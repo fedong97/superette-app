@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CartLine, PAYMENT_METHODS, computeTotals, formatFcfa, lineTotal } from '@superette/core';
-import { type Result, call } from '../api';
-import { Empty, Field, Modal, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { type ApiError, type Result, call } from '../api';
+import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 
 type Article = Result<'catalogue.get'>;
@@ -32,7 +33,8 @@ function toLine(article: Article, qtyMilli: number, barcode: string | null, fixe
   };
 }
 
-type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary';
+type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay';
+type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'extra';
 
 const UNIT_LABEL = { piece: 'Pièce', kg: 'Kg', litre: 'Litre' } as const;
@@ -40,12 +42,13 @@ const BILLS = [1000, 2000, 5000, 10000];
 const amount = (v: number) => formatFcfa(v, false);
 
 /**
- * Fiche de facturation (vente au comptant), sur le modèle de KONTROL :
+ * Fiche de facturation (vente au comptant ou à crédit), sur le modèle de KONTROL :
  * saisie produit, grille, grand total TTC, billets rapides avec encaissé
  * et rendu, boutons d'action à droite et raccourcis clavier en bas.
  * Plusieurs fiches peuvent être ouvertes en même temps (V. cash 1, V. cash 2).
  */
-export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
+export function Pos({ user, hasRegister, active, title, onClose, onListing, mode = 'cash' }: {
+  mode?: 'cash' | 'credit';
   user: User;
   hasRegister: boolean;
   active: boolean;
@@ -69,6 +72,11 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
   const [searchResults, setSearchResults] = useState<Article[]>([]);
   const [weightFor, setWeightFor] = useState<Article | null>(null);
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const account = useLoad(() => (customer ? call('customers.account', customer.id) : Promise.resolve(null)), [customer?.id]);
+  /** Vente bloquée en attente du code gérant (remise ou dépassement du plafond). */
+  const [pending, setPending] = useState<{ payments: SellPayments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string } | null>(null);
+  const credit = mode === 'credit';
   const scanRef = useRef<HTMLInputElement>(null);
   const totals = useMemo(() => computeTotals(lines), [lines]);
 
@@ -162,20 +170,57 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
     setSelected(null);
     setLastSale(sale);
     setDialog(null);
+    setCustomer(null);
     call('pos.printTicket', sale.id).catch((err) => toast.error(err));
   };
 
-  /** Valider (F4) : en espèces si le montant encaissé couvre le total, sinon choix du règlement. */
+  /**
+   * Envoie la vente ; si le serveur demande l'accord d'un gérant (remise d'un
+   * caissier, plafond de crédit dépassé), on demande son code puis on relance.
+   */
+  const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string } = {}) => {
+    try {
+      finish(await call('pos.sell', { lines: saleInput(), payments: payments as never, customerId: customer?.id ?? null, ...pins }));
+      setCashGiven(0);
+      setPending(null);
+    } catch (err) {
+      const code = (err as ApiError).code;
+      if (code === 'CREDIT_LIMIT' && !pins.creditPin) setPending({ payments, supervisorPin: pins.supervisorPin, reason: 'credit', message: (err as Error).message });
+      else if (code === 'SUPERVISOR_REQUIRED' && !pins.supervisorPin) setPending({ payments, reason: 'discount', message: 'Le ticket comporte une remise.' });
+      else toast.error(err);
+    }
+  };
+
+  const printA4 = () => {
+    if (lastSale) call('pos.printInvoice', lastSale.id).catch(toast.error);
+    else toast.error('Aucune facture à imprimer');
+  };
+
+  /**
+   * Valider (F4). Au comptant : en espèces si l'encaissé couvre le total, sinon
+   * choix du règlement. À crédit : l'encaissé est un acompte, le reste va au
+   * compte du client.
+   */
   const validate = async () => {
     if (!lines.length) return;
+    if (credit) {
+      if (!customer) {
+        toast.error('Choisissez le client de la vente à crédit');
+        setDialog('customer');
+        return;
+      }
+      const deposit = Math.min(cashGiven, totals.totalTtc);
+      const payments: SellPayments = cashGiven >= totals.totalTtc ? [{ method: 'CASH', amount: cashGiven }] : [];
+      if (!payments.length) {
+        if (deposit > 0) payments.push({ method: 'CASH', amount: deposit });
+        payments.push({ method: 'CUSTOMER_CREDIT', amount: totals.totalTtc - deposit });
+      }
+      await sell(payments);
+      return;
+    }
     const needsSupervisor = totals.totalDiscount > 0 && user.role === 'cashier';
     if (cashGiven >= totals.totalTtc && !needsSupervisor) {
-      try {
-        finish(await call('pos.sell', { lines: saleInput(), payments: [{ method: 'CASH', amount: cashGiven }] }));
-        setCashGiven(0);
-      } catch (err) {
-        toast.error(err);
-      }
+      await sell([{ method: 'CASH', amount: cashGiven }]);
       return;
     }
     setDialog('pay');
@@ -220,6 +265,8 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
         F4: () => void validate(),
         F6: () => selected !== null && setDialog('discount'),
         F7: onListing,
+        F8: () => setDialog('customer'),
+        F9: printA4,
       };
       if (fn[e.key]) {
         e.preventDefault();
@@ -246,25 +293,44 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
   const withDiscount = showDiscount || totals.totalDiscount > 0;
   const shownTotal = lines.length ? totals.totalTtc : (lastSale?.total_ttc ?? 0);
   const change = lines.length ? Math.max(0, cashGiven - totals.totalTtc) : (lastSale?.change_given ?? 0);
-  const given = lines.length ? cashGiven : lastSale ? lastSale.total_ttc + lastSale.change_given : 0;
+  // Après validation : espèces réellement reçues (rien pour une vente entièrement à crédit).
+  const given = lines.length ? cashGiven : lastSale ? lastSale.payments.filter((p) => p.method === 'CASH').reduce((t, p) => t + p.amount, 0) : 0;
   const rows = Math.max(12, lines.length);
 
   return (
     <div className="fiche">
       <div className="fiche-band">
         <h2>{title}</h2>
-        <div className="band-mode">Vente au comptant</div>
-        <div className="band-delivery">Livraison immédiate</div>
+        <div className={`band-mode ${credit ? 'credit' : ''}`}>{credit ? 'Vente à crédit' : 'Vente au comptant'}</div>
+        <div className={`band-delivery ${credit ? 'credit' : ''}`}>
+          {credit && customer && account.data
+            ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
+            : !lines.length && lastSale?.customer_name
+              ? `${lastSale.customer_name}${lastSale.due_date ? ` · à régler avant le ${new Date(`${lastSale.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`
+              : 'Livraison immédiate'}
+        </div>
       </div>
       <div className="fiche-body">
         <div className="fiche-main">
           <div className="fiche-head">
             <label>N°</label>
             <input readOnly value={lines.length ? 'Nouveau' : (lastSale?.number ?? 'Nouveau')} />
-            <input className="client" readOnly value="CLIENT COMPTOIR" title="Le fichier clients arrive avec le module Clients" />
-            <select disabled>
-              <option>CLIENT</option>
-            </select>
+            <input
+              className={`client ${credit && !customer ? 'missing' : ''}`}
+              readOnly
+              value={customer ? customer.name.toUpperCase() : credit ? 'CHOISIR LE CLIENT (F8)' : 'CLIENT COMPTOIR'}
+              title="Choisir le client (F8)"
+              onClick={() => setDialog('customer')}
+            />
+            {customer ? (
+              <button className="client-clear" title="Revenir au client comptoir" onClick={() => setCustomer(null)}>
+                ✕ {customer.code}
+              </button>
+            ) : (
+              <button className="client-clear" onClick={() => setDialog('customer')}>
+                Client… <kbd>F8</kbd>
+              </button>
+            )}
             <span className="count">
               {totals.itemCount} art.
             </span>
@@ -326,6 +392,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
                   <option value="cashOut">Prélèvement</option>
                   <option value="cancel">Annuler un ticket</option>
                   <option value="return">Retour client</option>
+                  <option value="custPay">Règlement client (crédit)</option>
                   <option value="close">Clôture de caisse (Z)</option>
                 </select>
               </form>
@@ -509,8 +576,8 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
           <button disabled={!lastSale} onClick={reprint}>
             Ticket <kbd>F2</kbd>
           </button>
-          <button disabled title="Facture A4 : arrive avec le module Clients">
-            A4 <kbd>F9</kbd>
+          <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
+            Facture A4 <kbd>F9</kbd>
           </button>
           <hr />
           <button disabled={!sel} onClick={() => setDialog('vary')}>
@@ -553,16 +620,54 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing }: {
         <span>
           <kbd>Ctrl+E</kbd> Encaisser
         </span>
+        <span>
+          <kbd>F8</kbd> Client
+        </span>
+        <span>
+          <kbd>F9</kbd> Facture A4
+        </span>
       </div>
 
       {dialog === 'pay' && (
         <PaymentDialog
           total={totals.totalTtc}
           needsSupervisor={totals.totalDiscount > 0 && user.role === 'cashier'}
+          allowCredit={Boolean(customer)}
           onClose={() => setDialog(null)}
           onPaid={async (payments, supervisorPin) => {
-            finish(await call('pos.sell', { lines: saleInput(), payments, supervisorPin }));
-            setCashGiven(0);
+            setDialog(null);
+            await sell(payments, { supervisorPin });
+          }}
+        />
+      )}
+      {dialog === 'customer' && (
+        <CustomerPickDialog
+          user={user}
+          onClose={() => setDialog(null)}
+          onPick={(c) => {
+            setCustomer(c);
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog === 'custPay' && (
+        <CustomerPaymentDialog
+          atRegister
+          onClose={() => setDialog(null)}
+          onPaid={(id) => {
+            setDialog(null);
+            call('customers.printReceipt', id).catch(toast.error);
+          }}
+        />
+      )}
+      {pending && (
+        <SupervisorPrompt
+          action={pending.message}
+          onCancel={() => setPending(null)}
+          onConfirm={(pin) => {
+            const p = pending;
+            setPending(null);
+            void sell(p.payments, p.reason === 'credit' ? { supervisorPin: p.supervisorPin, creditPin: pin } : { supervisorPin: pin });
           }}
         />
       )}

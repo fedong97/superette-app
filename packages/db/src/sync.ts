@@ -43,10 +43,12 @@ const TABLES: Record<string, string> = {
   supplier_article: 'supplier_articles',
   supplier_invoice: 'supplier_invoices',
   supplier_payment: 'supplier_payments',
+  customer: 'customers',
+  customer_payment: 'customer_payments',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
-const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment']);
+const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment']);
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
 const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> = {

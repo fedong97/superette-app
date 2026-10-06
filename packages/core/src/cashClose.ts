@@ -29,10 +29,12 @@ export interface CashMovements {
   cashIn: Fcfa;
   /** Prélèvements en cours de journée (mise en coffre). */
   cashOut: Fcfa;
+  /** Règlements de clients à crédit reçus en espèces à cette caisse. */
+  customerReceipts?: Fcfa;
 }
 
 export function expectedCash(m: CashMovements): Fcfa {
-  return m.openingFloat + m.cashSales - m.cashRefunds + m.cashIn - m.cashOut;
+  return m.openingFloat + m.cashSales - m.cashRefunds + m.cashIn - m.cashOut + (m.customerReceipts ?? 0);
 }
 
 /** Écart de clôture : positif = excédent, négatif = manquant. */

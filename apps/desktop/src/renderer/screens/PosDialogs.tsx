@@ -9,11 +9,14 @@ const METHODS: PaymentMethod[] = ['CASH', 'MTN_MOMO', 'ORANGE_MONEY', 'CARD', 'V
 export function PaymentDialog({
   total,
   needsSupervisor,
+  allowCredit = false,
   onClose,
   onPaid,
 }: {
   total: number;
   needsSupervisor: boolean;
+  /** Un client est choisi : le reste peut aller à son compte. */
+  allowCredit?: boolean;
   onClose: () => void;
   onPaid: (payments: Payment[], supervisorPin?: string) => Promise<void>;
 }) {
@@ -59,7 +62,7 @@ export function PaymentDialog({
         <div>
           <div className="big-total">{fcfa(total)}</div>
           <div className="methods">
-            {METHODS.map((m) => (
+            {[...METHODS, ...(allowCredit ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
               <button key={m} className={method === m ? 'active' : ''} onClick={() => setMethod(m)}>
                 {PAYMENT_METHODS[m]}
               </button>
@@ -290,7 +293,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
           <div className="grid2">
             <Field label="Remboursement">
               <select value={refund} onChange={(e) => setRefund(e.target.value as PaymentMethod)}>
-                {METHODS.map((m) => (
+                {[...METHODS, ...(sale.customer_id ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
                   <option key={m} value={m}>
                     {PAYMENT_METHODS[m]}
                   </option>
@@ -460,6 +463,12 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
                 <td className="r">{fcfa(m.amount)}</td>
               </tr>
             ))}
+            {z.customerReceipts.map((m) => (
+              <tr key={`rc-${m.method}`}>
+                <td>Règlement client · {m.label}</td>
+                <td className="r">{fcfa(m.amount)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
         <table className="list">
@@ -470,6 +479,7 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
             <tr><td>Remboursements</td><td className="r">{fcfa(-z.cash.cashRefunds)}</td></tr>
             <tr><td>Apports</td><td className="r">{fcfa(z.cash.cashIn)}</td></tr>
             <tr><td>Prélèvements</td><td className="r">{fcfa(-z.cash.cashOut)}</td></tr>
+            {z.cash.customerReceipts > 0 && <tr><td>Règlements clients</td><td className="r">{fcfa(z.cash.customerReceipts)}</td></tr>}
             <tr><td>Compté</td><td className="r">{z.counted === null ? '—' : fcfa(z.counted)}</td></tr>
           </tbody>
         </table>

@@ -233,3 +233,13 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 .grid2.top { align-items: start; }
 input.gap { border-color: #c62828; background: #fdecea; color: #c62828; }
 .nowrap { white-space: nowrap; }
+
+/* Vente à crédit */
+.fiche-band .band-mode.credit { background: linear-gradient(90deg, #7c2d12, #b45309); }
+.fiche-band .band-delivery.credit { background: linear-gradient(90deg, #b45309, #d97706); color: #fff7ed; font-size: 16px; }
+.fiche-head input.client { cursor: pointer; }
+.fiche-head input.client.missing { background: #fde68a; color: #92400e; }
+.fiche-head .client-clear { padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.toolbar input { flex: 1; }
+.aging th, .aging td { white-space: nowrap; }

@@ -15,6 +15,7 @@ import {
 } from '@superette/core';
 import type { AdminService } from './admin';
 import type { CatalogueService } from './catalogue';
+import type { CustomerService } from './customers';
 import type { StockService } from './stock';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
@@ -48,6 +49,10 @@ export interface SaleInput {
   payments: Payment[];
   /** Gérant qui a validé les remises, si le caissier n'a pas ce droit. */
   discountAuthorizedBy?: string | null;
+  /** Client de la vente : obligatoire pour une vente à crédit, facultatif sinon (nom sur la facture). */
+  customerId?: string | null;
+  /** Gérant qui a accepté un dépassement du plafond de crédit. */
+  creditAuthorizedBy?: string | null;
 }
 
 export interface Sale {
@@ -67,6 +72,9 @@ export interface Sale {
   change_given: Fcfa;
   original_sale_id: string | null;
   cancel_reason: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  due_date: string | null;
   created_at: string;
   lines: {
     id: string;
@@ -97,7 +105,8 @@ export interface ZReport {
   byMethod: { method: PaymentMethod; label: string; amount: Fcfa }[];
   vat: { rate: number; ht: Fcfa; tva: Fcfa; ttc: Fcfa }[];
   cashOperations: { type: 'IN' | 'OUT'; amount: Fcfa; reason: string; at: string }[];
-  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; expected: Fcfa };
+  customerReceipts: { method: string; label: string; amount: Fcfa }[];
+  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expected: Fcfa };
   counted: Fcfa | null;
   difference: Fcfa | null;
 }
@@ -109,6 +118,7 @@ export class PosService extends Base {
     private readonly admin: AdminService,
     private readonly catalogue: CatalogueService,
     private readonly stock: StockService,
+    private readonly customers: CustomerService,
   ) {
     super(db, clock);
   }
@@ -233,6 +243,14 @@ export class PosService extends Base {
     }
     const settlement = settle(totals.totalTtc, input.payments);
     if (!settlement.complete) throw new AppError('Le ticket n’est pas entièrement réglé', 'UNPAID');
+    const onCredit = input.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0);
+    if (onCredit > 0 && !input.customerId) throw new AppError('Choisissez le client pour une vente à crédit', 'CUSTOMER_REQUIRED');
+    const customer = input.customerId
+      ? onCredit > 0
+        ? this.customers.assertCredit(ctx.storeId, input.customerId, onCredit, input.creditAuthorizedBy ? this.admin.getUser(input.creditAuthorizedBy) : null)
+        : this.customers.getCustomer(input.customerId)
+      : null;
+    const due = customer && onCredit > 0 ? this.customers.dueDateFor(customer) : null;
 
     return this.tx(() => {
       const saleId = newId();
@@ -242,10 +260,25 @@ export class PosService extends Base {
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht,
-             total_tva, total_discount, change_given, created_at)
-           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`,
+             total_tva, total_discount, change_given, customer_id, due_date, created_at)
+           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(saleId, number, ctx.storeId, ctx.registerId, session.id, ctx.userId, totals.totalTtc, totals.totalHt, totals.totalTva, totals.totalDiscount, settlement.change, now);
+        .run(
+          saleId,
+          number,
+          ctx.storeId,
+          ctx.registerId,
+          session.id,
+          ctx.userId,
+          totals.totalTtc,
+          totals.totalHt,
+          totals.totalTva,
+          totals.totalDiscount,
+          settlement.change,
+          customer?.id ?? null,
+          due,
+          now,
+        );
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -274,7 +307,10 @@ export class PosService extends Base {
 
   getSale(id: string): Sale {
     const sale = this.db
-      .prepare('SELECT s.*, u.name AS user_name FROM sales s JOIN users u ON u.id = s.user_id WHERE s.id = ?')
+      .prepare(
+        `SELECT s.*, u.name AS user_name, c.name AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
+         LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?`,
+      )
       .get(id) as Omit<Sale, 'lines' | 'payments'> | undefined;
     if (!sale) throw new AppError('Ticket introuvable', 'NOT_FOUND');
     const lines = this.db
@@ -292,16 +328,18 @@ export class PosService extends Base {
     return id ? this.getSale(id) : null;
   }
 
-  listSales(opts: { sessionId?: string; storeId?: string; date?: string; limit?: number }): Omit<Sale, 'lines' | 'payments'>[] {
+  listSales(opts: { sessionId?: string; storeId?: string; date?: string; customerId?: string; limit?: number }): Omit<Sale, 'lines' | 'payments'>[] {
     return this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name FROM sales s JOIN users u ON u.id = s.user_id
+        `SELECT s.*, u.name AS user_name, c.name AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
+         LEFT JOIN customers c ON c.id = s.customer_id
          WHERE (@sessionId IS NULL OR s.session_id = @sessionId)
            AND (@storeId IS NULL OR s.store_id = @storeId)
            AND (@date IS NULL OR date(s.created_at, 'localtime') = @date)
+           AND (@customerId IS NULL OR s.customer_id = @customerId)
          ORDER BY s.created_at DESC LIMIT @limit`,
       )
-      .all({ sessionId: opts.sessionId ?? null, storeId: opts.storeId ?? null, date: opts.date ?? null, limit: opts.limit ?? 500 }) as never;
+      .all({ sessionId: opts.sessionId ?? null, storeId: opts.storeId ?? null, date: opts.date ?? null, customerId: opts.customerId ?? null, limit: opts.limit ?? 500 }) as never;
   }
 
   /**
@@ -381,6 +419,9 @@ export class PosService extends Base {
         return { line, qty: l.qty, amount };
       });
     if (returned.length === 0) throw new AppError('Aucun article retourné', 'EMPTY');
+    if (input.refundMethod === 'CUSTOMER_CREDIT' && !original.customer_id) {
+      throw new AppError('Ce ticket n’a pas de client : remboursez en espèces ou par un autre moyen', 'INVALID');
+    }
 
     return this.tx(() => {
       const id = newId();
@@ -392,10 +433,10 @@ export class PosService extends Base {
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht, total_tva,
-             total_discount, change_given, original_sale_id, cancel_reason, created_at)
-           VALUES (?, ?, 'return', ?, ?, ?, ?, 'completed', ?, ?, ?, 0, 0, ?, ?, ?)`,
+             total_discount, change_given, original_sale_id, cancel_reason, customer_id, created_at)
+           VALUES (?, ?, 'return', ?, ?, ?, ?, 'completed', ?, ?, ?, 0, 0, ?, ?, ?, ?)`,
         )
-        .run(id, number, ctx.storeId, ctx.registerId, session.id, ctx.userId, -total, -ht, -(total - ht), original.id, input.reason.trim(), this.now());
+        .run(id, number, ctx.storeId, ctx.registerId, session.id, ctx.userId, -total, -ht, -(total - ht), original.id, input.reason.trim(), original.customer_id, this.now());
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0)`,
@@ -498,7 +539,9 @@ export class PosService extends Base {
       .all(sessionId) as ZReport['cashOperations'];
     const cashIn = cashOperations.filter((o) => o.type === 'IN').reduce((s, o) => s + o.amount, 0);
     const cashOut = cashOperations.filter((o) => o.type === 'OUT').reduce((s, o) => s + o.amount, 0);
-    const cash = { openingFloat: session.opening_float, cashSales, cashRefunds, cashIn, cashOut };
+    const customerReceipts = this.customers.sessionReceipts(sessionId);
+    const receiptsCash = customerReceipts.find((r) => r.method === 'CASH')?.amount ?? 0;
+    const cash = { openingFloat: session.opening_float, cashSales, cashRefunds, cashIn, cashOut, customerReceipts: receiptsCash };
     const { expected } = closingDifference(cash, {});
     return {
       session,
@@ -513,6 +556,7 @@ export class PosService extends Base {
       byMethod,
       vat,
       cashOperations,
+      customerReceipts,
       cash: { ...cash, expected },
       counted: session.counted_cash,
       difference: session.difference,

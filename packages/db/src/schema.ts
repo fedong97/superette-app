@@ -433,4 +433,52 @@ CREATE TABLE supplier_payments (
 CREATE INDEX supplier_payments_invoice ON supplier_payments(invoice_id);
 `,
   },
+  {
+    version: 4,
+    name: 'clients et ventes à crédit',
+    sql: `
+-- Fiche client, commune à tous les magasins ; le compte (ce que le client doit)
+-- se calcule par magasin à partir des ventes à crédit et des règlements.
+CREATE TABLE customers (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  contact TEXT,
+  phone TEXT,
+  email TEXT,
+  address TEXT,
+  taxpayer_number TEXT,
+  credit_limit INTEGER NOT NULL DEFAULT 0 CHECK (credit_limit >= 0),
+  payment_terms_days INTEGER NOT NULL DEFAULT 30,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX customers_name ON customers(name);
+
+ALTER TABLE sales ADD COLUMN customer_id TEXT REFERENCES customers(id);
+ALTER TABLE sales ADD COLUMN due_date TEXT;
+CREATE INDEX sales_customer ON sales(customer_id, created_at);
+
+-- Règlement d'un client sur son compte. Encaissé à une caisse ouverte, il
+-- entre dans le tiroir et apparaît sur le Z de la session.
+CREATE TABLE customer_payments (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  register_id TEXT REFERENCES registers(id),
+  session_id TEXT REFERENCES cash_sessions(id),
+  method TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  reference TEXT,
+  notes TEXT,
+  paid_at TEXT NOT NULL,
+  user_id TEXT REFERENCES users(id)
+);
+CREATE INDEX customer_payments_customer ON customer_payments(customer_id, paid_at);
+CREATE INDEX customer_payments_session ON customer_payments(session_id);
+`,
+  },
 ];

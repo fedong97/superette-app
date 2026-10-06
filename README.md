@@ -34,6 +34,14 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Proposition de commande : ventes moyennes des 4 dernières semaines, délai de livraison, stock d'alerte et colisage ; un bon par fournisseur en un clic.
 - Commandes, réceptions et factures se synchronisent entre les PC du magasin ; les fiches fournisseurs sont communes à tous les magasins.
 
+**Clients et vente à crédit**
+- Fiches clients (NIU, téléphone, plafond de crédit, délai de paiement), communes à tous les magasins ; création rapide depuis la caisse.
+- Fiche « V. crédit » : choix du client (F8), acompte en espèces avec les billets, le reste va au compte du client avec son échéance. Au-delà du plafond, le code d'un gérant est demandé et tracé.
+- Facture A4 de n'importe quel ticket (F9), avec le client, la TVA par taux et l'échéance.
+- Règlements clients à la caisse (menu Action) ou au bureau : espèces, MoMo, Orange Money, virement, chèque, carte. Les espèces reçues à la caisse entrent dans le Z. Reçu imprimé.
+- Les règlements soldent automatiquement les ventes les plus anciennes ; retour d'un ticket au compte du client.
+- Compte client, relevé imprimable sur une période, balance âgée (non échu, 1-30, 31-60, 61-90, plus de 90 jours).
+
 **Pilotage et administration**
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
 - Export CSV des ventes pour le comptable (en attendant le module Comptabilité).
@@ -109,4 +117,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Phase 2 (suite) : clients et ventes à crédit (V. crédit, facture A4, relances).
+2. Phase 3 : comptabilité SYSCOHADA (journaux, grand livre, déclaration de TVA) et trésorerie.

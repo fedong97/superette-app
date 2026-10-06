@@ -267,3 +267,7 @@ table.list.journal tr.entry-first td { border-top: 2px solid #c9d6ea; }
 .grid2.statements { align-items: start; gap: 16px; }
 table.statements tr.total td, .grid2.statements tr.total td { font-weight: 700; }
 button.link { border: none; background: none; padding: 0; color: #2457a6; text-decoration: underline; }
+tr.selected td { background: #dbe7f7 !important; }
+.actions.sticky { position: sticky; bottom: 0; background: var(--panel, #fff); padding: 8px 0; justify-content: flex-start; }
+label.button-like { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; background: #fff; }
+.kpis input { font-size: 18px; padding: 4px 8px; }

@@ -337,6 +337,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(ACCOUNTING).storeId, opts),
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(ACCOUNTING).storeId, month),
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(ACCOUNTING).storeId, opts),
+    'accounting.cashFlow': (opts: { from: string; to: string }) => s.statements.cashFlow(ctx(ACCOUNTING).storeId, opts),
     'accounting.statementsCsv': (opts: { from: string; to: string }) => s.statements.exportCsv(ctx(ACCOUNTING).storeId, opts),
     'accounting.printStatements': (from: string, to: string) => printer.statements(ctx(ACCOUNTING).storeId, from, to),
     // --- Rapprochement bancaire --------------------------------------------------------

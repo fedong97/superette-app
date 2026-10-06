@@ -54,7 +54,8 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 **États financiers et DSF**
 - Bilan (actif brut, amortissements, net ; passif) et compte de résultat du SYSCOHADA révisé, système normal, avec les références officielles (AD… BZ, CA… DZ, TA… XI) et la colonne de l'exercice précédent (Comptabilité › États financiers, ou Fiscal › États financiers et DSF).
 - Stock de fin d'exercice valorisé au CMUP d'après les mouvements de stock : l'écart avec le compte 311 passe en variation de stock (6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à nouveau.
-- Impression A4 (bilan actif, bilan passif, compte de résultat) et export CSV des postes pour la saisie de la DSF. Les comptes qu'aucun poste ne reprend sont signalés. Le tableau des flux de trésorerie et les notes annexes restent à faire.
+- Tableau des flux de trésorerie (TFT) par la méthode indirecte : capacité d'autofinancement, variations du bilan, investissements, capitaux propres et emprunts (références ZA… ZH), avec contrôle de la trésorerie finale contre le bilan. Les à-nouveaux de reprise comptent comme trésorerie de départ.
+- Impression A4 (bilan actif, bilan passif, compte de résultat, tableau des flux) et export CSV des postes pour la saisie de la DSF. Les comptes qu'aucun poste ne reprend sont signalés. Les notes annexes restent à faire.
 
 **Rapprochement bancaire**
 - Comptabilité › Rapprochement bancaire (ou Trésorerie › Rapprochement bancaire), pour chaque compte de banque, MoMo ou Orange Money (classe 52 à 55).
@@ -152,4 +153,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Tableau des flux de trésorerie et notes annexes de la DSF.
+2. Notes annexes de la DSF et calcul de l'impôt sur le résultat.

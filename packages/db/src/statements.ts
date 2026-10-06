@@ -31,6 +31,20 @@ export interface FinancialStatements {
   unmapped: { account: string; balance: Fcfa }[];
 }
 
+/** Tableau des flux de trésorerie (TFT) du SYSCOHADA révisé, méthode indirecte. */
+export interface CashFlowStatement {
+  from: string;
+  to: string;
+  previousFrom: string;
+  previousTo: string;
+  rows: StatementRow[];
+  /**
+   * Trésorerie nette au dernier jour d'après le bilan (trésorerie-actif moins trésorerie-passif)
+   * et écart avec la ligne ZH : non nul seulement si des écritures sortent du schéma habituel.
+   */
+  check: { treasury: Fcfa; gap: Fcfa; previousTreasury: Fcfa; previousGap: Fcfa };
+}
+
 type Side = 'debit' | 'credit' | 'any';
 interface Rule {
   prefixes: string[];
@@ -149,6 +163,40 @@ const INCOME: IncomeLine[] = [
   { ref: 'XI', label: 'RÉSULTAT NET', formula: [...plus('XG', 'XH'), ...minus('RQ', 'RS')] },
 ];
 
+// --- Tableau des flux de trésorerie --------------------------------------------------
+
+const CASH_FLOW: { ref: string; label: string; total?: string[] }[] = [
+  { ref: 'ZA', label: 'Trésorerie nette au 1er jour de l’exercice (trésorerie-actif moins trésorerie-passif)', total: [] },
+  { ref: 'FA', label: "Capacité d'autofinancement globale (CAFG)" },
+  { ref: 'FB', label: '- Variation de l’actif circulant HAO' },
+  { ref: 'FC', label: '- Variation des stocks' },
+  { ref: 'FD', label: '- Variation des créances' },
+  { ref: 'FE', label: '+ Variation du passif circulant' },
+  { ref: 'ZB', label: 'FLUX DE TRÉSORERIE PROVENANT DES ACTIVITÉS OPÉRATIONNELLES', total: ['FA', 'FB', 'FC', 'FD', 'FE'] },
+  { ref: 'FF', label: "- Décaissements liés aux acquisitions d'immobilisations incorporelles" },
+  { ref: 'FG', label: "- Décaissements liés aux acquisitions d'immobilisations corporelles" },
+  { ref: 'FH', label: "- Décaissements liés aux acquisitions d'immobilisations financières" },
+  { ref: 'FI', label: "+ Encaissements liés aux cessions d'immobilisations incorporelles et corporelles" },
+  { ref: 'FJ', label: "+ Encaissements liés aux cessions d'immobilisations financières" },
+  { ref: 'ZC', label: "FLUX DE TRÉSORERIE PROVENANT DES ACTIVITÉS D'INVESTISSEMENT", total: ['FF', 'FG', 'FH', 'FI', 'FJ'] },
+  { ref: 'FK', label: '+ Augmentations de capital par apports nouveaux' },
+  { ref: 'FL', label: "+ Subventions d'investissement reçues" },
+  { ref: 'FM', label: "- Prélèvements sur le capital (compte de l'exploitant)" },
+  { ref: 'FN', label: '- Dividendes versés' },
+  { ref: 'ZD', label: 'FLUX DE TRÉSORERIE PROVENANT DES CAPITAUX PROPRES', total: ['FK', 'FL', 'FM', 'FN'] },
+  { ref: 'FO', label: '+ Emprunts' },
+  { ref: 'FP', label: '+ Autres dettes financières' },
+  { ref: 'FQ', label: '- Remboursements des emprunts et autres dettes financières' },
+  { ref: 'ZE', label: 'FLUX DE TRÉSORERIE PROVENANT DES CAPITAUX ÉTRANGERS', total: ['FO', 'FP', 'FQ'] },
+  { ref: 'ZF', label: 'FLUX DE TRÉSORERIE PROVENANT DES ACTIVITÉS DE FINANCEMENT', total: ['ZD', 'ZE'] },
+  { ref: 'ZG', label: 'VARIATION DE LA TRÉSORERIE NETTE DE LA PÉRIODE', total: ['ZB', 'ZC', 'ZF'] },
+  { ref: 'ZH', label: 'Trésorerie nette au dernier jour de l’exercice', total: ['ZG', 'ZA'] },
+];
+
+/** Charges et produits sans effet sur la trésorerie, retraités pour passer du résultat net à la CAFG. */
+const CAFG_ADD = ['681', '691', '697', '81', '85'];
+const CAFG_LESS = ['791', '797', '798', '799', '82', '86'];
+
 const matches = (account: string, r: Rule) => r.prefixes.some((x) => account.startsWith(x)) && !r.except?.some((x) => account.startsWith(x));
 
 /** Soldes (débit - crédit) par compte, et par tiers pour les comptes 40 et 41. */
@@ -232,7 +280,97 @@ export class FinancialStatementsService extends Base {
     for (const a of st.assets) rows.push(['Bilan actif', a.ref, q(a.label), a.gross ?? '', a.depreciation ?? '', a.net, a.previous].join(';'));
     for (const l of st.liabilities) rows.push(['Bilan passif', l.ref, q(l.label), '', '', l.net, l.previous].join(';'));
     for (const l of st.income) rows.push(['Compte de resultat', l.ref, q(l.label), '', '', l.net, l.previous].join(';'));
+    for (const l of this.cashFlow(storeId, opts).rows) rows.push(['Flux de tresorerie', l.ref, q(l.label), '', '', l.net, l.previous].join(';'));
     return `﻿${rows.join('\r\n')}\r\n`;
+  }
+
+  /**
+   * Tableau des flux de trésorerie par la méthode indirecte : résultat net retraité (CAFG),
+   * variations du bilan entre l'ouverture et la clôture, mouvements des immobilisations et
+   * des capitaux. Les à-nouveaux (journal AN) font partie de l'ouverture, même datés dans
+   * l'exercice : ce sont les soldes de reprise, pas des flux.
+   */
+  cashFlow(storeId: string, opts: { from?: string; to?: string } = {}): CashFlowStatement {
+    const year = this.today().slice(0, 4);
+    const from = opts.from ?? `${year}-01-01`;
+    const to = opts.to ?? `${year}-12-31`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new AppError('Période invalide', 'INVALID');
+    const previousTo = shiftDays(from, -1);
+    const previousFrom = shiftYear(from, -1);
+    const cur = this.flows(storeId, from, to);
+    const prev = this.flows(storeId, previousFrom, previousTo);
+    return {
+      from,
+      to,
+      previousFrom,
+      previousTo,
+      rows: CASH_FLOW.map((l) => ({ ref: l.ref, label: l.label, total: !!l.total?.length, net: cur.rows.get(l.ref)!, previous: prev.rows.get(l.ref)! })),
+      check: { treasury: cur.treasury, gap: cur.treasury - cur.rows.get('ZH')!, previousTreasury: prev.treasury, previousGap: prev.treasury - prev.rows.get('ZH')! },
+    };
+  }
+
+  private flows(storeId: string, from: string, to: string) {
+    const r = this.accounting.roles();
+    const close = this.balances(storeId, from, to);
+    // Ouverture : écritures antérieures à l'exercice et à-nouveaux de l'exercice.
+    const open = new Map<string, number>();
+    // Mouvements de l'exercice (hors à-nouveaux) sur les comptes de capitaux et d'immobilisations.
+    const debit = new Map<string, number>();
+    const credit = new Map<string, number>();
+    let stockReopened = 0;
+    for (const e of this.accounting.entries(storeId, { to })) {
+      const opening = e.date < from || e.journal === 'AN';
+      for (const l of e.lines) {
+        if (l.account[0]! >= '6') continue;
+        if (opening) {
+          add(open, /^4[01]/.test(l.account) && l.aux ? `${l.account}|${l.aux}` : l.account, l.debit - l.credit);
+          if (l.account === r.stock && e.date >= from) stockReopened += l.debit - l.credit;
+        } else if (/^[12]/.test(l.account)) {
+          add(debit, l.account, l.debit);
+          add(credit, l.account, l.credit);
+        }
+      }
+    }
+    // Même inventaire que pour le bilan : stock au CMUP la veille de l'exercice, plus le stock repris en à-nouveaux.
+    open.set(r.stock, this.stockService.valueAt(storeId, shiftDays(from, -1)) + stockReopened);
+    const a = this.sheet({ sheet: open, period: new Map(), prior: 0, stock: close.stock });
+    const z = this.sheet(close);
+    const asset = (m: typeof a, ref: string) => m.assets.get(ref)!.gross - m.assets.get(ref)!.dep;
+    const delta = (ref: string) => asset(z, ref) - asset(a, ref);
+    const deltaL = (ref: string) => z.liabilities.get(ref)! - a.liabilities.get(ref)!;
+    const sumOf = (m: Map<string, number>, prefixes: string[], except: string[] = []) =>
+      [...m].reduce((t, [acc, v]) => (prefixes.some((x) => acc.startsWith(x)) && !except.some((x) => acc.startsWith(x)) ? t + v : t), 0);
+    const signed = (m: Map<string, number>, prefixes: string[], except: string[] = []) =>
+      [...m].reduce((t, [key, v]) => {
+        const acc = key.split('|')[0]!;
+        return prefixes.some((x) => acc.startsWith(x)) && !except.some((x) => acc.startsWith(x)) ? t + v : t;
+      }, 0);
+    // Variation d'un groupe de comptes de capitaux, au crédit (augmentation = ressource).
+    const rise = (prefixes: string[], except: string[] = []) => -(signed(close.sheet, prefixes, except) - signed(open, prefixes, except));
+
+    const income = this.income(close.period);
+    const v = new Map<string, number>();
+    v.set('ZA', asset(a, 'BT') - a.liabilities.get('DT')!);
+    v.set('FA', income.get('XI')! + sumOf(close.period, CAFG_ADD) + sumOf(close.period, CAFG_LESS));
+    v.set('FB', -delta('BA'));
+    v.set('FC', -delta('BB'));
+    v.set('FD', -(delta('BH') + delta('BI') + delta('BJ') + delta('BU')));
+    v.set('FE', deltaL('DP') + deltaL('DV'));
+    v.set('FF', -sumOf(debit, ['21']));
+    v.set('FG', -sumOf(debit, ['22', '23', '24', '25']));
+    v.set('FH', -sumOf(debit, ['26', '27']));
+    v.set('FI', -sumOf(close.period, ['821', '822']));
+    v.set('FJ', -sumOf(close.period, ['826']));
+    v.set('FK', rise(['10'], ['104', '106']));
+    v.set('FL', rise(['14']));
+    v.set('FM', rise(['104']));
+    v.set('FN', rise(['11', '12', '13']));
+    v.set('FO', sumOf(credit, ['161', '162']));
+    v.set('FP', sumOf(credit, ['16', '17', '18'], ['161', '162']));
+    v.set('FQ', -sumOf(debit, ['16', '17', '18']));
+    for (const [ref, x] of v) v.set(ref, x + 0); // pas de « -0 »
+    for (const l of CASH_FLOW) if (l.total?.length) v.set(l.ref, l.total.reduce((t, ref) => t + v.get(ref)!, 0));
+    return { rows: v, treasury: asset(z, 'BT') - z.liabilities.get('DT')! };
   }
 
   private balances(storeId: string, from: string, to: string): Balances {

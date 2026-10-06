@@ -195,6 +195,22 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     for (const s of [pc1, pc2]) expect(s.quotes.get(q.id)).toMatchObject({ state: 'accepted', sale_number: sale.number });
   });
 
+  it('un relevé importé sur les deux PC ne se double pas, et le pointage voyage', async () => {
+    const line = { date: '2026-10-06', label: 'FRAIS TENUE DE COMPTE', reference: null, amount: -5_000 };
+    expect(pc1.reconciliation.importLines(ctx1, '521', [line])).toEqual({ added: 1, duplicates: 0 });
+    expect(pc2.reconciliation.importLines(ctx2, '521', [line])).toEqual({ added: 1, duplicates: 0 });
+    const id = pc1.reconciliation.bankLines(ctx1.storeId, '521')[0]!.id;
+    pc1.reconciliation.bookLine(ctx1, id, { account: '631' });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    for (const s of [pc1, pc2]) {
+      const st = s.reconciliation.state(ctx1.storeId, '521', '2026-12-31');
+      expect(st.bankOnly).toEqual([]);
+      expect(st.matched.map((m) => m.bank.id)).toEqual([id]);
+    }
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);

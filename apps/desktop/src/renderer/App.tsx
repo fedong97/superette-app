@@ -106,6 +106,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Créances clients', open: ['customers', 'receivables'], roles: ACCOUNTING },
       { label: 'Règlements clients reçus', open: ['customers', 'payments'] },
       { label: 'Banques, caisse et Mobile Money', open: ['accounting', 'treasury'] },
+      { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], roles: ACCOUNTING },
     ],
   ],
   [

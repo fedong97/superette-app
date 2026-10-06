@@ -5,6 +5,7 @@ import {
   type MovementType,
   type Payment,
   type PaymentMethod,
+  type StatementLine,
   type StockLevel,
 } from '@superette/core';
 import {
@@ -41,6 +42,7 @@ export interface Printer {
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
   statements(storeId: string, from: string, to: string): Promise<void>;
+  reconciliation(storeId: string, accountId: string, date: string, statementBalance: number | null): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
@@ -337,6 +339,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(ACCOUNTING).storeId, opts),
     'accounting.statementsCsv': (opts: { from: string; to: string }) => s.statements.exportCsv(ctx(ACCOUNTING).storeId, opts),
     'accounting.printStatements': (from: string, to: string) => printer.statements(ctx(ACCOUNTING).storeId, from, to),
+    // --- Rapprochement bancaire --------------------------------------------------------
+    'bank.accounts': () => (ctx(ACCOUNTING), s.reconciliation.accounts()),
+    'bank.state': (accountId: string, date?: string) => s.reconciliation.state(ctx(ACCOUNTING).storeId, accountId, date),
+    'bank.import': (accountId: string, lines: StatementLine[]) => s.reconciliation.importLines(ctx(ACCOUNTING), accountId, lines),
+    'bank.delete': (id: string) => s.reconciliation.deleteLine(ctx(ACCOUNTING), id),
+    'bank.match': (id: string, key: string) => s.reconciliation.match(ctx(ACCOUNTING), id, key),
+    'bank.unmatch': (id: string) => s.reconciliation.unmatch(ctx(ACCOUNTING), id),
+    'bank.autoMatch': (accountId: string) => s.reconciliation.autoMatch(ctx(ACCOUNTING), accountId),
+    'bank.book': (id: string, input: { account: string; label?: string }) => s.reconciliation.bookLine(ctx(ACCOUNTING), id, input),
+    'bank.print': (accountId: string, date: string, statementBalance: number | null) =>
+      printer.reconciliation(ctx(ACCOUNTING).storeId, accountId, date, statementBalance),
     'accounting.printBalance': (from?: string | null, to?: string | null) => printer.trialBalance(ctx(ACCOUNTING).storeId, from, to),
     'accounting.printJournal': (from?: string | null, to?: string | null, journal?: JournalCode | null) =>
       printer.journal(ctx(ACCOUNTING).storeId, from, to, journal),

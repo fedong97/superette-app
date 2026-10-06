@@ -370,6 +370,32 @@ export function createPrinter(s: Services): Printer {
         <p class="muted">Stock de marchandises valorisé au coût moyen pondéré (CMUP) d'après les mouvements de stock : ${money(st.stock.opening)} au début, ${money(st.stock.closing)} à la clôture.</p>`);
     },
 
+    async reconciliation(storeId, accountId, date, statementBalance) {
+      const store = s.admin.getStore(storeId);
+      const st = s.reconciliation.state(storeId, accountId, date);
+      const signed = (v: number) => (v < 0 ? `- ${money(-v)}` : money(v));
+      const rows = (items: { date: string; label: string; ref: string; amount: number }[], empty: string) =>
+        items.length
+          ? items.map((i) => `<tr><td>${dayFr(i.date)}</td><td>${esc(i.label)}</td><td>${esc(i.ref)}</td><td class="r">${signed(i.amount)}</td></tr>`).join('')
+          : `<tr><td colspan="4" class="muted">${empty}</td></tr>`;
+      const bookOnly = st.bookOnly.map((b) => ({ date: b.date, label: b.label, ref: b.ref, amount: b.amount }));
+      const bankOnly = [...st.bankOnly, ...st.lost].map((l) => ({ date: l.op_date, label: l.label, ref: l.reference ?? '', amount: l.amount }));
+      const gap = statementBalance === null ? null : statementBalance - st.expectedBankBalance;
+      await printA4(`${a4Head(store)}
+        <h1>État de rapprochement : ${esc(st.account.id)} ${esc(st.account.label)}</h1><div>Au ${dayFr(st.date)} · montants en FCFA</div>
+        <table class="totals"><tbody><tr class="total"><td>Solde du compte en comptabilité</td><td class="r">${signed(st.bookBalance)}</td></tr></tbody></table>
+        <h3>Écritures pas encore passées sur le relevé (à retrancher)</h3>
+        <table><thead><tr><th>Date</th><th>Libellé</th><th>Pièce</th><th class="r">Montant</th></tr></thead><tbody>${rows(bookOnly, 'Aucune')}</tbody></table>
+        <h3>Opérations du relevé pas encore comptabilisées (à ajouter)</h3>
+        <table><thead><tr><th>Date</th><th>Libellé</th><th>Référence</th><th class="r">Montant</th></tr></thead><tbody>${rows(bankOnly, 'Aucune')}</tbody></table>
+        <table class="totals"><tbody>
+        <tr class="total"><td>Solde attendu sur le relevé</td><td class="r">${signed(st.expectedBankBalance)}</td></tr>
+        ${statementBalance === null ? '' : `<tr><td>Solde affiché par le relevé</td><td class="r">${signed(statementBalance)}</td></tr><tr class="total"><td>${gap ? 'Écart à expliquer' : 'Rapprochement juste'}</td><td class="r">${signed(gap ?? 0)}</td></tr>`}
+        </tbody></table>
+        <p class="muted">${st.matched.length} opérations pointées.</p>
+        <table><tbody><tr><td>Établi par</td><td class="r">Visa du gérant</td></tr></tbody></table>`);
+    },
+
     async journal(storeId, from, to, journal) {
       const store = s.admin.getStore(storeId);
       const entries = s.accounting.entries(storeId, { from: from ?? undefined, to: to ?? undefined, journal: journal ?? undefined });

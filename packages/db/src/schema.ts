@@ -664,4 +664,32 @@ CREATE TABLE quote_lines (
 CREATE INDEX quote_lines_quote ON quote_lines(quote_id);
 `,
   },
+  {
+    version: 8,
+    name: 'rapprochement bancaire',
+    sql: `
+CREATE TABLE bank_lines (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  op_date TEXT NOT NULL,
+  label TEXT NOT NULL,
+  reference TEXT,
+  -- Positif : argent reçu sur le compte ; négatif : argent sorti.
+  amount INTEGER NOT NULL CHECK (amount <> 0),
+  -- Empreinte de la ligne importée, pour ne pas l'importer deux fois.
+  import_key TEXT NOT NULL,
+  -- Ligne de comptabilité pointée (clé calculée par le rapprochement).
+  match_key TEXT,
+  matched_at TEXT,
+  matched_by TEXT REFERENCES users(id),
+  deleted INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (store_id, account_id, import_key)
+);
+CREATE INDEX bank_lines_account ON bank_lines(store_id, account_id, op_date);
+`,
+  },
 ];

@@ -1,11 +1,12 @@
 import { Fragment, useState } from 'react';
-import { type Result, call } from '../api';
+import { type StatementLine, parseStatementCsv } from '@superette/core';
+import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'vat' | 'treasury' | 'accounts';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'vat' | 'treasury' | 'bank' | 'accounts';
 
 const JOURNALS: Record<JournalCode, string> = {
   VE: 'Ventes',
@@ -68,6 +69,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
           ['statements', 'États financiers'],
           ['vat', 'Déclaration de TVA'],
           ['treasury', 'Trésorerie'],
+          ['bank', 'Rapprochement bancaire'],
           ['accounts', 'Plan comptable'],
         ]}
       />
@@ -77,6 +79,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'statements' && <Statements onOpen={openLedger} />}
       {tab === 'vat' && <VatReturn />}
       {tab === 'treasury' && <Treasury onOpen={openLedger} />}
+      {tab === 'bank' && <BankReconciliation />}
       {tab === 'accounts' && <Accounts user={user} />}
     </div>
   );
@@ -729,6 +732,388 @@ function Treasury({ onOpen }: { onOpen: (account: string) => void }) {
         aux fournisseurs.
       </p>
     </>
+  );
+}
+
+type BankState = Result<'bank.state'>;
+type BankLine = BankState['bankOnly'][number];
+type BookLine = BankState['bookOnly'][number];
+
+/** Lit un fichier de relevé : UTF-8, ou Windows-1252 pour les exports Excel des banques. */
+async function readStatementFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder('windows-1252').decode(buf);
+  }
+}
+
+/** Rapprochement d'un compte de banque ou de Mobile Money avec son relevé. */
+function BankReconciliation() {
+  const toast = useToast();
+  const accounts = useLoad(() => call('bank.accounts'), []);
+  const [account, setAccount] = useState('521');
+  const [date, setDate] = useState(today());
+  const [statementBalance, setStatementBalance] = useState('');
+  const [bankSel, setBankSel] = useState<string | null>(null);
+  const [bookSel, setBookSel] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ name: string; parsed: ReturnType<typeof parseStatementCsv> } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [booking, setBooking] = useState<BankLine | null>(null);
+  const st = useLoad(() => call('bank.state', account, date || undefined), [account, date]);
+  const d = st.data;
+  const reload = () => {
+    setBankSel(null);
+    setBookSel(null);
+    st.reload();
+  };
+  const run = (p: Promise<unknown>, ok?: string) =>
+    p.then(() => {
+      if (ok) toast.ok(ok);
+      reload();
+    }, toast.error);
+  const given = statementBalance.trim() ? parseSigned(statementBalance) : null;
+  const gap = d && given !== null ? given - d.expectedBankBalance : null;
+  const bank = d ? [...d.lost, ...d.bankOnly] : [];
+  const selBank = bank.find((l) => l.id === bankSel);
+  const selBook = d?.bookOnly.find((b) => b.key === bookSel);
+
+  return (
+    <>
+      <div className="filters">
+        <select value={account} onChange={(e) => setAccount(e.target.value)}>
+          {(accounts.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.id} {a.label}
+            </option>
+          ))}
+        </select>
+        <label className="inline">
+          Au <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label className="button-like" style={{ marginLeft: 'auto' }}>
+          Importer un relevé (CSV)
+          <input
+            type="file"
+            accept=".csv,.txt,text/csv"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) setPreview({ name: f.name, parsed: parseStatementCsv(await readStatementFile(f)) });
+            }}
+          />
+        </label>
+        <button onClick={() => setAdding(true)}>Ajouter une ligne</button>
+        <button
+          onClick={() =>
+            call('bank.autoMatch', account).then((n) => {
+              toast.ok(n ? `${n} opération${n > 1 ? 's' : ''} pointée${n > 1 ? 's' : ''}` : 'Rien à pointer automatiquement');
+              reload();
+            }, toast.error)
+          }
+        >
+          Pointer automatiquement
+        </button>
+        <button className="primary" onClick={() => call('bank.print', account, date, given).catch(toast.error)}>
+          Imprimer l'état
+        </button>
+      </div>
+      {d && (
+        <div className="kpis">
+          <div>
+            <span>Solde en comptabilité</span>
+            <strong>{fcfa(d.bookBalance)}</strong>
+          </div>
+          <div>
+            <span>Le relevé doit afficher</span>
+            <strong>{fcfa(d.expectedBankBalance)}</strong>
+          </div>
+          <div>
+            <span>Solde du relevé au {dateFr(d.date)}</span>
+            <input inputMode="numeric" placeholder="À recopier du relevé" value={statementBalance} onChange={(e) => setStatementBalance(e.target.value)} />
+          </div>
+          <div className={gap === null ? '' : gap === 0 ? 'pos' : 'neg'}>
+            <span>Écart</span>
+            <strong>{gap === null ? '-' : gap === 0 ? 'Juste' : fcfa(gap)}</strong>
+          </div>
+        </div>
+      )}
+      {d && (
+        <div className="grid2 statements">
+          <section>
+            <h3>Relevé : pas encore en comptabilité ({bank.length})</h3>
+            {bank.length === 0 ? (
+              <Empty>Tout le relevé est pointé.</Empty>
+            ) : (
+              <table className="list compact">
+                <tbody>
+                  {bank.map((l) => (
+                    <tr key={l.id} className={`clickable ${bankSel === l.id ? 'selected' : ''}`} onClick={() => setBankSel(bankSel === l.id ? null : l.id)}>
+                      <td className="nowrap">{dateFr(l.op_date)}</td>
+                      <td>
+                        {l.label}
+                        {l.reference && <span className="muted"> · {l.reference}</span>}
+                        {d.lost.includes(l) && <span className="tag alerte">écriture modifiée, à repointer</span>}
+                      </td>
+                      <td className={`r nowrap ${l.amount < 0 ? 'neg' : ''}`}>{fcfa(l.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+          <section>
+            <h3>Comptabilité : pas encore sur le relevé ({d.bookOnly.length})</h3>
+            {d.bookOnly.length === 0 ? (
+              <Empty>Toutes les écritures sont pointées.</Empty>
+            ) : (
+              <table className="list compact">
+                <tbody>
+                  {d.bookOnly.map((b) => (
+                    <tr key={b.key} className={`clickable ${bookSel === b.key ? 'selected' : ''}`} onClick={() => setBookSel(bookSel === b.key ? null : b.key)}>
+                      <td className="nowrap">{dateFr(b.date)}</td>
+                      <td>
+                        {b.label} <span className="muted">· {b.journal} {b.ref}</span>
+                      </td>
+                      <td className={`r nowrap ${b.amount < 0 ? 'neg' : ''}`}>{fcfa(b.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </div>
+      )}
+      {(selBank || selBook) && (
+        <div className="actions sticky">
+          {selBank && selBook && (
+            <button className="primary" disabled={selBank.amount !== selBook.amount} onClick={() => run(call('bank.match', selBank.id, selBook.key), 'Opération pointée')}>
+              {selBank.amount === selBook.amount ? 'Pointer ces deux lignes' : 'Montants différents'}
+            </button>
+          )}
+          {selBank && !selBook && (
+            <>
+              <button className="primary" onClick={() => setBooking(selBank)}>
+                Comptabiliser (frais, intérêts…)
+              </button>
+              <button className="danger" onClick={() => run(call('bank.delete', selBank.id), 'Ligne supprimée')}>
+                Supprimer la ligne
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {d && d.matched.length > 0 && (
+        <details>
+          <summary>{d.matched.length} opérations pointées</summary>
+          <table className="list compact">
+            <tbody>
+              {d.matched.map((m) => (
+                <tr key={m.bank.id}>
+                  <td className="nowrap">{dateFr(m.bank.op_date)}</td>
+                  <td>{m.bank.label}</td>
+                  <td className="muted">
+                    {m.book.journal} {m.book.ref} du {dateFr(m.book.date)}
+                  </td>
+                  <td className="r nowrap">{fcfa(m.bank.amount)}</td>
+                  <td>
+                    <button className="link" onClick={() => run(call('bank.unmatch', m.bank.id))}>
+                      Dépointer
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+      <p className="muted">
+        Importez le relevé de la banque ou de MoMo / Orange Money (fichier CSV), puis pointez : chaque opération du relevé avec son écriture. Ce qui reste d'un côté explique
+        l'écart entre les deux soldes : chèques pas encore encaissés, frais pas encore comptabilisés… Les à-nouveaux sont considérés comme déjà rapprochés.
+      </p>
+      {preview && (
+        <ImportPreview
+          name={preview.name}
+          parsed={preview.parsed}
+          onClose={() => setPreview(null)}
+          onImport={(lines) =>
+            call('bank.import', account, lines).then((r) => {
+              toast.ok(`${r.added} ligne${r.added > 1 ? 's' : ''} importée${r.added > 1 ? 's' : ''}${r.duplicates ? `, ${r.duplicates} déjà présente${r.duplicates > 1 ? 's' : ''}` : ''}`);
+              setPreview(null);
+              reload();
+            }, toast.error)
+          }
+        />
+      )}
+      {adding && (
+        <BankLineDialog
+          onClose={() => setAdding(false)}
+          onSave={(line) =>
+            call('bank.import', account, [line]).then(() => {
+              setAdding(false);
+              reload();
+            }, toast.error)
+          }
+        />
+      )}
+      {booking && (
+        <BookDialog
+          line={booking}
+          onClose={() => setBooking(null)}
+          onSave={(input) =>
+            call('bank.book', booking.id, input).then(() => {
+              toast.ok('Écriture passée et pointée');
+              setBooking(null);
+              reload();
+            }, toast.error)
+          }
+        />
+      )}
+    </>
+  );
+}
+
+const parseSigned = (v: string) => {
+  const neg = v.trim().startsWith('-');
+  const n = parseAmount(v.replace('-', ''));
+  return n === null ? null : neg ? -n : n;
+};
+
+function ImportPreview({
+  name,
+  parsed,
+  onClose,
+  onImport,
+}: {
+  name: string;
+  parsed: ReturnType<typeof parseStatementCsv>;
+  onClose: () => void;
+  onImport: (lines: StatementLine[]) => void;
+}) {
+  const cols = Object.entries(parsed.columns)
+    .map(([k, v]) => `${({ date: 'date', label: 'libellé', reference: 'référence', debit: 'débit', credit: 'crédit', amount: 'montant', fee: 'frais' } as Record<string, string>)[k]} = « ${v} »`)
+    .join(', ');
+  const total = parsed.lines.reduce((t, l) => t + l.amount, 0);
+  return (
+    <Modal title={`Importer ${name}`} onClose={onClose} wide>
+      {cols && <p className="muted">Colonnes reconnues : {cols}</p>}
+      {parsed.skipped.map((sk) => (
+        <p key={sk.row} className="neg">
+          Ligne {sk.row} ignorée : {sk.reason}
+        </p>
+      ))}
+      {parsed.lines.length === 0 ? (
+        <Empty>Aucune opération lisible dans ce fichier.</Empty>
+      ) : (
+        <table className="list compact">
+          <tbody>
+            {parsed.lines.slice(0, 200).map((l, i) => (
+              <tr key={i}>
+                <td className="nowrap">{dateFr(l.date)}</td>
+                <td>
+                  {l.label}
+                  {l.reference && <span className="muted"> · {l.reference}</span>}
+                </td>
+                <td className={`r nowrap ${l.amount < 0 ? 'neg' : ''}`}>{fcfa(l.amount)}</td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td colSpan={2}>{parsed.lines.length} opérations, mouvement net</td>
+              <td className="r">{fcfa(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      <div className="actions">
+        <button onClick={onClose}>Annuler</button>
+        <button className="primary" disabled={!parsed.lines.length} onClick={() => onImport(parsed.lines)}>
+          Importer {parsed.lines.length} opérations
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function BankLineDialog({ onClose, onSave }: { onClose: () => void; onSave: (l: StatementLine) => void }) {
+  const [date, setDate] = useState(today());
+  const [label, setLabel] = useState('');
+  const [reference, setReference] = useState('');
+  const [amount, setAmount] = useState('');
+  const [out, setOut] = useState(true);
+  const v = parseAmount(amount);
+  return (
+    <Modal title="Ligne du relevé" onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (v) onSave({ date, label, reference: reference || null, amount: out ? -v : v });
+        }}
+      >
+        <div className="methods">
+          <button type="button" className={out ? 'active' : ''} onClick={() => setOut(true)}>
+            Sortie (débit du relevé)
+          </button>
+          <button type="button" className={!out ? 'active' : ''} onClick={() => setOut(false)}>
+            Entrée (crédit du relevé)
+          </button>
+        </div>
+        <Field label="Date">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </Field>
+        <Field label="Libellé">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Frais de tenue de compte, agios…" required autoFocus />
+        </Field>
+        <Field label="Référence">
+          <input value={reference} onChange={(e) => setReference(e.target.value)} />
+        </Field>
+        <Field label="Montant (FCFA)">
+          <input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        </Field>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!v || !label.trim()}>
+            Ajouter
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Passe en comptabilité une opération vue seulement sur le relevé. */
+function BookDialog({ line, onClose, onSave }: { line: BankLine; onClose: () => void; onSave: (input: { account: string; label: string }) => void }) {
+  const accounts = useLoad(() => call('accounting.accounts'), []);
+  const [account, setAccount] = useState(line.amount < 0 ? '631' : '758');
+  const [label, setLabel] = useState(line.label);
+  const choices = (accounts.data ?? []).filter((a) => /^[4678]/.test(a.id));
+  return (
+    <Modal title="Comptabiliser l'opération du relevé" onClose={onClose}>
+      <p>
+        {dateFr(line.op_date)} · {line.label} · <strong className={line.amount < 0 ? 'neg' : ''}>{fcfa(line.amount)}</strong>
+      </p>
+      <Field label={line.amount < 0 ? 'Compte de charge (débité)' : 'Compte de produit (crédité)'}>
+        <select value={account} onChange={(e) => setAccount(e.target.value)}>
+          {choices.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.id} {a.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Libellé de l'écriture">
+        <input value={label} onChange={(e) => setLabel(e.target.value)} />
+      </Field>
+      <div className="actions">
+        <button onClick={onClose}>Annuler</button>
+        <button className="primary" onClick={() => onSave({ account, label })}>
+          Passer l'écriture et pointer
+        </button>
+      </div>
+    </Modal>
   );
 }
 

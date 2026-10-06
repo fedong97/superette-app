@@ -56,6 +56,13 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Stock de fin d'exercice valorisé au CMUP d'après les mouvements de stock : l'écart avec le compte 311 passe en variation de stock (6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à nouveau.
 - Impression A4 (bilan actif, bilan passif, compte de résultat) et export CSV des postes pour la saisie de la DSF. Les comptes qu'aucun poste ne reprend sont signalés. Le tableau des flux de trésorerie et les notes annexes restent à faire.
 
+**Rapprochement bancaire**
+- Comptabilité › Rapprochement bancaire (ou Trésorerie › Rapprochement bancaire), pour chaque compte de banque, MoMo ou Orange Money (classe 52 à 55).
+- Import du relevé en CSV tel que la banque ou l'opérateur le fournit : colonnes reconnues automatiquement (date, libellé, référence, débit/crédit ou montant signé, frais), séparateur `;`, `,` ou tabulation, fichiers Excel enregistrés en CSV acceptés. Un relevé importé deux fois, ou sur deux PC, ne crée pas de doublon.
+- Pointage automatique : même montant, dates proches de 10 jours au plus, la référence citée sur le relevé départage. Pointage et dépointage à la main pour le reste.
+- Frais, agios, intérêts présents seulement sur le relevé : « Comptabiliser » passe l'écriture (journal BQ ou MM) et la pointe.
+- Solde attendu sur le relevé, écart avec le solde affiché, et état de rapprochement A4 à signer. Le pointage se synchronise entre les PC.
+
 **Dépenses**
 - Loyer, ENEO, salaires, CNPS, transport, sacs, entretien… classés par catégorie, chaque catégorie passant sur son compte de charges (modifiable).
 - Payées par espèces, MoMo, Orange Money, virement, chèque ou carte (référence obligatoire hors espèces), avec la TVA récupérable de la facture (calcul 19,25 % en un clic).
@@ -145,4 +152,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Rapprochement bancaire, tableau des flux de trésorerie et notes annexes de la DSF.
+2. Tableau des flux de trésorerie et notes annexes de la DSF.

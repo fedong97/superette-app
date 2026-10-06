@@ -48,6 +48,7 @@ const TABLES: Record<string, string> = {
   account: 'accounts',
   expense_category: 'expense_categories',
   expense: 'expenses',
+  bank_line: 'bank_lines',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -301,6 +302,13 @@ export class SyncService extends Base {
         const local = this.db.prepare('SELECT status FROM expenses WHERE id = ?').pluck().get(event.entityId);
         if (local === 'cancelled') return;
         this.upsert('expenses', p);
+        return;
+      }
+      case 'bank_line': {
+        // Pointage fait sur deux PC : la modification la plus récente l'emporte.
+        const local = this.db.prepare('SELECT updated_at FROM bank_lines WHERE id = ?').pluck().get(event.entityId) as string | undefined;
+        if (local && local > String(p['updated_at'])) return;
+        this.upsert('bank_lines', p);
         return;
       }
       case 'account': {

@@ -9,6 +9,7 @@ import {
   parseScaleBarcode,
 } from '@superette/core';
 import { AppError, Base, newId } from './util';
+import { fold } from './database';
 
 export type Unit = 'piece' | 'kg' | 'litre';
 
@@ -141,6 +142,38 @@ export class CatalogueService extends Base {
       Article,
       'barcodes'
     >[];
+    return this.withBarcodes(rows);
+  }
+
+  /**
+   * Suggestions pendant la saisie : chaque mot tapé doit se retrouver dans le
+   * nom ou la marque (ou commencer le code ou un code-barres), sans tenir compte des accents
+   * ni des majuscules. Les noms qui commencent par le premier mot passent devant.
+   */
+  suggestArticles(query: string, storeId: string | null, limit = 12): Article[] {
+    const words = fold(query)
+      .replace(/[%_]/g, '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 6);
+    if (words.length === 0) return [];
+    const params: Record<string, unknown> = { storeId, prefix: `${words[0]}%`, limit: Math.min(Math.max(limit, 1), 50) };
+    const where = words
+      .map((w, i) => {
+        params[`w${i}`] = `%${w}%`;
+        params[`p${i}`] = `${w}%`;
+        // Codes et codes-barres : par le début seulement, sinon « 1 » ramènerait tout le catalogue.
+        return `(fold(a.name) LIKE @w${i} OR fold(COALESCE(a.brand, '')) LIKE @w${i} OR fold(a.code) LIKE @p${i}
+                 OR a.id IN (SELECT article_id FROM barcodes WHERE code LIKE @p${i}))`;
+      })
+      .join(' AND ');
+    const rows = this.db
+      .prepare(
+        `${ARTICLE_SELECT}
+         WHERE a.active = 1 AND ${where}
+         ORDER BY CASE WHEN fold(a.name) LIKE @prefix THEN 0 ELSE 1 END, fold(a.name) LIMIT @limit`,
+      )
+      .all(params) as Omit<Article, 'barcodes'>[];
     return this.withBarcodes(rows);
   }
 

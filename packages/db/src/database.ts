@@ -8,8 +8,14 @@ export function openDatabase(file: string): Db {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('synchronous = NORMAL');
+  // Minuscules sans accents, pour chercher « creme » et trouver « Crème ».
+  db.function('fold', { deterministic: true }, (v: unknown) => (v == null ? null : fold(String(v))));
   migrate(db);
   return db;
+}
+
+export function fold(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 export function migrate(db: Db): void {

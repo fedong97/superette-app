@@ -5,6 +5,7 @@ import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { QuotePickDialog } from './Quotes';
+import { SuggestionList, useArticleSuggestions } from './pickers';
 import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 
 type Article = Result<'catalogue.get'>;
@@ -120,6 +121,17 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     addLine(toLine(article, multiplier, null));
   };
 
+  // « 3*riz » : suggestions sur « riz », l'article choisi est ajouté 3 fois.
+  const multiplied = /^(\d+(?:[.,]\d+)?)\*(.*)$/.exec(input.trim());
+  const suggestQuery = multiplied ? multiplied[2]! : input;
+  const suggestions = useArticleSuggestions(suggestQuery);
+  const pickSuggestion = (a: Article) => {
+    const mult = multiplied ? parseQty(multiplied[1]!) : null;
+    setInput('');
+    addArticle(a, mult ?? 1000);
+    scanRef.current?.focus();
+  };
+
   const onScan = async (e: React.FormEvent) => {
     e.preventDefault();
     const raw = input.trim();
@@ -143,7 +155,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
         }
         return;
       }
-      const found = await call('catalogue.search', code);
+      const found = await call('catalogue.suggest', code);
       if (found.length === 1) addArticle(found[0]!, mult ?? 1000);
       else if (found.length === 0) toast.error(`Article introuvable : ${code}`);
       else {
@@ -386,13 +398,19 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
           {pane === 'lines' && (
             <>
               <form onSubmit={onScan} className="fiche-tools">
-                <input
-                  ref={scanRef}
-                  className="scan-input"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Saisir une partie du nom produit ou scanner (3*code)"
-                />
+                <div className="scan-wrap">
+                  <input
+                    ref={scanRef}
+                    className="scan-input"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => suggestions.onKeyDown(e, pickSuggestion)}
+                    onBlur={suggestions.close}
+                    autoComplete="off"
+                    placeholder="Taper le début du nom produit ou scanner (3*code)"
+                  />
+                  <SuggestionList s={suggestions} onPick={pickSuggestion} query={suggestQuery} />
+                </div>
                 <label>Grille tarif.</label>
                 <select defaultValue="detail">
                   <option value="detail">Détail</option>

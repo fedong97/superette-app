@@ -139,6 +139,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Catalogue ----------------------------------------------------------
     'catalogue.search': (query: string, opts?: { includeInactive?: boolean; familyId?: string }) =>
       s.catalogue.searchArticles(query, ctx().storeId, opts),
+    'catalogue.suggest': (query: string) => s.catalogue.suggestArticles(query, ctx().storeId),
     'catalogue.get': (id: string) => s.catalogue.getArticle(id, ctx().storeId),
     'catalogue.save': (input: ArticleInput, id?: string) => s.catalogue.saveArticle(requireUser(STOCK).id, input, id),
     'catalogue.setStorePrice': (articleId: string, price: Fcfa | null) => {

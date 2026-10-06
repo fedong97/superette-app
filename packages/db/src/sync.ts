@@ -214,6 +214,21 @@ export class SyncService extends Base {
     return cols;
   }
 
+  /**
+   * Dernière écriture gagnante : garde la version locale si elle est plus récente. À égalité
+   * d'horodatage (deux PC dans la même milliseconde), le contenu départage, pour que tous les PC
+   * gardent la même version au lieu de chacun la sienne.
+   */
+  private keepsLocal(table: string, id: string, remote: Record<string, unknown>): boolean {
+    const local = this.db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    if (!local) return false;
+    const lu = String(local['updated_at']);
+    const ru = String(remote['updated_at']);
+    if (lu !== ru) return lu > ru;
+    const content = (row: Record<string, unknown>) => JSON.stringify(Object.keys(local).sort().map((k) => (row[k] ?? null) === null ? null : String(row[k])));
+    return content(local) >= content(remote);
+  }
+
   private upsert(table: string, row: Record<string, unknown>, keys: string[] = ['id'], ignoreExisting = false): void {
     const cols = [...this.tableColumns(table)].filter((c) => c in row);
     const values = Object.fromEntries(cols.map((c) => [c, row[c] ?? null]));
@@ -307,15 +322,13 @@ export class SyncService extends Base {
       }
       case 'bank_line': {
         // Pointage fait sur deux PC : la modification la plus récente l'emporte.
-        const local = this.db.prepare('SELECT updated_at FROM bank_lines WHERE id = ?').pluck().get(event.entityId) as string | undefined;
-        if (local && local > String(p['updated_at'])) return;
+        if (this.keepsLocal('bank_lines', event.entityId, p)) return;
         this.upsert('bank_lines', p);
         return;
       }
       case 'tax_year': {
         // Paramètres fiscaux modifiés sur deux PC : la modification la plus récente l'emporte.
-        const local = this.db.prepare('SELECT updated_at FROM tax_years WHERE id = ?').pluck().get(event.entityId) as string | undefined;
-        if (local && local > String(p['updated_at'])) return;
+        if (this.keepsLocal('tax_years', event.entityId, p)) return;
         this.upsert('tax_years', p);
         return;
       }

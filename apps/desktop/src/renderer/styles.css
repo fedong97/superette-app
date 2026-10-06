@@ -271,3 +271,15 @@ tr.selected td { background: #dbe7f7 !important; }
 .actions.sticky { position: sticky; bottom: 0; background: var(--panel, #fff); padding: 8px 0; justify-content: flex-start; }
 label.button-like { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; background: #fff; }
 .kpis input { font-size: 18px; padding: 4px 8px; }
+
+details.note {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 0;
+}
+details.note > summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+details.note table {
+  margin: 6px 0;
+}

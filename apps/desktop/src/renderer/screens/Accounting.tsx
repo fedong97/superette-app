@@ -465,11 +465,12 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
   const toast = useToast();
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear);
-  const [view, setView] = useState<'sheet' | 'income' | 'flows'>('sheet');
+  const [view, setView] = useState<'sheet' | 'income' | 'flows' | 'notes'>('sheet');
   const from = `${year}-01-01`;
   const to = year === thisYear ? today() : `${year}-12-31`;
   const st = useLoad(() => call('accounting.statements', { from, to }), [from, to]);
   const flows = useLoad(() => call('accounting.cashFlow', { from, to }), [from, to]);
+  const notes = useLoad(() => (view === 'notes' ? call('accounting.notes', year) : Promise.resolve(undefined)), [year, view]);
   const d = st.data;
   const f = flows.data;
   const cell = (v: number | undefined) => <td className={`r ${v && v < 0 ? 'neg' : ''}`}>{v ? fcfa(v) : '-'}</td>;
@@ -511,14 +512,20 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
           <button className={view === 'flows' ? 'active' : ''} onClick={() => setView('flows')}>
             Flux de trésorerie
           </button>
+          <button className={view === 'notes' ? 'active' : ''} onClick={() => setView('notes')}>
+            Notes annexes
+          </button>
         </div>
-        <button style={{ marginLeft: 'auto' }} onClick={() => call('accounting.printStatements', from, to).catch(toast.error)}>
-          Imprimer (A4)
+        <button
+          style={{ marginLeft: 'auto' }}
+          onClick={() => (view === 'notes' ? call('accounting.printNotes', year) : call('accounting.printStatements', from, to)).catch(toast.error)}
+        >
+          {view === 'notes' ? 'Imprimer les notes (A4)' : 'Imprimer (A4)'}
         </button>
         <button
           onClick={() =>
-            call('accounting.statementsCsv', { from, to })
-              .then((csv) => downloadText(`etats-financiers-${year}.csv`, csv))
+            (view === 'notes' ? call('accounting.notesCsv', year) : call('accounting.statementsCsv', { from, to }))
+              .then((csv) => downloadText(view === 'notes' ? `notes-annexes-${year}.csv` : `etats-financiers-${year}.csv`, csv))
               .catch(toast.error)
           }
         >
@@ -627,13 +634,57 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
           </table>
         </>
       )}
+      {view === 'notes' && notes.data && (
+        <>
+          <p className="muted">
+            Notes établies à partir des écritures de l'exercice. Les notes déclaratives (engagements donnés et reçus, effectifs, informations sociales et
+            environnementales) restent à rédiger par votre comptable.
+          </p>
+          {notes.data.notes.map((n) => (
+            <details key={n.id} className="note" open={n.id === '3A'}>
+              <summary>
+                <strong>{n.id === 'RF' ? '' : `Note ${n.id} · `}</strong>
+                {n.title}
+                {n.rows.length === 0 && <span className="muted"> · néant</span>}
+              </summary>
+              {n.rows.length > 0 && (
+                <table className="list compact">
+                  <thead>
+                    <tr>
+                      <th />
+                      {n.columns.map((c) => (
+                        <th key={c} className="r">
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {n.rows.map((r, k) => (
+                      <tr key={k} className={r.total ? 'total' : ''}>
+                        <td>{r.label}</td>
+                        {r.values.map((x, j) => (
+                          <td key={j} className={`r ${x < 0 ? 'neg' : ''}`}>
+                            {x ? fcfa(x) : '-'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {n.comment && <p className="muted">{n.comment}</p>}
+            </details>
+          ))}
+        </>
+      )}
       {d && view === 'flows' && (
         <p className="muted">
           Méthode indirecte du SYSCOHADA : on part du résultat net, on retire ce qui ne se paie pas (amortissements, provisions, cessions), puis on suit les variations du
           bilan. Les à-nouveaux de reprise comptent comme trésorerie de départ, pas comme des flux. La ligne ZH doit égaler la trésorerie du bilan.
         </p>
       )}
-      {d && view !== 'flows' && (
+      {d && (view === 'sheet' || view === 'income') && (
         <p className="muted">
           Le stock de marchandises est valorisé au coût moyen pondéré d'après les mouvements de stock ({fcfa(d.stock.opening)} au début de l'exercice, {fcfa(d.stock.closing)}{' '}
           à la date choisie) : l'écart passe en variation de stock (compte 6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à

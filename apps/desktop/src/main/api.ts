@@ -44,6 +44,7 @@ export interface Printer {
   statements(storeId: string, from: string, to: string): Promise<void>;
   reconciliation(storeId: string, accountId: string, date: string, statementBalance: number | null): Promise<void>;
   taxAssessment(storeId: string, year: number): Promise<void>;
+  notes(storeId: string, year: number): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
@@ -344,6 +345,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(ACCOUNTING).storeId, month),
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(ACCOUNTING).storeId, opts),
     'accounting.cashFlow': (opts: { from: string; to: string }) => s.statements.cashFlow(ctx(ACCOUNTING).storeId, opts),
+    'accounting.notes': (year: number) => s.notes.notes(ctx(ACCOUNTING).storeId, year),
+    'accounting.notesCsv': (year: number) => s.notes.exportCsv(ctx(ACCOUNTING).storeId, year),
+    'accounting.printNotes': (year: number) => printer.notes(ctx(ACCOUNTING).storeId, year),
     'accounting.statementsCsv': (opts: { from: string; to: string }) => s.statements.exportCsv(ctx(ACCOUNTING).storeId, opts),
     'accounting.printStatements': (from: string, to: string) => printer.statements(ctx(ACCOUNTING).storeId, from, to),
     // --- Rapprochement bancaire --------------------------------------------------------

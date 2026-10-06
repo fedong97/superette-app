@@ -259,3 +259,11 @@ table.list.journal tr.entry-first td { border-top: 2px solid #c9d6ea; }
 .suggest .suggest-price { text-align: right; font-weight: 600; }
 .fiche-tools .scan-wrap { position: relative; flex: 1; min-width: 260px; display: flex; }
 .fiche-tools .scan-wrap .scan-input { flex: 1; }
+
+/* États financiers */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: none; padding: 6px 14px; }
+.seg button.active { background: #dbe7f7; font-weight: 600; }
+.grid2.statements { align-items: start; gap: 16px; }
+table.statements tr.total td, .grid2.statements tr.total td { font-weight: 700; }
+button.link { border: none; background: none; padding: 0; color: #2457a6; text-decoration: underline; }

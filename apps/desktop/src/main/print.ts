@@ -349,6 +349,27 @@ export function createPrinter(s: Services): Printer {
         <tbody>${rows}<tr class="total"><td colspan="2">Totaux (FCFA)</td>${cell(tb.totals.opening)}${cell(tb.totals.debit)}${cell(tb.totals.credit)}${cell(closingD)}${cell(closingC)}</tr></tbody></table>`);
     },
 
+    async statements(storeId, from, to) {
+      const store = s.admin.getStore(storeId);
+      const st = s.statements.statements(storeId, { from, to });
+      const v = (n: number | undefined) => (n ? money(n) : '-');
+      const years = `<th class="r">Exercice au ${dayFr(st.to)}</th><th class="r">Exercice au ${dayFr(st.previousTo)}</th>`;
+      const row = (r: { ref: string; label: string; total?: boolean }, cells: string) =>
+        `<tr${r.total ? ' class="total"' : ''}><td>${r.ref}</td><td>${esc(r.label)}</td>${cells}</tr>`;
+      const title = (t: string) => `${a4Head(store)}<h1>${t}</h1><div>Exercice du ${dayFr(st.from)} au ${dayFr(st.to)} · montants en FCFA · SYSCOHADA révisé, système normal</div>`;
+      const assets = st.assets
+        .map((a) => row(a, `<td class="r">${a.total ? '' : v(a.gross)}</td><td class="r">${a.total ? '' : v(a.depreciation)}</td><td class="r">${v(a.net)}</td><td class="r">${v(a.previous)}</td>`))
+        .join('');
+      const lines = (rows: typeof st.liabilities) => rows.map((l) => row(l, `<td class="r">${v(l.net)}</td><td class="r">${v(l.previous)}</td>`)).join('');
+      await printA4(`${title('Bilan : actif')}
+        <table><thead><tr><th>Réf</th><th>Actif</th><th class="r">Brut</th><th class="r">Amort. et dépréc.</th><th class="r">Net</th><th class="r">Net N-1</th></tr></thead><tbody>${assets}</tbody></table>
+        <div style="page-break-before: always"></div>${title('Bilan : passif')}
+        <table><thead><tr><th>Réf</th><th>Passif</th>${years}</tr></thead><tbody>${lines(st.liabilities)}</tbody></table>
+        <div style="page-break-before: always"></div>${title('Compte de résultat')}
+        <table><thead><tr><th>Réf</th><th>Libellé</th>${years}</tr></thead><tbody>${lines(st.income)}</tbody></table>
+        <p class="muted">Stock de marchandises valorisé au coût moyen pondéré (CMUP) d'après les mouvements de stock : ${money(st.stock.opening)} au début, ${money(st.stock.closing)} à la clôture.</p>`);
+    },
+
     async journal(storeId, from, to, journal) {
       const store = s.admin.getStore(storeId);
       const entries = s.accounting.entries(storeId, { from: from ?? undefined, to: to ?? undefined, journal: journal ?? undefined });

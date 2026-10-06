@@ -95,7 +95,7 @@ export class AccountingService extends Base {
     return this.db.prepare(`SELECT id, label, role, active FROM accounts WHERE (? = 1 OR active = 1) ORDER BY id`).all(includeInactive ? 1 : 0) as Account[];
   }
 
-  private roles(): Record<AccountRole, string> {
+  roles(): Record<AccountRole, string> {
     const rows = this.db.prepare('SELECT id, role FROM accounts WHERE role IS NOT NULL').all() as { id: string; role: AccountRole }[];
     const map = Object.fromEntries(rows.map((r) => [r.role, r.id])) as Record<AccountRole, string>;
     for (const role of Object.keys(ACCOUNT_ROLES) as AccountRole[]) {

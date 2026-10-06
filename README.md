@@ -51,6 +51,11 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Impression A4 des journaux, de la balance et de la déclaration ; export CSV des écritures pour le cabinet comptable.
 - Les écritures sont recalculées à partir des pièces : elles restent justes quel que soit l'ordre dans lequel les PC se synchronisent. Plan comptable et écritures manuelles se synchronisent.
 
+**États financiers et DSF**
+- Bilan (actif brut, amortissements, net ; passif) et compte de résultat du SYSCOHADA révisé, système normal, avec les références officielles (AD… BZ, CA… DZ, TA… XI) et la colonne de l'exercice précédent (Comptabilité › États financiers, ou Fiscal › États financiers et DSF).
+- Stock de fin d'exercice valorisé au CMUP d'après les mouvements de stock : l'écart avec le compte 311 passe en variation de stock (6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à nouveau.
+- Impression A4 (bilan actif, bilan passif, compte de résultat) et export CSV des postes pour la saisie de la DSF. Les comptes qu'aucun poste ne reprend sont signalés. Le tableau des flux de trésorerie et les notes annexes restent à faire.
+
 **Dépenses**
 - Loyer, ENEO, salaires, CNPS, transport, sacs, entretien… classés par catégorie, chaque catégorie passant sur son compte de charges (modifiable).
 - Payées par espèces, MoMo, Orange Money, virement, chèque ou carte (référence obligatoire hors espèces), avec la TVA récupérable de la facture (calcul 19,25 % en un clic).
@@ -140,4 +145,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Rapprochement bancaire, états financiers annuels (bilan, compte de résultat, DSF).
+2. Rapprochement bancaire, tableau des flux de trésorerie et notes annexes de la DSF.

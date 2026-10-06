@@ -153,6 +153,40 @@ export class StockService extends Base {
       .run(articleId, warehouseId, qty, avg);
   }
 
+  /**
+   * Valeur du stock d'un magasin au soir d'une date (CMUP rejoué à partir des
+   * mouvements), pour l'inventaire de fin d'exercice. Un stock négatif compte zéro.
+   */
+  valueAt(storeId: string, date: string): Fcfa {
+    const moves = this.db
+      .prepare(
+        `SELECT m.article_id, m.warehouse_id, m.type, m.qty, m.unit_cost FROM stock_movements m
+         JOIN warehouses w ON w.id = m.warehouse_id
+         WHERE w.store_id = ? AND date(m.at, 'localtime') <= ? ORDER BY m.article_id, m.warehouse_id, m.at, m.id`,
+      )
+      .all(storeId, date) as { article_id: string; warehouse_id: string; type: MovementType; qty: number; unit_cost: number }[];
+    let total = 0;
+    let key = '';
+    let qty = 0;
+    let avg = 0;
+    const flush = () => {
+      total += Math.round((Math.max(0, qty) * avg) / 1000);
+    };
+    for (const m of moves) {
+      const k = `${m.article_id}|${m.warehouse_id}`;
+      if (k !== key) {
+        if (key) flush();
+        key = k;
+        qty = 0;
+        avg = 0;
+      }
+      if (m.qty > 0 && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN')) avg = weightedAverageCost(qty, avg, m.qty, m.unit_cost);
+      qty += m.qty;
+    }
+    if (key) flush();
+    return total;
+  }
+
   /** Quantité d'un lot = somme des mouvements qui le citent. */
   recomputeLot(lotId: string): void {
     this.db

@@ -155,11 +155,12 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Journaux', open: ['accounting', 'journals'] },
       { label: 'Grand livre', open: ['accounting', 'ledger'] },
       { label: 'Balance générale', open: ['accounting', 'balance'] },
+      { label: 'Bilan et compte de résultat', open: ['accounting', 'statements'] },
       { label: 'Plan comptable', open: ['accounting', 'accounts'] },
       { label: 'Export des ventes (CSV)', open: ['sales', 'export'] },
     ],
   ],
-  ['Fiscal', [{ label: 'Déclaration de TVA', open: ['accounting', 'vat'] }, { label: 'DSF', soon: true }]],
+  ['Fiscal', [{ label: 'Déclaration de TVA', open: ['accounting', 'vat'] }, { label: 'États financiers et DSF', open: ['accounting', 'statements'] }]],
   [
     'Administration',
     [

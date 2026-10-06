@@ -5,7 +5,7 @@ import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, tod
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'vat' | 'treasury' | 'accounts';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'vat' | 'treasury' | 'accounts';
 
 const JOURNALS: Record<JournalCode, string> = {
   VE: 'Ventes',
@@ -65,6 +65,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
           ['journals', 'Journaux'],
           ['ledger', 'Grand livre'],
           ['balance', 'Balance'],
+          ['statements', 'États financiers'],
           ['vat', 'Déclaration de TVA'],
           ['treasury', 'Trésorerie'],
           ['accounts', 'Plan comptable'],
@@ -73,6 +74,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'journals' && <Journals />}
       {tab === 'ledger' && <Ledger account={ledgerAccount} onAccount={setLedgerAccount} />}
       {tab === 'balance' && <Balance onOpen={openLedger} />}
+      {tab === 'statements' && <Statements onOpen={openLedger} />}
       {tab === 'vat' && <VatReturn />}
       {tab === 'treasury' && <Treasury onOpen={openLedger} />}
       {tab === 'accounts' && <Accounts user={user} />}
@@ -446,6 +448,162 @@ function Balance({ onOpen }: { onOpen: (account: string) => void }) {
         </table>
       )}
       {tb.data && tb.data.totals.debit === tb.data.totals.credit && rows.length > 0 && <p className="pos">Balance équilibrée : total des débits = total des crédits.</p>}
+    </>
+  );
+}
+
+type Statements = Result<'accounting.statements'>;
+type StatementRow = Statements['income'][number];
+
+/** Bilan et compte de résultat SYSCOHADA de l'exercice (année civile), avec l'exercice précédent. */
+function Statements({ onOpen }: { onOpen: (account: string) => void }) {
+  const toast = useToast();
+  const thisYear = Number(today().slice(0, 4));
+  const [year, setYear] = useState(thisYear);
+  const [view, setView] = useState<'sheet' | 'income'>('sheet');
+  const from = `${year}-01-01`;
+  const to = year === thisYear ? today() : `${year}-12-31`;
+  const st = useLoad(() => call('accounting.statements', { from, to }), [from, to]);
+  const d = st.data;
+  const cell = (v: number | undefined) => <td className={`r ${v && v < 0 ? 'neg' : ''}`}>{v ? fcfa(v) : '-'}</td>;
+  const line = (r: StatementRow, extra?: React.ReactNode) => (
+    <tr key={r.ref} className={r.total ? 'total' : ''}>
+      <td className="muted">{r.ref}</td>
+      <td>{r.label}</td>
+      {extra}
+      {cell(r.net)}
+      {cell(r.previous)}
+    </tr>
+  );
+  const heads = (
+    <>
+      <th className="r">{year === thisYear ? `Au ${dateFr(to)}` : `Exercice ${year}`}</th>
+      <th className="r">Exercice {year - 1}</th>
+    </>
+  );
+  return (
+    <>
+      <div className="filters">
+        <label className="inline">
+          Exercice
+          <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {[0, 1, 2, 3].map((k) => (
+              <option key={k} value={thisYear - k}>
+                {thisYear - k}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="seg">
+          <button className={view === 'sheet' ? 'active' : ''} onClick={() => setView('sheet')}>
+            Bilan
+          </button>
+          <button className={view === 'income' ? 'active' : ''} onClick={() => setView('income')}>
+            Compte de résultat
+          </button>
+        </div>
+        <button style={{ marginLeft: 'auto' }} onClick={() => call('accounting.printStatements', from, to).catch(toast.error)}>
+          Imprimer (A4)
+        </button>
+        <button
+          onClick={() =>
+            call('accounting.statementsCsv', { from, to })
+              .then((csv) => downloadText(`etats-financiers-${year}.csv`, csv))
+              .catch(toast.error)
+          }
+        >
+          Export pour la DSF (CSV)
+        </button>
+      </div>
+      {d && (
+        <div className="kpis">
+          <div>
+            <span>Résultat net {year === thisYear ? 'à ce jour' : year}</span>
+            <strong className={d.result < 0 ? 'neg' : 'pos'}>{fcfa(d.result)}</strong>
+          </div>
+          <div>
+            <span>Chiffre d'affaires</span>
+            <strong>{fcfa(d.income.find((l) => l.ref === 'XB')!.net)}</strong>
+          </div>
+          <div>
+            <span>Marge commerciale</span>
+            <strong>{fcfa(d.income.find((l) => l.ref === 'XA')!.net)}</strong>
+          </div>
+          <div>
+            <span>Stock au CMUP</span>
+            <strong>{fcfa(d.stock.closing)}</strong>
+          </div>
+        </div>
+      )}
+      {d && d.unmapped.length > 0 && (
+        <p className="neg">
+          Comptes non repris dans les états, à vérifier :{' '}
+          {d.unmapped.map((u, i) => (
+            <Fragment key={u.account}>
+              {i > 0 && ', '}
+              <button className="link" onClick={() => onOpen(u.account)}>
+                {u.account}
+              </button>{' '}
+              ({signed(u.balance)})
+            </Fragment>
+          ))}
+        </p>
+      )}
+      {d && view === 'sheet' && (
+        <div className="grid2 statements">
+          <table className="list compact">
+            <thead>
+              <tr>
+                <th />
+                <th>Actif</th>
+                <th className="r">Brut</th>
+                <th className="r">Amort. dépréc.</th>
+                {heads}
+              </tr>
+            </thead>
+            <tbody>
+              {d.assets.map((a) =>
+                line(
+                  a,
+                  <>
+                    <td className="r muted">{a.total || !a.gross ? '' : fcfa(a.gross)}</td>
+                    <td className="r muted">{a.total || !a.depreciation ? '' : fcfa(a.depreciation)}</td>
+                  </>,
+                ),
+              )}
+            </tbody>
+          </table>
+          <table className="list compact">
+            <thead>
+              <tr>
+                <th />
+                <th>Passif</th>
+                {heads}
+              </tr>
+            </thead>
+            <tbody>{d.liabilities.map((l) => line(l))}</tbody>
+          </table>
+        </div>
+      )}
+      {d && view === 'income' && (
+        <table className="list compact statements">
+          <thead>
+            <tr>
+              <th />
+              <th>Compte de résultat</th>
+              {heads}
+            </tr>
+          </thead>
+          <tbody>{d.income.map((l) => line(l))}</tbody>
+        </table>
+      )}
+      {d && (
+        <p className="muted">
+          Le stock de marchandises est valorisé au coût moyen pondéré d'après les mouvements de stock ({fcfa(d.stock.opening)} au début de l'exercice, {fcfa(d.stock.closing)}{' '}
+          à la date choisie) : l'écart passe en variation de stock (compte 6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à
+          nouveau tant qu'ils ne sont pas affectés par une écriture.
+        </p>
+      )}
     </>
   );
 }

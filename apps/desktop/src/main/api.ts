@@ -40,6 +40,7 @@ export interface Printer {
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
+  statements(storeId: string, from: string, to: string): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
@@ -333,6 +334,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.vatReturn': (month: string) => s.accounting.vatReturn(ctx(ACCOUNTING).storeId, month),
     'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(ACCOUNTING).storeId, opts),
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(ACCOUNTING).storeId, month),
+    'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(ACCOUNTING).storeId, opts),
+    'accounting.statementsCsv': (opts: { from: string; to: string }) => s.statements.exportCsv(ctx(ACCOUNTING).storeId, opts),
+    'accounting.printStatements': (from: string, to: string) => printer.statements(ctx(ACCOUNTING).storeId, from, to),
     'accounting.printBalance': (from?: string | null, to?: string | null) => printer.trialBalance(ctx(ACCOUNTING).storeId, from, to),
     'accounting.printJournal': (from?: string | null, to?: string | null, journal?: JournalCode | null) =>
       printer.journal(ctx(ACCOUNTING).storeId, from, to, journal),

@@ -5,9 +5,11 @@ import { Articles } from './screens/Articles';
 import { Dashboard } from './screens/Dashboard';
 import { Login } from './screens/Login';
 import { Pos } from './screens/Pos';
+import { Purchases, type PurchasesTab } from './screens/Purchases';
 import { Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
 import { Stock, type StockTab } from './screens/Stock';
+import { Suppliers } from './screens/Suppliers';
 import { Modal, ToastProvider, useLoad, useToast } from './ui';
 
 type AppState = Result<'app.state'>;
@@ -15,7 +17,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'sales' | 'articles' | 'stock' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'dashboard' | 'admin';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -28,6 +30,8 @@ const POS: Role[] = ['admin', 'manager', 'cashier'];
 const STOCK: Role[] = ['admin', 'manager', 'stock'];
 const MANAGE: Role[] = ['admin', 'manager'];
 const ACCOUNTING: Role[] = ['admin', 'manager', 'accountant'];
+const BUY: Role[] = ['admin', 'manager', 'stock'];
+const PURCHASING: Role[] = ['admin', 'manager', 'stock', 'accountant'];
 
 const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
   cash1: { label: 'Fiche de facturation 1', roles: POS },
@@ -35,6 +39,8 @@ const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
   sales: { label: 'Mes factures', roles: ACCOUNTING },
   articles: { label: 'Produits', roles: STOCK },
   stock: { label: 'Stock', roles: STOCK },
+  purchases: { label: 'Achats', roles: PURCHASING },
+  suppliers: { label: 'Fournisseurs', roles: PURCHASING },
   dashboard: { label: 'Tableau de bord', roles: MANAGE },
   admin: { label: 'Administration', roles: MANAGE },
 };
@@ -71,9 +77,12 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Achats',
     [
-      { label: 'Réception de marchandise', open: ['stock', 'receive'] },
-      { label: 'Bons de commande fournisseur', soon: true },
-      { label: 'Factures fournisseur', soon: true },
+      { label: 'Bons de commande fournisseur', open: ['purchases', 'orders'], roles: BUY },
+      { label: 'Proposition de commande', open: ['purchases', 'reorder'], roles: BUY },
+      { label: 'Réceptions fournisseur', open: ['purchases', 'receptions'] },
+      { label: 'Réception libre (sans commande)', open: ['stock', 'receive'] },
+      { label: 'Factures fournisseur', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
     ],
   ],
   ['Fabrication', [{ label: 'Recettes et ordres de fabrication', soon: true }]],
@@ -81,6 +90,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Trésorerie',
     [
       { label: 'Registre de caisse (Z)', open: ['sales', 'z'] },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
       { label: 'Banques et Mobile Money', soon: true },
     ],
   ],
@@ -91,7 +101,13 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'État du stock', open: ['stock', 'state'] },
     ],
   ],
-  ['Fournisseur', [{ label: 'Fiches fournisseurs', soon: true }]],
+  [
+    'Fournisseur',
+    [
+      { label: 'Fiches fournisseurs', open: ['suppliers'] },
+      { label: 'Factures et règlements', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+    ],
+  ],
   ['Client', [{ label: 'Fiches clients', soon: true }, { label: 'Comptes clients (crédit)', soon: true }]],
   ['Charge', [{ label: 'Dépenses', soon: true }]],
   ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'] }]],
@@ -140,7 +156,7 @@ const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?
   { label: 'Stock MM', open: ['stock', 'moves'] },
   { label: 'Transfert', open: ['stock', 'transfer'] },
   { label: 'Dépenses', soon: true },
-  { label: 'Achats', open: ['stock', 'receive'] },
+  { label: 'Achats', open: ['purchases', 'orders'] },
   { label: 'Trésorerie', soon: true },
   { label: 'TABORD', open: ['dashboard'] },
 ];
@@ -302,6 +318,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'articles' && <Articles user={user} />}
             {w.kind === 'stock' && <Stock user={user} initialTab={w.tab as StockTab | undefined} />}
             {w.kind === 'sales' && <Sales initialTab={w.tab as SalesTab | undefined} />}
+            {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
+            {w.kind === 'suppliers' && <Suppliers user={user} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>

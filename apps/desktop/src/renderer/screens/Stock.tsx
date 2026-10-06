@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType } from '@superette/core';
 import { type Result, call } from '../api';
+import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 
 type Article = Result<'catalogue.get'>;
@@ -36,78 +37,6 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'expiry' && <Expiry />}
       {tab === 'moves' && <Moves />}
     </div>
-  );
-}
-
-/** Recherche d'article par scan ou par nom. */
-function ArticlePicker({ onPick, placeholder }: { onPick: (a: Article) => void; placeholder?: string }) {
-  const toast = useToast();
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<Article[]>([]);
-  return (
-    <div className="picker">
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!q.trim()) return;
-          try {
-            const hit = await call('catalogue.scan', q);
-            if (hit) {
-              onPick(hit.article);
-              setQ('');
-              setResults([]);
-              return;
-            }
-            const found = await call('catalogue.search', q);
-            if (found.length === 1) {
-              onPick(found[0]!);
-              setQ('');
-              setResults([]);
-            } else if (found.length === 0) toast.error('Article introuvable');
-            else setResults(found);
-          } catch (err) {
-            toast.error(err);
-          }
-        }}
-      >
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder ?? 'Scanner ou rechercher un article'} autoFocus />
-      </form>
-      {results.length > 0 && (
-        <div className="pick-list dropdown">
-          {results.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => {
-                onPick(a);
-                setQ('');
-                setResults([]);
-              }}
-            >
-              <span>{a.name}</span>
-              <span>{a.code}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WarehouseSelect({ value, onChange, label = 'Dépôt' }: { value: string; onChange: (v: string) => void; label?: string }) {
-  const wh = useLoad(() => call('admin.warehouses'));
-  useEffect(() => {
-    if (!value && wh.data?.[0]) onChange(wh.data[0].id);
-  }, [value, wh.data, onChange]);
-  return (
-    <Field label={label}>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        {(wh.data ?? []).map((w) => (
-          <option key={w.id} value={w.id}>
-            {w.name}
-          </option>
-        ))}
-      </select>
-    </Field>
   );
 }
 
@@ -181,19 +110,17 @@ interface RecLine {
 function Reception() {
   const toast = useToast();
   const [warehouseId, setWarehouseId] = useState('');
-  const [supplier, setSupplier] = useState('');
+  const [supplierId, setSupplierId] = useState('');
   const [reference, setReference] = useState('');
   const [lines, setLines] = useState<RecLine[]>([]);
   const update = (i: number, patch: Partial<RecLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const total = lines.reduce((s, l) => s + Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000), 0);
   return (
     <div>
-      <p className="muted">Entrée de marchandise avec lot et date limite. La commande fournisseur et la facture arrivent avec le module Achats (phase 2).</p>
+      <p className="muted">Réception libre, sans bon de commande (lot et date limite). Pour réceptionner une commande : Achats › Bons de commande.</p>
       <div className="grid3">
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} />
-        <Field label="Fournisseur">
-          <input value={supplier} onChange={(e) => setSupplier(e.target.value)} />
-        </Field>
+        <SupplierSelect value={supplierId} onChange={setSupplierId} optional />
         <Field label="N° bon de livraison">
           <input value={reference} onChange={(e) => setReference(e.target.value)} />
         </Field>
@@ -248,7 +175,7 @@ function Reception() {
             try {
               await call('stock.receive', {
                 warehouseId,
-                supplier: supplier || undefined,
+                supplierId: supplierId || null,
                 reference: reference || undefined,
                 lines: lines.map((l) => {
                   const q = parseQty(l.qty);

@@ -227,3 +227,9 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 600; background: #eef2
 .bar-row span:last-child { text-align: right; }
 ul.watch { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 section.card .grid2 { gap: 16px; }
+
+/* Achats et fournisseurs */
+fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
+.grid2.top { align-items: start; }
+input.gap { border-color: #c62828; background: #fdecea; color: #c62828; }
+.nowrap { white-space: nowrap; }

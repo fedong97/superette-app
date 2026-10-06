@@ -39,10 +39,20 @@ const TABLES: Record<string, string> = {
   stock_movement: 'stock_movements',
   cash_session: 'cash_sessions',
   cash_operation: 'cash_operations',
+  supplier: 'suppliers',
+  supplier_article: 'supplier_articles',
+  supplier_invoice: 'supplier_invoices',
+  supplier_payment: 'supplier_payments',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
-const IMMUTABLE = new Set(['stock_movement', 'cash_operation']);
+const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment']);
+
+/** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
+const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> = {
+  purchase_order: { table: 'purchase_orders', lines: 'purchase_order_lines', fk: 'order_id' },
+  reception: { table: 'receptions', lines: 'reception_lines', fk: 'reception_id' },
+};
 
 /**
  * Synchronisation avec le serveur central, côté poste.
@@ -150,6 +160,12 @@ export class SyncService extends Base {
   serialize(entity: string, entityId: string): Record<string, unknown> | null {
     const table = TABLES[entity];
     if (table) return (this.db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(entityId) as Record<string, unknown> | undefined) ?? null;
+    const doc = WITH_LINES[entity];
+    if (doc) {
+      const row = this.db.prepare(`SELECT * FROM ${doc.table} WHERE id = ?`).get(entityId) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      return { ...row, lines: this.db.prepare(`SELECT * FROM ${doc.lines} WHERE ${doc.fk} = ? ORDER BY line_no`).all(entityId) };
+    }
     switch (entity) {
       case 'article': {
         const row = this.db.prepare('SELECT * FROM articles WHERE id = ?').get(entityId) as Record<string, unknown> | undefined;
@@ -249,7 +265,24 @@ export class SyncService extends Base {
       }
       return;
     }
-    if (!p) return;
+    const doc = WITH_LINES[event.entity];
+    if (doc && (event.op === 'delete' || !p)) {
+      this.db.prepare(`DELETE FROM ${doc.table} WHERE id = ?`).run(event.entityId);
+      return;
+    }
+    if (!p) {
+      const table = TABLES[event.entity];
+      if (event.op === 'delete' && table && !IMMUTABLE.has(event.entity)) this.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(event.entityId);
+      return;
+    }
+    if (doc) {
+      this.upsert(doc.table, p);
+      // Un bon de commande brouillon peut être réécrit : on remplace ses lignes.
+      // Les lignes d'une réception ne changent jamais.
+      if (event.entity === 'purchase_order') this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
+      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], event.entity === 'reception');
+      return;
+    }
     switch (event.entity) {
       case 'article': {
         // La modification la plus récente l'emporte.

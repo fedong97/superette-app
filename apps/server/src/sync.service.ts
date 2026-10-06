@@ -5,9 +5,21 @@ import { CONFIG, type ServerConfig } from './config';
 import { PG } from './database';
 
 /** Données partagées entre tous les magasins ; le reste ne circule qu'à l'intérieur d'un magasin. */
-export const GLOBAL_ENTITIES = ['vat_rate', 'store', 'warehouse', 'register', 'user', 'department', 'family', 'article', 'store_price'];
+export const GLOBAL_ENTITIES = [
+  'vat_rate',
+  'store',
+  'warehouse',
+  'register',
+  'user',
+  'department',
+  'family',
+  'article',
+  'store_price',
+  'supplier',
+  'supplier_article',
+];
 
-const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale']);
+const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment']);
 
 export interface SyncEvent {
   id: string;

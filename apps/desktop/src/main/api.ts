@@ -16,6 +16,9 @@ import {
   type Role,
   type SaleLineInput,
   type Services,
+  type PurchaseOrderLineInput,
+  type SupplierInput,
+  type SupplierPaymentMethod,
   type User,
 } from '@superette/db';
 
@@ -24,6 +27,7 @@ import type { SyncRunner } from './sync';
 export interface Printer {
   ticket(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
+  purchaseOrder(orderId: string): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
 }
 
@@ -49,6 +53,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const supervisor = (pin: string) => s.admin.authorizeSupervisor(pin);
 
   const MANAGE: Role[] = ['admin', 'manager'];
+  const ACCOUNTING: Role[] = ['admin', 'manager', 'accountant'];
+  const BUY: Role[] = ['admin', 'manager', 'stock'];
   const STOCK: Role[] = ['admin', 'manager', 'stock'];
   const POS: Role[] = ['admin', 'manager', 'cashier'];
 
@@ -135,7 +141,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
     // --- Stock --------------------------------------------------------------
     'stock.list': (opts?: { warehouseId?: string; search?: string; level?: StockLevel }) => s.stock.list(ctx().storeId, opts),
-    'stock.receive': (input: { warehouseId: string; reference?: string; supplier?: string; lines: ReceptionLine[] }) =>
+    'stock.receive': (input: { warehouseId: string; reference?: string; supplier?: string; supplierId?: string | null; lines: ReceptionLine[] }) =>
       s.stock.receive(ctx(STOCK), input),
     'stock.loss': (input: { warehouseId: string; articleId: string; qty: Milli; type: MovementType; reason: string; lotId?: string | null }) =>
       s.stock.recordLoss(ctx(STOCK), input),
@@ -146,6 +152,42 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'stock.expiring': (days?: number) => s.stock.expiringLots(ctx().storeId, days),
     'stock.lots': (articleId: string) => s.stock.lotsOf(articleId, ctx().storeId),
     'stock.movements': (articleId?: string) => s.stock.movements(ctx().storeId, { articleId }),
+
+    // --- Fournisseurs et achats -----------------------------------------------
+    'suppliers.list': (opts?: { search?: string; includeInactive?: boolean }) => (requireUser(), s.purchases.listSuppliers(opts)),
+    'suppliers.get': (id: string) => (requireUser(), s.purchases.getSupplier(id)),
+    'suppliers.save': (input: SupplierInput, id?: string) => s.purchases.saveSupplier(requireUser(BUY).id, input, id),
+    'suppliers.articles': (supplierId: string) => (requireUser(), s.purchases.supplierArticles(supplierId)),
+    'suppliers.ofArticle': (articleId: string) => (requireUser(), s.purchases.articleSuppliers(articleId)),
+    'suppliers.setArticle': (input: Parameters<Services['purchases']['setSupplierArticle']>[1]) =>
+      s.purchases.setSupplierArticle(requireUser(BUY).id, input),
+    'suppliers.removeArticle': (id: string) => s.purchases.removeSupplierArticle(requireUser(BUY).id, id),
+    'purchases.orders': (opts?: { supplierId?: string; open?: boolean }) => s.purchases.listOrders(ctx().storeId, opts),
+    'purchases.order': (id: string) => (requireUser(), s.purchases.getOrder(id)),
+    'purchases.createOrder': (input: { supplierId: string; warehouseId: string; expectedDate?: string | null; notes?: string | null; lines: PurchaseOrderLineInput[] }) =>
+      s.purchases.createOrder(ctx(BUY), input),
+    'purchases.updateOrder': (
+      id: string,
+      input: { supplierId: string; warehouseId: string; expectedDate?: string | null; notes?: string | null; lines: PurchaseOrderLineInput[] },
+    ) => s.purchases.updateOrder(ctx(BUY), id, input),
+    'purchases.setOrderStatus': (id: string, status: 'sent' | 'closed' | 'cancelled') => s.purchases.setOrderStatus(ctx(BUY), id, status),
+    'purchases.receiveOrder': (id: string, input: Parameters<Services['purchases']['receiveOrder']>[2]) => s.purchases.receiveOrder(ctx(BUY), id, input),
+    'purchases.printOrder': (id: string) => (requireUser(), printer.purchaseOrder(id)),
+    'purchases.receptions': (opts?: { supplierId?: string; uninvoiced?: boolean }) => s.purchases.listReceptions(ctx().storeId, opts),
+    'purchases.reception': (id: string) => (requireUser(), s.purchases.getReception(id)),
+    'purchases.invoicePreview': (receptionIds: string[]) => (requireUser(), s.purchases.invoicePreview(receptionIds)),
+    'purchases.createInvoice': (input: Parameters<Services['purchases']['createInvoice']>[1]) => s.purchases.createInvoice(ctx(ACCOUNTING), input),
+    'purchases.invoices': (opts?: { supplierId?: string; unpaid?: boolean }) => s.purchases.listInvoices(ctx(ACCOUNTING).storeId, opts),
+    'purchases.invoice': (id: string) => {
+      requireUser(ACCOUNTING);
+      return { invoice: s.purchases.getInvoice(id), payments: s.purchases.invoicePayments(id) };
+    },
+    'purchases.pay': (input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null }) =>
+      s.purchases.paySupplier(ctx(ACCOUNTING), input),
+    'purchases.due': () => s.purchases.dueSchedule(ctx(ACCOUNTING).storeId),
+    'purchases.reorder': (coverDays?: number) => s.purchases.reorderProposal(ctx(BUY).storeId, { coverDays }),
+    'purchases.createOrders': (input: { warehouseId: string; lines: (PurchaseOrderLineInput & { supplierId: string })[] }) =>
+      s.purchases.createOrdersFromProposal(ctx(BUY), input),
 
     // --- Caisse -------------------------------------------------------------
     'pos.session': () => {

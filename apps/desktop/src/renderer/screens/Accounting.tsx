@@ -1,0 +1,683 @@
+import { Fragment, useState } from 'react';
+import { type Result, call } from '../api';
+import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+
+type User = NonNullable<Result<'app.state'>['user']>;
+type Account = Result<'accounting.accounts'>[number];
+type JournalCode = Result<'accounting.entries'>[number]['journal'];
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'vat' | 'treasury' | 'accounts';
+
+const JOURNALS: Record<JournalCode, string> = {
+  VE: 'Ventes',
+  AC: 'Achats',
+  CA: 'Caisse',
+  BQ: 'Banque',
+  MM: 'Mobile Money',
+  OD: 'Opérations diverses',
+  AN: 'À-nouveaux',
+};
+const MANUAL_JOURNALS: JournalCode[] = ['OD', 'BQ', 'CA', 'MM', 'AN'];
+
+const ROLES: Record<string, string> = {
+  sales: 'Ventes de marchandises',
+  purchases: 'Achats de marchandises',
+  vat_collected: 'TVA collectée',
+  vat_deductible: 'TVA déductible',
+  vat_due: 'TVA due',
+  vat_credit: 'Crédit de TVA',
+  customers: 'Clients',
+  suppliers: 'Fournisseurs',
+  cash: 'Caisse',
+  bank: 'Banque (virements, chèques)',
+  card: 'Cartes bancaires',
+  mtn: 'MTN Mobile Money',
+  orange: 'Orange Money',
+  voucher: "Bons d'achat",
+  transfer: 'Virements internes (coffre)',
+  cash_short: 'Manquants de caisse',
+  cash_over: 'Excédents de caisse',
+  stock: 'Stock de marchandises',
+  stock_variation: 'Variation des stocks',
+};
+
+const monthStart = () => `${today().slice(0, 7)}-01`;
+const signed = (v: number) => (v === 0 ? '' : v > 0 ? `${fcfa(v)} D` : `${fcfa(-v)} C`);
+const amount = (v: number) => (v ? fcfa(v) : '');
+
+/** Comptabilité SYSCOHADA : écritures tirées des caisses, achats et règlements, plus les saisies manuelles. */
+export function Accounting({ user, initialTab = 'journals' }: { user: User; initialTab?: AccountingTab }) {
+  const [tab, setTab] = useState<AccountingTab>(initialTab);
+  const [ledgerAccount, setLedgerAccount] = useState('571');
+  const openLedger = (account: string) => {
+    setLedgerAccount(account);
+    setTab('ledger');
+  };
+  return (
+    <div className="page">
+      <header className="page-head">
+        <h1>Comptabilité</h1>
+        <span className="muted">Plan SYSCOHADA révisé · les écritures se passent toutes seules à partir des Z, factures et règlements</span>
+      </header>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          ['journals', 'Journaux'],
+          ['ledger', 'Grand livre'],
+          ['balance', 'Balance'],
+          ['vat', 'Déclaration de TVA'],
+          ['treasury', 'Trésorerie'],
+          ['accounts', 'Plan comptable'],
+        ]}
+      />
+      {tab === 'journals' && <Journals />}
+      {tab === 'ledger' && <Ledger account={ledgerAccount} onAccount={setLedgerAccount} />}
+      {tab === 'balance' && <Balance onOpen={openLedger} />}
+      {tab === 'vat' && <VatReturn />}
+      {tab === 'treasury' && <Treasury onOpen={openLedger} />}
+      {tab === 'accounts' && <Accounts user={user} />}
+    </div>
+  );
+}
+
+function Period({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
+  return (
+    <>
+      <label className="inline">
+        Du <input type="date" value={from} onChange={(e) => onFrom(e.target.value)} />
+      </label>
+      <label className="inline">
+        au <input type="date" value={to} onChange={(e) => onTo(e.target.value)} />
+      </label>
+    </>
+  );
+}
+
+function Journals() {
+  const toast = useToast();
+  const [from, setFrom] = useState(monthStart());
+  const [to, setTo] = useState(today());
+  const [journal, setJournal] = useState<JournalCode | ''>('');
+  const [adding, setAdding] = useState(false);
+  const list = useLoad(() => call('accounting.entries', { from: from || undefined, to: to || undefined, journal: journal || undefined }), [from, to, journal]);
+  const entries = list.data ?? [];
+  const total = entries.reduce((t, e) => t + e.lines.reduce((s, l) => s + l.debit, 0), 0);
+  return (
+    <>
+      <div className="filters">
+        <Period from={from} to={to} onFrom={setFrom} onTo={setTo} />
+        <select value={journal} onChange={(e) => setJournal(e.target.value as JournalCode | '')}>
+          <option value="">Tous les journaux</option>
+          {(Object.keys(JOURNALS) as JournalCode[]).map((j) => (
+            <option key={j} value={j}>
+              {j} · {JOURNALS[j]}
+            </option>
+          ))}
+        </select>
+        <button style={{ marginLeft: 'auto' }} onClick={() => call('accounting.printJournal', from, to, journal || null).catch(toast.error)}>
+          Imprimer
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              downloadText(`ecritures_${from}_${to}.csv`, `﻿${await call('accounting.exportCsv', { from: from || undefined, to: to || undefined })}`);
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          Export CSV (cabinet comptable)
+        </button>
+        <button className="primary" onClick={() => setAdding(true)}>
+          Saisir une écriture
+        </button>
+      </div>
+      {list.error ? (
+        <Empty>{String((list.error as Error).message ?? list.error)}</Empty>
+      ) : entries.length === 0 ? (
+        <Empty>Aucune écriture sur la période.</Empty>
+      ) : (
+        <table className="list compact journal">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Jnl</th>
+              <th>Pièce</th>
+              <th>Compte</th>
+              <th>Tiers</th>
+              <th>Libellé</th>
+              <th className="r">Débit</th>
+              <th className="r">Crédit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e, i) => (
+              <Fragment key={`${e.journal}-${e.ref}-${i}`}>
+                {e.lines.map((l, j) => (
+                  <tr key={j} className={j === 0 ? 'entry-first' : ''}>
+                    <td>{j === 0 ? dateFr(e.date) : ''}</td>
+                    <td>{j === 0 ? <span className="tag">{e.journal}</span> : ''}</td>
+                    <td className="nowrap">{j === 0 ? e.ref : ''}</td>
+                    <td>{l.account}</td>
+                    <td>{l.aux_name ?? l.aux ?? ''}</td>
+                    <td>{l.label}</td>
+                    <td className="r">{amount(l.debit)}</td>
+                    <td className="r">{amount(l.credit)}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+            <tr className="total">
+              <td colSpan={6}>
+                {entries.length} écritures · total des mouvements
+              </td>
+              <td className="r">{fcfa(total)}</td>
+              <td className="r">{fcfa(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      {adding && (
+        <ManualEntryDialog
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            list.reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+interface DraftLine {
+  account: string;
+  aux: string;
+  label: string;
+  debit: string;
+  credit: string;
+}
+const emptyLine = (): DraftLine => ({ account: '', aux: '', label: '', debit: '', credit: '' });
+
+/** Saisie d'une écriture : à-nouveaux, frais bancaires, versement d'espèces à la banque, loyer… */
+function ManualEntryDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const accounts = useLoad(() => call('accounting.accounts'), []);
+  const [journal, setJournal] = useState<JournalCode>('OD');
+  const [date, setDate] = useState(today());
+  const [label, setLabel] = useState('');
+  const [lines, setLines] = useState<DraftLine[]>([emptyLine(), emptyLine()]);
+  const set = (i: number, patch: Partial<DraftLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const num = (v: string) => (v ? (parseAmount(v) ?? NaN) : 0);
+  const debit = lines.reduce((t, l) => t + num(l.debit), 0);
+  const credit = lines.reduce((t, l) => t + num(l.credit), 0);
+  const gap = debit - credit;
+  return (
+    <Modal title="Saisir une écriture" onClose={onClose} wide>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            const entry = await call('accounting.addEntry', {
+              journal,
+              date,
+              label,
+              lines: lines
+                .filter((l) => l.account)
+                .map((l) => ({ account: l.account, aux: l.aux || null, label: l.label || null, debit: num(l.debit), credit: num(l.credit) })),
+            });
+            toast.ok(`Écriture ${entry.ref} enregistrée`);
+            onSaved();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <div className="grid3">
+          <Field label="Journal">
+            <select value={journal} onChange={(e) => setJournal(e.target.value as JournalCode)}>
+              {MANUAL_JOURNALS.map((j) => (
+                <option key={j} value={j}>
+                  {j} · {JOURNALS[j]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </Field>
+          <Field label="Libellé">
+            <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Loyer d'octobre, frais bancaires…" required />
+          </Field>
+        </div>
+        <datalist id="accounts-list">
+          {(accounts.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.label}
+            </option>
+          ))}
+        </datalist>
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Compte</th>
+              <th>Intitulé</th>
+              <th>Tiers</th>
+              <th>Libellé de ligne</th>
+              <th className="r">Débit</th>
+              <th className="r">Crédit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i}>
+                <td>
+                  <input list="accounts-list" value={l.account} onChange={(e) => set(i, { account: e.target.value.trim() })} style={{ width: 90 }} />
+                </td>
+                <td className="muted">{accounts.data?.find((a) => a.id === l.account)?.label ?? ''}</td>
+                <td>
+                  <input value={l.aux} onChange={(e) => set(i, { aux: e.target.value })} style={{ width: 120 }} placeholder="CLI-… / FRS-…" />
+                </td>
+                <td>
+                  <input value={l.label} onChange={(e) => set(i, { label: e.target.value })} />
+                </td>
+                <td>
+                  <input inputMode="numeric" className="r" value={l.debit} onChange={(e) => set(i, { debit: e.target.value, credit: '' })} style={{ width: 110 }} />
+                </td>
+                <td>
+                  <input inputMode="numeric" className="r" value={l.credit} onChange={(e) => set(i, { credit: e.target.value, debit: '' })} style={{ width: 110 }} />
+                </td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td colSpan={4}>
+                <button type="button" onClick={() => setLines([...lines, { ...emptyLine(), ...(gap > 0 ? { credit: String(gap) } : gap < 0 ? { debit: String(-gap) } : {}) }])}>
+                  Ajouter une ligne
+                </button>{' '}
+                {Number.isNaN(gap) ? <span className="neg">Montant invalide</span> : gap !== 0 ? <span className="neg">Écart {fcfa(Math.abs(gap))}</span> : <span className="pos">Équilibrée</span>}
+              </td>
+              <td className="r">{Number.isNaN(debit) ? '' : fcfa(debit)}</td>
+              <td className="r">{Number.isNaN(credit) ? '' : fcfa(credit)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="muted">
+          Exemples : versement à la banque des espèces prélevées au tiroir (débit 521, crédit 585), frais bancaires (débit 631, crédit 521), loyer payé (débit 6222, crédit 521),
+          à-nouveaux de début d'exercice (journal AN).
+        </p>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={gap !== 0 || debit === 0}>
+            Enregistrer l'écriture
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Ledger({ account, onAccount }: { account: string; onAccount: (v: string) => void }) {
+  const [from, setFrom] = useState(monthStart());
+  const [to, setTo] = useState(today());
+  const [aux, setAux] = useState('');
+  const accounts = useLoad(() => call('accounting.accounts', true), []);
+  const ledger = useLoad(() => (account ? call('accounting.ledger', { account, aux: aux || undefined, from: from || undefined, to: to || undefined }) : Promise.resolve(null)), [account, aux, from, to]);
+  const l = ledger.data;
+  return (
+    <>
+      <div className="filters">
+        <select value={accounts.data?.some((a) => a.id === account) ? account : ''} onChange={(e) => e.target.value && onAccount(e.target.value)}>
+          <option value="">Racine de compte…</option>
+          {(accounts.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.id} · {a.label}
+            </option>
+          ))}
+        </select>
+        <input value={account} onChange={(e) => onAccount(e.target.value.trim())} style={{ width: 90 }} title="Compte ou racine (ex. 41, 5)" />
+        <input value={aux} onChange={(e) => setAux(e.target.value.trim())} placeholder="Tiers (CLI-…, FRS-…)" style={{ width: 160 }} />
+        <Period from={from} to={to} onFrom={setFrom} onTo={setTo} />
+      </div>
+      {l && (
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Jnl</th>
+              <th>Pièce</th>
+              <th>Compte</th>
+              <th>Libellé</th>
+              <th className="r">Débit</th>
+              <th className="r">Crédit</th>
+              <th className="r">Solde</th>
+            </tr>
+          </thead>
+          <tbody>
+            {from && (
+              <tr className="muted">
+                <td colSpan={7}>Solde au {dateFr(from)}</td>
+                <td className="r">{signed(l.opening) || '0'}</td>
+              </tr>
+            )}
+            {l.rows.map((r, i) => (
+              <tr key={i}>
+                <td>{dateFr(r.date)}</td>
+                <td>
+                  <span className="tag">{r.journal}</span>
+                </td>
+                <td className="nowrap">{r.ref}</td>
+                <td>
+                  {r.account}
+                  {r.aux ? ` ${r.aux}` : ''}
+                </td>
+                <td>{r.label}</td>
+                <td className="r">{amount(r.debit)}</td>
+                <td className="r">{amount(r.credit)}</td>
+                <td className="r nowrap">{signed(r.balance)}</td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td colSpan={5}>Totaux et solde de fin de période</td>
+              <td className="r">{fcfa(l.debit)}</td>
+              <td className="r">{fcfa(l.credit)}</td>
+              <td className="r nowrap">{signed(l.closing) || '0'}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      <p className="muted">D = solde débiteur, C = solde créditeur. Tapez une racine (41, 5…) pour regrouper plusieurs comptes.</p>
+    </>
+  );
+}
+
+function Balance({ onOpen }: { onOpen: (account: string) => void }) {
+  const toast = useToast();
+  const [from, setFrom] = useState(`${today().slice(0, 4)}-01-01`);
+  const [to, setTo] = useState(today());
+  const tb = useLoad(() => call('accounting.trialBalance', { from: from || undefined, to: to || undefined }), [from, to]);
+  const rows = tb.data?.rows ?? [];
+  const sumD = rows.reduce((t, r) => t + Math.max(r.closing, 0), 0);
+  const sumC = rows.reduce((t, r) => t + Math.max(-r.closing, 0), 0);
+  return (
+    <>
+      <div className="filters">
+        <Period from={from} to={to} onFrom={setFrom} onTo={setTo} />
+        <button style={{ marginLeft: 'auto' }} onClick={() => call('accounting.printBalance', from, to).catch(toast.error)}>
+          Imprimer
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <Empty>Aucun mouvement sur la période.</Empty>
+      ) : (
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Compte</th>
+              <th>Intitulé</th>
+              <th className="r">À-nouveau</th>
+              <th className="r">Débit</th>
+              <th className="r">Crédit</th>
+              <th className="r">Solde débiteur</th>
+              <th className="r">Solde créditeur</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.account} className="clickable" onClick={() => onOpen(r.account)} title="Ouvrir le grand livre de ce compte">
+                <td>{r.account}</td>
+                <td>{r.label}</td>
+                <td className="r">{signed(r.opening)}</td>
+                <td className="r">{amount(r.debit)}</td>
+                <td className="r">{amount(r.credit)}</td>
+                <td className="r">{amount(Math.max(r.closing, 0))}</td>
+                <td className="r">{amount(Math.max(-r.closing, 0))}</td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td colSpan={3}>Totaux</td>
+              <td className="r">{fcfa(tb.data!.totals.debit)}</td>
+              <td className="r">{fcfa(tb.data!.totals.credit)}</td>
+              <td className="r">{fcfa(sumD)}</td>
+              <td className="r">{fcfa(sumC)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      {tb.data && tb.data.totals.debit === tb.data.totals.credit && rows.length > 0 && <p className="pos">Balance équilibrée : total des débits = total des crédits.</p>}
+    </>
+  );
+}
+
+function VatReturn() {
+  const toast = useToast();
+  const [month, setMonth] = useState(today().slice(0, 7));
+  const vat = useLoad(() => call('accounting.vatReturn', month), [month]);
+  const v = vat.data;
+  return (
+    <>
+      <div className="filters">
+        <label className="inline">
+          Mois <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+        </label>
+        <button style={{ marginLeft: 'auto' }} className="primary" onClick={() => call('accounting.printVat', month).catch(toast.error)}>
+          Imprimer la déclaration
+        </button>
+      </div>
+      {v && (
+        <>
+          <div className="kpis">
+            <div>
+              <small>Chiffre d'affaires HT</small>
+              <strong>{fcfa(v.turnoverHt)}</strong>
+              <small>dont exonéré {fcfa(v.exemptHt)}</small>
+            </div>
+            <div>
+              <small>TVA collectée</small>
+              <strong>{fcfa(v.collected)}</strong>
+            </div>
+            <div>
+              <small>TVA déductible</small>
+              <strong>{fcfa(v.deductible)}</strong>
+              <small>{v.previousCredit ? `+ crédit reporté ${fcfa(v.previousCredit)}` : `${v.invoiceCount} factures fournisseurs`}</small>
+            </div>
+            <div className={v.due ? 'neg' : 'pos'}>
+              <small>{v.due ? 'TVA à payer' : 'Crédit de TVA à reporter'}</small>
+              <strong>{fcfa(v.due || v.credit)}</strong>
+            </div>
+          </div>
+          <div className="grid2 top">
+            <table className="list compact">
+              <caption>Ventes par taux</caption>
+              <thead>
+                <tr>
+                  <th>Taux</th>
+                  <th className="r">TTC</th>
+                  <th className="r">HT</th>
+                  <th className="r">TVA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {v.sales.map((s) => (
+                  <tr key={s.rate}>
+                    <td>{(s.rate / 100).toLocaleString('fr-FR')} %</td>
+                    <td className="r">{fcfa(s.ttc)}</td>
+                    <td className="r">{fcfa(s.ht)}</td>
+                    <td className="r">{fcfa(s.tva)}</td>
+                  </tr>
+                ))}
+                {v.sales.length > 0 && v.sales.reduce((t, r) => t + r.tva, 0) !== v.collected && (
+                  <tr className="muted">
+                    <td colSpan={3}>Arrondis de TVA ticket par ticket</td>
+                    <td className="r">{fcfa(v.collected - v.sales.reduce((t, r) => t + r.tva, 0))}</td>
+                  </tr>
+                )}
+                {v.sales.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="muted">
+                      Aucune vente ce mois-ci
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <div className="card">
+              <p>
+                Ce récapitulatif sert à remplir la déclaration mensuelle sur le portail de la DGI. La TVA collectée est celle des tickets (arrondie ticket par
+                ticket), la TVA déductible celle des factures et avoirs fournisseurs datés du mois.
+              </p>
+              <p className="muted">
+                Les acomptes d'impôt sur le revenu, les précomptes et le droit d'accises ne sont pas calculés ici : votre comptable les ajoute sur la
+                déclaration.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function Treasury({ onOpen }: { onOpen: (account: string) => void }) {
+  const [date, setDate] = useState(today());
+  const t = useLoad(() => call('accounting.treasury', date), [date]);
+  const total = (t.data ?? []).reduce((s, a) => s + a.balance, 0);
+  return (
+    <>
+      <div className="filters">
+        <label className="inline">
+          Soldes au <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+      </div>
+      <div className="kpis">
+        {(t.data ?? []).map((a) => (
+          <div key={a.account} className={`clickable ${a.balance < 0 ? 'neg' : ''}`} onClick={() => onOpen(a.account)} title="Voir le grand livre">
+            <small>
+              {a.account} · {a.label}
+            </small>
+            <strong>{fcfa(a.balance)}</strong>
+          </div>
+        ))}
+        <div>
+          <small>Total trésorerie</small>
+          <strong>{fcfa(total)}</strong>
+        </div>
+      </div>
+      <p className="muted">
+        La caisse (571) regroupe les espèces du magasin, tiroirs et coffre : ventes en espèces nettes de la monnaie rendue, règlements clients en
+        espèces et écarts de clôture. Les prélèvements faits pendant la journée passent au compte 585 jusqu'à leur dépôt à la banque, que vous saisissez
+        dans Journaux (débit 521, crédit 585). MTN MoMo et Orange Money reçoivent les paiements mobiles des ventes et des clients, moins les paiements
+        aux fournisseurs.
+      </p>
+    </>
+  );
+}
+
+function Accounts({ user }: { user: User }) {
+  const canEdit = ['admin', 'manager', 'accountant'].includes(user.role);
+  const [inactive, setInactive] = useState(false);
+  const [search, setSearch] = useState('');
+  const list = useLoad(() => call('accounting.accounts', inactive), [inactive]);
+  const [open, setOpen] = useState<Account | 'new' | null>(null);
+  const q = search.toLowerCase();
+  const rows = (list.data ?? []).filter((a) => !q || a.id.startsWith(q) || a.label.toLowerCase().includes(q));
+  return (
+    <>
+      <div className="filters">
+        <input className="search" placeholder="Numéro ou intitulé" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <label>
+          <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Comptes désactivés
+        </label>
+        {canEdit && (
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+            Nouveau compte
+          </button>
+        )}
+      </div>
+      <table className="list compact">
+        <thead>
+          <tr>
+            <th>Compte</th>
+            <th>Intitulé</th>
+            <th>Utilisé automatiquement pour</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a) => (
+            <tr key={a.id} className={`${canEdit ? 'clickable' : ''} ${a.active ? '' : 'inactive'}`} onClick={() => canEdit && setOpen(a)}>
+              <td>{a.id}</td>
+              <td>{a.label}</td>
+              <td>{a.role ? <span className="tag">{ROLES[a.role]}</span> : ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {open && (
+        <AccountDialog
+          account={open === 'new' ? null : open}
+          onClose={() => setOpen(null)}
+          onSaved={() => {
+            setOpen(null);
+            list.reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function AccountDialog({ account, onClose, onSaved }: { account: Account | null; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [id, setId] = useState(account?.id ?? '');
+  const [label, setLabel] = useState(account?.label ?? '');
+  const [role, setRole] = useState<string>(account?.role ?? '');
+  const [active, setActive] = useState(account ? account.active === 1 : true);
+  return (
+    <Modal title={account ? `Compte ${account.id}` : 'Nouveau compte'} onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await call('accounting.saveAccount', { id, label, role: (role || null) as Account['role'], active });
+            toast.ok('Compte enregistré');
+            onSaved();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <Field label="Numéro de compte" hint="Plan SYSCOHADA : classe 1 à 9, ex. 5211 pour un deuxième compte bancaire">
+          <input autoFocus={!account} value={id} disabled={!!account} onChange={(e) => setId(e.target.value.trim())} required />
+        </Field>
+        <Field label="Intitulé">
+          <input autoFocus={!!account} value={label} onChange={(e) => setLabel(e.target.value)} required />
+        </Field>
+        <Field
+          label="Utilisé automatiquement pour"
+          hint={account?.role ? 'Pour changer, choisissez cet usage sur le nouveau compte' : "Un seul compte par usage : le choisir ici le retire de l'ancien compte"}
+        >
+          <select value={role} disabled={!!account?.role} onChange={(e) => setRole(e.target.value)}>
+            <option value="">Aucun usage automatique</option>
+            {Object.entries(ROLES).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <label>
+          <input type="checkbox" checked={active} disabled={!!account?.role} onChange={(e) => setActive(e.target.checked)} /> Compte actif
+        </label>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary">
+            Enregistrer
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

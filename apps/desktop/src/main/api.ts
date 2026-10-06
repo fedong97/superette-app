@@ -14,6 +14,8 @@ import {
   type Context,
   type CustomerInput,
   type CustomerPaymentMethod,
+  type AccountRole,
+  type JournalCode,
   type ReceptionLine,
   type Role,
   type SaleLineInput,
@@ -33,6 +35,9 @@ export interface Printer {
   invoice(saleId: string): Promise<void>;
   statement(storeId: string, customerId: string, from?: string | null, to?: string | null): Promise<void>;
   customerReceipt(paymentId: string): Promise<void>;
+  vatReturn(storeId: string, month: string): Promise<void>;
+  trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
+  journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
 }
 
@@ -266,6 +271,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.receivables': () => s.customers.receivables(ctx([...MANAGE, 'accountant']).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
+
+    // --- Comptabilité --------------------------------------------------------
+    'accounting.accounts': (includeInactive?: boolean) => (requireUser(), s.accounting.listAccounts(includeInactive)),
+    'accounting.saveAccount': (input: { id: string; label: string; role?: AccountRole | null; active?: boolean }) =>
+      s.accounting.saveAccount(requireUser(ACCOUNTING).id, input),
+    'accounting.entries': (opts: { from?: string; to?: string; journal?: JournalCode }) => s.accounting.entries(ctx(ACCOUNTING).storeId, opts),
+    'accounting.addEntry': (input: Parameters<Services['accounting']['addManualEntry']>[1]) => s.accounting.addManualEntry(ctx(ACCOUNTING), input),
+    'accounting.ledger': (opts: { account: string; aux?: string; from?: string; to?: string }) => s.accounting.ledger(ctx(ACCOUNTING).storeId, opts),
+    'accounting.trialBalance': (opts: { from?: string; to?: string }) => s.accounting.trialBalance(ctx(ACCOUNTING).storeId, opts),
+    'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),
+    'accounting.vatReturn': (month: string) => s.accounting.vatReturn(ctx(ACCOUNTING).storeId, month),
+    'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(ACCOUNTING).storeId, opts),
+    'accounting.printVat': (month: string) => printer.vatReturn(ctx(ACCOUNTING).storeId, month),
+    'accounting.printBalance': (from?: string | null, to?: string | null) => printer.trialBalance(ctx(ACCOUNTING).storeId, from, to),
+    'accounting.printJournal': (from?: string | null, to?: string | null, journal?: JournalCode | null) =>
+      printer.journal(ctx(ACCOUNTING).storeId, from, to, journal),
 
     // --- Rapports -----------------------------------------------------------
     'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),

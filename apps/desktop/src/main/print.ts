@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { PAYMENT_METHODS, formatFcfa, formatQty, formatRate, splitTtc } from '@superette/core';
-import { CUSTOMER_PAYMENT_METHODS } from '@superette/db';
+import { CUSTOMER_PAYMENT_METHODS, JOURNALS } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
 
@@ -80,6 +80,13 @@ export function createPrinter(s: Services): Printer {
       <div class="c">${[st.address, st.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
       ${st.taxpayer_number ? `<div class="c">NIU : ${esc(st.taxpayer_number)}</div>` : ''}<hr>`;
   }
+
+  function a4Head(store: { name: string; address: string | null; phone: string | null; taxpayer_number: string | null }): string {
+    return `<div class="head"><div><h1>${esc(store.name)}</h1>${[store.address, store.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
+      ${store.taxpayer_number ? `<div class="box">NIU : ${esc(store.taxpayer_number)}</div>` : ''}</div>`;
+  }
+  const periodFr = (from?: string | null, to?: string | null) =>
+    `${from ? `Du ${dayFr(from)} ` : 'Depuis le début '}${to ? `au ${dayFr(to)}` : `au ${new Date().toLocaleDateString('fr-FR')}`}`;
 
   return {
     async ticket(saleId) {
@@ -238,6 +245,68 @@ export function createPrinter(s: Services): Printer {
         <tr><td>${esc(CUSTOMER_PAYMENT_METHODS[p.method])}${p.reference ? ` ${esc(p.reference)}` : ''}</td><td></td></tr>
         <tr><td>Reste dû après règlement</td><td class="r">${money(acc.balance)}</td></tr></table><hr>
         <div class="c">Merci !</div>`);
+    },
+
+    async vatReturn(storeId, month) {
+      const store = s.admin.getStore(storeId);
+      const v = s.accounting.vatReturn(storeId, month);
+      const [y, m] = month.split('-');
+      const period = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      const rates = v.sales
+        .map((r) => `<tr><td>Ventes à ${formatRate(r.rate)}</td><td class="r">${money(r.ttc)}</td><td class="r">${money(r.ht)}</td><td class="r">${money(r.tva)}</td></tr>`)
+        .join('');
+      const rounding = v.collected - v.sales.reduce((t, r) => t + r.tva, 0);
+      await printA4(`${a4Head(store)}
+        <h1>Déclaration de TVA, ${esc(period)}</h1>
+        <p class="muted">Document de travail pour remplir la déclaration mensuelle sur le portail de la DGI. Les acomptes d'impôt sur le revenu et les précomptes ne sont pas repris ici.</p>
+        <h3>Chiffre d'affaires et TVA collectée</h3>
+        <table><thead><tr><th>Taux</th><th class="r">TTC</th><th class="r">HT</th><th class="r">TVA</th></tr></thead><tbody>${rates}
+        ${rounding ? `<tr><td colspan="3">Arrondis de TVA ticket par ticket</td><td class="r">${money(rounding)}</td></tr>` : ''}
+        <tr class="total"><td>Chiffre d'affaires HT déclaré, dont exonéré ${money(v.exemptHt)}</td><td></td><td class="r">${money(v.turnoverHt)}</td><td class="r">${money(v.collected)}</td></tr></tbody></table>
+        <h3>TVA déductible</h3>
+        <table><tbody><tr><td>Achats de marchandises HT (${v.invoiceCount} factures et avoirs fournisseurs)</td><td class="r">${money(v.purchasesHt)}</td></tr>
+        <tr><td>TVA récupérable sur achats</td><td class="r">${money(v.deductible)}</td></tr>
+        <tr><td>Crédit de TVA reporté du mois précédent</td><td class="r">${money(v.previousCredit)}</td></tr></tbody></table>
+        <table class="totals"><tbody>
+        <tr class="total"><td>TVA collectée</td><td class="r">${money(v.collected)}</td></tr>
+        <tr><td>TVA déductible et crédit reporté</td><td class="r">${money(v.deductible + v.previousCredit)}</td></tr>
+        <tr class="total"><td>${v.due ? 'TVA à payer (FCFA)' : 'Crédit de TVA à reporter (FCFA)'}</td><td class="r">${money(v.due || v.credit)}</td></tr></tbody></table>`);
+    },
+
+    async trialBalance(storeId, from, to) {
+      const store = s.admin.getStore(storeId);
+      const tb = s.accounting.trialBalance(storeId, { from: from ?? undefined, to: to ?? undefined });
+      const cell = (v: number) => `<td class="r">${v ? money(v) : ''}</td>`;
+      const rows = tb.rows
+        .map((r) => `<tr><td>${esc(r.account)}</td><td>${esc(r.label)}</td>${cell(r.opening)}${cell(r.debit)}${cell(r.credit)}${cell(Math.max(r.closing, 0))}${cell(Math.max(-r.closing, 0))}</tr>`)
+        .join('');
+      const closingD = tb.rows.reduce((t, r) => t + Math.max(r.closing, 0), 0);
+      const closingC = tb.rows.reduce((t, r) => t + Math.max(-r.closing, 0), 0);
+      await printA4(`${a4Head(store)}
+        <h1>Balance générale</h1><div>${periodFr(from, to)}</div>
+        <table><thead><tr><th>Compte</th><th>Intitulé</th><th class="r">À-nouveau</th><th class="r">Débit</th><th class="r">Crédit</th><th class="r">Solde débiteur</th><th class="r">Solde créditeur</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="2">Totaux (FCFA)</td>${cell(tb.totals.opening)}${cell(tb.totals.debit)}${cell(tb.totals.credit)}${cell(closingD)}${cell(closingC)}</tr></tbody></table>`);
+    },
+
+    async journal(storeId, from, to, journal) {
+      const store = s.admin.getStore(storeId);
+      const entries = s.accounting.entries(storeId, { from: from ?? undefined, to: to ?? undefined, journal: journal ?? undefined });
+      let debit = 0;
+      const rows = entries
+        .map((e) => {
+          const lines = e.lines
+            .map((l) => {
+              debit += l.debit;
+              return `<tr><td></td><td></td><td>${esc(l.account)}${l.aux ? ` ${esc(l.aux)}` : ''}</td><td>${esc(l.label)}</td><td class="r">${l.debit ? money(l.debit) : ''}</td><td class="r">${l.credit ? money(l.credit) : ''}</td></tr>`;
+            })
+            .join('');
+          return `<tr class="total"><td>${dayFr(e.date)}</td><td>${e.journal}</td><td>${esc(e.ref)}</td><td colspan="3">${esc(e.label)}</td></tr>${lines}`;
+        })
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>${journal ? `Journal ${esc(JOURNALS[journal])}` : 'Journal général'}</h1><div>${periodFr(from, to)}</div>
+        <table><thead><tr><th>Date</th><th>Jnl</th><th>Pièce / compte</th><th>Libellé</th><th class="r">Débit</th><th class="r">Crédit</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="4">Totaux (FCFA)</td><td class="r">${money(debit)}</td><td class="r">${money(debit)}</td></tr></tbody></table>`);
     },
 
     async list() {

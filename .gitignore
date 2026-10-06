@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+release/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.DS_Store

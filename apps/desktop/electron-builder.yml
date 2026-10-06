@@ -1,0 +1,28 @@
+appId: cm.superette.gestion
+productName: Superette Gestion
+copyright: Superette Gestion
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - '**/*.node'
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: SuperetteGestion-Setup-${version}.exe
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Superette Gestion
+  language: '1036'
+# Mise à jour automatique : les nouvelles versions (.exe + latest.yml) sont
+# déposées sur le serveur central ; chaque poste vérifie au démarrage.
+publish:
+  provider: generic
+  url: https://mises-a-jour.example.cm/superette/

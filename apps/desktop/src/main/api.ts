@@ -1,0 +1,180 @@
+import {
+  type DenominationCount,
+  type Fcfa,
+  type Milli,
+  type MovementType,
+  type Payment,
+  type PaymentMethod,
+  type StockLevel,
+} from '@superette/core';
+import {
+  AppError,
+  type ArticleInput,
+  type BootstrapInput,
+  type Context,
+  type ReceptionLine,
+  type Role,
+  type SaleLineInput,
+  type Services,
+  type User,
+} from '@superette/db';
+
+export interface Printer {
+  ticket(saleId: string): Promise<void>;
+  zReport(sessionId: string): Promise<void>;
+  list(): Promise<{ name: string; isDefault: boolean }[]>;
+}
+
+/**
+ * API exposée à l'interface. L'utilisateur connecté et le poste (magasin,
+ * caisse) sont tenus ici, côté processus principal : l'écran ne peut pas
+ * se faire passer pour un autre utilisateur ni valider à la place d'un gérant.
+ */
+export function createApi(s: Services, printer: Printer, appVersion: string) {
+  let user: User | null = null;
+
+  const requireUser = (roles?: Role[]): User => {
+    if (!user) throw new AppError('Session expirée, reconnectez-vous', 'NOT_LOGGED_IN');
+    if (roles && !roles.includes(user.role)) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
+    return user;
+  };
+  const ctx = (roles?: Role[]): Context => {
+    const u = requireUser(roles);
+    const station = s.admin.station();
+    if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
+    return { storeId: station.store.id, registerId: station.register?.id ?? null, userId: u.id };
+  };
+  const supervisor = (pin: string) => s.admin.authorizeSupervisor(pin);
+
+  const MANAGE: Role[] = ['admin', 'manager'];
+  const STOCK: Role[] = ['admin', 'manager', 'stock'];
+  const POS: Role[] = ['admin', 'manager', 'cashier'];
+
+  return {
+    // --- Application et connexion -------------------------------------------
+    'app.state': () => ({
+      version: appVersion,
+      initialized: s.admin.isInitialized(),
+      station: s.admin.station(),
+      user,
+    }),
+    'setup.bootstrap': (input: BootstrapInput) => {
+      const result = s.admin.bootstrap(input);
+      user = result.admin;
+      return result;
+    },
+    'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
+    'auth.login': (login: string, pin: string) => (user = s.admin.login(login, pin)),
+    'auth.logout': () => {
+      user = null;
+    },
+    'auth.checkSupervisor': (pin: string) => {
+      const sup = supervisor(pin);
+      return { id: sup.id, name: sup.name };
+    },
+
+    // --- Administration -----------------------------------------------------
+    'admin.stores': () => (requireUser(), s.admin.listStores()),
+    'admin.createStore': (input: { storeCode: string; storeName: string; address?: string; phone?: string; taxpayerNumber?: string }) =>
+      s.admin.createStore(requireUser(['admin']).id, input),
+    'admin.updateStore': (id: string, patch: { name?: string; address?: string | null; phone?: string | null; taxpayer_number?: string | null }) =>
+      s.admin.updateStore(requireUser(['admin']).id, id, patch),
+    'admin.registers': (storeId: string) => (requireUser(MANAGE), s.admin.listRegisters(storeId)),
+    'admin.createRegister': (storeId: string, name?: string) => s.admin.createRegister(requireUser(['admin']).id, storeId, name),
+    'admin.warehouses': () => s.admin.listWarehouses(ctx().storeId),
+    'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(MANAGE).storeId, name, kind),
+    'admin.users': () => (requireUser(MANAGE), s.admin.listUsers()),
+    'admin.createUser': (input: { name: string; login: string; pin: string; role: Role; storeId: string | null }) =>
+      s.admin.createUser(requireUser(MANAGE).id, input),
+    'admin.updateUser': (id: string, patch: { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }) =>
+      s.admin.updateUser(requireUser(MANAGE).id, id, patch),
+    'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
+    'admin.settings': () => {
+      requireUser();
+      const keys = ['scale.prefixes', 'scale.valueType', 'printer.name', 'printer.enabled', 'ticket.footer'];
+      return Object.fromEntries(keys.map((k) => [k, s.admin.getSetting(k)])) as Record<string, string | null>;
+    },
+    'admin.saveSettings': (values: Record<string, string>) => {
+      requireUser(MANAGE);
+      for (const [k, v] of Object.entries(values)) s.admin.setSetting(k, v);
+    },
+    'admin.audit': () => (requireUser(MANAGE), s.admin.auditLog()),
+    'admin.printers': () => (requireUser(), printer.list()),
+
+    // --- Catalogue ----------------------------------------------------------
+    'catalogue.search': (query: string, opts?: { includeInactive?: boolean; familyId?: string }) =>
+      s.catalogue.searchArticles(query, ctx().storeId, opts),
+    'catalogue.get': (id: string) => s.catalogue.getArticle(id, ctx().storeId),
+    'catalogue.save': (input: ArticleInput, id?: string) => s.catalogue.saveArticle(requireUser(STOCK).id, input, id),
+    'catalogue.setStorePrice': (articleId: string, price: Fcfa | null) => {
+      const c = ctx(MANAGE);
+      s.catalogue.setStorePrice(c.userId, articleId, c.storeId, price);
+    },
+    'catalogue.priceHistory': (articleId: string) => (requireUser(), s.catalogue.priceHistory(articleId)),
+    'catalogue.departments': () => (requireUser(), s.catalogue.listDepartments()),
+    'catalogue.createDepartment': (name: string) => (requireUser(STOCK), s.catalogue.createDepartment(name)),
+    'catalogue.createFamily': (departmentId: string, name: string) => (requireUser(STOCK), s.catalogue.createFamily(departmentId, name)),
+    'catalogue.newInternalBarcode': () => (requireUser(STOCK), s.catalogue.generateInternalBarcode()),
+    'catalogue.quickKeys': () => s.catalogue.quickKeys(ctx().storeId),
+    'catalogue.scan': (code: string) => s.catalogue.scan(code, ctx().storeId),
+    'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) => s.catalogue.importArticles(requireUser(MANAGE).id, rows),
+
+    // --- Stock --------------------------------------------------------------
+    'stock.list': (opts?: { warehouseId?: string; search?: string; level?: StockLevel }) => s.stock.list(ctx().storeId, opts),
+    'stock.receive': (input: { warehouseId: string; reference?: string; supplier?: string; lines: ReceptionLine[] }) =>
+      s.stock.receive(ctx(STOCK), input),
+    'stock.loss': (input: { warehouseId: string; articleId: string; qty: Milli; type: MovementType; reason: string; lotId?: string | null }) =>
+      s.stock.recordLoss(ctx(STOCK), input),
+    'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
+      s.stock.transfer(ctx(STOCK), input),
+    'stock.inventory': (input: { warehouseId: string; counts: { articleId: string; counted: Milli; countedAt: string }[] }) =>
+      s.stock.applyInventory(ctx(MANAGE), input),
+    'stock.expiring': (days?: number) => s.stock.expiringLots(ctx().storeId, days),
+    'stock.lots': (articleId: string) => s.stock.lotsOf(articleId, ctx().storeId),
+    'stock.movements': (articleId?: string) => s.stock.movements(ctx().storeId, { articleId }),
+
+    // --- Caisse -------------------------------------------------------------
+    'pos.session': () => {
+      const c = ctx();
+      return c.registerId ? s.pos.currentSession(c.registerId) : null;
+    },
+    'pos.open': (openingFloat: Fcfa) => s.pos.openSession(ctx(POS), openingFloat),
+    'pos.cashOperation': (type: 'IN' | 'OUT', amount: Fcfa, reason: string, supervisorPin?: string) => {
+      const c = ctx(POS);
+      // Un prélèvement par un caissier doit être validé par le gérant.
+      if (type === 'OUT' && user!.role === 'cashier') supervisor(supervisorPin ?? '');
+      s.pos.cashOperation(c, type, amount, reason);
+    },
+    'pos.priceLines': (lines: SaleLineInput[]) => s.pos.priceLines(ctx().storeId, lines),
+    'pos.sell': (input: { lines: SaleLineInput[]; payments: Payment[]; supervisorPin?: string }) => {
+      const c = ctx(POS);
+      const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : null;
+      return s.pos.completeSale(c, { lines: input.lines, payments: input.payments, discountAuthorizedBy: authorizedBy });
+    },
+    'pos.cancel': (saleId: string, supervisorPin: string, reason: string) =>
+      s.pos.cancelSale(ctx(POS), saleId, supervisor(supervisorPin).id, reason),
+    'pos.return': (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) =>
+      s.pos.returnSale(ctx(POS), { ...input, supervisorId: supervisor(input.supervisorPin).id }),
+    'pos.findSale': (number: string) => (requireUser(), s.pos.findSaleByNumber(number)),
+    'pos.sale': (id: string) => (requireUser(), s.pos.getSale(id)),
+    'pos.sales': (opts: { sessionId?: string; date?: string }) => s.pos.listSales({ ...opts, storeId: ctx().storeId }),
+    'pos.hold': (label: string, lines: SaleLineInput[]) => s.pos.holdTicket(ctx(POS), label, lines),
+    'pos.held': () => {
+      const c = ctx();
+      return c.registerId ? s.pos.listHeld(c.registerId) : [];
+    },
+    'pos.resume': (id: string) => (requireUser(POS), s.pos.resumeHeld(id)),
+    'pos.zReport': (sessionId: string) => (requireUser(), s.pos.zReport(sessionId)),
+    'pos.close': (counted: DenominationCount) => s.pos.closeSession(ctx(POS), counted),
+    'pos.sessions': () => s.pos.listSessions(ctx(MANAGE).storeId),
+    'pos.printTicket': (saleId: string) => printer.ticket(saleId),
+    'pos.printZ': (sessionId: string) => printer.zReport(sessionId),
+
+    // --- Rapports -----------------------------------------------------------
+    'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),
+    'reports.salesCsv': (from: string, to: string) => s.reports.salesExportCsv(ctx(['admin', 'manager', 'accountant']).storeId, from, to),
+  };
+}
+
+export type Api = ReturnType<typeof createApi>;
+export type ApiName = keyof Api;

@@ -3,6 +3,7 @@ import { type CartLine, PAYMENT_METHODS, computeTotals, formatFcfa, lineTotal } 
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
+import { ExpenseDialog } from './Expenses';
 import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 
 type Article = Result<'catalogue.get'>;
@@ -33,7 +34,7 @@ function toLine(article: Article, qtyMilli: number, barcode: string | null, fixe
   };
 }
 
-type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay';
+type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'extra';
 
@@ -393,6 +394,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                   <option value="cancel">Annuler un ticket</option>
                   <option value="return">Retour client</option>
                   <option value="custPay">Règlement client (crédit)</option>
+                  <option value="expense">Dépense payée en caisse</option>
                   <option value="close">Clôture de caisse (Z)</option>
                 </select>
               </form>
@@ -657,6 +659,17 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
           onPaid={(id) => {
             setDialog(null);
             call('customers.printReceipt', id).catch(toast.error);
+          }}
+        />
+      )}
+      {dialog === 'expense' && (
+        <ExpenseDialog
+          atRegister
+          needsSupervisor={user.role === 'cashier'}
+          onClose={() => setDialog(null)}
+          onSaved={(e) => {
+            setDialog(null);
+            call('expenses.print', e.id).catch(toast.error);
           }}
         />
       )}

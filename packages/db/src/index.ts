@@ -3,6 +3,7 @@ import { AdminService } from './admin';
 import { CatalogueService } from './catalogue';
 import { CustomerService } from './customers';
 import { type Db, openDatabase } from './database';
+import { ExpenseService } from './expenses';
 import { PosService } from './pos';
 import { PurchaseService } from './purchases';
 import { ReportService } from './reports';
@@ -15,6 +16,7 @@ export * from './admin';
 export * from './catalogue';
 export * from './customers';
 export * from './database';
+export * from './expenses';
 export * from './pos';
 export * from './purchases';
 export * from './reports';
@@ -29,6 +31,7 @@ export interface Services {
   catalogue: CatalogueService;
   stock: StockService;
   customers: CustomerService;
+  expenses: ExpenseService;
   pos: PosService;
   purchases: PurchaseService;
   reports: ReportService;
@@ -41,12 +44,13 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const catalogue = new CatalogueService(db, clock);
   const stock = new StockService(db, clock);
   const customers = new CustomerService(db, clock);
+  const expenses = new ExpenseService(db, clock);
   const pos = new PosService(db, clock, admin, catalogue, stock, customers);
   const purchases = new PurchaseService(db, clock, stock);
   const reports = new ReportService(db, clock);
   const accounting = new AccountingService(db, clock);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, customers, pos, purchases, reports, accounting, sync };
+  return { db, admin, catalogue, stock, customers, expenses, pos, purchases, reports, accounting, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

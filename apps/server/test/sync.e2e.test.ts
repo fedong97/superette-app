@@ -170,6 +170,20 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(pc2.accounting.entries(ctx1.storeId, { journal: 'BQ' }).find((e) => e.source === 'manual')?.label).toBe('Frais de tenue de compte');
   });
 
+  it('une dépense saisie sur le PC 2 et annulée sur le PC 1 reste annulée partout', async () => {
+    pc1.expenses.saveCategory(ctx1.userId, { id: 'cat-divers', name: 'Divers et imprévus', accountId: '638' });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    expect(pc2.expenses.listCategories().find((c) => c.id === 'cat-divers')?.account_id).toBe('638');
+    const dep = pc2.expenses.record(ctx2, { categoryId: 'cat-divers', label: 'Réparation balance', amount: 7_500, method: 'CASH' });
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    pc1.expenses.cancel(ctx1, dep.id, ctx1.userId, 'Payée par le fournisseur');
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    for (const s of [pc1, pc2]) expect(s.expenses.get(dep.id)).toMatchObject({ status: 'cancelled', account_id: '638' });
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);
@@ -186,5 +200,7 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(client.map((c) => [c.name, c.balance])).toEqual([['Restaurant Chez Mballa', 0]]);
     expect(pc3.accounting.listAccounts().find((a) => a.role === 'cash')?.id).toBe('5711');
     expect(pc3.db.prepare('SELECT COUNT(*) FROM manual_entries').pluck().get()).toBe(0);
+    expect(pc3.db.prepare('SELECT COUNT(*) FROM expenses').pluck().get()).toBe(0);
+    expect(pc3.expenses.listCategories().find((c) => c.id === 'cat-divers')?.name).toBe('Divers et imprévus');
   });
 });

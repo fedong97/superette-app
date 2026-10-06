@@ -480,6 +480,12 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
             <tr><td>Apports</td><td className="r">{fcfa(z.cash.cashIn)}</td></tr>
             <tr><td>Prélèvements</td><td className="r">{fcfa(-z.cash.cashOut)}</td></tr>
             {z.cash.customerReceipts > 0 && <tr><td>Règlements clients</td><td className="r">{fcfa(z.cash.customerReceipts)}</td></tr>}
+            {z.cash.expenses > 0 && (
+              <tr title={z.expenses.map((e) => `${e.number} ${e.label}`).join('\n')}>
+                <td>Dépenses payées ({z.expenses.length})</td>
+                <td className="r">{fcfa(-z.cash.expenses)}</td>
+              </tr>
+            )}
             <tr><td>Compté</td><td className="r">{z.counted === null ? '—' : fcfa(z.counted)}</td></tr>
           </tbody>
         </table>

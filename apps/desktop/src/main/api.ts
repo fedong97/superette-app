@@ -14,6 +14,7 @@ import {
   type Context,
   type CustomerInput,
   type CustomerPaymentMethod,
+  type ExpenseInput,
   type AccountRole,
   type JournalCode,
   type ReceptionLine,
@@ -37,6 +38,7 @@ export interface Printer {
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
+  expenseVoucher(expenseId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
 }
@@ -271,6 +273,28 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.receivables': () => s.customers.receivables(ctx([...MANAGE, 'accountant']).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
+
+    // --- Dépenses -------------------------------------------------------------
+    'expenses.categories': (includeInactive?: boolean) => (requireUser(), s.expenses.listCategories(includeInactive)),
+    'expenses.saveCategory': (input: { id?: string | null; name: string; accountId: string; active?: boolean }) =>
+      s.expenses.saveCategory(requireUser(ACCOUNTING).id, input),
+    /** Au bureau : gérant ou comptable. À la caisse (espèces du tiroir) : un caissier a besoin du code d'un gérant. */
+    'expenses.record': (input: Omit<ExpenseInput, 'authorizedBy'> & { supervisorPin?: string }) => {
+      const { supervisorPin, ...rest } = input;
+      const c = ctx(input.atRegister ? POS : ACCOUNTING);
+      const authorizedBy = user!.role === 'cashier' ? supervisor(supervisorPin ?? '').id : null;
+      return s.expenses.record(c, { ...rest, authorizedBy });
+    },
+    'expenses.cancel': (id: string, reason: string, supervisorPin?: string) => {
+      const c = ctx([...POS, 'accountant']);
+      const sup = MANAGE.includes(user!.role) ? user!.id : supervisor(supervisorPin ?? '').id;
+      return s.expenses.cancel(c, id, sup, reason);
+    },
+    'expenses.get': (id: string) => (requireUser(), s.expenses.get(id)),
+    'expenses.list': (opts: { from?: string; to?: string; categoryId?: string; sessionId?: string; includeCancelled?: boolean }) =>
+      s.expenses.list(ctx(opts.sessionId ? undefined : ACCOUNTING).storeId, opts),
+    'expenses.summary': (opts: { from?: string; to?: string }) => s.expenses.summary(ctx(ACCOUNTING).storeId, opts),
+    'expenses.print': (id: string) => (requireUser(), printer.expenseVoucher(id)),
 
     // --- Comptabilité --------------------------------------------------------
     'accounting.accounts': (includeInactive?: boolean) => (requireUser(), s.accounting.listAccounts(includeInactive)),

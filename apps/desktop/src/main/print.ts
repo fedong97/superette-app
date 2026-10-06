@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { PAYMENT_METHODS, formatFcfa, formatQty, formatRate, splitTtc } from '@superette/core';
-import { CUSTOMER_PAYMENT_METHODS, JOURNALS } from '@superette/db';
+import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, JOURNALS } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
 
@@ -130,10 +130,12 @@ export function createPrinter(s: Services): Printer {
         ${row('CA net TTC', z.netTtc)}${row('Remises', z.discounts)}${row(`Annulations (${z.cancelled.count})`, z.cancelled.amount)}</table><hr>
         <div class="b">Encaissements</div><table>${z.byMethod.map((m) => row(m.label, m.amount)).join('')}</table><hr>
         ${z.customerReceipts.length ? `<div class="b">Règlements clients (crédit)</div><table>${z.customerReceipts.map((m) => row(m.label, m.amount)).join('')}</table><hr>` : ''}
+        ${z.expenses.length ? `<div class="b">Dépenses payées en caisse</div><table>${z.expenses.map((e) => row(`${e.number} ${e.label}`, e.amount)).join('')}</table><hr>` : ''}
         <div class="b">TVA</div><table>${z.vat.map((v) => row(`${formatRate(v.rate)} HT ${money(v.ht)}`, v.tva)).join('')}</table><hr>
         <div class="b">Espèces</div><table>${row('Fond de caisse', z.cash.openingFloat)}${row('Ventes espèces', z.cash.cashSales)}
         ${row('Remboursements', -z.cash.cashRefunds)}${row('Apports', z.cash.cashIn)}${row('Prélèvements', -z.cash.cashOut)}
         ${z.cash.customerReceipts ? row('Règlements clients', z.cash.customerReceipts) : ''}
+        ${z.cash.expenses ? row('Dépenses payées', -z.cash.expenses) : ''}
         ${row('Théorique', z.cash.expected)}${z.counted !== null ? row('Compté', z.counted) + row('Écart', z.difference ?? 0) : ''}</table>`);
     },
 
@@ -247,6 +249,21 @@ export function createPrinter(s: Services): Printer {
         <div class="c">Merci !</div>`);
     },
 
+    async expenseVoucher(expenseId) {
+      const e = s.expenses.get(expenseId);
+      await printHtml(`${header()}
+        <div class="c b">${e.session_id ? 'BON DE SORTIE DE CAISSE' : 'PIÈCE DE DÉPENSE'}</div>
+        <div>${esc(e.number)}${e.status === 'cancelled' ? ' · <b>ANNULÉE</b>' : ''}<br>${dayFr(e.expense_date)}${e.register_name ? ` · ${esc(e.register_name)}` : ''}${
+          e.user_name ? ` · ${esc(e.user_name)}` : ''
+        }</div><hr>
+        <div>${esc(e.category_name)}<br><b>${esc(e.label)}</b>${e.beneficiary ? `<br>Bénéficiaire : ${esc(e.beneficiary)}` : ''}</div><hr>
+        <table><tr><td class="big">Montant FCFA</td><td class="r big">${money(e.amount)}</td></tr>
+        ${e.vat ? `<tr><td>dont TVA récupérable</td><td class="r">${money(e.vat)}</td></tr>` : ''}
+        <tr><td>${esc(EXPENSE_PAYMENT_METHODS[e.method])}${e.reference ? ` ${esc(e.reference)}` : ''}</td><td></td></tr></table>
+        ${e.authorized_by_name ? `<div>Autorisé par ${esc(e.authorized_by_name)}</div>` : ''}<hr>
+        <table><tr><td>Le bénéficiaire</td><td class="r">Le responsable</td></tr></table><br><br><br>`);
+    },
+
     async vatReturn(storeId, month) {
       const store = s.admin.getStore(storeId);
       const v = s.accounting.vatReturn(storeId, month);
@@ -265,7 +282,9 @@ export function createPrinter(s: Services): Printer {
         <tr class="total"><td>Chiffre d'affaires HT déclaré, dont exonéré ${money(v.exemptHt)}</td><td></td><td class="r">${money(v.turnoverHt)}</td><td class="r">${money(v.collected)}</td></tr></tbody></table>
         <h3>TVA déductible</h3>
         <table><tbody><tr><td>Achats de marchandises HT (${v.invoiceCount} factures et avoirs fournisseurs)</td><td class="r">${money(v.purchasesHt)}</td></tr>
-        <tr><td>TVA récupérable sur achats</td><td class="r">${money(v.deductible)}</td></tr>
+        <tr><td>TVA récupérable sur achats de marchandises</td><td class="r">${money(v.purchasesVat)}</td></tr>
+        <tr><td>Autres charges HT (dépenses : ${v.expenseCount} factures avec TVA)</td><td class="r">${money(v.expensesHt)}</td></tr>
+        <tr><td>TVA récupérable sur dépenses</td><td class="r">${money(v.expensesVat)}</td></tr>
         <tr><td>Crédit de TVA reporté du mois précédent</td><td class="r">${money(v.previousCredit)}</td></tr></tbody></table>
         <table class="totals"><tbody>
         <tr class="total"><td>TVA collectée</td><td class="r">${money(v.collected)}</td></tr>

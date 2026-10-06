@@ -146,6 +146,7 @@ export class AccountingService extends Base {
       ...this.customerPaymentEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
+      ...this.expenseEntries(storeId, r, opts),
       ...this.manualEntries(storeId, opts),
     ].filter((e) => (!opts.journal || e.journal === opts.journal) && inRange(e.date, opts.from, opts.to) && e.lines.length > 0);
     return all.sort((a, b) => a.date.localeCompare(b.date) || a.journal.localeCompare(b.journal) || a.ref.localeCompare(b.ref));
@@ -303,6 +304,40 @@ export class AccountingService extends Base {
       });
   }
 
+  /** Dépenses : charge HT et TVA récupérable au débit, trésorerie au crédit. */
+  private expenseEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.number, e.expense_date AS d, e.label, e.beneficiary, e.amount, e.vat, e.method, e.reference, e.account_id
+         FROM expenses e WHERE e.store_id = @storeId AND e.status = 'active'
+         AND (@from IS NULL OR e.expense_date >= @from) AND (@to IS NULL OR e.expense_date <= @to)`,
+      )
+      .all({ storeId, from: opts.from ?? null, to: opts.to ?? null }) as {
+      number: string;
+      d: string;
+      label: string;
+      beneficiary: string | null;
+      amount: number;
+      vat: number;
+      method: string;
+      reference: string | null;
+      account_id: string;
+    }[];
+    return rows.map((e) => {
+      const label = `${e.label}${e.beneficiary ? `, ${e.beneficiary}` : ''}${e.reference ? ` (${e.reference})` : ''}`;
+      return {
+        journal: METHOD_JOURNAL(e.method),
+        date: e.d,
+        ref: e.number,
+        label,
+        source: 'auto' as const,
+        lines: [side(e.account_id, e.amount - e.vat, label), side(r.vat_deductible, e.vat, label), side(r[METHOD_ROLE[e.method] ?? 'bank'], -e.amount, label)].filter(
+          (l) => l.debit || l.credit,
+        ),
+      };
+    });
+  }
+
   private manualEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
     const heads = this.db
       .prepare(
@@ -449,17 +484,28 @@ export class AccountingService extends Base {
          FROM supplier_invoices WHERE store_id = ? AND substr(invoice_date, 1, 7) = ?`,
       )
       .get(storeId, month) as { ht: number; tva: number; n: number };
+    const expenses = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(amount - vat), 0) AS ht, COALESCE(SUM(vat), 0) AS tva, COUNT(CASE WHEN vat > 0 THEN 1 END) AS n FROM expenses
+         WHERE store_id = ? AND status = 'active' AND substr(expense_date, 1, 7) = ?`,
+      )
+      .get(storeId, month) as { ht: number; tva: number; n: number };
     const previousCredit = this.carriedVatCredit(storeId, month);
-    const due = booked.tva - purchases.tva - previousCredit;
+    const deductible = purchases.tva + expenses.tva;
+    const due = booked.tva - deductible - previousCredit;
     return {
       month,
       sales,
       turnoverHt: booked.ht,
       exemptHt: sales.filter((s) => s.rate === 0).reduce((t, s) => t + s.ht, 0),
       collected: booked.tva,
-      deductible: purchases.tva,
+      deductible,
       purchasesHt: purchases.ht,
+      purchasesVat: purchases.tva,
       invoiceCount: purchases.n,
+      expensesHt: expenses.ht,
+      expensesVat: expenses.tva,
+      expenseCount: expenses.n,
       previousCredit,
       due: Math.max(0, due),
       credit: Math.max(0, -due),
@@ -471,10 +517,11 @@ export class AccountingService extends Base {
     const first = this.db
       .prepare(
         `SELECT MIN(m) FROM (SELECT strftime('%Y-%m', created_at, 'localtime') AS m FROM sales WHERE store_id = ?
-         UNION ALL SELECT substr(invoice_date, 1, 7) FROM supplier_invoices WHERE store_id = ?)`,
+         UNION ALL SELECT substr(invoice_date, 1, 7) FROM supplier_invoices WHERE store_id = ?
+         UNION ALL SELECT substr(expense_date, 1, 7) FROM expenses WHERE store_id = ? AND status = 'active')`,
       )
       .pluck()
-      .get(storeId, storeId) as string | null;
+      .get(storeId, storeId, storeId) as string | null;
     if (!first || first >= month) return 0;
     let credit = 0;
     let [y, m] = first.split('-').map(Number) as [number, number];
@@ -484,7 +531,8 @@ export class AccountingService extends Base {
       const v = this.db
         .prepare(
           `SELECT (SELECT COALESCE(SUM(total_tva), 0) FROM sales WHERE store_id = @s AND status = 'completed' AND strftime('%Y-%m', created_at, 'localtime') = @k)
-                - (SELECT COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_tva ELSE -total_tva END), 0) FROM supplier_invoices WHERE store_id = @s AND substr(invoice_date, 1, 7) = @k)`,
+                - (SELECT COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_tva ELSE -total_tva END), 0) FROM supplier_invoices WHERE store_id = @s AND substr(invoice_date, 1, 7) = @k)
+                - (SELECT COALESCE(SUM(vat), 0) FROM expenses WHERE store_id = @s AND status = 'active' AND substr(expense_date, 1, 7) = @k)`,
         )
         .pluck()
         .get({ s: storeId, k: key }) as number;

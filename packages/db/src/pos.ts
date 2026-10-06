@@ -106,7 +106,9 @@ export interface ZReport {
   vat: { rate: number; ht: Fcfa; tva: Fcfa; ttc: Fcfa }[];
   cashOperations: { type: 'IN' | 'OUT'; amount: Fcfa; reason: string; at: string }[];
   customerReceipts: { method: string; label: string; amount: Fcfa }[];
-  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expected: Fcfa };
+  /** Dépenses payées avec les espèces du tiroir. */
+  expenses: { number: string; label: string; amount: Fcfa }[];
+  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expenses: Fcfa; expected: Fcfa };
   counted: Fcfa | null;
   difference: Fcfa | null;
 }
@@ -541,7 +543,18 @@ export class PosService extends Base {
     const cashOut = cashOperations.filter((o) => o.type === 'OUT').reduce((s, o) => s + o.amount, 0);
     const customerReceipts = this.customers.sessionReceipts(sessionId);
     const receiptsCash = customerReceipts.find((r) => r.method === 'CASH')?.amount ?? 0;
-    const cash = { openingFloat: session.opening_float, cashSales, cashRefunds, cashIn, cashOut, customerReceipts: receiptsCash };
+    const expenses = this.db
+      .prepare("SELECT number, label, amount FROM expenses WHERE session_id = ? AND status = 'active' ORDER BY created_at")
+      .all(sessionId) as ZReport['expenses'];
+    const cash = {
+      openingFloat: session.opening_float,
+      cashSales,
+      cashRefunds,
+      cashIn,
+      cashOut,
+      customerReceipts: receiptsCash,
+      expenses: expenses.reduce((t, e) => t + e.amount, 0),
+    };
     const { expected } = closingDifference(cash, {});
     return {
       session,
@@ -557,6 +570,7 @@ export class PosService extends Base {
       vat,
       cashOperations,
       customerReceipts,
+      expenses,
       cash: { ...cash, expected },
       counted: session.counted_cash,
       difference: session.difference,

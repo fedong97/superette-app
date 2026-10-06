@@ -12,6 +12,8 @@ import {
   type ArticleInput,
   type BootstrapInput,
   type Context,
+  type CustomerInput,
+  type CustomerPaymentMethod,
   type ReceptionLine,
   type Role,
   type SaleLineInput,
@@ -28,6 +30,9 @@ export interface Printer {
   ticket(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
   purchaseOrder(orderId: string): Promise<void>;
+  invoice(saleId: string): Promise<void>;
+  statement(storeId: string, customerId: string, from?: string | null, to?: string | null): Promise<void>;
+  customerReceipt(paymentId: string): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
 }
 
@@ -202,10 +207,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.priceLines': (lines: SaleLineInput[]) => s.pos.priceLines(ctx().storeId, lines),
-    'pos.sell': (input: { lines: SaleLineInput[]; payments: Payment[]; supervisorPin?: string }) => {
+    'pos.sell': (input: { lines: SaleLineInput[]; payments: Payment[]; supervisorPin?: string; customerId?: string | null; creditPin?: string }) => {
       const c = ctx(POS);
       const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : null;
-      return s.pos.completeSale(c, { lines: input.lines, payments: input.payments, discountAuthorizedBy: authorizedBy });
+      const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
+      return s.pos.completeSale(c, {
+        lines: input.lines,
+        payments: input.payments,
+        discountAuthorizedBy: authorizedBy,
+        customerId: input.customerId ?? null,
+        creditAuthorizedBy: creditBy,
+      });
     },
     'pos.cancel': (saleId: string, supervisorPin: string, reason: string) =>
       s.pos.cancelSale(ctx(POS), saleId, supervisor(supervisorPin).id, reason),
@@ -225,6 +237,35 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.sessions': () => s.pos.listSessions(ctx(MANAGE).storeId),
     'pos.printTicket': (saleId: string) => printer.ticket(saleId),
     'pos.printZ': (sessionId: string) => printer.zReport(sessionId),
+    'pos.printInvoice': (saleId: string) => (requireUser(), printer.invoice(saleId)),
+
+    // --- Clients et crédit ----------------------------------------------------
+    'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean }) => s.customers.listCustomers(ctx().storeId, opts),
+    'customers.get': (id: string) => (requireUser(), s.customers.getCustomer(id)),
+    'customers.save': (input: CustomerInput, id?: string) => {
+      const u = requireUser([...MANAGE, 'accountant', 'cashier']);
+      // Le caissier peut créer ou corriger une fiche, mais pas accorder de crédit.
+      if (u.role === 'cashier') {
+        const before = id ? s.customers.getCustomer(id).credit_limit : 0;
+        if ((input.creditLimit ?? before) !== before) throw new AppError('Seul le gérant ou le comptable fixe le plafond de crédit', 'FORBIDDEN');
+      }
+      return s.customers.saveCustomer(u.id, input, id);
+    },
+    'customers.account': (id: string) => s.customers.account(ctx().storeId, id),
+    'customers.statement': (id: string, from?: string | null, to?: string | null) =>
+      s.customers.statement(ctx().storeId, id, { from: from ?? undefined, to: to ?? undefined }),
+    'customers.sales': (id: string) => s.pos.listSales({ storeId: ctx().storeId, customerId: id, limit: 100 }),
+    'customers.pay': (input: { customerId: string; method: CustomerPaymentMethod; amount: Fcfa; reference?: string | null; notes?: string | null; atRegister?: boolean }) => {
+      const c = ctx([...POS, 'accountant']);
+      // Encaissé à la caisse : rattaché à la session ouverte, les espèces vont dans le tiroir.
+      const session = input.atRegister && c.registerId ? s.pos.currentSession(c.registerId) : null;
+      if (input.atRegister && !session) throw new AppError("Ouvrez la caisse avant d'encaisser un règlement client", 'NO_SESSION');
+      return s.customers.receivePayment(c, { ...input, sessionId: session?.id ?? null });
+    },
+    'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
+    'customers.receivables': () => s.customers.receivables(ctx([...MANAGE, 'accountant']).storeId),
+    'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
+    'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
 
     // --- Rapports -----------------------------------------------------------
     'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),

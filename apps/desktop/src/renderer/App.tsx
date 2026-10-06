@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { type Result, call } from './api';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles } from './screens/Articles';
+import { Customers, type CustomersTab } from './screens/Customers';
 import { Dashboard } from './screens/Dashboard';
 import { Login } from './screens/Login';
 import { Pos } from './screens/Pos';
@@ -17,7 +18,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'dashboard' | 'admin';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -32,15 +33,18 @@ const MANAGE: Role[] = ['admin', 'manager'];
 const ACCOUNTING: Role[] = ['admin', 'manager', 'accountant'];
 const BUY: Role[] = ['admin', 'manager', 'stock'];
 const PURCHASING: Role[] = ['admin', 'manager', 'stock', 'accountant'];
+const CUSTOMERS: Role[] = ['admin', 'manager', 'cashier', 'accountant'];
 
 const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
   cash1: { label: 'Fiche de facturation 1', roles: POS },
   cash2: { label: 'Fiche de facturation 2', roles: POS },
+  credit: { label: 'Vente à crédit', roles: POS },
   sales: { label: 'Mes factures', roles: ACCOUNTING },
   articles: { label: 'Produits', roles: STOCK },
   stock: { label: 'Stock', roles: STOCK },
   purchases: { label: 'Achats', roles: PURCHASING },
   suppliers: { label: 'Fournisseurs', roles: PURCHASING },
+  customers: { label: 'Clients', roles: CUSTOMERS },
   dashboard: { label: 'Tableau de bord', roles: MANAGE },
   admin: { label: 'Administration', roles: MANAGE },
 };
@@ -61,7 +65,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Vente au comptant 1', open: ['cash1'] },
       { label: 'Vente au comptant 2', open: ['cash2'] },
-      { label: 'Vente à crédit', soon: true },
+      { label: 'Vente à crédit', open: ['credit'] },
       { label: 'Mes factures', open: ['sales', 'tickets'] },
       { label: 'Registre (clôtures Z)', open: ['sales', 'z'] },
     ],
@@ -91,6 +95,8 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Registre de caisse (Z)', open: ['sales', 'z'] },
       { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
+      { label: 'Créances clients', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: 'Règlements clients reçus', open: ['customers', 'payments'] },
       { label: 'Banques et Mobile Money', soon: true },
     ],
   ],
@@ -108,7 +114,14 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Factures et règlements', open: ['purchases', 'invoices'], roles: ACCOUNTING },
     ],
   ],
-  ['Client', [{ label: 'Fiches clients', soon: true }, { label: 'Comptes clients (crédit)', soon: true }]],
+  [
+    'Client',
+    [
+      { label: 'Fiches clients', open: ['customers', 'list'] },
+      { label: 'Créances (balance âgée)', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: 'Règlements reçus', open: ['customers', 'payments'] },
+    ],
+  ],
   ['Charge', [{ label: 'Dépenses', soon: true }]],
   ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'] }]],
   [
@@ -148,7 +161,7 @@ const MENUS: [string, MenuItem[]][] = [
 const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?: boolean }[] = [
   { label: 'V. cash 1', open: ['cash1'] },
   { label: 'V. cash 2', open: ['cash2'] },
-  { label: 'V. crédit', soon: true, credit: true },
+  { label: 'V. crédit', open: ['credit'], credit: true },
   { label: 'Mes factures', open: ['sales', 'tickets'] },
   { label: 'Registre', open: ['sales', 'z'] },
   { label: 'Produits', open: ['articles'] },
@@ -305,12 +318,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       <main className="windows">
         {wins.map((w) => (
           <section key={`${w.kind}-${w.nonce}`} className="window" hidden={w.kind !== active}>
-            {(w.kind === 'cash1' || w.kind === 'cash2') && (
+            {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
               <Pos
                 user={user}
+                mode={w.kind === 'credit' ? 'credit' : 'cash'}
                 hasRegister={Boolean(state.station?.register)}
                 active={w.kind === active}
-                title={w.kind === 'cash1' ? 'Fiche de facturation 1' : 'Fiche de facturation 2'}
+                title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
                 onListing={() => open('sales', 'tickets')}
               />
@@ -320,6 +334,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'sales' && <Sales initialTab={w.tab as SalesTab | undefined} />}
             {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
             {w.kind === 'suppliers' && <Suppliers user={user} />}
+            {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>

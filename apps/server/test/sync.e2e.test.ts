@@ -139,6 +139,19 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     for (const s of [pc1, pc2]) expect(stockOf(s, ctx1.storeId)?.qty).toBe(94_000);
   });
 
+  it('une vente à crédit sur le PC 2, réglée sur le PC 1, donne le même compte client partout', async () => {
+    const client = pc1.customers.saveCustomer(ctx1.userId, { name: 'Restaurant Chez Mballa', creditLimit: 100_000 });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    pc2.pos.completeSale(ctx2, { lines: [{ articleId, qty: 10_000 }], payments: [{ method: 'CUSTOMER_CREDIT', amount: 6_500 }], customerId: client.id });
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    pc1.customers.receivePayment(ctx1, { customerId: client.id, method: 'MTN_MOMO', amount: 4_000, reference: 'MP1' });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    for (const s of [pc1, pc2]) expect(s.customers.account(ctx1.storeId, client.id)).toMatchObject({ balance: 2_500, available: 97_500 });
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);
@@ -151,5 +164,7 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(pc3.db.prepare('SELECT COUNT(*) FROM stock_movements').pluck().get()).toBe(0);
     expect(pc3.purchases.listSuppliers().map((f) => f.name)).toEqual(['SABC']);
     expect(pc3.db.prepare('SELECT COUNT(*) FROM purchase_orders').pluck().get()).toBe(0);
+    const client = pc3.customers.listCustomers(station!.store.id);
+    expect(client.map((c) => [c.name, c.balance])).toEqual([['Restaurant Chez Mballa', 0]]);
   });
 });

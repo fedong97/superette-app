@@ -17,9 +17,10 @@ export const GLOBAL_ENTITIES = [
   'store_price',
   'supplier',
   'supplier_article',
+  'customer',
 ];
 
-const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment']);
+const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment']);
 
 export interface SyncEvent {
   id: string;

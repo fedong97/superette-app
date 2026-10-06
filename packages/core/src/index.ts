@@ -8,3 +8,4 @@ export * from './stock';
 export * from './expiry';
 export * from './cashClose';
 export * from './purchase';
+export * from './credit';

@@ -5,12 +5,13 @@ import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty,
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
+export type StockTab = Tab;
 type Tab = 'state' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
-export function Stock({ user }: { user: User }) {
-  const [tab, setTab] = useState<Tab>('state');
+export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const canInventory = user.role === 'admin' || user.role === 'manager';
   const tabs: [Tab, string][] = [
     ['state', 'État du stock'],

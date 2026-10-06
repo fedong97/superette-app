@@ -5,10 +5,11 @@ import { Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
+export type AdminTab = Tab;
 type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'settings' | 'server' | 'audit';
 
-export function Admin({ user, onChanged }: { user: User; onChanged: () => void }) {
-  const [tab, setTab] = useState<Tab>(user.role === 'admin' ? 'stores' : 'users');
+export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
   const tabs: [Tab, string][] = [
     ...(user.role === 'admin' ? ([['stores', 'Magasins']] as [Tab, string][]) : []),
     ['registers', 'Caisses'],

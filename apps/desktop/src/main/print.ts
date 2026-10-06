@@ -309,6 +309,7 @@ export function createPrinter(s: Services): Printer {
     async vatReturn(storeId, month) {
       const store = s.admin.getStore(storeId);
       const v = s.accounting.vatReturn(storeId, month);
+      const inst = s.tax.instalment(storeId, month);
       const [y, m] = month.split('-');
       const period = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
       const rates = v.sales
@@ -317,7 +318,7 @@ export function createPrinter(s: Services): Printer {
       const rounding = v.collected - v.sales.reduce((t, r) => t + r.tva, 0);
       await printA4(`${a4Head(store)}
         <h1>Déclaration de TVA, ${esc(period)}</h1>
-        <p class="muted">Document de travail pour remplir la déclaration mensuelle sur le portail de la DGI. Les acomptes d'impôt sur le revenu et les précomptes ne sont pas repris ici.</p>
+        <p class="muted">Document de travail pour remplir la déclaration mensuelle sur le portail de la DGI. Les précomptes et le droit d'accises ne sont pas repris ici.</p>
         <h3>Chiffre d'affaires et TVA collectée</h3>
         <table><thead><tr><th>Taux</th><th class="r">TTC</th><th class="r">HT</th><th class="r">TVA</th></tr></thead><tbody>${rates}
         ${rounding ? `<tr><td colspan="3">Arrondis de TVA ticket par ticket</td><td class="r">${money(rounding)}</td></tr>` : ''}
@@ -331,7 +332,13 @@ export function createPrinter(s: Services): Printer {
         <table class="totals"><tbody>
         <tr class="total"><td>TVA collectée</td><td class="r">${money(v.collected)}</td></tr>
         <tr><td>TVA déductible et crédit reporté</td><td class="r">${money(v.deductible + v.previousCredit)}</td></tr>
-        <tr class="total"><td>${v.due ? 'TVA à payer (FCFA)' : 'Crédit de TVA à reporter (FCFA)'}</td><td class="r">${money(v.due || v.credit)}</td></tr></tbody></table>`);
+        <tr class="total"><td>${v.due ? 'TVA à payer (FCFA)' : 'Crédit de TVA à reporter (FCFA)'}</td><td class="r">${money(v.due || v.credit)}</td></tr></tbody></table>
+        <h3>Acompte d'impôt sur le résultat (minimum de perception)</h3>
+        <table><tbody><tr><td>Chiffre d'affaires HT × ${formatRate(inst.rate)}</td><td class="r">${money(inst.principal)}</td></tr>
+        <tr><td>Centimes additionnels communaux (10 %)</td><td class="r">${money(inst.cac)}</td></tr>
+        <tr class="total"><td>Acompte à payer</td><td class="r">${money(inst.total)}</td></tr></tbody></table>
+        <table class="totals"><tbody><tr class="total"><td>Total à verser à la DGI (TVA et acompte)</td><td class="r">${money(v.due + inst.total)}</td></tr></tbody></table>
+        <p class="muted">Écriture du paiement de l'acompte : débit 441, crédit 521 (journal de banque) ou 5521 / 5522 si payé par Mobile Money.</p>`);
     },
 
     async trialBalance(storeId, from, to) {
@@ -372,6 +379,43 @@ export function createPrinter(s: Services): Printer {
         <div style="page-break-before: always"></div>${title('Tableau des flux de trésorerie')}
         <table><thead><tr><th>Réf</th><th>Libellé</th>${years}</tr></thead><tbody>${lines(flows.rows)}</tbody></table>
         ${flows.check.gap ? `<p>Trésorerie au bilan : ${money(flows.check.treasury)}, écart de ${money(flows.check.gap)} avec la ligne ZH, à analyser.</p>` : ''}`);
+    },
+
+    async taxAssessment(storeId, year) {
+      const store = s.admin.getStore(storeId);
+      const a = s.tax.assessment(storeId, year);
+      const signed = (v: number) => (v < 0 ? `- ${money(-v)}` : money(v));
+      const company = a.settings.form === 'company';
+      const adj = a.settings.adjustments
+        .map((x) => `<tr><td>${x.kind === 'add' ? 'Réintégration' : 'Déduction'} : ${esc(x.label)}</td><td class="r">${x.kind === 'add' ? '' : '- '}${money(x.amount)}</td></tr>`)
+        .join('');
+      const months = a.instalments
+        .map((i) => `<tr><td>${new Date(`${i.month}-01T00:00:00`).toLocaleDateString('fr-FR', { month: 'long' })}</td><td class="r">${money(i.turnoverHt)}</td><td class="r">${money(i.principal)}</td><td class="r">${money(i.cac)}</td><td class="r">${money(i.total)}</td></tr>`)
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>${company ? 'Impôt sur les sociétés' : 'Impôt sur le revenu (BIC)'} : exercice ${year}</h1>
+        <div>${company ? 'Société' : 'Entreprise individuelle'}, régime ${a.settings.regime === 'reel' ? 'du réel' : 'simplifié'} · montants en FCFA${a.provisional ? ' · <strong>calcul provisoire, exercice en cours</strong>' : ''}</div>
+        <h3>Du résultat comptable au résultat fiscal</h3>
+        <table><tbody>
+        <tr><td>Résultat net comptable avant impôt sur le résultat</td><td class="r">${signed(a.resultBeforeTax)}</td></tr>${adj}
+        <tr class="total"><td>Résultat fiscal</td><td class="r">${signed(a.fiscalResult)}</td></tr>
+        <tr><td>Déficits antérieurs imputés</td><td class="r">${a.lossesUsed ? `- ${money(a.lossesUsed)}` : '-'}</td></tr>
+        <tr class="total"><td>Bénéfice imposable</td><td class="r">${money(a.taxableIncome)}</td></tr>
+        ${a.lossCarriedForward ? `<tr><td>Déficit reportable sur les exercices suivants</td><td class="r">${money(a.lossCarriedForward)}</td></tr>` : ''}
+        </tbody></table>
+        <h3>Liquidation</h3>
+        <table><tbody>
+        <tr><td>${company ? `Impôt sur les sociétés au taux de ${formatRate(a.rateApplied)}` : `IRPP au barème (taux moyen ${formatRate(a.rateApplied)})`}</td><td class="r">${money(a.tax.principal)}</td></tr>
+        <tr><td>Centimes additionnels communaux (10 %)</td><td class="r">${money(a.tax.cac)}</td></tr>
+        <tr class="total"><td>Impôt calculé</td><td class="r">${money(a.tax.total)}</td></tr>
+        <tr><td>Minimum de perception (acomptes de l'exercice, ${formatRate(a.settings.rates.minimumRate)} du chiffre d'affaires HT de ${money(a.turnoverHt)}, CAC compris)</td><td class="r">${money(a.minimum)}</td></tr>
+        <tr class="total"><td>Impôt dû (le plus élevé des deux)</td><td class="r">${money(a.due)}</td></tr>
+        <tr><td>Acomptes mensuels</td><td class="r">- ${money(a.minimum)}</td></tr>
+        <tr class="total"><td>Solde à payer</td><td class="r">${money(a.balance)}</td></tr>
+        </tbody></table>
+        <h3>Acomptes mensuels</h3>
+        <table><thead><tr><th>Mois</th><th class="r">Chiffre d'affaires HT</th><th class="r">Principal</th><th class="r">CAC</th><th class="r">Acompte</th></tr></thead><tbody>${months}</tbody></table>
+        <p class="muted">Taux par défaut du Code général des impôts, modifiables dans l'application : à faire valider par votre comptable avant le dépôt de la DSF.</p>`);
     },
 
     async reconciliation(storeId, accountId, date, statementBalance) {

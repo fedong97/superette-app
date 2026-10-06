@@ -6,7 +6,7 @@ import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, tod
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'vat' | 'treasury' | 'bank' | 'accounts';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts';
 
 const JOURNALS: Record<JournalCode, string> = {
   VE: 'Ventes',
@@ -68,6 +68,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
           ['balance', 'Balance'],
           ['statements', 'États financiers'],
           ['vat', 'Déclaration de TVA'],
+          ['tax', 'Impôt sur le résultat'],
           ['treasury', 'Trésorerie'],
           ['bank', 'Rapprochement bancaire'],
           ['accounts', 'Plan comptable'],
@@ -78,6 +79,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'balance' && <Balance onOpen={openLedger} />}
       {tab === 'statements' && <Statements onOpen={openLedger} />}
       {tab === 'vat' && <VatReturn />}
+      {tab === 'tax' && <TaxReturn />}
       {tab === 'treasury' && <Treasury onOpen={openLedger} />}
       {tab === 'bank' && <BankReconciliation />}
       {tab === 'accounts' && <Accounts user={user} />}
@@ -646,7 +648,9 @@ function VatReturn() {
   const toast = useToast();
   const [month, setMonth] = useState(today().slice(0, 7));
   const vat = useLoad(() => call('accounting.vatReturn', month), [month]);
+  const inst = useLoad(() => call('tax.instalment', month), [month]);
   const v = vat.data;
+  const i = inst.data;
   return (
     <>
       <div className="filters">
@@ -678,6 +682,15 @@ function VatReturn() {
               <small>{v.due ? 'TVA à payer' : 'Crédit de TVA à reporter'}</small>
               <strong>{fcfa(v.due || v.credit)}</strong>
             </div>
+            {i && (
+              <div>
+                <small>Acompte d'impôt (minimum de perception)</small>
+                <strong>{fcfa(i.total)}</strong>
+                <small>
+                  {(i.rate / 100).toLocaleString('fr-FR')} % du CA HT + CAC · total DGI {fcfa(v.due + i.total)}
+                </small>
+              </div>
+            )}
           </div>
           <div className="grid2 top">
             <table className="list compact">
@@ -720,12 +733,281 @@ function VatReturn() {
                 ticket), la TVA déductible celle des factures et avoirs fournisseurs et des dépenses datés du mois.
               </p>
               <p className="muted">
-                Les acomptes d'impôt sur le revenu, les précomptes et le droit d'accises ne sont pas calculés ici : votre comptable les ajoute sur la
-                déclaration.
+                L'acompte d'impôt sur le résultat (minimum de perception) est calculé sur le chiffre d'affaires HT du mois, au taux du régime choisi dans
+                Fiscal › Impôt sur le résultat. Les précomptes et le droit d'accises restent à ajouter par votre comptable.
               </p>
             </div>
           </div>
         </>
+      )}
+    </>
+  );
+}
+
+type TaxForm = Result<'tax.assessment'>['settings']['form'];
+type TaxRegime = Result<'tax.assessment'>['settings']['regime'];
+type TaxAdjustment = Result<'tax.assessment'>['settings']['adjustments'][number];
+
+const pctFr = (bp: number) => `${(bp / 100).toLocaleString('fr-FR')} %`;
+
+/** Impôt sur le résultat : du résultat comptable au résultat fiscal, liquidation et acomptes mensuels. */
+function TaxReturn() {
+  const toast = useToast();
+  const thisYear = Number(today().slice(0, 4));
+  const [year, setYear] = useState(thisYear);
+  const st = useLoad(() => call('tax.assessment', year), [year]);
+  const a = st.data;
+  const [kind, setKind] = useState<TaxAdjustment['kind']>('add');
+  const [label, setLabel] = useState('');
+  const [amount, setAmount] = useState('');
+  const save = (input: Parameters<typeof call<'tax.saveSettings'>>[2], ok?: string) =>
+    call('tax.saveSettings', year, input).then(() => {
+      if (ok) toast.ok(ok);
+      st.reload();
+    }, toast.error);
+  const v = parseAmount(amount);
+  const signed = (n: number) => <td className={`r ${n < 0 ? 'neg' : ''}`}>{fcfa(n)}</td>;
+  const rate = (key: 'isRate' | 'reducedRate' | 'minimumRate', text: string) =>
+    a && (
+      <Field label={text}>
+        <input
+          key={`${year}-${key}-${a.settings.rates[key]}`}
+          inputMode="decimal"
+          defaultValue={(a.settings.rates[key] / 100).toLocaleString('fr-FR')}
+          onBlur={(e) => {
+            const n = Math.round(Number(e.target.value.replace(',', '.').replace('%', '').trim()) * 100);
+            if (Number.isFinite(n) && n !== a.settings.rates[key]) save({ rates: { [key]: n } }, 'Taux enregistré');
+          }}
+        />
+      </Field>
+    );
+  return (
+    <>
+      <div className="filters">
+        <label className="inline">
+          Exercice
+          <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {[0, 1, 2, 3].map((k) => (
+              <option key={k} value={thisYear - k}>
+                {thisYear - k}
+              </option>
+            ))}
+          </select>
+        </label>
+        {a && (
+          <>
+            <select value={a.settings.form} onChange={(e) => save({ form: e.target.value as TaxForm })}>
+              <option value="company">Société (impôt sur les sociétés)</option>
+              <option value="individual">Entreprise individuelle (IRPP, BIC)</option>
+            </select>
+            <select value={a.settings.regime} onChange={(e) => save({ regime: e.target.value as TaxRegime })}>
+              <option value="reel">Régime du réel</option>
+              <option value="simplifie">Régime simplifié</option>
+            </select>
+          </>
+        )}
+        <button style={{ marginLeft: 'auto' }} onClick={() => call('tax.print', year).catch(toast.error)}>
+          Imprimer (A4)
+        </button>
+        <button
+          className="primary"
+          disabled={!a || a.provisional || !a.toBook}
+          title={a?.provisional ? "L'impôt se constate une fois l'exercice clos" : undefined}
+          onClick={() =>
+            call('tax.book', year).then((n) => {
+              toast.ok(`Écriture passée : ${fcfa(Math.abs(n))} au compte 891`);
+              st.reload();
+            }, toast.error)
+          }
+        >
+          {a && !a.provisional && !a.toBook ? 'Impôt passé en comptabilité' : "Passer l'écriture d'impôt"}
+        </button>
+      </div>
+      {a && (
+        <div className="kpis">
+          <div>
+            <span>Chiffre d'affaires HT {a.provisional ? 'à ce jour' : year}</span>
+            <strong>{fcfa(a.turnoverHt)}</strong>
+          </div>
+          <div>
+            <span>Résultat fiscal</span>
+            <strong className={a.fiscalResult < 0 ? 'neg' : ''}>{fcfa(a.fiscalResult)}</strong>
+          </div>
+          <div>
+            <span>Impôt dû{a.provisional ? ' (provisoire)' : ''}</span>
+            <strong>{fcfa(a.due)}</strong>
+            <small>{a.due === a.minimum && a.tax.total < a.minimum ? 'minimum de perception' : `${a.settings.form === 'company' ? 'IS' : 'IRPP'} ${pctFr(a.rateApplied)} + CAC`}</small>
+          </div>
+          <div className={a.balance ? 'neg' : 'pos'}>
+            <span>Reste à payer après acomptes</span>
+            <strong>{fcfa(a.balance)}</strong>
+          </div>
+        </div>
+      )}
+      {a && (
+        <div className="grid2 top">
+          <section>
+            <table className="list compact">
+              <caption>Du résultat comptable au résultat fiscal</caption>
+              <tbody>
+                <tr>
+                  <td>Résultat net comptable avant impôt sur le résultat</td>
+                  {signed(a.resultBeforeTax)}
+                  <td />
+                </tr>
+                {a.settings.adjustments.map((x, k) => (
+                  <tr key={k}>
+                    <td>
+                      {x.kind === 'add' ? '+ Réintégration' : '- Déduction'} : {x.label}
+                    </td>
+                    <td className="r">{fcfa(x.kind === 'add' ? x.amount : -x.amount)}</td>
+                    <td className="r">
+                      <button className="link" onClick={() => save({ adjustments: a.settings.adjustments.filter((_, j) => j !== k) }, 'Ligne retirée')}>
+                        Retirer
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                <tr className="total">
+                  <td>Résultat fiscal</td>
+                  {signed(a.fiscalResult)}
+                  <td />
+                </tr>
+                <tr>
+                  <td>Déficits des exercices antérieurs (encore reportables)</td>
+                  <td className="r">
+                    <input
+                      key={`${year}-${a.settings.priorLosses}`}
+                      className="r"
+                      inputMode="numeric"
+                      defaultValue={a.settings.priorLosses || ''}
+                      placeholder="0"
+                      onBlur={(e) => {
+                        const n = parseAmount(e.target.value || '0');
+                        if (n !== null && n !== a.settings.priorLosses) save({ priorLosses: n }, 'Déficit antérieur enregistré');
+                      }}
+                    />
+                  </td>
+                  <td />
+                </tr>
+                <tr className="total">
+                  <td>Bénéfice imposable{a.lossesUsed ? ` (déficit imputé : ${fcfa(a.lossesUsed)})` : ''}</td>
+                  <td className="r">{fcfa(a.taxableIncome)}</td>
+                  <td />
+                </tr>
+                <tr>
+                  <td>
+                    {a.settings.form === 'company' ? `Impôt sur les sociétés à ${pctFr(a.rateApplied)}` : `IRPP au barème (taux moyen ${pctFr(a.rateApplied)})`}, plus CAC
+                    10 %
+                  </td>
+                  <td className="r">{fcfa(a.tax.total)}</td>
+                  <td />
+                </tr>
+                <tr>
+                  <td>Minimum de perception (total des acomptes)</td>
+                  <td className="r">{fcfa(a.minimum)}</td>
+                  <td />
+                </tr>
+                <tr className="total">
+                  <td>Impôt dû (le plus élevé des deux)</td>
+                  <td className="r">{fcfa(a.due)}</td>
+                  <td />
+                </tr>
+                <tr className="total">
+                  <td>Solde à payer après acomptes</td>
+                  <td className="r">{fcfa(a.balance)}</td>
+                  <td />
+                </tr>
+                {a.lossCarriedForward > 0 && (
+                  <tr className="muted">
+                    <td>Déficit reportable sur les {4} exercices suivants</td>
+                    <td className="r">{fcfa(a.lossCarriedForward)}</td>
+                    <td />
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <form
+              className="filters"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!v || !label.trim()) return;
+                save({ adjustments: [...a.settings.adjustments, { kind, label: label.trim(), amount: v }] }, 'Ligne ajoutée').then(() => {
+                  setLabel('');
+                  setAmount('');
+                });
+              }}
+            >
+              <select value={kind} onChange={(e) => setKind(e.target.value as TaxAdjustment['kind'])}>
+                <option value="add">Réintégration</option>
+                <option value="deduct">Déduction</option>
+              </select>
+              <input
+                list="tax-adjustments"
+                placeholder="Amendes et pénalités, dons au-delà du plafond…"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <datalist id="tax-adjustments">
+                <option value="Amendes et pénalités" />
+                <option value="Dons et libéralités au-delà du plafond" />
+                <option value="Cadeaux et réceptions non justifiés" />
+                <option value="Amortissements excédentaires" />
+                <option value="Charges sans facture ou payées en espèces au-delà du seuil" />
+                <option value="Rémunération de l'exploitant" />
+                <option value="Produits déjà imposés (dividendes reçus)" />
+              </datalist>
+              <input inputMode="numeric" placeholder="Montant" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: '9em' }} />
+              <button type="submit" disabled={!v || !label.trim()}>
+                Ajouter
+              </button>
+            </form>
+            <details>
+              <summary>Taux appliqués</summary>
+              <div className="filters">
+                {a.settings.form === 'company' && rate('isRate', 'Taux normal IS (%)')}
+                {a.settings.form === 'company' && rate('reducedRate', 'Taux réduit, CA ≤ 3 milliards (%)')}
+                {rate('minimumRate', 'Minimum de perception (%)')}
+              </div>
+              <p className="muted">
+                Taux du Code général des impôts par défaut, hors centimes additionnels communaux (10 % de l'impôt, ajoutés au calcul). L'IRPP des entreprises
+                individuelles suit le barème 10 / 15 / 25 / 35 %. Faites valider ces taux par votre comptable.
+              </p>
+            </details>
+          </section>
+          <table className="list compact">
+            <caption>Acomptes mensuels (minimum de perception)</caption>
+            <thead>
+              <tr>
+                <th>Mois</th>
+                <th className="r">CA HT</th>
+                <th className="r">Acompte</th>
+              </tr>
+            </thead>
+            <tbody>
+              {a.instalments.map((m) => (
+                <tr key={m.month}>
+                  <td>{new Date(`${m.month}-01T00:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</td>
+                  <td className="r">{fcfa(m.turnoverHt)}</td>
+                  <td className="r">{fcfa(m.total)}</td>
+                </tr>
+              ))}
+              <tr className="total">
+                <td>Total</td>
+                <td className="r">{fcfa(a.turnoverHt)}</td>
+                <td className="r">{fcfa(a.minimum)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {a && (
+        <p className="muted">
+          L'impôt dû est le plus élevé de l'impôt calculé sur le bénéfice et du minimum de perception. Les acomptes se paient chaque mois avec la TVA ; passez
+          leur paiement au débit du compte 441. En fin d'exercice, « Passer l'écriture d'impôt » constate l'impôt dû (débit 891, crédit 441) : le solde du 441
+          est alors ce qui reste à payer.
+        </p>
       )}
     </>
   );

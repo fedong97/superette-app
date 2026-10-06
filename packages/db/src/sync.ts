@@ -49,6 +49,7 @@ const TABLES: Record<string, string> = {
   expense_category: 'expense_categories',
   expense: 'expenses',
   bank_line: 'bank_lines',
+  tax_year: 'tax_years',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -309,6 +310,13 @@ export class SyncService extends Base {
         const local = this.db.prepare('SELECT updated_at FROM bank_lines WHERE id = ?').pluck().get(event.entityId) as string | undefined;
         if (local && local > String(p['updated_at'])) return;
         this.upsert('bank_lines', p);
+        return;
+      }
+      case 'tax_year': {
+        // Paramètres fiscaux modifiés sur deux PC : la modification la plus récente l'emporte.
+        const local = this.db.prepare('SELECT updated_at FROM tax_years WHERE id = ?').pluck().get(event.entityId) as string | undefined;
+        if (local && local > String(p['updated_at'])) return;
+        this.upsert('tax_years', p);
         return;
       }
       case 'account': {

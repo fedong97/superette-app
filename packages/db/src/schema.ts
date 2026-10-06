@@ -692,4 +692,33 @@ CREATE TABLE bank_lines (
 CREATE INDEX bank_lines_account ON bank_lines(store_id, account_id, op_date);
 `,
   },
+  {
+    version: 9,
+    name: 'impôt sur le résultat',
+    sql: `
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES
+  ('441', 'État, impôt sur les bénéfices', NULL),
+  ('891', 'Impôts sur les bénéfices de l''exercice', NULL);
+
+-- Paramètres fiscaux d'un exercice : forme (société à l'IS ou entreprise individuelle à l'IRPP),
+-- régime, taux (si différents de ceux du CGI), réintégrations et déductions extra-comptables.
+-- Identifiant fixe « magasin:année » pour que deux PC ne créent pas deux fiches.
+CREATE TABLE tax_years (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  year INTEGER NOT NULL,
+  form TEXT NOT NULL DEFAULT 'company' CHECK (form IN ('company', 'individual')),
+  regime TEXT NOT NULL DEFAULT 'reel' CHECK (regime IN ('reel', 'simplifie')),
+  -- JSON : { isRate, reducedRate, minimumRate } en points de base, absents = taux du CGI.
+  rates TEXT NOT NULL DEFAULT '{}',
+  -- JSON : [{ kind: 'add' | 'deduct', label, amount }]
+  adjustments TEXT NOT NULL DEFAULT '[]',
+  -- Déficits des exercices antérieurs encore reportables.
+  prior_losses INTEGER NOT NULL DEFAULT 0 CHECK (prior_losses >= 0),
+  user_id TEXT REFERENCES users(id),
+  updated_at TEXT NOT NULL,
+  UNIQUE (store_id, year)
+);
+`,
+  },
 ];

@@ -57,6 +57,11 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Tableau des flux de trésorerie (TFT) par la méthode indirecte : capacité d'autofinancement, variations du bilan, investissements, capitaux propres et emprunts (références ZA… ZH), avec contrôle de la trésorerie finale contre le bilan. Les à-nouveaux de reprise comptent comme trésorerie de départ.
 - Impression A4 (bilan actif, bilan passif, compte de résultat, tableau des flux) et export CSV des postes pour la saisie de la DSF. Les comptes qu'aucun poste ne reprend sont signalés. Les notes annexes restent à faire.
 
+**Impôt sur le résultat**
+- Fiscal › Impôt sur le résultat : forme (société à l'IS ou entreprise individuelle à l'IRPP), régime (réel ou simplifié) et taux, exercice par exercice. Taux du CGI par défaut, modifiables : IS 30 % (25 % jusqu'à 3 milliards de chiffre d'affaires), minimum de perception 2 % au réel et 5 % au simplifié, barème IRPP 10 / 15 / 25 / 35 %, centimes additionnels communaux de 10 %.
+- Acompte mensuel calculé sur le chiffre d'affaires HT et ajouté à la déclaration de TVA du mois (total à verser à la DGI).
+- Liquidation annuelle : résultat comptable, réintégrations et déductions, déficits antérieurs, impôt calculé comparé au minimum de perception, solde après acomptes, déficit reportable. Impression A4 et écriture de fin d'exercice (débit 891, crédit 441).
+
 **Rapprochement bancaire**
 - Comptabilité › Rapprochement bancaire (ou Trésorerie › Rapprochement bancaire), pour chaque compte de banque, MoMo ou Orange Money (classe 52 à 55).
 - Import du relevé en CSV tel que la banque ou l'opérateur le fournit : colonnes reconnues automatiquement (date, libellé, référence, débit/crédit ou montant signé, frais), séparateur `;`, `,` ou tabulation, fichiers Excel enregistrés en CSV acceptés. Un relevé importé deux fois, ou sur deux PC, ne crée pas de doublon.
@@ -153,4 +158,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Notes annexes de la DSF et calcul de l'impôt sur le résultat.
+2. Notes annexes de la DSF.

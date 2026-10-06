@@ -19,6 +19,20 @@ const STYLE = `
   .big { font-size: 15px; font-weight: bold; }
 `;
 
+const A4_STYLE = `
+  @page { size: A4; margin: 15mm; }
+  body { font: 12px/1.4 'Segoe UI', Arial, sans-serif; color: #111; }
+  .head { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+  .box { border: 1px solid #999; padding: 8px 12px; min-width: 240px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: left; }
+  th { background: #e8eef7; }
+  .r { text-align: right; }
+  .total td { font-weight: bold; }
+  .sign { margin-top: 40px; display: flex; justify-content: space-between; }
+`;
+
 /** Ticket de caisse 80 mm et rapport Z, imprimés par le pilote Windows de l'imprimante. */
 export function createPrinter(s: Services): Printer {
   async function printHtml(body: string): Promise<void> {
@@ -31,6 +45,22 @@ export function createPrinter(s: Services): Printer {
       await new Promise<void>((resolve, reject) =>
         win.webContents.print({ silent: true, printBackground: false, deviceName, margins: { marginType: 'none' } }, (ok, reason) =>
           ok ? resolve() : reject(new Error(`Impression impossible : ${reason}`)),
+        ),
+      );
+    } finally {
+      win.destroy();
+    }
+  }
+
+  /** Document A4 (bon de commande) : la fenêtre d'impression Windows s'ouvre pour choisir l'imprimante ou « Enregistrer en PDF ». */
+  async function printA4(body: string): Promise<void> {
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    try {
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${body}</body></html>`;
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await new Promise<void>((resolve, reject) =>
+        win.webContents.print({ silent: false, printBackground: true, pageSize: 'A4' }, (ok, reason) =>
+          ok || reason === 'cancelled' ? resolve() : reject(new Error(`Impression impossible : ${reason}`)),
         ),
       );
     } finally {
@@ -89,6 +119,33 @@ export function createPrinter(s: Services): Printer {
         <div class="b">Espèces</div><table>${row('Fond de caisse', z.cash.openingFloat)}${row('Ventes espèces', z.cash.cashSales)}
         ${row('Remboursements', -z.cash.cashRefunds)}${row('Apports', z.cash.cashIn)}${row('Prélèvements', -z.cash.cashOut)}
         ${row('Théorique', z.cash.expected)}${z.counted !== null ? row('Compté', z.counted) + row('Écart', z.difference ?? 0) : ''}</table>`);
+    },
+
+    async purchaseOrder(orderId) {
+      const o = s.purchases.getOrder(orderId);
+      const sup = s.purchases.getSupplier(o.supplier_id);
+      const store = s.admin.getStore(o.store_id);
+      const rows = o.lines
+        .map(
+          (l) => `<tr><td>${esc(l.supplier_ref ?? '')}</td><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td>
+            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
+        )
+        .join('');
+      await printA4(`<div class="head">
+          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
+            .filter(Boolean)
+            .map((v) => esc(v!))
+            .join('<br>')}</div>
+          <div class="box"><b>${esc(sup.name)}</b><br>${[sup.contact, sup.address, sup.phone, sup.email].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
+        </div>
+        <h1>Bon de commande ${esc(o.number)}</h1>
+        <div>Date : ${new Date(`${o.order_date}T00:00:00`).toLocaleDateString('fr-FR')}${
+          o.expected_date ? ` · Livraison souhaitée : ${new Date(`${o.expected_date}T00:00:00`).toLocaleDateString('fr-FR')}` : ''
+        } · Livrer à : ${esc(o.warehouse_name)}</div>
+        <table><thead><tr><th>Réf. fournisseur</th><th>Code</th><th>Désignation</th><th class="r">Quantité</th><th class="r">PU HT</th><th class="r">Total HT</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="5">Total HT (FCFA)</td><td class="r">${money(o.total_ht)}</td></tr></tbody></table>
+        ${o.notes ? `<p>${esc(o.notes)}</p>` : ''}
+        <div class="sign"><div>Établi par : ${esc(o.user_name ?? '')}</div><div>Signature et cachet</div></div>`);
     },
 
     async list() {

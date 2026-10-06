@@ -122,6 +122,23 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     for (const s of [pc1, pc2]) expect(stockOf(s, ctx1.storeId)?.qty).toBe(82000);
   });
 
+  it('une commande passée sur le PC 1 est réceptionnée sur le PC 2', async () => {
+    const sabc = pc1.purchases.saveSupplier(ctx1.userId, { name: 'SABC', paymentTermsDays: 30 });
+    pc1.purchases.setSupplierArticle(ctx1.userId, { supplierId: sabc.id, articleId, unitCost: 450, packQty: 12_000 });
+    const order = pc1.purchases.createOrder(ctx1, { supplierId: sabc.id, warehouseId: pc1.admin.salesWarehouse(ctx1.storeId).id, lines: [{ articleId, qty: 24_000, unitCost: 450 }] });
+    pc1.purchases.setOrderStatus(ctx1, order.id, 'sent');
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    expect(pc2.purchases.articleSuppliers(articleId)[0]?.supplier_name).toBe('SABC');
+    const remote = pc2.purchases.getOrder(order.id);
+    const r = pc2.purchases.receiveOrder(ctx2, order.id, { deliveryNote: 'BL 9', lines: [{ orderLineId: remote.lines[0]!.id, articleId, qty: 12_000, unitCost: 450 }] });
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    expect(pc1.purchases.getOrder(order.id).state).toBe('partial');
+    expect(pc1.purchases.getReception(r.id).total_ht).toBe(5_400);
+    for (const s of [pc1, pc2]) expect(stockOf(s, ctx1.storeId)?.qty).toBe(94_000);
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);
@@ -132,5 +149,7 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(pc3.db.prepare('SELECT COUNT(*) FROM articles').pluck().get()).toBe(3);
     expect(pc3.db.prepare('SELECT COUNT(*) FROM sales').pluck().get()).toBe(0);
     expect(pc3.db.prepare('SELECT COUNT(*) FROM stock_movements').pluck().get()).toBe(0);
+    expect(pc3.purchases.listSuppliers().map((f) => f.name)).toEqual(['SABC']);
+    expect(pc3.db.prepare('SELECT COUNT(*) FROM purchase_orders').pluck().get()).toBe(0);
   });
 });

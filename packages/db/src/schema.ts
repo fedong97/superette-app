@@ -302,4 +302,135 @@ INSERT INTO outbox (id, entity, entity_id, op, payload, store_id, register_id, c
   FROM users u WHERE NOT EXISTS (SELECT 1 FROM outbox o WHERE o.entity = 'user' AND o.entity_id = u.id);
 `,
   },
+  {
+    version: 3,
+    name: 'fournisseurs et achats',
+    sql: `
+CREATE TABLE suppliers (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  contact TEXT,
+  phone TEXT,
+  email TEXT,
+  address TEXT,
+  taxpayer_number TEXT,
+  payment_terms_days INTEGER NOT NULL DEFAULT 0,
+  lead_time_days INTEGER NOT NULL DEFAULT 2,
+  franco INTEGER,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX suppliers_name ON suppliers(name);
+
+-- Articles référencés chez un fournisseur : référence, prix négocié HT, colisage.
+CREATE TABLE supplier_articles (
+  id TEXT PRIMARY KEY,
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  supplier_ref TEXT,
+  unit_cost INTEGER NOT NULL DEFAULT 0,
+  pack_qty INTEGER NOT NULL DEFAULT 1000,
+  is_main INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  UNIQUE (supplier_id, article_id)
+);
+CREATE INDEX supplier_articles_article ON supplier_articles(article_id);
+
+-- Bon de commande. « Partiellement reçu » et « reçu » se déduisent des réceptions.
+CREATE TABLE purchase_orders (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  status TEXT NOT NULL CHECK (status IN ('draft', 'sent', 'closed', 'cancelled')),
+  order_date TEXT NOT NULL,
+  expected_date TEXT,
+  notes TEXT,
+  user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX purchase_orders_supplier ON purchase_orders(supplier_id, order_date);
+
+CREATE TABLE purchase_order_lines (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  line_no INTEGER NOT NULL,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  qty INTEGER NOT NULL,
+  unit_cost INTEGER NOT NULL
+);
+CREATE INDEX purchase_order_lines_order ON purchase_order_lines(order_id);
+
+-- Bon de réception (avec ou sans commande). Les mouvements de stock portent ref_type 'reception'.
+CREATE TABLE receptions (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  supplier_id TEXT REFERENCES suppliers(id),
+  order_id TEXT REFERENCES purchase_orders(id),
+  delivery_note TEXT,
+  invoice_id TEXT,
+  user_id TEXT REFERENCES users(id),
+  received_at TEXT NOT NULL
+);
+CREATE INDEX receptions_supplier ON receptions(supplier_id, received_at);
+CREATE INDEX receptions_order ON receptions(order_id);
+
+CREATE TABLE reception_lines (
+  id TEXT PRIMARY KEY,
+  reception_id TEXT NOT NULL REFERENCES receptions(id) ON DELETE CASCADE,
+  line_no INTEGER NOT NULL,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  order_line_id TEXT,
+  qty INTEGER NOT NULL,
+  unit_cost INTEGER NOT NULL,
+  vat_rate_bp INTEGER NOT NULL DEFAULT 0,
+  lot_id TEXT,
+  lot_number TEXT,
+  expiry TEXT
+);
+CREATE INDEX reception_lines_reception ON reception_lines(reception_id);
+CREATE INDEX reception_lines_order_line ON reception_lines(order_line_id);
+
+-- Facture ou avoir fournisseur ; l'état payé se déduit des règlements.
+CREATE TABLE supplier_invoices (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL CHECK (kind IN ('invoice', 'credit_note')),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  supplier_number TEXT NOT NULL,
+  invoice_date TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  total_ht INTEGER NOT NULL,
+  total_tva INTEGER NOT NULL,
+  total_ttc INTEGER NOT NULL,
+  received_ht INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX supplier_invoices_supplier ON supplier_invoices(supplier_id, invoice_date);
+CREATE UNIQUE INDEX supplier_invoices_ref ON supplier_invoices(supplier_id, kind, supplier_number);
+
+CREATE TABLE supplier_payments (
+  id TEXT PRIMARY KEY,
+  invoice_id TEXT NOT NULL REFERENCES supplier_invoices(id),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  method TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  reference TEXT,
+  paid_at TEXT NOT NULL,
+  user_id TEXT REFERENCES users(id)
+);
+CREATE INDEX supplier_payments_invoice ON supplier_payments(invoice_id);
+`,
+  },
 ];

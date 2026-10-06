@@ -20,6 +20,8 @@ export interface ReceptionLine {
   unitCost: Fcfa;
   lotNumber?: string | null;
   expiry?: string | null;
+  /** Ligne de bon de commande soldée par cette réception. */
+  orderLineId?: string | null;
 }
 
 export interface StockRow {
@@ -204,17 +206,46 @@ export class StockService extends Base {
    * Réception de marchandise (bon de réception simplifié ; la chaîne
    * commande/réception/facture fournisseur arrive en phase 2).
    */
-  receive(ctx: Context, input: { warehouseId: string; reference?: string; supplier?: string; lines: ReceptionLine[] }): { id: string } {
+  receive(
+    ctx: Context,
+    input: { warehouseId: string; reference?: string; supplier?: string; supplierId?: string | null; orderId?: string | null; lines: ReceptionLine[] },
+  ): { id: string; number: string } {
     if (input.lines.length === 0) throw new AppError('Réception vide', 'INVALID');
     return this.tx(() => {
       const receptionId = newId();
+      const number = `BR-${this.stationPrefix()}-${String(this.nextCounter('reception.number')).padStart(5, '0')}`;
       const now = this.now();
-      for (const line of input.lines) {
+      const supplierName = input.supplierId
+        ? ((this.db.prepare('SELECT name FROM suppliers WHERE id = ?').pluck().get(input.supplierId) as string | undefined) ?? input.supplier)
+        : input.supplier;
+      const reception = {
+        id: receptionId,
+        number,
+        store_id: ctx.storeId,
+        warehouse_id: input.warehouseId,
+        supplier_id: input.supplierId ?? null,
+        order_id: input.orderId ?? null,
+        delivery_note: input.reference?.trim() || null,
+        invoice_id: null,
+        user_id: ctx.userId,
+        received_at: now,
+      };
+      this.db
+        .prepare(
+          `INSERT INTO receptions (id, number, store_id, warehouse_id, supplier_id, order_id, delivery_note, invoice_id, user_id, received_at)
+           VALUES (@id, @number, @store_id, @warehouse_id, @supplier_id, @order_id, @delivery_note, @invoice_id, @user_id, @received_at)`,
+        )
+        .run(reception);
+      const insertLine = this.db.prepare(
+        `INSERT INTO reception_lines (id, reception_id, line_no, article_id, order_line_id, qty, unit_cost, vat_rate_bp, lot_id, lot_number, expiry)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      input.lines.forEach((line, i) => {
         if (line.qty <= 0) throw new AppError('Quantité reçue invalide', 'INVALID');
         if (!Number.isSafeInteger(line.unitCost) || line.unitCost < 0) throw new AppError("Coût d'achat invalide", 'INVALID');
-        const article = this.db.prepare('SELECT perishable, name FROM articles WHERE id = ?').get(line.articleId) as
-          | { perishable: number; name: string }
-          | undefined;
+        const article = this.db
+          .prepare('SELECT a.perishable, a.name, v.rate_bp FROM articles a JOIN vat_rates v ON v.id = a.vat_rate_id WHERE a.id = ?')
+          .get(line.articleId) as { perishable: number; name: string; rate_bp: number } | undefined;
         if (!article) throw new AppError('Article introuvable', 'NOT_FOUND');
         if (article.perishable && !line.expiry) {
           throw new AppError(`Date limite obligatoire pour « ${article.name} » (article périssable)`, 'EXPIRY_REQUIRED');
@@ -236,14 +267,29 @@ export class StockService extends Base {
           qty: line.qty,
           unitCost: line.unitCost,
           lotId,
-          reason: [input.supplier, input.reference].filter(Boolean).join(' · ') || null,
+          reason: [supplierName, input.reference].filter(Boolean).join(' · ') || null,
           refType: 'reception',
           refId: receptionId,
         });
+        insertLine.run(
+          newId(),
+          receptionId,
+          i + 1,
+          line.articleId,
+          line.orderLineId ?? null,
+          line.qty,
+          line.unitCost,
+          article.rate_bp,
+          lotId,
+          line.lotNumber ?? null,
+          line.expiry ?? null,
+        );
         this.db.prepare('UPDATE articles SET purchase_price = ?, updated_at = ? WHERE id = ?').run(line.unitCost, now, line.articleId);
-      }
-      this.audit(ctx.userId, 'stock.receive', 'reception', receptionId, { reference: input.reference, lines: input.lines.length });
-      return { id: receptionId };
+        this.enqueue(null, 'article', line.articleId, 'upsert', {});
+      });
+      this.enqueue(ctx, 'reception', receptionId, 'upsert', reception);
+      this.audit(ctx.userId, 'stock.receive', 'reception', receptionId, { number, reference: input.reference, lines: input.lines.length });
+      return { id: receptionId, number };
     });
   }
 

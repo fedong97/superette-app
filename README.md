@@ -25,6 +25,15 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Inventaire tournant sans fermer le magasin : chaque comptage est horodaté, les ventes passées depuis sont déduites.
 - Alertes de péremption (J-7, J-3, J-1, périmé), niveaux rupture/alerte/surstock.
 
+**Fournisseurs et achats**
+- Fiches fournisseurs (NIU, délais de paiement et de livraison, franco), articles référencés avec référence fournisseur, prix négocié, colisage et fournisseur principal.
+- Bons de commande numérotés (BC-…), brouillon puis envoyé, impression A4, réception en une ou plusieurs fois avec reliquat, écart de prix signalé, solde ou annulation.
+- Réception libre sans commande toujours possible depuis le Stock ; chaque réception produit un bon de réception (BR-…).
+- Factures et avoirs fournisseurs (FF-…/AF-…) rapprochés des bons de réception, refus des doublons, échéance calculée sur le délai de paiement.
+- Règlements en espèces, virement, chèque, MTN Mobile Money ou Orange Money (référence obligatoire hors espèces), échéancier avec retards, solde dû par fournisseur.
+- Proposition de commande : ventes moyennes des 4 dernières semaines, délai de livraison, stock d'alerte et colisage ; un bon par fournisseur en un clic.
+- Commandes, réceptions et factures se synchronisent entre les PC du magasin ; les fiches fournisseurs sont communes à tous les magasins.
+
 **Pilotage et administration**
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
 - Export CSV des ventes pour le comptable (en attendant le module Comptabilité).
@@ -100,4 +109,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Phase 2 : fournisseurs et achats (commande, réception, facture, réapprovisionnement automatique).
+2. Phase 2 (suite) : clients et ventes à crédit (V. crédit, facture A4, relances).

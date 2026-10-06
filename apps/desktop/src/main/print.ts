@@ -352,6 +352,7 @@ export function createPrinter(s: Services): Printer {
     async statements(storeId, from, to) {
       const store = s.admin.getStore(storeId);
       const st = s.statements.statements(storeId, { from, to });
+      const flows = s.statements.cashFlow(storeId, { from, to });
       const v = (n: number | undefined) => (n ? money(n) : '-');
       const years = `<th class="r">Exercice au ${dayFr(st.to)}</th><th class="r">Exercice au ${dayFr(st.previousTo)}</th>`;
       const row = (r: { ref: string; label: string; total?: boolean }, cells: string) =>
@@ -367,7 +368,10 @@ export function createPrinter(s: Services): Printer {
         <table><thead><tr><th>Réf</th><th>Passif</th>${years}</tr></thead><tbody>${lines(st.liabilities)}</tbody></table>
         <div style="page-break-before: always"></div>${title('Compte de résultat')}
         <table><thead><tr><th>Réf</th><th>Libellé</th>${years}</tr></thead><tbody>${lines(st.income)}</tbody></table>
-        <p class="muted">Stock de marchandises valorisé au coût moyen pondéré (CMUP) d'après les mouvements de stock : ${money(st.stock.opening)} au début, ${money(st.stock.closing)} à la clôture.</p>`);
+        <p class="muted">Stock de marchandises valorisé au coût moyen pondéré (CMUP) d'après les mouvements de stock : ${money(st.stock.opening)} au début, ${money(st.stock.closing)} à la clôture.</p>
+        <div style="page-break-before: always"></div>${title('Tableau des flux de trésorerie')}
+        <table><thead><tr><th>Réf</th><th>Libellé</th>${years}</tr></thead><tbody>${lines(flows.rows)}</tbody></table>
+        ${flows.check.gap ? `<p>Trésorerie au bilan : ${money(flows.check.treasury)}, écart de ${money(flows.check.gap)} avec la ligne ZH, à analyser.</p>` : ''}`);
     },
 
     async reconciliation(storeId, accountId, date, statementBalance) {

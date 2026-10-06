@@ -463,11 +463,13 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
   const toast = useToast();
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear);
-  const [view, setView] = useState<'sheet' | 'income'>('sheet');
+  const [view, setView] = useState<'sheet' | 'income' | 'flows'>('sheet');
   const from = `${year}-01-01`;
   const to = year === thisYear ? today() : `${year}-12-31`;
   const st = useLoad(() => call('accounting.statements', { from, to }), [from, to]);
+  const flows = useLoad(() => call('accounting.cashFlow', { from, to }), [from, to]);
   const d = st.data;
+  const f = flows.data;
   const cell = (v: number | undefined) => <td className={`r ${v && v < 0 ? 'neg' : ''}`}>{v ? fcfa(v) : '-'}</td>;
   const line = (r: StatementRow, extra?: React.ReactNode) => (
     <tr key={r.ref} className={r.total ? 'total' : ''}>
@@ -503,6 +505,9 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
           </button>
           <button className={view === 'income' ? 'active' : ''} onClick={() => setView('income')}>
             Compte de résultat
+          </button>
+          <button className={view === 'flows' ? 'active' : ''} onClick={() => setView('flows')}>
+            Flux de trésorerie
           </button>
         </div>
         <button style={{ marginLeft: 'auto' }} onClick={() => call('accounting.printStatements', from, to).catch(toast.error)}>
@@ -600,7 +605,33 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
           <tbody>{d.income.map((l) => line(l))}</tbody>
         </table>
       )}
-      {d && (
+      {f && view === 'flows' && (
+        <>
+          {f.check.gap !== 0 && (
+            <p className="neg">
+              La trésorerie du bilan ({fcfa(f.check.treasury)}) diffère de la ligne ZH de {fcfa(f.check.gap)} : une écriture sort du schéma habituel (immobilisation ou capital
+              passé sans contrepartie de trésorerie, par exemple). Vérifiez-la avant de remettre le tableau.
+            </p>
+          )}
+          <table className="list compact statements">
+            <thead>
+              <tr>
+                <th />
+                <th>Tableau des flux de trésorerie</th>
+                {heads}
+              </tr>
+            </thead>
+            <tbody>{f.rows.map((l) => line(l))}</tbody>
+          </table>
+        </>
+      )}
+      {d && view === 'flows' && (
+        <p className="muted">
+          Méthode indirecte du SYSCOHADA : on part du résultat net, on retire ce qui ne se paie pas (amortissements, provisions, cessions), puis on suit les variations du
+          bilan. Les à-nouveaux de reprise comptent comme trésorerie de départ, pas comme des flux. La ligne ZH doit égaler la trésorerie du bilan.
+        </p>
+      )}
+      {d && view !== 'flows' && (
         <p className="muted">
           Le stock de marchandises est valorisé au coût moyen pondéré d'après les mouvements de stock ({fcfa(d.stock.opening)} au début de l'exercice, {fcfa(d.stock.closing)}{' '}
           à la date choisie) : l'écart passe en variation de stock (compte 6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à

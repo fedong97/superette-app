@@ -183,21 +183,26 @@ export class ReconciliationService extends Base {
     this.requireAccount(accountId);
     const state = this.state(ctx.storeId, accountId, '9999-12-31');
     const free = new Map(state.bookOnly.map((b) => [b.key, b]));
+    const lines = new Map([...state.bankOnly, ...state.lost].map((l) => [l.id, l]));
     let count = 0;
-    for (const l of [...state.bankOnly, ...state.lost]) {
-      const text = `${l.label} ${l.reference ?? ''}`.toLowerCase();
-      const candidates = [...free.values()]
-        .filter((b) => b.amount === l.amount && Math.abs(days(b.date, l.op_date)) <= 10)
-        .map((b) => ({ b, cited: b.ref && text.includes(b.ref.toLowerCase()) ? 0 : 1, gap: Math.abs(days(b.date, l.op_date)) }))
-        .sort((a, b) => a.cited - b.cited || a.gap - b.gap);
-      const best = candidates[0];
-      if (!best) continue;
-      // Deux écritures aussi plausibles l'une que l'autre : on laisse choisir l'utilisateur.
-      const second = candidates[1];
-      if (second && second.cited === best.cited && second.gap === best.gap) continue;
-      this.setMatch(ctx, l.id, best.b.key);
-      free.delete(best.b.key);
-      count++;
+    // D'abord les lignes qui citent la pièce, puis les autres : le résultat ne dépend pas de l'ordre des lignes.
+    for (const citedOnly of [true, false]) {
+      for (const l of lines.values()) {
+        const text = `${l.label} ${l.reference ?? ''}`.toLowerCase();
+        const candidates = [...free.values()]
+          .filter((b) => b.amount === l.amount && Math.abs(days(b.date, l.op_date)) <= 10)
+          .map((b) => ({ b, cited: b.ref && text.includes(b.ref.toLowerCase()) ? 0 : 1, gap: Math.abs(days(b.date, l.op_date)) }))
+          .sort((a, b) => a.cited - b.cited || a.gap - b.gap);
+        const best = candidates[0];
+        if (!best || (citedOnly && best.cited)) continue;
+        // Deux écritures aussi plausibles l'une que l'autre : on laisse choisir l'utilisateur.
+        const second = candidates[1];
+        if (second && second.cited === best.cited && second.gap === best.gap) continue;
+        this.setMatch(ctx, l.id, best.b.key);
+        free.delete(best.b.key);
+        lines.delete(l.id);
+        count++;
+      }
     }
     return count;
   }

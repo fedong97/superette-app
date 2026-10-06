@@ -73,6 +73,9 @@ describe('rapprochement bancaire', () => {
     s.reconciliation.importLines(ctx, '5521', [{ date: '2026-10-06', label: 'Paiement', reference: null, amount: -10_000 }]);
     expect(s.reconciliation.autoMatch(ctx, '5521')).toBe(0);
     s.reconciliation.importLines(ctx, '5521', [{ date: '2026-10-06', label: 'Paiement DEP-DLA11-00002', reference: 'MP2', amount: -10_000 }]);
-    expect(s.reconciliation.autoMatch(ctx, '5521')).toBe(1);
+    // La ligne qui cite la pièce prend la sienne ; il ne reste alors qu'une écriture possible pour l'autre.
+    expect(s.reconciliation.autoMatch(ctx, '5521')).toBe(2);
+    const st = s.reconciliation.state(store.id, '5521');
+    expect(st.matched.find((m) => m.bank.reference === 'MP2')!.book.ref).toBe('DEP-DLA11-00002');
   });
 });

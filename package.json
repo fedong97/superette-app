@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -p packages/core && tsc -p packages/db && npm run typecheck -w @superette/desktop",
+    "typecheck": "tsc -p packages/core && tsc -p packages/db && tsc -p apps/server --noEmit && npm run typecheck -w @superette/desktop",
     "dev": "npm run dev -w @superette/desktop",
     "build:win": "npm run build:win -w @superette/desktop",
     "pretest": "npm rebuild better-sqlite3 --silent"

@@ -105,6 +105,59 @@ export class StockService extends Base {
     return { unitCost };
   }
 
+  /** Crée un lot ; sa quantité est ensuite tenue par les mouvements qui le citent. */
+  private insertLot(
+    ctx: Context,
+    lot: { id: string; articleId: string; warehouseId: string; lotNumber?: string | null; expiry?: string | null; qty: Milli; receivedAt?: string },
+  ): void {
+    const row = {
+      id: lot.id,
+      article_id: lot.articleId,
+      warehouse_id: lot.warehouseId,
+      lot_number: lot.lotNumber ?? null,
+      expiry: lot.expiry ?? null,
+      qty: lot.qty,
+      received_at: lot.receivedAt ?? this.now(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO lots (id, article_id, warehouse_id, lot_number, expiry, qty, received_at)
+         VALUES (@id, @article_id, @warehouse_id, @lot_number, @expiry, @qty, @received_at)`,
+      )
+      .run(row);
+    this.enqueue(ctx, 'lot', lot.id, 'upsert', row);
+  }
+
+  /**
+   * Recalcule le stock d'un article dans un dépôt en rejouant ses mouvements
+   * dans l'ordre chronologique (quantité et CMUP). Utilisé après réception de
+   * mouvements d'autres caisses : tous les postes obtiennent le même résultat.
+   */
+  recompute(articleId: string, warehouseId: string): void {
+    const moves = this.db
+      .prepare('SELECT type, qty, unit_cost FROM stock_movements WHERE article_id = ? AND warehouse_id = ? ORDER BY at, id')
+      .all(articleId, warehouseId) as { type: MovementType; qty: number; unit_cost: number }[];
+    let qty = 0;
+    let avg = 0;
+    for (const m of moves) {
+      if (m.qty > 0 && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN')) avg = weightedAverageCost(qty, avg, m.qty, m.unit_cost);
+      qty += m.qty;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO stock (article_id, warehouse_id, qty, avg_cost) VALUES (?, ?, ?, ?)
+         ON CONFLICT(article_id, warehouse_id) DO UPDATE SET qty = excluded.qty, avg_cost = excluded.avg_cost`,
+      )
+      .run(articleId, warehouseId, qty, avg);
+  }
+
+  /** Quantité d'un lot = somme des mouvements qui le citent. */
+  recomputeLot(lotId: string): void {
+    this.db
+      .prepare('UPDATE lots SET qty = (SELECT COALESCE(SUM(qty), 0) FROM stock_movements WHERE lot_id = ?) WHERE id = ?')
+      .run(lotId, lotId);
+  }
+
   private lots(articleId: string, warehouseId: string) {
     return this.db
       .prepare('SELECT id, qty, expiry, received_at AS receivedAt FROM lots WHERE article_id = ? AND warehouse_id = ? AND qty > 0')
@@ -142,9 +195,7 @@ export class StockService extends Base {
       this.db.prepare('UPDATE lots SET qty = qty + ? WHERE id = ?').run(m.qty, lotId);
     } else {
       lotId = newId();
-      this.db
-        .prepare('INSERT INTO lots (id, article_id, warehouse_id, lot_number, expiry, qty, received_at) VALUES (?, ?, ?, NULL, NULL, ?, ?)')
-        .run(lotId, m.articleId, m.warehouseId, m.qty, this.now());
+      this.insertLot(ctx, { id: lotId, articleId: m.articleId, warehouseId: m.warehouseId, qty: m.qty });
     }
     this.applyMovement(ctx, { type: 'RETURN', articleId: m.articleId, warehouseId: m.warehouseId, qty: m.qty, lotId, refType: m.refType, refId: m.refId });
   }
@@ -169,9 +220,15 @@ export class StockService extends Base {
           throw new AppError(`Date limite obligatoire pour « ${article.name} » (article périssable)`, 'EXPIRY_REQUIRED');
         }
         const lotId = newId();
-        this.db
-          .prepare('INSERT INTO lots (id, article_id, warehouse_id, lot_number, expiry, qty, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(lotId, line.articleId, input.warehouseId, line.lotNumber ?? null, line.expiry ?? null, line.qty, now);
+        this.insertLot(ctx, {
+          id: lotId,
+          articleId: line.articleId,
+          warehouseId: input.warehouseId,
+          lotNumber: line.lotNumber,
+          expiry: line.expiry,
+          qty: line.qty,
+          receivedAt: now,
+        });
         this.applyMovement(ctx, {
           type: 'RECEPTION',
           articleId: line.articleId,
@@ -227,9 +284,15 @@ export class StockService extends Base {
               })
             : { lot_number: null, expiry: null, received_at: this.now() };
           const lotId = newId();
-          this.db
-            .prepare('INSERT INTO lots (id, article_id, warehouse_id, lot_number, expiry, qty, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(lotId, line.articleId, input.toWarehouseId, source.lot_number, source.expiry, part.qty, source.received_at);
+          this.insertLot(ctx, {
+            id: lotId,
+            articleId: line.articleId,
+            warehouseId: input.toWarehouseId,
+            lotNumber: source.lot_number,
+            expiry: source.expiry,
+            qty: part.qty,
+            receivedAt: source.received_at,
+          });
           this.applyMovement(ctx, {
             type: 'TRANSFER_IN',
             articleId: line.articleId,
@@ -294,9 +357,7 @@ export class StockService extends Base {
 
   private restockAdjust(ctx: Context, articleId: string, warehouseId: string, qty: Milli, inventoryId: string): void {
     const lotId = newId();
-    this.db
-      .prepare('INSERT INTO lots (id, article_id, warehouse_id, lot_number, expiry, qty, received_at) VALUES (?, ?, ?, NULL, NULL, ?, ?)')
-      .run(lotId, articleId, warehouseId, qty, this.now());
+    this.insertLot(ctx, { id: lotId, articleId, warehouseId, qty });
     this.applyMovement(ctx, {
       type: 'INVENTORY_ADJUST',
       articleId,

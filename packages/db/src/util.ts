@@ -82,6 +82,21 @@ export class Base {
     return row.value;
   }
 
+  /**
+   * Préfixe propre à ce poste (code magasin + numéro de caisse), pour que
+   * deux PC qui créent des fiches hors ligne ne produisent pas le même code.
+   */
+  protected stationPrefix(): string {
+    const row = this.db
+      .prepare(
+        `SELECT s.code, r.number FROM settings k
+         JOIN registers r ON r.id = k.value JOIN stores s ON s.id = r.store_id
+         WHERE k.key = 'station.registerId'`,
+      )
+      .get() as { code: string; number: number } | undefined;
+    return row ? `${row.code}${row.number}` : 'A';
+  }
+
   protected tx<T>(fn: () => T): T {
     return this.db.transaction(fn)();
   }

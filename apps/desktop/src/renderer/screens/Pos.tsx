@@ -4,6 +4,7 @@ import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
+import { QuotePickDialog } from './Quotes';
 import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 
 type Article = Result<'catalogue.get'>;
@@ -34,7 +35,7 @@ function toLine(article: Article, qtyMilli: number, barcode: string | null, fixe
   };
 }
 
-type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense';
+type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'extra';
 
@@ -74,6 +75,8 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   const [weightFor, setWeightFor] = useState<Article | null>(null);
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
+  /** Devis ou proforma chargé : ses prix garantis valent accord de remise. */
+  const [quote, setQuote] = useState<{ id: string; number: string; validUntil: string } | null>(null);
   const account = useLoad(() => (customer ? call('customers.account', customer.id) : Promise.resolve(null)), [customer?.id]);
   /** Vente bloquée en attente du code gérant (remise ou dépassement du plafond). */
   const [pending, setPending] = useState<{ payments: SellPayments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string } | null>(null);
@@ -159,6 +162,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     setSelected(null);
   };
   const clear = () => {
+    setQuote(null);
     setLines([]);
     setCashGiven(0);
     setSelected(null);
@@ -172,6 +176,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     setLastSale(sale);
     setDialog(null);
     setCustomer(null);
+    setQuote(null);
     call('pos.printTicket', sale.id).catch((err) => toast.error(err));
   };
 
@@ -181,7 +186,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
    */
   const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string } = {}) => {
     try {
-      finish(await call('pos.sell', { lines: saleInput(), payments: payments as never, customerId: customer?.id ?? null, ...pins }));
+      finish(await call('pos.sell', { lines: saleInput(), payments: payments as never, customerId: customer?.id ?? null, quoteId: quote?.id ?? null, ...pins }));
       setCashGiven(0);
       setPending(null);
     } catch (err) {
@@ -219,7 +224,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       await sell(payments);
       return;
     }
-    const needsSupervisor = totals.totalDiscount > 0 && user.role === 'cashier';
+    const needsSupervisor = totals.totalDiscount > 0 && user.role === 'cashier' && !quote;
     if (cashGiven >= totals.totalTtc && !needsSupervisor) {
       await sell([{ method: 'CASH', amount: cashGiven }]);
       return;
@@ -246,6 +251,24 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       const arts = await Promise.all(priced.map((p) => call('catalogue.get', p.articleId)));
       setLines(priced.map((p, i) => ({ ...p, key: ++keySeq, ref: arts[i]!.code, unit: arts[i]!.unit, barcode: p.barcode })));
       setDialog(null);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+
+  /** Charge un devis : ses lignes aux prix garantis et son client. */
+  const loadQuote = async (id: string) => {
+    if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+    try {
+      const q = await call('quotes.get', id);
+      const priced = await call('pos.priceLines', await call('quotes.saleLines', id));
+      const arts = await Promise.all(priced.map((p) => call('catalogue.get', p.articleId)));
+      setLines(priced.map((p, i) => ({ ...p, key: ++keySeq, ref: arts[i]!.code, unit: arts[i]!.unit, barcode: p.barcode })));
+      setCustomer(q.customer_id ? await call('customers.get', q.customer_id) : null);
+      setQuote({ id: q.id, number: q.number, validUntil: q.valid_until });
+      setLastSale(null);
+      setDialog(null);
+      toast.ok(`${q.number} chargé${q.customer_id ? '' : ` (client : ${q.customer_name})`}`);
     } catch (err) {
       toast.error(err);
     }
@@ -308,14 +331,16 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
             ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
             : !lines.length && lastSale?.customer_name
               ? `${lastSale.customer_name}${lastSale.due_date ? ` · à régler avant le ${new Date(`${lastSale.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`
-              : 'Livraison immédiate'}
+              : quote && lines.length
+                ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
+                : 'Livraison immédiate'}
         </div>
       </div>
       <div className="fiche-body">
         <div className="fiche-main">
           <div className="fiche-head">
             <label>N°</label>
-            <input readOnly value={lines.length ? 'Nouveau' : (lastSale?.number ?? 'Nouveau')} />
+            <input readOnly value={lines.length ? (quote ? `Devis ${quote.number}` : 'Nouveau') : (lastSale?.number ?? 'Nouveau')} />
             <input
               className={`client ${credit && !customer ? 'missing' : ''}`}
               readOnly
@@ -394,6 +419,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                   <option value="cancel">Annuler un ticket</option>
                   <option value="return">Retour client</option>
                   <option value="custPay">Règlement client (crédit)</option>
+                  <option value="quote">Facturer un devis / proforma</option>
                   <option value="expense">Dépense payée en caisse</option>
                   <option value="close">Clôture de caisse (Z)</option>
                 </select>
@@ -662,6 +688,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
           }}
         />
       )}
+      {dialog === 'quote' && <QuotePickDialog onClose={() => setDialog(null)} onPick={(id) => void loadQuote(id)} />}
       {dialog === 'expense' && (
         <ExpenseDialog
           atRegister

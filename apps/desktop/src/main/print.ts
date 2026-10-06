@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron';
-import { PAYMENT_METHODS, formatFcfa, formatQty, formatRate, splitTtc } from '@superette/core';
+import { PAYMENT_METHODS, formatFcfa, formatQty, formatRate, numberToWordsFr, splitTtc } from '@superette/core';
 import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, JOURNALS } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
@@ -208,6 +208,48 @@ export function createPrinter(s: Services): Printer {
         <table class="totals"><tr><td>Total HT</td><td class="r">${money(sale.total_ht)}</td></tr>${vat}
           <tr class="total"><td>Total TTC (FCFA)</td><td class="r">${money(sale.total_ttc)}</td></tr>${pays}</table>
         <div class="sign"><div>Le client</div><div>Pour ${esc(store.name)}</div></div>`);
+    },
+
+    async quote(quoteId) {
+      const q = s.quotes.get(quoteId);
+      const store = s.admin.getStore(q.store_id);
+      const c = q.customer_id ? s.customers.getCustomer(q.customer_id) : null;
+      const rows = q.lines
+        .map((l) => {
+          const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
+          return `<tr><td>${esc(l.label)}</td><td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_price)}</td>
+            <td class="r">${l.discount ? money(l.discount) : ''}</td><td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td><td class="r">${money(l.total_ttc)}</td></tr>`;
+        })
+        .join('');
+      const byRate = new Map<number, number>();
+      for (const l of q.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
+      const vat = [...byRate.entries()]
+        .filter(([rate]) => rate > 0)
+        .map(([rate, ttc]) => `<tr><td>TVA ${formatRate(rate)}</td><td class="r">${money(splitTtc(ttc, rate).tva)}</td></tr>`)
+        .join('');
+      const title = q.kind === 'proforma' ? 'Facture proforma' : 'Devis';
+      const words = numberToWordsFr(q.total_ttc);
+      await printA4(`<div class="head">
+          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
+            .filter(Boolean)
+            .map((v) => esc(v!))
+            .join('<br>')}</div>
+          <div class="box">${
+            c
+              ? `<b>${esc(c.name)}</b><br>${[c.address, c.phone, c.taxpayer_number ? `NIU ${c.taxpayer_number}` : null].filter(Boolean).map((v) => esc(v!)).join('<br>')}`
+              : `<b>${esc(q.customer_name ?? '')}</b>`
+          }</div>
+        </div>
+        <h1>${title} ${esc(q.number)}${q.state === 'cancelled' ? ' (annulé)' : ''}</h1>
+        <div>Date : ${dayFr(q.quote_date)} · Valable jusqu'au ${dayFr(q.valid_until)}${q.user_name ? ` · Établi par ${esc(q.user_name)}` : ''}</div>
+        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">PU TTC</th><th class="r">Remise</th><th class="r">TVA</th><th class="r">Total HT</th><th class="r">Total TTC</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+        <table class="totals"><tr><td>Total HT</td><td class="r">${money(q.total_ht)}</td></tr>${vat}
+          <tr class="total"><td>Net à payer TTC (FCFA)</td><td class="r">${money(q.total_ttc)}</td></tr></table>
+        <p>Arrêté${q.kind === 'proforma' ? 'e la présente facture proforma' : ' le présent devis'} à la somme de <b>${esc(words)} francs CFA</b> toutes taxes comprises.</p>
+        ${q.notes ? `<p>${esc(q.notes)}</p>` : ''}
+        <p class="muted">Prix garantis jusqu'au ${dayFr(q.valid_until)} dans la limite des stocks disponibles. Ce document n'est pas une facture définitive.</p>
+        <div class="sign"><div>Bon pour accord, le client<br><br>Date et signature</div><div>Pour ${esc(store.name)}</div></div>`);
     },
 
     async statement(storeId, customerId, from, to) {

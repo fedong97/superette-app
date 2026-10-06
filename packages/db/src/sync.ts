@@ -58,6 +58,7 @@ const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> =
   purchase_order: { table: 'purchase_orders', lines: 'purchase_order_lines', fk: 'order_id' },
   reception: { table: 'receptions', lines: 'reception_lines', fk: 'reception_id' },
   manual_entry: { table: 'manual_entries', lines: 'manual_entry_lines', fk: 'entry_id' },
+  quote: { table: 'quotes', lines: 'quote_lines', fk: 'quote_id' },
 };
 
 /**
@@ -282,11 +283,16 @@ export class SyncService extends Base {
       return;
     }
     if (doc) {
+      // Un devis facturé ou annulé ne redevient pas ouvert si une version plus ancienne arrive.
+      if (event.entity === 'quote' && p['status'] === 'open') {
+        const local = this.db.prepare('SELECT status FROM quotes WHERE id = ?').pluck().get(event.entityId);
+        if (local && local !== 'open') return;
+      }
       this.upsert(doc.table, p);
       // Un bon de commande brouillon peut être réécrit : on remplace ses lignes.
       // Les lignes d'une réception ne changent jamais.
-      if (event.entity === 'purchase_order') this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
-      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], event.entity !== 'purchase_order');
+      if (event.entity === 'purchase_order' || event.entity === 'quote') this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
+      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], event.entity !== 'purchase_order' && event.entity !== 'quote');
       return;
     }
     switch (event.entity) {

@@ -140,3 +140,17 @@ describe('clôture Z', () => {
     expect(result).toEqual({ expected: 72000, counted: 61900, difference: -10100 });
   });
 });
+
+describe('montant en lettres', () => {
+  it('écrit les montants en français', async () => {
+    const { numberToWordsFr } = await import('../src');
+    expect(numberToWordsFr(113_000)).toBe('cent-treize-mille');
+    expect(numberToWordsFr(80)).toBe('quatre-vingts');
+    expect(numberToWordsFr(81)).toBe('quatre-vingt-un');
+    expect(numberToWordsFr(71)).toBe('soixante-et-onze');
+    expect(numberToWordsFr(200)).toBe('deux-cents');
+    expect(numberToWordsFr(280_000)).toBe('deux-cent-quatre-vingt-mille');
+    expect(numberToWordsFr(1_250_675)).toBe('un-million-deux-cent-cinquante-mille-six-cent-soixante-quinze');
+    expect(numberToWordsFr(2_000_000_021)).toBe('deux-milliards-vingt-et-un');
+  });
+});

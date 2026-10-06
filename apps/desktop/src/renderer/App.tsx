@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from './api';
+import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
@@ -18,7 +19,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'accounting' | 'dashboard' | 'admin';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -45,6 +46,7 @@ const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
   purchases: { label: 'Achats', roles: PURCHASING },
   suppliers: { label: 'Fournisseurs', roles: PURCHASING },
   customers: { label: 'Clients', roles: CUSTOMERS },
+  accounting: { label: 'Comptabilité', roles: ACCOUNTING },
   dashboard: { label: 'Tableau de bord', roles: MANAGE },
   admin: { label: 'Administration', roles: MANAGE },
 };
@@ -97,7 +99,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
       { label: 'Créances clients', open: ['customers', 'receivables'], roles: ACCOUNTING },
       { label: 'Règlements clients reçus', open: ['customers', 'payments'] },
-      { label: 'Banques et Mobile Money', soon: true },
+      { label: 'Banques, caisse et Mobile Money', open: ['accounting', 'treasury'] },
     ],
   ],
   [
@@ -137,11 +139,14 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Comptabilité',
     [
+      { label: 'Journaux', open: ['accounting', 'journals'] },
+      { label: 'Grand livre', open: ['accounting', 'ledger'] },
+      { label: 'Balance générale', open: ['accounting', 'balance'] },
+      { label: 'Plan comptable', open: ['accounting', 'accounts'] },
       { label: 'Export des ventes (CSV)', open: ['sales', 'export'] },
-      { label: 'Journaux et grand livre SYSCOHADA', soon: true },
     ],
   ],
-  ['Fiscal', [{ label: 'Déclaration de TVA', soon: true }, { label: 'DSF', soon: true }]],
+  ['Fiscal', [{ label: 'Déclaration de TVA', open: ['accounting', 'vat'] }, { label: 'DSF', soon: true }]],
   [
     'Administration',
     [
@@ -170,7 +175,7 @@ const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?
   { label: 'Transfert', open: ['stock', 'transfer'] },
   { label: 'Dépenses', soon: true },
   { label: 'Achats', open: ['purchases', 'orders'] },
-  { label: 'Trésorerie', soon: true },
+  { label: 'Trésorerie', open: ['accounting', 'treasury'] },
   { label: 'TABORD', open: ['dashboard'] },
 ];
 
@@ -335,6 +340,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
             {w.kind === 'suppliers' && <Suppliers user={user} />}
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
+            {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>

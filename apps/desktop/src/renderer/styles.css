@@ -243,3 +243,9 @@ input.gap { border-color: #c62828; background: #fdecea; color: #c62828; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .toolbar input { flex: 1; }
 .aging th, .aging td { white-space: nowrap; }
+
+/* Comptabilité */
+table.list tr.total td { font-weight: 600; background: #f3f6fb; }
+table.list.journal tr.entry-first td { border-top: 2px solid #c9d6ea; }
+.kpis > div.clickable { cursor: pointer; }
+.kpis > div.clickable:hover { border-color: var(--brand); }

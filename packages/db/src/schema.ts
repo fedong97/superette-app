@@ -481,4 +481,82 @@ CREATE INDEX customer_payments_customer ON customer_payments(customer_id, paid_a
 CREATE INDEX customer_payments_session ON customer_payments(session_id);
 `,
   },
+  {
+    version: 5,
+    name: 'comptabilité SYSCOHADA',
+    sql: `
+-- Plan comptable (numéro de compte = identifiant). « role » désigne le compte
+-- utilisé par les écritures automatiques (caisse, ventes, TVA…) : un seul compte par rôle.
+CREATE TABLE accounts (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  role TEXT UNIQUE,
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO accounts (id, label, role) VALUES
+  ('101', 'Capital social', NULL),
+  ('121', 'Report à nouveau créditeur', NULL),
+  ('129', 'Report à nouveau débiteur', NULL),
+  ('131', 'Résultat net : bénéfice', NULL),
+  ('139', 'Résultat net : perte', NULL),
+  ('162', 'Emprunts auprès des établissements de crédit', NULL),
+  ('2441', 'Matériel et mobilier de bureau', NULL),
+  ('2451', 'Matériel de transport', NULL),
+  ('311', 'Marchandises', 'stock'),
+  ('401', 'Fournisseurs', 'suppliers'),
+  ('411', 'Clients', 'customers'),
+  ('4211', 'Personnel, rémunérations dues', NULL),
+  ('4311', 'CNPS, sécurité sociale', NULL),
+  ('4471', 'État, impôts retenus à la source', NULL),
+  ('4191', 'Clients, avances reçues (bons d''achat)', 'voucher'),
+  ('4431', 'État, TVA facturée sur ventes', 'vat_collected'),
+  ('4441', 'État, TVA due', 'vat_due'),
+  ('4449', 'État, crédit de TVA à reporter', 'vat_credit'),
+  ('4452', 'État, TVA récupérable sur achats', 'vat_deductible'),
+  ('521', 'Banques', 'bank'),
+  ('5215', 'Banque, encaissements par carte', 'card'),
+  ('5521', 'Monnaie électronique, MTN Mobile Money', 'mtn'),
+  ('5522', 'Monnaie électronique, Orange Money', 'orange'),
+  ('571', 'Caisse', 'cash'),
+  ('585', 'Virements de fonds', 'transfer'),
+  ('601', 'Achats de marchandises', 'purchases'),
+  ('6031', 'Variations des stocks de marchandises', 'stock_variation'),
+  ('6052', 'Eau et électricité', NULL),
+  ('6222', 'Loyers des locaux', NULL),
+  ('6281', 'Téléphone et internet', NULL),
+  ('631', 'Frais bancaires et de Mobile Money', NULL),
+  ('641', 'Impôts et taxes directs (patente…)', NULL),
+  ('661', 'Rémunérations du personnel', NULL),
+  ('664', 'Charges sociales', NULL),
+  ('658', 'Charges diverses (manquants de caisse)', 'cash_short'),
+  ('701', 'Ventes de marchandises', 'sales'),
+  ('758', 'Produits divers (excédents de caisse)', 'cash_over');
+
+-- Écritures saisies à la main (à-nouveaux, opérations diverses, frais bancaires…).
+-- Les autres écritures se calculent à partir des tickets, factures et règlements.
+CREATE TABLE manual_entries (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  journal TEXT NOT NULL CHECK (journal IN ('AN', 'OD', 'BQ', 'CA', 'MM')),
+  entry_date TEXT NOT NULL,
+  label TEXT NOT NULL,
+  user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX manual_entries_date ON manual_entries(store_id, entry_date);
+CREATE TABLE manual_entry_lines (
+  id TEXT PRIMARY KEY,
+  entry_id TEXT NOT NULL REFERENCES manual_entries(id),
+  line_no INTEGER NOT NULL,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  aux TEXT,
+  label TEXT,
+  debit INTEGER NOT NULL DEFAULT 0,
+  credit INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX manual_entry_lines_entry ON manual_entry_lines(entry_id);
+`,
+  },
 ];

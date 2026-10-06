@@ -42,9 +42,18 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Les règlements soldent automatiquement les ventes les plus anciennes ; retour d'un ticket au compte du client.
 - Compte client, relevé imprimable sur une période, balance âgée (non échu, 1-30, 31-60, 61-90, plus de 90 jours).
 
+**Comptabilité SYSCOHADA et TVA**
+- Plan comptable SYSCOHADA révisé prérempli (caisse 571, banque 521, MTN 5521, Orange Money 5522, TVA 4431/4452, clients 411, fournisseurs 401…), modifiable ; chaque usage automatique (caisse, ventes, TVA…) peut être confié à un autre compte.
+- Écritures passées toutes seules, sans double saisie : ventes par Z (une écriture par caisse et par jour, crédit client sur 411 avec le tiers), apports et prélèvements, écarts de caisse (658/758), règlements clients, factures et avoirs fournisseurs, paiements fournisseurs.
+- Journaux VE, AC, CA, BQ, MM, OD, AN ; saisie d'écritures manuelles équilibrées (à-nouveaux, loyer, électricité, frais bancaires, dépôt à la banque).
+- Grand livre par compte, racine (41, 5…) ou tiers, avec solde progressif ; balance générale cliquable ; trésorerie (caisse, banques, Mobile Money).
+- Déclaration de TVA du mois : chiffre d'affaires par taux, exonéré, TVA collectée et déductible, crédit reporté d'un mois sur l'autre, document A4 pour remplir la déclaration DGI. Les acomptes d'IR et les précomptes restent à ajouter par le comptable.
+- Impression A4 des journaux, de la balance et de la déclaration ; export CSV des écritures pour le cabinet comptable.
+- Les écritures sont recalculées à partir des pièces : elles restent justes quel que soit l'ordre dans lequel les PC se synchronisent. Plan comptable et écritures manuelles se synchronisent.
+
 **Pilotage et administration**
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
-- Export CSV des ventes pour le comptable (en attendant le module Comptabilité).
+- Export CSV des ventes.
 - Magasins, caisses (code d'activation), dépôts, utilisateurs et rôles (administrateur, gérant, caissier, magasinier, comptable), paramètres, journal d'audit.
 
 **Serveur central et plusieurs PC**
@@ -117,4 +126,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Phase 3 : comptabilité SYSCOHADA (journaux, grand livre, déclaration de TVA) et trésorerie.
+2. Dépenses courantes saisies depuis le menu Charge, rapprochement bancaire, états financiers annuels (bilan, compte de résultat, DSF).

@@ -45,6 +45,7 @@ const TABLES: Record<string, string> = {
   supplier_payment: 'supplier_payments',
   customer: 'customers',
   customer_payment: 'customer_payments',
+  account: 'accounts',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -54,6 +55,7 @@ const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment
 const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> = {
   purchase_order: { table: 'purchase_orders', lines: 'purchase_order_lines', fk: 'order_id' },
   reception: { table: 'receptions', lines: 'reception_lines', fk: 'reception_id' },
+  manual_entry: { table: 'manual_entries', lines: 'manual_entry_lines', fk: 'entry_id' },
 };
 
 /**
@@ -282,10 +284,18 @@ export class SyncService extends Base {
       // Un bon de commande brouillon peut être réécrit : on remplace ses lignes.
       // Les lignes d'une réception ne changent jamais.
       if (event.entity === 'purchase_order') this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
-      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], event.entity === 'reception');
+      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], event.entity !== 'purchase_order');
       return;
     }
     switch (event.entity) {
+      case 'account': {
+        // Un rôle (caisse, TVA collectée…) n'est porté que par un compte : il quitte l'ancien.
+        const local = this.db.prepare('SELECT updated_at FROM accounts WHERE id = ?').pluck().get(event.entityId) as string | undefined;
+        if (local && local > String(p['updated_at'])) return;
+        if (p['role']) this.db.prepare('UPDATE accounts SET role = NULL WHERE role = ? AND id <> ?').run(p['role'], event.entityId);
+        this.upsert('accounts', p);
+        return;
+      }
       case 'article': {
         // La modification la plus récente l'emporte.
         const local = this.db.prepare('SELECT updated_at FROM articles WHERE id = ?').pluck().get(event.entityId) as string | undefined;

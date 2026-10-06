@@ -1,7 +1,7 @@
 {
   "name": "superette-app",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Logiciel de gestion de superette (caisse, stock, achats, comptabilité) — Cameroun, SYSCOHADA, FCFA",
   "workspaces": [
     "packages/*",

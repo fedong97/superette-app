@@ -184,6 +184,17 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     for (const s of [pc1, pc2]) expect(s.expenses.get(dep.id)).toMatchObject({ status: 'cancelled', account_id: '638' });
   });
 
+  it('un devis fait sur le PC 1 et facturé sur le PC 2 est marqué facturé partout', async () => {
+    const q = pc1.quotes.save(ctx1, { kind: 'proforma', customerName: 'Hôtel La Falaise', lines: [{ articleId, qty: 4000 }] });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    const lines = pc2.quotes.saleLines(ctx2.storeId, q.id);
+    const sale = pc2.pos.completeSale(ctx2, { lines, payments: [{ method: 'CASH', amount: q.total_ttc }], quoteId: q.id });
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    for (const s of [pc1, pc2]) expect(s.quotes.get(q.id)).toMatchObject({ state: 'accepted', sale_number: sale.number });
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);

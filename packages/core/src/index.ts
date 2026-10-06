@@ -9,3 +9,4 @@ export * from './expiry';
 export * from './cashClose';
 export * from './purchase';
 export * from './credit';
+export * from './words';

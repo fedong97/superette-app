@@ -15,6 +15,8 @@ import {
   type CustomerInput,
   type CustomerPaymentMethod,
   type ExpenseInput,
+  type QuoteInput,
+  type QuoteState,
   type AccountRole,
   type JournalCode,
   type ReceptionLine,
@@ -39,6 +41,7 @@ export interface Printer {
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
+  quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
 }
@@ -214,7 +217,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.priceLines': (lines: SaleLineInput[]) => s.pos.priceLines(ctx().storeId, lines),
-    'pos.sell': (input: { lines: SaleLineInput[]; payments: Payment[]; supervisorPin?: string; customerId?: string | null; creditPin?: string }) => {
+    'pos.sell': (input: {
+      lines: SaleLineInput[];
+      payments: Payment[];
+      supervisorPin?: string;
+      customerId?: string | null;
+      creditPin?: string;
+      quoteId?: string | null;
+    }) => {
       const c = ctx(POS);
       const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
@@ -224,6 +234,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         discountAuthorizedBy: authorizedBy,
         customerId: input.customerId ?? null,
         creditAuthorizedBy: creditBy,
+        quoteId: input.quoteId ?? null,
       });
     },
     'pos.cancel': (saleId: string, supervisorPin: string, reason: string) =>
@@ -273,6 +284,19 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.receivables': () => s.customers.receivables(ctx([...MANAGE, 'accountant']).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
+
+    // --- Devis et proformas ----------------------------------------------------
+    'quotes.list': (opts?: { state?: QuoteState; customerId?: string; search?: string }) => s.quotes.list(ctx().storeId, opts),
+    'quotes.get': (id: string) => (requireUser(), s.quotes.get(id)),
+    /** Remise sur un devis : gérant, ou code d'un gérant. */
+    'quotes.save': (input: QuoteInput, id?: string | null, supervisorPin?: string) => {
+      const c = ctx([...POS, 'accountant']);
+      return s.quotes.save(c, input, { id: id ?? undefined, discountAuthorizedBy: supervisorPin ? supervisor(supervisorPin).id : null });
+    },
+    'quotes.cancel': (id: string) => s.quotes.cancel(ctx([...POS, 'accountant']), id),
+    'quotes.print': (id: string) => (requireUser(), printer.quote(id)),
+    /** Lignes à charger dans la fiche de facturation, aux prix garantis par le devis. */
+    'quotes.saleLines': (id: string) => s.quotes.saleLines(ctx(POS).storeId, id),
 
     // --- Dépenses -------------------------------------------------------------
     'expenses.categories': (includeInactive?: boolean) => (requireUser(), s.expenses.listCategories(includeInactive)),

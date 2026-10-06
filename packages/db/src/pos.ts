@@ -16,6 +16,7 @@ import {
 import type { AdminService } from './admin';
 import type { CatalogueService } from './catalogue';
 import type { CustomerService } from './customers';
+import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
@@ -53,6 +54,8 @@ export interface SaleInput {
   customerId?: string | null;
   /** Gérant qui a accepté un dépassement du plafond de crédit. */
   creditAuthorizedBy?: string | null;
+  /** Devis ou proforma facturé : ses prix garantis valent accord de remise. */
+  quoteId?: string | null;
 }
 
 export interface Sale {
@@ -121,6 +124,7 @@ export class PosService extends Base {
     private readonly catalogue: CatalogueService,
     private readonly stock: StockService,
     private readonly customers: CustomerService,
+    private readonly quotes: QuoteService,
   ) {
     super(db, clock);
   }
@@ -231,7 +235,10 @@ export class PosService extends Base {
     if (input.lines.some((l) => l.qty < 0)) throw new AppError('Quantité négative : utilisez le retour client', 'INVALID');
     const lines = this.priceLines(ctx.storeId, input.lines);
     const totals = computeTotals(lines);
-    if (totals.totalDiscount > 0) {
+    const quote = input.quoteId ? this.quotes.authorizeSaleDiscounts(ctx.storeId, input.quoteId, lines) : null;
+    let discountBy = input.discountAuthorizedBy ?? null;
+    if (quote) discountBy ??= quote.by;
+    if (totals.totalDiscount > 0 && !quote) {
       const user = this.admin.getUser(ctx.userId);
       const authorizer = input.discountAuthorizedBy ? this.admin.getUser(input.discountAuthorizedBy) : null;
       const allowed = (u: { role: string } | null) => u !== null && (u.role === 'admin' || u.role === 'manager');
@@ -299,8 +306,9 @@ export class PosService extends Base {
       const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference) VALUES (?, ?, ?, ?, ?)');
       for (const p of input.payments) insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null);
       if (totals.totalDiscount > 0) {
-        this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: totals.totalDiscount, authorizedBy: input.discountAuthorizedBy ?? null });
+        this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: totals.totalDiscount, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
       }
+      if (input.quoteId) this.quotes.markAccepted(ctx, input.quoteId, saleId);
       const sale = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', sale);
       return sale;

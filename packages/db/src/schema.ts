@@ -622,4 +622,46 @@ CREATE INDEX expenses_date ON expenses(store_id, expense_date);
 CREATE INDEX expenses_session ON expenses(session_id);
 `,
   },
+  {
+    version: 7,
+    name: 'devis et proformas',
+    sql: `
+CREATE TABLE quotes (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL CHECK (kind IN ('quote', 'proforma')),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT REFERENCES customers(id),
+  -- Prospect sans fiche client : nom libre.
+  customer_name TEXT,
+  quote_date TEXT NOT NULL,
+  valid_until TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'accepted', 'cancelled')),
+  sale_id TEXT,
+  total_ttc INTEGER NOT NULL,
+  total_ht INTEGER NOT NULL,
+  total_tva INTEGER NOT NULL,
+  total_discount INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  user_id TEXT,
+  discount_authorized_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX quotes_store ON quotes(store_id, quote_date);
+CREATE TABLE quote_lines (
+  id TEXT PRIMARY KEY,
+  quote_id TEXT NOT NULL REFERENCES quotes(id),
+  line_no INTEGER NOT NULL,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  label TEXT NOT NULL,
+  qty INTEGER NOT NULL CHECK (qty > 0),
+  unit_price INTEGER NOT NULL,
+  discount INTEGER NOT NULL DEFAULT 0,
+  vat_rate_bp INTEGER NOT NULL,
+  total_ttc INTEGER NOT NULL
+);
+CREATE INDEX quote_lines_quote ON quote_lines(quote_id);
+`,
+  },
 ];

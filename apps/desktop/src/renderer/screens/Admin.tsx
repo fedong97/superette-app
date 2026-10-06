@@ -1,20 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
 import { Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'settings' | 'audit';
+export type AdminTab = Tab;
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'settings' | 'server' | 'audit';
 
-export function Admin({ user, onChanged }: { user: User; onChanged: () => void }) {
-  const [tab, setTab] = useState<Tab>(user.role === 'admin' ? 'stores' : 'users');
+export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
   const tabs: [Tab, string][] = [
     ...(user.role === 'admin' ? ([['stores', 'Magasins']] as [Tab, string][]) : []),
     ['registers', 'Caisses'],
     ['warehouses', 'Dépôts'],
     ['users', 'Utilisateurs'],
     ['settings', 'Paramètres'],
+    ['server', 'Serveur central'],
     ['audit', "Journal d'audit"],
   ];
   return (
@@ -28,6 +30,7 @@ export function Admin({ user, onChanged }: { user: User; onChanged: () => void }
       {tab === 'warehouses' && <Warehouses />}
       {tab === 'users' && <Users currentRole={user.role} />}
       {tab === 'settings' && <Settings />}
+      {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && <Audit />}
     </div>
   );
@@ -204,7 +207,8 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
         </button>
       </form>
       <p className="muted">
-        Sur un autre PC, le code d'activation sera utilisable une fois la synchronisation avec le serveur central en place (prochaine étape de la phase 1).
+        Sur un nouveau PC, choisissez « Rejoindre un magasin existant » au premier démarrage et saisissez l'adresse du serveur central et ce code :
+        le PC récupère le catalogue, les utilisateurs et le stock du magasin.
       </p>
     </>
   );
@@ -424,6 +428,133 @@ function Settings() {
           Enregistrer
         </button>
       </div>
+    </div>
+  );
+}
+
+function CentralServer({ isAdmin }: { isAdmin: boolean }) {
+  const toast = useToast();
+  const state = useLoad(() => call('sync.state'));
+  const conflicts = useLoad(() => call('sync.conflicts'));
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const t = setInterval(state.reload, 5000);
+    return () => clearInterval(t);
+  }, []);
+  const st = state.data;
+  if (!st) return null;
+  const act = async (fn: () => Promise<{ sent: number; received: number; conflicts: number }>) => {
+    setBusy(true);
+    try {
+      const r = await fn();
+      toast.ok(`Synchronisé : ${r.sent} envoyée(s), ${r.received} reçue(s)${r.conflicts ? `, ${r.conflicts} conflit(s)` : ''}`);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+      state.reload();
+      conflicts.reload();
+    }
+  };
+  return (
+    <div className="narrow">
+      <p>
+        Le serveur central relie les caisses et les magasins : chaque PC garde sa propre base et continue de vendre sans réseau, les opérations
+        partent toutes les 20 secondes dès que la connexion revient.
+      </p>
+      {st.connected ? (
+        <>
+          <table className="list">
+            <tbody>
+              <tr>
+                <th>Serveur</th>
+                <td>{st.url}</td>
+              </tr>
+              <tr>
+                <th>Dernière synchronisation</th>
+                <td>{st.lastSyncAt ? dateTime(st.lastSyncAt) : 'jamais'}</td>
+              </tr>
+              <tr>
+                <th>Opérations en attente d'envoi</th>
+                <td>{st.pending}</td>
+              </tr>
+              <tr>
+                <th>État</th>
+                <td className={st.lastError ? 'neg' : 'pos'}>{st.lastError ?? 'Connecté'}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="actions">
+            {isAdmin && (
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  if (!confirm('Délier ce PC du serveur central ? Les ventes resteront sur ce PC sans être partagées.')) return;
+                  try {
+                    await call('sync.disconnect');
+                    state.reload();
+                  } catch (err) {
+                    toast.error(err);
+                  }
+                }}
+              >
+                Délier ce PC
+              </button>
+            )}
+            <button className="primary" disabled={busy} onClick={() => act(() => call('sync.now'))}>
+              Synchroniser maintenant
+            </button>
+          </div>
+        </>
+      ) : isAdmin ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act(() => call('sync.connect', url, key));
+          }}
+        >
+          <div className="grid2">
+            <Field label="Adresse du serveur" hint="ex. https://superette.mondomaine.cm">
+              <input value={url} onChange={(e) => setUrl(e.target.value)} required />
+            </Field>
+            <Field label="Clé d'enrôlement" hint="ENROLLMENT_KEY configurée sur le serveur">
+              <input type="password" value={key} onChange={(e) => setKey(e.target.value)} required />
+            </Field>
+          </div>
+          <div className="actions">
+            <button className="primary" type="submit" disabled={busy}>
+              {busy ? 'Envoi de l’historique…' : 'Relier ce PC au serveur'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <p className="muted">Ce PC n'est pas relié au serveur central. Demandez à l'administrateur de le faire.</p>
+      )}
+      {(conflicts.data ?? []).length > 0 && (
+        <>
+          <h3>Conflits à vérifier</h3>
+          <table className="list">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Élément</th>
+                <th>Problème</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conflicts.data!.map((c) => (
+                <tr key={c.id}>
+                  <td>{dateTime(c.at)}</td>
+                  <td>{c.entity}</td>
+                  <td>{c.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

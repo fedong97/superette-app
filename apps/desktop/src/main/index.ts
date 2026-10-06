@@ -4,6 +4,7 @@ import { autoUpdater } from 'electron-updater';
 import { AppError, openServices } from '@superette/db';
 import { type ApiName, createApi } from './api';
 import { createPrinter } from './print';
+import { createSyncRunner } from './sync';
 
 // Une seule instance par PC : la base locale n'accepte qu'un écrivain.
 if (!app.requestSingleInstanceLock()) {
@@ -52,7 +53,8 @@ void app.whenReady().then(() => {
     app.quit();
     return;
   }
-  const api = createApi(services, createPrinter(services), app.getVersion());
+  const sync = createSyncRunner(services);
+  const api = createApi(services, createPrinter(services), sync, app.getVersion());
 
   ipcMain.handle('api', async (_event, name: ApiName, args: unknown[]) => {
     const fn = api[name] as ((...a: unknown[]) => unknown) | undefined;
@@ -74,7 +76,10 @@ void app.whenReady().then(() => {
     autoUpdater.checkForUpdatesAndNotify().catch((e) => console.warn('Vérification de mise à jour impossible', e));
   }
 
-  app.on('before-quit', () => services.db.close());
+  app.on('before-quit', () => {
+    sync.stop();
+    services.db.close();
+  });
 });
 
 app.on('second-instance', () => {

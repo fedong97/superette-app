@@ -4,8 +4,10 @@ import { type Result, call } from '../api';
 import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useLoad, useToast } from '../ui';
 import { ZView } from './PosDialogs';
 
-export function Sales() {
-  const [tab, setTab] = useState<'tickets' | 'z' | 'export'>('tickets');
+export type SalesTab = 'tickets' | 'z' | 'export';
+
+export function Sales({ initialTab = 'tickets' }: { initialTab?: SalesTab }) {
+  const [tab, setTab] = useState<SalesTab>(initialTab);
   return (
     <div className="page">
       <header className="page-head">

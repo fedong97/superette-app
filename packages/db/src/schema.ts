@@ -276,4 +276,30 @@ CREATE TABLE outbox (
 CREATE INDEX outbox_pending ON outbox(seq) WHERE sent_at IS NULL;
 `,
   },
+  {
+    version: 2,
+    name: 'synchronisation avec le serveur central',
+    sql: `
+CREATE TABLE sync_conflicts (
+  id TEXT PRIMARY KEY,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  message TEXT NOT NULL,
+  payload TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX movements_lot ON stock_movements(lot_id);
+CREATE INDEX movements_article_warehouse ON stock_movements(article_id, warehouse_id);
+
+-- Données créées avant la synchronisation et absentes de la file d'envoi.
+INSERT INTO outbox (id, entity, entity_id, op, payload, store_id, register_id, created_at)
+  SELECT lower(hex(randomblob(16))), 'vat_rate', id, 'upsert', '{}', NULL, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM vat_rates;
+INSERT INTO outbox (id, entity, entity_id, op, payload, store_id, register_id, created_at)
+  SELECT lower(hex(randomblob(16))), 'lot', l.id, 'upsert', '{}', w.store_id, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  FROM lots l JOIN warehouses w ON w.id = l.warehouse_id;
+INSERT INTO outbox (id, entity, entity_id, op, payload, store_id, register_id, created_at)
+  SELECT lower(hex(randomblob(16))), 'user', u.id, 'upsert', '{}', NULL, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  FROM users u WHERE NOT EXISTS (SELECT 1 FROM outbox o WHERE o.entity = 'user' AND o.entity_id = u.id);
+`,
+  },
 ];

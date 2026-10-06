@@ -4,6 +4,7 @@ import { type Db, openDatabase } from './database';
 import { PosService } from './pos';
 import { ReportService } from './reports';
 import { StockService } from './stock';
+import { SyncService } from './sync';
 import type { Clock } from './util';
 
 export * from './admin';
@@ -12,6 +13,8 @@ export * from './database';
 export * from './pos';
 export * from './reports';
 export * from './stock';
+export * from './sync';
+export * from './syncClient';
 export { AppError, type Clock, type Context } from './util';
 
 export interface Services {
@@ -21,6 +24,7 @@ export interface Services {
   stock: StockService;
   pos: PosService;
   reports: ReportService;
+  sync: SyncService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date()): Services {
@@ -29,7 +33,8 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const stock = new StockService(db, clock);
   const pos = new PosService(db, clock, admin, catalogue, stock);
   const reports = new ReportService(db, clock);
-  return { db, admin, catalogue, stock, pos, reports };
+  const sync = new SyncService(db, clock, stock);
+  return { db, admin, catalogue, stock, pos, reports, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

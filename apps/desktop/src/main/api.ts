@@ -19,6 +19,8 @@ import {
   type User,
 } from '@superette/db';
 
+import type { SyncRunner } from './sync';
+
 export interface Printer {
   ticket(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
@@ -30,7 +32,7 @@ export interface Printer {
  * caisse) sont tenus ici, côté processus principal : l'écran ne peut pas
  * se faire passer pour un autre utilisateur ni valider à la place d'un gérant.
  */
-export function createApi(s: Services, printer: Printer, appVersion: string) {
+export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVersion: string) {
   let user: User | null = null;
 
   const requireUser = (roles?: Role[]): User => {
@@ -64,6 +66,8 @@ export function createApi(s: Services, printer: Printer, appVersion: string) {
       return result;
     },
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
+    /** Nouveau PC : rejoint un magasin existant via le serveur central (avant toute connexion). */
+    'setup.join': (url: string, activationCode: string) => sync.join(url, activationCode),
     'auth.login': (login: string, pin: string) => (user = s.admin.login(login, pin)),
     'auth.logout': () => {
       user = null;
@@ -100,6 +104,16 @@ export function createApi(s: Services, printer: Printer, appVersion: string) {
     },
     'admin.audit': () => (requireUser(MANAGE), s.admin.auditLog()),
     'admin.printers': () => (requireUser(), printer.list()),
+
+    // --- Serveur central ----------------------------------------------------
+    'sync.state': () => (requireUser(), s.sync.state()),
+    'sync.connect': (url: string, enrollmentKey: string) => (requireUser(['admin']), sync.connect(url, enrollmentKey)),
+    'sync.now': () => (requireUser(), sync.now()),
+    'sync.conflicts': () => (requireUser(MANAGE), s.sync.conflicts()),
+    'sync.disconnect': () => {
+      requireUser(['admin']);
+      s.sync.disconnect();
+    },
 
     // --- Catalogue ----------------------------------------------------------
     'catalogue.search': (query: string, opts?: { includeInactive?: boolean; familyId?: string }) =>

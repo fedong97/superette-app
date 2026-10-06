@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import {
   type Fcfa,
   type Milli,
@@ -151,7 +152,7 @@ export class CatalogueService extends Base {
   }
 
   private nextArticleCode(): string {
-    return `A${String(this.nextCounter('article.code')).padStart(6, '0')}`;
+    return `${this.stationPrefix()}-${String(this.nextCounter('article.code')).padStart(5, '0')}`;
   }
 
   /** Crée ou modifie une fiche article ; trace l'historique des prix. */
@@ -270,8 +271,14 @@ export class CatalogueService extends Base {
 
   /** Attribue un code-barres interne (préfixe 20) à un article sans code. */
   generateInternalBarcode(): string {
+    // 3 chiffres propres au poste + 7 chiffres de séquence : pas de doublon entre PC hors ligne.
+    let node = this.db.prepare("SELECT value FROM settings WHERE key = 'barcode.node'").pluck().get() as string | undefined;
+    if (!node) {
+      node = String(randomInt(0, 1000));
+      this.db.prepare("INSERT INTO settings (key, value) VALUES ('barcode.node', ?)").run(node);
+    }
     for (;;) {
-      const code = internalEan13(this.nextCounter('barcode.internal'));
+      const code = internalEan13(Number(node) * 10_000_000 + this.nextCounter('barcode.internal'));
       const taken = this.db.prepare('SELECT 1 FROM barcodes WHERE code = ?').get(code);
       if (!taken) return code;
     }

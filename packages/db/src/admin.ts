@@ -74,8 +74,14 @@ export class AdminService extends Base {
     if (this.isInitialized()) throw new AppError('Application déjà initialisée', 'ALREADY_INITIALIZED');
     return this.tx(() => {
       const now = this.now();
-      this.db.prepare('INSERT INTO vat_rates (id, label, rate_bp) VALUES (?, ?, ?)').run(newId(), 'TVA 19,25 %', TVA_CAMEROUN_NORMAL);
-      this.db.prepare('INSERT INTO vat_rates (id, label, rate_bp) VALUES (?, ?, ?)').run(newId(), 'Exonéré', 0);
+      for (const [label, rate] of [
+        ['TVA 19,25 %', TVA_CAMEROUN_NORMAL],
+        ['Exonéré', 0],
+      ] as const) {
+        const id = newId();
+        this.db.prepare('INSERT INTO vat_rates (id, label, rate_bp) VALUES (?, ?, ?)').run(id, label, rate);
+        this.enqueue(null, 'vat_rate', id, 'upsert', { id, label, rate_bp: rate });
+      }
       this.setSetting('scale.prefixes', '21,22');
       this.setSetting('scale.valueType', 'price');
       this.setSetting('currency', 'XAF');
@@ -83,6 +89,7 @@ export class AdminService extends Base {
       this.db
         .prepare('INSERT INTO users (id, name, login, pin_hash, role, store_id, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)')
         .run(adminId, input.adminName.trim(), input.adminLogin.trim().toLowerCase(), hashPin(input.adminPin), 'admin', now);
+      this.enqueue(null, 'user', adminId, 'upsert', this.getUser(adminId));
       const store = this.createStore(adminId, input);
       const register = this.listRegisters(store.id)[0]!;
       this.activateRegister(register.activation_code);

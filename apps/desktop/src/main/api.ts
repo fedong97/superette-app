@@ -43,6 +43,7 @@ export interface Printer {
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
   statements(storeId: string, from: string, to: string): Promise<void>;
   reconciliation(storeId: string, accountId: string, date: string, statementBalance: number | null): Promise<void>;
+  taxAssessment(storeId: string, year: number): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
@@ -335,6 +336,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),
     'accounting.vatReturn': (month: string) => s.accounting.vatReturn(ctx(ACCOUNTING).storeId, month),
     'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(ACCOUNTING).storeId, opts),
+    'tax.assessment': (year: number) => s.tax.assessment(ctx(ACCOUNTING).storeId, year),
+    'tax.instalment': (month: string) => s.tax.instalment(ctx(ACCOUNTING).storeId, month),
+    'tax.saveSettings': (year: number, input: Parameters<typeof s.tax.saveSettings>[2]) => s.tax.saveSettings(ctx(ACCOUNTING), year, input),
+    'tax.book': (year: number) => s.tax.book(ctx(ACCOUNTING), year),
+    'tax.print': (year: number) => printer.taxAssessment(ctx(ACCOUNTING).storeId, year),
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(ACCOUNTING).storeId, month),
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(ACCOUNTING).storeId, opts),
     'accounting.cashFlow': (opts: { from: string; to: string }) => s.statements.cashFlow(ctx(ACCOUNTING).storeId, opts),

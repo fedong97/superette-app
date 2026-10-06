@@ -211,6 +211,18 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     }
   });
 
+  it('les paramètres fiscaux saisis sur un PC arrivent sur l’autre, sans doublon', async () => {
+    pc2.tax.saveSettings(ctx2, 2026, { regime: 'simplifie' });
+    pc1.tax.saveSettings(ctx1, 2026, { form: 'individual', priorLosses: 250_000 });
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    for (const s of [pc1, pc2]) {
+      expect(s.tax.settings(ctx1.storeId, 2026)).toMatchObject({ form: 'individual', regime: 'reel', priorLosses: 250_000 });
+      expect(s.db.prepare('SELECT COUNT(*) FROM tax_years').pluck().get()).toBe(1);
+    }
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);

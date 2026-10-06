@@ -161,7 +161,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Export des ventes (CSV)', open: ['sales', 'export'] },
     ],
   ],
-  ['Fiscal', [{ label: 'Déclaration de TVA', open: ['accounting', 'vat'] }, { label: 'États financiers et DSF', open: ['accounting', 'statements'] }]],
+  ['Fiscal', [{ label: 'Déclaration de TVA', open: ['accounting', 'vat'] }, { label: 'États financiers et DSF', open: ['accounting', 'statements'] }, { label: 'Impôt sur le résultat', open: ['accounting', 'tax'] }]],
   [
     'Administration',
     [

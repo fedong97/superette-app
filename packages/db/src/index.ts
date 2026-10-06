@@ -9,6 +9,7 @@ import { PurchaseService } from './purchases';
 import { QuoteService } from './quotes';
 import { ReportService } from './reports';
 import { ReconciliationService } from './reconciliation';
+import { TaxService } from './tax';
 import { FinancialStatementsService } from './statements';
 import { StockService } from './stock';
 import { SyncService } from './sync';
@@ -25,6 +26,7 @@ export * from './purchases';
 export * from './quotes';
 export * from './reports';
 export * from './reconciliation';
+export * from './tax';
 export * from './statements';
 export * from './stock';
 export * from './sync';
@@ -45,6 +47,7 @@ export interface Services {
   accounting: AccountingService;
   statements: FinancialStatementsService;
   reconciliation: ReconciliationService;
+  tax: TaxService;
   sync: SyncService;
 }
 
@@ -61,8 +64,9 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const accounting = new AccountingService(db, clock);
   const statements = new FinancialStatementsService(db, clock, accounting, stock);
   const reconciliation = new ReconciliationService(db, clock, accounting);
+  const tax = new TaxService(db, clock, accounting, statements);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, purchases, reports, accounting, statements, reconciliation, sync };
+  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, purchases, reports, accounting, statements, reconciliation, tax, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

@@ -250,3 +250,12 @@ table.list.journal tr.entry-first td { border-top: 2px solid #c9d6ea; }
 .kpis > div.clickable { cursor: pointer; }
 .kpis > div.clickable:hover { border-color: var(--brand); }
 .methods.six { grid-template-columns: repeat(3, 1fr); }
+
+/* Suggestions d'articles pendant la saisie */
+.suggest { border: 1px solid var(--line); border-radius: 4px; padding: 4px 0; max-height: 360px; }
+.suggest button { display: grid; grid-template-columns: 1fr auto 110px; gap: 12px; width: 100%; border: 0; border-radius: 0; background: none; padding: 7px 12px; text-align: left; font-size: 15px; font-style: normal; }
+.suggest button.active { background: #dbe7f7; }
+.suggest b { font-weight: 700; color: #1d3f72; }
+.suggest .suggest-price { text-align: right; font-weight: 600; }
+.fiche-tools .scan-wrap { position: relative; flex: 1; min-width: 260px; display: flex; }
+.fiche-tools .scan-wrap .scan-input { flex: 1; }

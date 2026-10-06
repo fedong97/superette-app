@@ -381,6 +381,25 @@ export function createPrinter(s: Services): Printer {
         ${flows.check.gap ? `<p>Trésorerie au bilan : ${money(flows.check.treasury)}, écart de ${money(flows.check.gap)} avec la ligne ZH, à analyser.</p>` : ''}`);
     },
 
+    async notes(storeId, year) {
+      const store = s.admin.getStore(storeId);
+      const { notes } = s.notes.notes(storeId, year);
+      const v = (n: number) => (n ? (n < 0 ? `- ${money(-n)}` : money(n)) : '-');
+      const body = notes
+        .map((n) => {
+          const rows = n.rows.length
+            ? n.rows.map((r) => `<tr${r.total ? ' class="total"' : ''}><td>${esc(r.label)}</td>${r.values.map((x) => `<td class="r">${v(x)}</td>`).join('')}</tr>`).join('')
+            : `<tr><td colspan="${n.columns.length + 1}" class="muted">Néant</td></tr>`;
+          return `<div style="break-inside: avoid"><h3>Note ${esc(n.id === 'RF' ? '' : n.id)}${n.id === 'RF' ? '' : ' : '}${esc(n.title)}</h3>
+            <table><thead><tr><th>Libellé</th>${n.columns.map((c) => `<th class="r">${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+            ${n.comment ? `<p class="muted">${esc(n.comment)}</p>` : ''}</div>`;
+        })
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Notes annexes : exercice ${year}</h1><div>Montants en FCFA · SYSCOHADA révisé, système normal · notes établies à partir des écritures ; les notes déclaratives (engagements, effectifs, informations sociales) sont à compléter par le comptable</div>
+        ${body}`);
+    },
+
     async taxAssessment(storeId, year) {
       const store = s.admin.getStore(storeId);
       const a = s.tax.assessment(storeId, year);

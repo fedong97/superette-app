@@ -217,10 +217,11 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     await syncOnce(pc2);
     await syncOnce(pc1);
     await syncOnce(pc2);
-    for (const s of [pc1, pc2]) {
-      expect(s.tax.settings(ctx1.storeId, 2026)).toMatchObject({ form: 'individual', regime: 'reel', priorLosses: 250_000 });
-      expect(s.db.prepare('SELECT COUNT(*) FROM tax_years').pluck().get()).toBe(1);
-    }
+    // Les deux saisies peuvent tomber dans la même milliseconde : peu importe laquelle l'emporte, tous les PC gardent la même.
+    const [a, b] = [pc1, pc2].map((s) => s.tax.settings(ctx1.storeId, 2026));
+    expect(a).toEqual(b);
+    expect(JSON.stringify([a!.form, a!.regime, a!.priorLosses])).toBeOneOf([JSON.stringify(['individual', 'reel', 250_000]), JSON.stringify(['company', 'simplifie', 0])]);
+    for (const s of [pc1, pc2]) expect(s.db.prepare('SELECT COUNT(*) FROM tax_years').pluck().get()).toBe(1);
   });
 
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {

@@ -31,10 +31,12 @@ export interface CashMovements {
   cashOut: Fcfa;
   /** Règlements de clients à crédit reçus en espèces à cette caisse. */
   customerReceipts?: Fcfa;
+  /** Dépenses payées avec les espèces du tiroir (transport, sacs…). */
+  expenses?: Fcfa;
 }
 
 export function expectedCash(m: CashMovements): Fcfa {
-  return m.openingFloat + m.cashSales - m.cashRefunds + m.cashIn - m.cashOut + (m.customerReceipts ?? 0);
+  return m.openingFloat + m.cashSales - m.cashRefunds + m.cashIn - m.cashOut + (m.customerReceipts ?? 0) - (m.expenses ?? 0);
 }
 
 /** Écart de clôture : positif = excédent, négatif = manquant. */

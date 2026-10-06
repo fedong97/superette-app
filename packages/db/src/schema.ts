@@ -559,4 +559,67 @@ CREATE TABLE manual_entry_lines (
 CREATE INDEX manual_entry_lines_entry ON manual_entry_lines(entry_id);
 `,
   },
+  {
+    version: 6,
+    name: 'dépenses',
+    sql: `
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES
+  ('6047', 'Fournitures de bureau', NULL),
+  ('6081', 'Achats d''emballages (sacs, papier)', NULL),
+  ('618', 'Autres frais de transport', NULL),
+  ('624', 'Entretien, réparations et maintenance', NULL),
+  ('638', 'Autres charges externes (gardiennage, nettoyage…)', NULL);
+
+-- Catégories de dépenses : chacune passe sur un compte de charges (classe 6).
+-- Identifiants fixes pour que tous les PC aient les mêmes catégories d'origine.
+CREATE TABLE expense_categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO expense_categories (id, name, account_id) VALUES
+  ('cat-loyer', 'Loyer', '6222'),
+  ('cat-eneo', 'Électricité et eau (ENEO, CDE)', '6052'),
+  ('cat-telephone', 'Téléphone et internet', '6281'),
+  ('cat-salaires', 'Salaires', '661'),
+  ('cat-cnps', 'Cotisations CNPS', '664'),
+  ('cat-transport', 'Transport et carburant', '618'),
+  ('cat-emballages', 'Sacs et emballages', '6081'),
+  ('cat-fournitures', 'Fournitures de bureau', '6047'),
+  ('cat-entretien', 'Entretien et réparations', '624'),
+  ('cat-gardiennage', 'Gardiennage et nettoyage', '638'),
+  ('cat-impots', 'Impôts et taxes (patente, communales…)', '641'),
+  ('cat-frais', 'Frais bancaires et Mobile Money', '631'),
+  ('cat-divers', 'Divers', '658');
+
+CREATE TABLE expenses (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  category_id TEXT NOT NULL REFERENCES expense_categories(id),
+  -- Compte de charges au moment de la dépense : changer la catégorie ne réécrit pas le passé.
+  account_id TEXT NOT NULL,
+  expense_date TEXT NOT NULL,
+  label TEXT NOT NULL,
+  beneficiary TEXT,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  vat INTEGER NOT NULL DEFAULT 0 CHECK (vat >= 0),
+  method TEXT NOT NULL CHECK (method IN ('CASH', 'MTN_MOMO', 'ORANGE_MONEY', 'BANK_TRANSFER', 'CHEQUE', 'CARD')),
+  reference TEXT,
+  register_id TEXT,
+  session_id TEXT,
+  user_id TEXT,
+  authorized_by TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  cancelled_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX expenses_date ON expenses(store_id, expense_date);
+CREATE INDEX expenses_session ON expenses(session_id);
+`,
+  },
 ];

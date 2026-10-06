@@ -46,6 +46,8 @@ const TABLES: Record<string, string> = {
   customer: 'customers',
   customer_payment: 'customer_payments',
   account: 'accounts',
+  expense_category: 'expense_categories',
+  expense: 'expenses',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -288,6 +290,13 @@ export class SyncService extends Base {
       return;
     }
     switch (event.entity) {
+      case 'expense': {
+        // Une annulation est définitive : une version plus ancienne ne la défait pas.
+        const local = this.db.prepare('SELECT status FROM expenses WHERE id = ?').pluck().get(event.entityId);
+        if (local === 'cancelled') return;
+        this.upsert('expenses', p);
+        return;
+      }
       case 'account': {
         // Un rôle (caisse, TVA collectée…) n'est porté que par un compte : il quitte l'ancien.
         const local = this.db.prepare('SELECT updated_at FROM accounts WHERE id = ?').pluck().get(event.entityId) as string | undefined;

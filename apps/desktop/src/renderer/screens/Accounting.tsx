@@ -480,7 +480,7 @@ function VatReturn() {
             <div>
               <small>TVA déductible</small>
               <strong>{fcfa(v.deductible)}</strong>
-              <small>{v.previousCredit ? `+ crédit reporté ${fcfa(v.previousCredit)}` : `${v.invoiceCount} factures fournisseurs`}</small>
+              <small>{v.previousCredit ? `+ crédit reporté ${fcfa(v.previousCredit)}` : `${v.invoiceCount} factures fournisseurs, ${v.expenseCount} dépenses`}</small>
             </div>
             <div className={v.due ? 'neg' : 'pos'}>
               <small>{v.due ? 'TVA à payer' : 'Crédit de TVA à reporter'}</small>
@@ -525,7 +525,7 @@ function VatReturn() {
             <div className="card">
               <p>
                 Ce récapitulatif sert à remplir la déclaration mensuelle sur le portail de la DGI. La TVA collectée est celle des tickets (arrondie ticket par
-                ticket), la TVA déductible celle des factures et avoirs fournisseurs datés du mois.
+                ticket), la TVA déductible celle des factures et avoirs fournisseurs et des dépenses datés du mois.
               </p>
               <p className="muted">
                 Les acomptes d'impôt sur le revenu, les précomptes et le droit d'accises ne sont pas calculés ici : votre comptable les ajoute sur la

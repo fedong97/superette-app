@@ -51,6 +51,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Impression A4 des journaux, de la balance et de la déclaration ; export CSV des écritures pour le cabinet comptable.
 - Les écritures sont recalculées à partir des pièces : elles restent justes quel que soit l'ordre dans lequel les PC se synchronisent. Plan comptable et écritures manuelles se synchronisent.
 
+**Dépenses**
+- Loyer, ENEO, salaires, CNPS, transport, sacs, entretien… classés par catégorie, chaque catégorie passant sur son compte de charges (modifiable).
+- Payées par espèces, MoMo, Orange Money, virement, chèque ou carte (référence obligatoire hors espèces), avec la TVA récupérable de la facture (calcul 19,25 % en un clic).
+- Dépense payée avec les espèces du tiroir depuis la caisse (Action › Dépense payée en caisse) : bon de sortie imprimé pour signature, montant déduit des espèces attendues et listé sur le Z. Un caissier a besoin du code d'un gérant.
+- Écritures comptables automatiques, TVA des dépenses reprise dans la déclaration du mois, annulation motivée (impossible après le Z pour une sortie de caisse), totaux par catégorie, par mode de paiement et par mois.
+
 **Pilotage et administration**
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
 - Export CSV des ventes.
@@ -126,4 +132,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 ## Prochaines étapes
 
 1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Dépenses courantes saisies depuis le menu Charge, rapprochement bancaire, états financiers annuels (bilan, compte de résultat, DSF).
+2. Rapprochement bancaire, états financiers annuels (bilan, compte de résultat, DSF).

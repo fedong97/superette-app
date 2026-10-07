@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast } from '../ui';
+import { type PackDraft, PackGrid, newPackKey } from './packs';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -49,6 +50,12 @@ export function Articles({ user }: { user: User }) {
                   <td>
                     {a.name}
                     {a.brand && <small className="muted"> · {a.brand}</small>}
+                    {a.packs.length > 0 && (
+                      <small className="muted">
+                        {' '}
+                        · {a.packs.map((p) => `${p.name} de ${p.units / 1000}`).join(', ')}
+                      </small>
+                    )}
                   </td>
                   <td>{a.department_name ?? '—'}</td>
                   <td>{a.barcodes[0]?.code ?? (a.plu ? `PLU ${a.plu}` : '—')}</td>
@@ -111,7 +118,24 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
     maxQty: milli(article?.max_qty),
     active: article ? article.active === 1 : true,
   });
-  const [barcodes, setBarcodes] = useState(article?.barcodes.map((b) => ({ code: b.code, pack: String(b.pack_qty / 1000) })) ?? []);
+  const packCodes = new Set(article?.packs.map((p) => p.barcode).filter(Boolean));
+  const [barcodes, setBarcodes] = useState(
+    article?.barcodes.filter((b) => !packCodes.has(b.code)).map((b) => ({ code: b.code, pack: String(b.pack_qty / 1000) })) ?? [],
+  );
+  const str = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
+  const [packs, setPacks] = useState<PackDraft[]>(
+    article?.packs.map((p) => ({
+      key: newPackKey(),
+      name: p.name,
+      contains: String(p.contains),
+      sale: String(p.sale_price),
+      wholesale: str(p.wholesale_price),
+      superWholesale: str(p.super_wholesale_price),
+      barcode: p.barcode ?? '',
+    })) ?? [],
+  );
+  const [purchaseIndex, setPurchaseIndex] = useState(article?.packs.findIndex((p) => p.is_purchase) ?? -1);
+  const [tariff, setTariff] = useState({ unitName: article?.unit_name ?? '', wholesale: str(article?.wholesale_price), superWholesale: str(article?.super_wholesale_price) });
   const [newDept, setNewDept] = useState('');
   const [storePrice, setStorePrice] = useState(article && article.store_price !== article.sale_price ? String(article.store_price) : '');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -126,6 +150,8 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
     e.preventDefault();
     if (sale === null || buy === null) return toast.error('Prix invalides');
     const opt = (v: string) => (v.trim() ? parseQty(v) : null);
+    const price = (v: string) => (v.trim() ? parseAmount(v) : null);
+    const piece = f.unit === 'piece';
     try {
       const saved = await call(
         'catalogue.save',
@@ -146,6 +172,20 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
           maxQty: opt(f.maxQty),
           active: f.active,
           barcodes: barcodes.filter((b) => b.code.trim()).map((b) => ({ code: b.code, packQty: parseQty(b.pack) ?? 1000 })),
+          unitName: piece ? tariff.unitName.trim() || null : null,
+          wholesalePrice: price(tariff.wholesale),
+          superWholesalePrice: price(tariff.superWholesale),
+          packs: piece
+            ? packs.map((p, i) => ({
+                name: p.name,
+                contains: Math.floor(Number(p.contains) || 0),
+                salePrice: parseAmount(p.sale) ?? 0,
+                wholesalePrice: price(p.wholesale),
+                superWholesalePrice: price(p.superWholesale),
+                barcode: p.barcode.trim() || null,
+                purchase: i === purchaseIndex,
+              }))
+            : [],
         },
         article?.id,
       );
@@ -226,15 +266,22 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
               ))}
             </select>
           </Field>
-          <Field label="Prix d'achat HT (FCFA)">
-            <input inputMode="numeric" value={f.purchasePrice} onChange={set('purchasePrice')} />
-          </Field>
-          <Field
-            label="Prix de vente TTC (FCFA)"
-            hint={sale ? `HT ${fcfa(ht)}${buy ? ` · marge ${fcfa(ht - buy)} (${ht ? Math.round(((ht - buy) / ht) * 100) : 0} %)` : ''}` : undefined}
-          >
-            <input inputMode="numeric" value={f.salePrice} onChange={set('salePrice')} required />
-          </Field>
+          {f.unit !== 'piece' && (
+            <>
+              <Field label="Prix d'achat HT (FCFA)">
+                <input inputMode="numeric" value={f.purchasePrice} onChange={set('purchasePrice')} />
+              </Field>
+              <Field
+                label="Prix de vente TTC (FCFA)"
+                hint={sale ? `HT ${fcfa(ht)}${buy ? ` · marge ${fcfa(ht - buy)} (${ht ? Math.round(((ht - buy) / ht) * 100) : 0} %)` : ''}` : undefined}
+              >
+                <input inputMode="numeric" value={f.salePrice} onChange={set('salePrice')} required />
+              </Field>
+              <Field label="Prix de gros TTC" hint="Vide = prix de vente">
+                <input inputMode="numeric" value={tariff.wholesale} onChange={(e) => setTariff({ ...tariff, wholesale: e.target.value })} />
+              </Field>
+            </>
+          )}
           {canSetStorePrice && article && (
             <Field label="Prix propre à ce magasin" hint="Vide = prix national">
               <input inputMode="numeric" value={storePrice} onChange={(e) => setStorePrice(e.target.value)} />
@@ -264,7 +311,30 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
             <input type="checkbox" checked={f.active} onChange={set('active')} /> Actif
           </label>
         </div>
-        <h3>Codes-barres</h3>
+        {f.unit === 'piece' && (
+          <>
+            <h3>Conditionnements et prix</h3>
+            <p className="muted small">
+              Du conditionnement d'achat (carton, palette) à l'unité vendue au détail. « Contient » donne le nombre du niveau suivant : un carton
+              contient 10 paquets, un paquet 10 ampoules. Le prix de gros s'applique aux clients au tarif gros.
+            </p>
+            <PackGrid
+              packs={packs}
+              base={{ unitName: tariff.unitName, purchase: f.purchasePrice, sale: f.salePrice, wholesale: tariff.wholesale, superWholesale: tariff.superWholesale }}
+              purchaseIndex={purchaseIndex}
+              rate={rate}
+              onPacks={setPacks}
+              onBase={(patch) => {
+                if (patch.purchase !== undefined || patch.sale !== undefined)
+                  setF((cur) => ({ ...cur, ...(patch.purchase !== undefined ? { purchasePrice: patch.purchase } : {}), ...(patch.sale !== undefined ? { salePrice: patch.sale } : {}) }));
+                const { purchase: _p, sale: _s, ...rest } = patch;
+                if (Object.keys(rest).length) setTariff((cur) => ({ ...cur, ...rest }));
+              }}
+              onPurchaseIndex={setPurchaseIndex}
+            />
+          </>
+        )}
+        <h3>{f.unit === 'piece' && packs.length ? `Codes-barres de l'unité (${tariff.unitName.trim() || 'pièce'})` : 'Codes-barres'}</h3>
         <table className="list compact">
           <tbody>
             {barcodes.map((b, i) => (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType } from '@superette/core';
 import { type Result, call } from '../api';
+import { PackUnitSelect, packChoices, purchaseUnits, switchUnits, toBase } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 
@@ -84,7 +85,10 @@ function StockState() {
             <tr key={r.article_id}>
               <td>{r.name}</td>
               <td>{r.department_name ?? '—'}</td>
-              <td className={`r ${r.qty < 0 ? 'neg' : ''}`}>{qty(r.qty, r.unit)}</td>
+              <td className={`r ${r.qty < 0 ? 'neg' : ''}`}>
+                {qty(r.qty, r.unit)}
+                {r.in_packs && <small className="muted block">{r.in_packs}</small>}
+              </td>
               <td className="r">{fcfa(r.avg_cost)}</td>
               <td className="r">{fcfa(r.value)}</td>
               <td>{r.next_expiry ? dateFr(r.next_expiry) : '—'}</td>
@@ -101,8 +105,10 @@ function StockState() {
 
 interface RecLine {
   article: Article;
+  /** Quantité et coût HT dans le conditionnement choisi (`packUnits` unités, en millièmes). */
   qty: string;
   cost: string;
+  packUnits: number;
   lot: string;
   expiry: string;
 }
@@ -125,13 +131,19 @@ function Reception() {
           <input value={reference} onChange={(e) => setReference(e.target.value)} />
         </Field>
       </div>
-      <ArticlePicker onPick={(a) => setLines([...lines, { article: a, qty: '1', cost: String(a.purchase_price || ''), lot: '', expiry: '' }])} />
+      <ArticlePicker
+        onPick={(a) => {
+          const units = purchaseUnits(a);
+          setLines([...lines, { article: a, qty: '1', cost: a.purchase_price ? String(Math.round((a.purchase_price * units) / 1000)) : '', packUnits: units, lot: '', expiry: '' }]);
+        }}
+      />
       {lines.length > 0 && (
         <table className="list">
           <thead>
             <tr>
               <th>Article</th>
               <th>Quantité</th>
+              <th>Conditionnement</th>
               <th>Coût unitaire HT</th>
               <th>N° de lot</th>
               <th>Date limite</th>
@@ -145,6 +157,13 @@ function Reception() {
                 <td>{l.article.name}</td>
                 <td>
                   <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
+                </td>
+                <td>
+                  <PackUnitSelect
+                    choices={packChoices(l.article)}
+                    value={l.packUnits}
+                    onChange={(u) => update(i, { ...switchUnits(l.qty, l.cost, l.packUnits, u), packUnits: u })}
+                  />
                 </td>
                 <td>
                   <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
@@ -178,10 +197,9 @@ function Reception() {
                 supplierId: supplierId || null,
                 reference: reference || undefined,
                 lines: lines.map((l) => {
-                  const q = parseQty(l.qty);
-                  const c = parseAmount(l.cost);
-                  if (!q || c === null) throw new Error(`Quantité ou coût invalide : ${l.article.name}`);
-                  return { articleId: l.article.id, qty: q, unitCost: c, lotNumber: l.lot || null, expiry: l.expiry || null };
+                  const b = toBase(l.qty, l.cost, l.packUnits);
+                  if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou coût invalide : ${l.article.name}`);
+                  return { articleId: l.article.id, qty: b.qty, unitCost: b.unitCost, lotNumber: l.lot || null, expiry: l.expiry || null };
                 }),
               });
               toast.ok('Réception enregistrée');

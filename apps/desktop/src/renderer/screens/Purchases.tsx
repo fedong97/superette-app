@@ -1,6 +1,8 @@
+import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast } from '../ui';
+import { PackUnitSelect, packChoices, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -131,8 +133,54 @@ interface EditLine {
   name: string;
   unit: 'piece' | 'kg' | 'litre';
   ref: string | null;
+  /** Quantité et prix HT dans le conditionnement choisi (`packUnits` unités de détail, en millièmes). */
   qty: string;
   cost: string;
+  packUnits: number;
+  /** Ligne reprise d'un bon enregistré : passée au conditionnement d'achat dès qu'on le connaît. */
+  auto?: boolean;
+}
+
+const lineHt = (qty: string, cost: string) => Math.round(((parseQty(qty) ?? 0) * (parseAmount(cost) ?? 0)) / 1000);
+
+/** Les lignes reprises d'un bon passent au conditionnement d'achat quand la quantité tombe juste (2 cartons plutôt que 200 pièces). */
+function useAutoPacks<L extends { articleId: string; qty: string; cost: string; packUnits: number; auto?: boolean }>(
+  lines: L[] | null,
+  setLines: (l: L[]) => void,
+  packs: ReturnType<typeof useArticlePacks>[0],
+) {
+  useEffect(() => {
+    if (!lines?.some((l) => l.auto && packs.has(l.articleId))) return;
+    setLines(
+      lines.map((l) => {
+        const a = l.auto ? packs.get(l.articleId) : undefined;
+        if (!a) return l;
+        const base = toBase(l.qty, l.cost, l.packUnits);
+        const units = unitsFor(base.qty ?? 0, packChoices(a), purchaseUnits(a));
+        return { ...l, ...switchUnits(l.qty, l.cost, l.packUnits, units), packUnits: units, auto: false };
+      }),
+    );
+  }, [lines, packs, setLines]);
+}
+
+/** Choix du conditionnement d'une ligne, la quantité et le prix étant convertis. */
+function PackCell<L extends { qty: string; cost: string; packUnits: number; auto?: boolean }>({
+  line,
+  a,
+  onChange,
+}: {
+  line: L;
+  a: Parameters<typeof packChoices>[0] | undefined;
+  onChange: (patch: Partial<L>) => void;
+}) {
+  if (!a) return null;
+  return (
+    <PackUnitSelect
+      choices={packChoices(a)}
+      value={line.packUnits}
+      onChange={(u) => onChange({ ...switchUnits(line.qty, line.cost, line.packUnits, u), packUnits: u, auto: false } as Partial<L>)}
+    />
+  );
 }
 
 function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: string | null) => void }) {
@@ -142,16 +190,26 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
   const [expected, setExpected] = useState(order?.expected_date ?? '');
   const [notes, setNotes] = useState(order?.notes ?? '');
   const [lines, setLines] = useState<EditLine[]>(
-    order?.lines.map((l) => ({ articleId: l.article_id, code: l.article_code, name: l.article_name, unit: l.unit, ref: l.supplier_ref, qty: num(l.qty), cost: String(l.unit_cost) })) ?? [],
+    order?.lines.map((l) => ({ articleId: l.article_id, code: l.article_code, name: l.article_name, unit: l.unit, ref: l.supplier_ref, qty: num(l.qty), cost: String(l.unit_cost), packUnits: 1000, auto: true })) ?? [],
   );
+  const [packs, remember] = useArticlePacks(lines.map((l) => l.articleId));
+  useAutoPacks(lines, setLines, packs);
   const update = (i: number, patch: Partial<EditLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const total = lines.reduce((t, l) => t + Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000), 0);
+  const total = lines.reduce((t, l) => t + lineHt(l.qty, l.cost), 0);
 
   const add = async (a: Result<'catalogue.get'>) => {
-    // Prix négocié et colisage du fournisseur choisi, sinon dernier prix d'achat.
+    // Prix négocié et colisage du fournisseur choisi, sinon dernier prix d'achat ;
+    // la ligne est saisie dans le conditionnement d'achat (1 carton au prix du carton).
+    remember(a.id, a);
     const refs = await call('suppliers.ofArticle', a.id);
     const ref = refs.find((r) => r.supplier_id === supplierId);
-    setLines([...lines, { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num(ref?.pack_qty ?? 1000), cost: String(ref?.unit_cost || a.purchase_price || '') }]);
+    const unitCost = ref?.unit_cost || a.purchase_price || 0;
+    const baseQty = ref?.pack_qty ?? purchaseUnits(a);
+    const units = unitsFor(baseQty, packChoices(a), purchaseUnits(a));
+    setLines([
+      ...lines,
+      { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost: unitCost ? String(Math.round((unitCost * units) / 1000)) : '', packUnits: units },
+    ]);
   };
 
   const save = async (send: boolean) => {
@@ -162,10 +220,9 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         expectedDate: expected || null,
         notes: notes || null,
         lines: lines.map((l) => {
-          const q = parseQty(l.qty);
-          const c = parseAmount(l.cost);
-          if (!q || c === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
-          return { articleId: l.articleId, qty: q, unitCost: c };
+          const b = toBase(l.qty, l.cost, l.packUnits);
+          if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
+          return { articleId: l.articleId, qty: b.qty, unitCost: b.unitCost };
         }),
       };
       if (!supplierId) throw new Error('Choisissez le fournisseur');
@@ -196,6 +253,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
               <th>Réf. fournisseur</th>
               <th>Article</th>
               <th>Quantité</th>
+              <th>Conditionnement</th>
               <th>PU HT</th>
               <th className="r">Total HT</th>
               <th />
@@ -212,9 +270,12 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
                   <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
                 </td>
                 <td>
+                  <PackCell line={l} a={packs.get(l.articleId)} onChange={(p) => update(i, p)} />
+                </td>
+                <td>
                   <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
                 </td>
-                <td className="r">{fcfa(Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000))}</td>
+                <td className="r">{fcfa(lineHt(l.qty, l.cost))}</td>
                 <td>
                   <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
                     ✕
@@ -357,6 +418,8 @@ interface RecvLine {
   already: number;
   qty: string;
   cost: string;
+  packUnits: number;
+  auto?: boolean;
   lot: string;
   expiry: string;
 }
@@ -379,14 +442,22 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
           already: l.received,
           qty: num(Math.max(0, l.qty - l.received)),
           cost: String(l.unit_cost),
+          packUnits: 1000,
+          auto: true,
           lot: '',
           expiry: '',
         })),
       );
   }, [order.data, lines]);
+  const [packs, remember] = useArticlePacks((lines ?? []).map((l) => l.articleId));
+  useAutoPacks(lines, setLines, packs);
+  const inPacks = (q: number, articleId: string) => {
+    const a = packs.get(articleId);
+    return a && a.packs.length ? describeInPacks(q, a.packs, a.unit_name || 'Pièce') : '';
+  };
   if (!order.data || !lines) return null;
   const update = (i: number, patch: Partial<RecvLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const total = lines.reduce((t, l) => t + Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000), 0);
+  const total = lines.reduce((t, l) => t + lineHt(l.qty, l.cost), 0);
   return (
     <div>
       <h2>
@@ -400,9 +471,14 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
       </div>
       <ArticlePicker
         placeholder="Article livré en plus de la commande : scanner ou rechercher"
-        onPick={(a) =>
-          setLines([...lines, { orderLineId: null, articleId: a.id, name: a.name, unit: a.unit, perishable: a.perishable === 1, ordered: 0, already: 0, qty: '1', cost: String(a.purchase_price || ''), lot: '', expiry: '' }])
-        }
+        onPick={(a) => {
+          remember(a.id, a);
+          const units = purchaseUnits(a);
+          setLines([
+            ...lines,
+            { orderLineId: null, articleId: a.id, name: a.name, unit: a.unit, perishable: a.perishable === 1, ordered: 0, already: 0, qty: '1', cost: a.purchase_price ? String(Math.round((a.purchase_price * units) / 1000)) : '', packUnits: units, lot: '', expiry: '' },
+          ]);
+        }}
       />
       <table className="list">
         <thead>
@@ -411,6 +487,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
             <th className="r">Commandé</th>
             <th className="r">Déjà reçu</th>
             <th>Reçu</th>
+            <th>Conditionnement</th>
             <th>PU HT</th>
             <th>N° de lot</th>
             <th>Date limite</th>
@@ -420,17 +497,23 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
         <tbody>
           {lines.map((l, i) => {
             const ol = order.data!.lines.find((x) => x.id === l.orderLineId);
-            const priceGap = ol && parseAmount(l.cost) !== ol.unit_cost;
+            const priceGap = ol && toBase(l.qty, l.cost, l.packUnits).unitCost !== ol.unit_cost;
             return (
               <tr key={i}>
                 <td>
                   {l.name}
                   {!l.orderLineId && <small className="muted"> hors commande</small>}
                 </td>
-                <td className="r">{l.ordered ? qty(l.ordered, l.unit) : ''}</td>
+                <td className="r">
+                  {l.ordered ? qty(l.ordered, l.unit) : ''}
+                  {l.ordered > 0 && inPacks(l.ordered, l.articleId) && <small className="muted block">{inPacks(l.ordered, l.articleId)}</small>}
+                </td>
                 <td className="r">{l.already ? qty(l.already, l.unit) : ''}</td>
                 <td>
                   <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
+                </td>
+                <td>
+                  <PackCell line={l} a={packs.get(l.articleId)} onChange={(p) => update(i, p)} />
                 </td>
                 <td>
                   <input className={`qty ${priceGap ? 'gap' : ''}`} value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
@@ -441,7 +524,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
                 <td>
                   <input type="date" value={l.expiry} required={l.perishable && (parseQty(l.qty) ?? 0) > 0} onChange={(e) => update(i, { expiry: e.target.value })} />
                 </td>
-                <td className="r">{fcfa(Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000))}</td>
+                <td className="r">{fcfa(lineHt(l.qty, l.cost))}</td>
               </tr>
             );
           })}
@@ -457,10 +540,9 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
               const input = lines
                 .filter((l) => l.qty.trim() && l.qty.trim() !== '0')
                 .map((l) => {
-                  const q = parseQty(l.qty);
-                  const c = parseAmount(l.cost);
-                  if (!q || c === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
-                  return { orderLineId: l.orderLineId, articleId: l.articleId, qty: q, unitCost: c, lotNumber: l.lot || null, expiry: l.expiry || null };
+                  const b = toBase(l.qty, l.cost, l.packUnits);
+                  if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
+                  return { orderLineId: l.orderLineId, articleId: l.articleId, qty: b.qty, unitCost: b.unitCost, lotNumber: l.lot || null, expiry: l.expiry || null };
                 });
               const r = await call('purchases.receiveOrder', id, { deliveryNote: note || undefined, lines: input });
               toast.ok(`Réception ${r.number} enregistrée, stock mis à jour`);

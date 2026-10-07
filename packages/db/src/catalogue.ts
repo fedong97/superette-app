@@ -3,9 +3,11 @@ import {
   type Fcfa,
   type Milli,
   type ScaleBarcodeConfig,
+  checkPacks,
   internalEan13,
   isValidEan,
   normalizeBarcode,
+  packUnits,
   parseScaleBarcode,
 } from '@superette/core';
 import { AppError, Base, newId } from './util';
@@ -36,7 +38,39 @@ export interface Article {
   alert_qty: Milli | null;
   max_qty: Milli | null;
   active: number;
+  /** Nom de l'unité de détail (Ampoule, Bouteille) ; vide = « Pièce ». */
+  unit_name: string | null;
+  wholesale_price: Fcfa | null;
+  super_wholesale_price: Fcfa | null;
   barcodes: { code: string; pack_qty: Milli }[];
+  /** Conditionnements, du plus grand au plus petit (carton, paquet). */
+  packs: ArticlePack[];
+}
+
+export interface ArticlePack {
+  id: string;
+  position: number;
+  name: string;
+  /** Nombre de conditionnements du niveau suivant (ou d'unités de détail) contenus. */
+  contains: number;
+  /** Unités de détail contenues (millièmes). */
+  units: Milli;
+  sale_price: Fcfa;
+  wholesale_price: Fcfa | null;
+  super_wholesale_price: Fcfa | null;
+  barcode: string | null;
+  /** Conditionnement dans lequel on achète l'article. */
+  is_purchase: number;
+}
+
+export interface PackInput {
+  name: string;
+  contains: number;
+  salePrice: Fcfa;
+  wholesalePrice?: Fcfa | null;
+  superWholesalePrice?: Fcfa | null;
+  barcode?: string | null;
+  purchase?: boolean;
 }
 
 export interface ArticleInput {
@@ -56,6 +90,11 @@ export interface ArticleInput {
   maxQty?: Milli | null;
   active?: boolean;
   barcodes?: { code: string; packQty?: Milli }[];
+  unitName?: string | null;
+  wholesalePrice?: Fcfa | null;
+  superWholesalePrice?: Fcfa | null;
+  /** Conditionnements du plus grand au plus petit ; absent = inchangés. */
+  packs?: PackInput[];
 }
 
 /** Résultat d'un scan en caisse. */
@@ -66,6 +105,8 @@ export interface ScanResult {
   qty: Milli;
   /** Montant imposé par une étiquette balance à prix intégré. */
   fixedAmount?: Fcfa;
+  /** Code-barres d'un conditionnement (carton, paquet) : vendu à son prix. */
+  pack?: ArticlePack;
 }
 
 const ARTICLE_SELECT = `
@@ -106,19 +147,25 @@ export class CatalogueService extends Base {
 
   // --- Articles -------------------------------------------------------------
 
-  private withBarcodes(rows: Omit<Article, 'barcodes'>[]): Article[] {
+  private withBarcodes(rows: Omit<Article, 'barcodes' | 'packs'>[]): Article[] {
     if (rows.length === 0) return [];
+    const marks = rows.map(() => '?').join(',');
+    const ids = rows.map((r) => r.id);
     const codes = this.db
-      .prepare(`SELECT article_id, code, pack_qty FROM barcodes WHERE article_id IN (${rows.map(() => '?').join(',')})`)
-      .all(...rows.map((r) => r.id)) as { article_id: string; code: string; pack_qty: number }[];
+      .prepare(`SELECT article_id, code, pack_qty FROM barcodes WHERE article_id IN (${marks})`)
+      .all(...ids) as { article_id: string; code: string; pack_qty: number }[];
+    const packs = this.db
+      .prepare(`SELECT * FROM article_packs WHERE article_id IN (${marks}) ORDER BY position`)
+      .all(...ids) as (ArticlePack & { article_id: string })[];
     return rows.map((r) => ({
       ...r,
       barcodes: codes.filter((c) => c.article_id === r.id).map(({ code, pack_qty }) => ({ code, pack_qty })),
+      packs: packs.filter((p) => p.article_id === r.id).map(({ article_id: _a, ...p }) => p),
     }));
   }
 
   getArticle(id: string, storeId: string | null = null): Article {
-    const row = this.db.prepare(`${ARTICLE_SELECT} WHERE a.id = @id`).get({ id, storeId }) as Omit<Article, 'barcodes'> | undefined;
+    const row = this.db.prepare(`${ARTICLE_SELECT} WHERE a.id = @id`).get({ id, storeId }) as Omit<Article, 'barcodes' | 'packs'> | undefined;
     if (!row) throw new AppError('Article introuvable', 'NOT_FOUND');
     return this.withBarcodes([row])[0]!;
   }
@@ -140,7 +187,7 @@ export class CatalogueService extends Base {
       )
       .all({ q, storeId, all: opts.includeInactive ? 1 : 0, familyId: opts.familyId ?? null, limit: opts.limit ?? 200 }) as Omit<
       Article,
-      'barcodes'
+      'barcodes' | 'packs'
     >[];
     return this.withBarcodes(rows);
   }
@@ -173,14 +220,14 @@ export class CatalogueService extends Base {
          WHERE a.active = 1 AND ${where}
          ORDER BY CASE WHEN fold(a.name) LIKE @prefix THEN 0 ELSE 1 END, fold(a.name) LIMIT @limit`,
       )
-      .all(params) as Omit<Article, 'barcodes'>[];
+      .all(params) as Omit<Article, 'barcodes' | 'packs'>[];
     return this.withBarcodes(rows);
   }
 
   quickKeys(storeId: string): Article[] {
     const rows = this.db
       .prepare(`${ARTICLE_SELECT} WHERE a.quick_key = 1 AND a.active = 1 ORDER BY f.name, a.name`)
-      .all({ storeId }) as Omit<Article, 'barcodes'>[];
+      .all({ storeId }) as Omit<Article, 'barcodes' | 'packs'>[];
     return this.withBarcodes(rows);
   }
 
@@ -197,7 +244,28 @@ export class CatalogueService extends Base {
     ] as const) {
       if (!Number.isSafeInteger(v) || v < 0) throw new AppError(`${label} invalide`, 'INVALID');
     }
-    const barcodes = (input.barcodes ?? []).map((b) => ({ code: normalizeBarcode(b.code), packQty: b.packQty ?? 1000 }));
+    for (const [label, v] of [
+      ['Prix de gros', input.wholesalePrice],
+      ['Prix super gros', input.superWholesalePrice],
+    ] as const) {
+      if (v !== undefined && v !== null && (!Number.isSafeInteger(v) || v <= 0)) throw new AppError(`${label} invalide`, 'INVALID');
+    }
+    const packs = input.packs?.map((p) => ({ ...p, name: p.name.trim(), barcode: p.barcode?.trim() ? normalizeBarcode(p.barcode) : null }));
+    if (packs) {
+      const error = checkPacks(packs, input.unit);
+      if (error) throw new AppError(error, 'INVALID');
+      for (const p of packs) {
+        for (const v of [p.wholesalePrice, p.superWholesalePrice]) {
+          if (v !== undefined && v !== null && (!Number.isSafeInteger(v) || v <= 0)) throw new AppError(`Prix du conditionnement « ${p.name} » invalide`, 'INVALID');
+        }
+      }
+    }
+    const units = packs ? packUnits(packs) : [];
+    const packCodes = new Set((packs ?? []).map((p) => p.barcode).filter(Boolean));
+    const barcodes = [
+      ...(input.barcodes ?? []).map((b) => ({ code: normalizeBarcode(b.code), packQty: b.packQty ?? 1000 })).filter((b) => !packCodes.has(b.code)),
+      ...(packs ?? []).flatMap((p, i) => (p.barcode ? [{ code: p.barcode, packQty: units[i]! }] : [])),
+    ];
     for (const b of barcodes) {
       if (/^\d+$/.test(b.code) && [8, 13].includes(b.code.length) && !isValidEan(b.code)) {
         throw new AppError(`Code-barres ${b.code} : clé de contrôle incorrecte`, 'INVALID_BARCODE');
@@ -224,6 +292,9 @@ export class CatalogueService extends Base {
         alert_qty: input.alertQty ?? null,
         max_qty: input.maxQty ?? null,
         active: input.active === false ? 0 : 1,
+        unit_name: input.unitName === undefined ? (existing?.unit_name ?? null) : input.unitName?.trim() || null,
+        wholesale_price: input.wholesalePrice === undefined ? (existing?.wholesale_price ?? null) : input.wholesalePrice,
+        super_wholesale_price: input.superWholesalePrice === undefined ? (existing?.super_wholesale_price ?? null) : input.superWholesalePrice,
         now,
       };
       try {
@@ -233,22 +304,34 @@ export class CatalogueService extends Base {
               `UPDATE articles SET code=@code, name=@name, family_id=@family_id, brand=@brand, unit=@unit,
                  vat_rate_id=@vat_rate_id, purchase_price=@purchase_price, sale_price=@sale_price,
                  perishable=@perishable, plu=@plu, quick_key=@quick_key, min_qty=@min_qty, alert_qty=@alert_qty,
-                 max_qty=@max_qty, active=@active, updated_at=@now WHERE id=@id`,
+                 max_qty=@max_qty, active=@active, unit_name=@unit_name, wholesale_price=@wholesale_price,
+                 super_wholesale_price=@super_wholesale_price, updated_at=@now WHERE id=@id`,
             )
             .run(params);
         } else {
           this.db
             .prepare(
               `INSERT INTO articles (id, code, name, family_id, brand, unit, vat_rate_id, purchase_price, sale_price,
-                 perishable, plu, quick_key, min_qty, alert_qty, max_qty, active, created_at, updated_at)
+                 perishable, plu, quick_key, min_qty, alert_qty, max_qty, active, unit_name, wholesale_price, super_wholesale_price, created_at, updated_at)
                VALUES (@id, @code, @name, @family_id, @brand, @unit, @vat_rate_id, @purchase_price, @sale_price,
-                 @perishable, @plu, @quick_key, @min_qty, @alert_qty, @max_qty, @active, @now, @now)`,
+                 @perishable, @plu, @quick_key, @min_qty, @alert_qty, @max_qty, @active, @unit_name, @wholesale_price, @super_wholesale_price, @now, @now)`,
             )
             .run(params);
         }
         this.db.prepare('DELETE FROM barcodes WHERE article_id = ?').run(articleId);
         const insertCode = this.db.prepare('INSERT INTO barcodes (code, article_id, pack_qty) VALUES (?, ?, ?)');
         for (const b of barcodes) insertCode.run(b.code, articleId, b.packQty);
+        if (packs) {
+          this.db.prepare('DELETE FROM article_packs WHERE article_id = ?').run(articleId);
+          const insertPack = this.db.prepare(
+            `INSERT INTO article_packs (id, article_id, position, name, contains, units, sale_price, wholesale_price, super_wholesale_price, barcode, is_purchase)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          );
+          const purchase = packs.findIndex((p) => p.purchase);
+          packs.forEach((p, i) =>
+            insertPack.run(newId(), articleId, i + 1, p.name, p.contains, units[i], p.salePrice, p.wholesalePrice ?? null, p.superWholesalePrice ?? null, p.barcode, i === purchase ? 1 : 0),
+          );
+        }
       } catch (e) {
         const msg = String(e);
         if (msg.includes('barcodes.code')) throw new AppError('Un des codes-barres est déjà attribué à un autre article', 'DUPLICATE_BARCODE');
@@ -335,7 +418,11 @@ export class CatalogueService extends Base {
     const hit = this.db
       .prepare('SELECT b.article_id, b.pack_qty FROM barcodes b JOIN articles a ON a.id = b.article_id WHERE b.code = ? AND a.active = 1')
       .get(code) as { article_id: string; pack_qty: number } | undefined;
-    if (hit) return { article: this.getArticle(hit.article_id, storeId), barcode: code, qty: hit.pack_qty };
+    if (hit) {
+      const article = this.getArticle(hit.article_id, storeId);
+      const pack = article.packs.find((p) => p.barcode === code);
+      return { article, barcode: code, qty: pack?.units ?? hit.pack_qty, ...(pack ? { pack } : {}) };
+    }
 
     const scale = parseScaleBarcode(code, this.scaleConfig());
     if (scale) {

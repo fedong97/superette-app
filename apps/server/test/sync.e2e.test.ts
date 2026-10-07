@@ -250,6 +250,34 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(pc2.promotions.activeRules(ctx2.storeId)).toEqual([]);
   });
 
+  it('les conditionnements et le tarif de gros d’un article voyagent, et un carton vendu sur le PC 2 remonte', async () => {
+    const tva = pc1.admin.listVatRates().find((r) => r.rate_bp === 1925)!.id;
+    const jus = pc1.catalogue.saveArticle(ctx1.userId, {
+      name: 'Jus Top 1 L',
+      unit: 'piece',
+      unitName: 'Bouteille',
+      vatRateId: tva,
+      purchasePrice: 500,
+      salePrice: 800,
+      packs: [
+        { name: 'Palette', contains: 80, salePrice: 360_000, purchase: true },
+        { name: 'Pack', contains: 6, salePrice: 4_500, wholesalePrice: 4_200 },
+      ],
+    });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    const onPc2 = pc2.catalogue.getArticle(jus.id);
+    expect(onPc2.packs.map((p) => [p.name, p.units, p.sale_price])).toEqual([
+      ['Palette', 480_000, 360_000],
+      ['Pack', 6000, 4_500],
+    ]);
+    expect(onPc2.unit_name).toBe('Bouteille');
+    const sale = pc2.pos.completeSale(ctx2, { lines: [{ articleId: jus.id, qty: 12_000, packId: onPc2.packs[1]!.id }], payments: [{ method: 'CASH', amount: 9_000 }] });
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    expect(pc1.pos.getSale(sale.id).lines[0]).toMatchObject({ pack_name: 'Pack', pack_units: 6000, pack_price: 4_500, total_ttc: 9_000 });
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);
@@ -257,7 +285,7 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     const pc3 = fresh();
     const station = await joinStore(pc3, url, reg.activation_code, 'PC Yaoundé');
     expect(station?.store.code).toBe('YDE1');
-    expect(pc3.db.prepare('SELECT COUNT(*) FROM articles').pluck().get()).toBe(3);
+    expect(pc3.db.prepare('SELECT COUNT(*) FROM articles').pluck().get()).toBe(4);
     expect(pc3.db.prepare('SELECT COUNT(*) FROM sales').pluck().get()).toBe(0);
     expect(pc3.db.prepare('SELECT COUNT(*) FROM stock_movements').pluck().get()).toBe(0);
     expect(pc3.purchases.listSuppliers().map((f) => f.name)).toEqual(['SABC']);

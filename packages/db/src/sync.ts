@@ -181,7 +181,11 @@ export class SyncService extends Base {
       case 'article': {
         const row = this.db.prepare('SELECT * FROM articles WHERE id = ?').get(entityId) as Record<string, unknown> | undefined;
         if (!row) return null;
-        return { ...row, barcodes: this.db.prepare('SELECT code, pack_qty FROM barcodes WHERE article_id = ?').all(entityId) };
+        return {
+          ...row,
+          barcodes: this.db.prepare('SELECT code, pack_qty FROM barcodes WHERE article_id = ?').all(entityId),
+          packs: this.db.prepare('SELECT * FROM article_packs WHERE article_id = ? ORDER BY position').all(entityId),
+        };
       }
       case 'store_price': {
         const [articleId, storeId] = entityId.split(':');
@@ -368,6 +372,11 @@ export class SyncService extends Base {
             continue;
           }
           insert.run(b.code, event.entityId, b.pack_qty);
+        }
+        // Conditionnements : la liste reçue remplace la liste locale (un poste ancien n'en envoie pas).
+        if (Array.isArray(p['packs'])) {
+          this.db.prepare('DELETE FROM article_packs WHERE article_id = ?').run(event.entityId);
+          for (const pack of p['packs'] as Record<string, unknown>[]) this.upsert('article_packs', pack);
         }
         return;
       }

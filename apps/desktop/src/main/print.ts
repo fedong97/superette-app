@@ -211,7 +211,9 @@ export function createPrinter(s: Services): Printer {
       const rows = sale.lines
         .map((l) => {
           const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
-          return `<tr><td>${esc(l.label)}</td><td class="r">${formatQty(Math.abs(l.qty), l.unit)}</td><td class="r">${money(l.unit_price)}</td>
+          const pack = l.pack_name && l.pack_units && l.pack_price !== null;
+          const q = pack ? `${Math.abs(l.qty) / l.pack_units!} ${esc(l.pack_name!)}` : formatQty(Math.abs(l.qty), l.unit);
+          return `<tr><td>${esc(l.label)}</td><td class="r">${q}</td><td class="r">${money(pack ? l.pack_price! : l.unit_price)}</td>
             <td class="r">${l.discount ? money(l.discount) : ''}</td><td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td><td class="r">${money(l.total_ttc)}</td></tr>`;
         })
         .join('');

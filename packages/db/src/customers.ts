@@ -2,6 +2,8 @@ import {
   AGING_LABELS,
   type AgingBucket,
   type Fcfa,
+  type PriceLevel,
+  PRICE_LEVELS,
   agingBucket,
   allocateOldestFirst,
   creditCheck,
@@ -24,6 +26,8 @@ export interface Customer {
   payment_terms_days: number;
   notes: string | null;
   active: number;
+  /** Tarif du client : détail, gros ou super gros. */
+  price_level: PriceLevel;
   created_at: string;
   updated_at: string;
 }
@@ -39,6 +43,7 @@ export interface CustomerInput {
   paymentTermsDays?: number;
   notes?: string | null;
   active?: boolean;
+  priceLevel?: PriceLevel;
 }
 
 export const CUSTOMER_PAYMENT_METHODS = {
@@ -157,8 +162,10 @@ export class CustomerService extends Base {
       payment_terms_days: terms,
       notes: input.notes?.trim() || null,
       active: input.active === false ? 0 : 1,
+      price_level: input.priceLevel ?? (id ? this.getCustomer(id).price_level : 'retail'),
       updated_at: now,
     };
+    if (!(values.price_level in PRICE_LEVELS)) throw new AppError('Tarif inconnu', 'INVALID');
     return this.tx(() => {
       let customerId = id;
       if (customerId) {
@@ -167,7 +174,7 @@ export class CustomerService extends Base {
           .prepare(
             `UPDATE customers SET name = @name, contact = @contact, phone = @phone, email = @email, address = @address,
                taxpayer_number = @taxpayer_number, credit_limit = @credit_limit, payment_terms_days = @payment_terms_days,
-               notes = @notes, active = @active, updated_at = @updated_at WHERE id = @id`,
+               notes = @notes, active = @active, price_level = @price_level, updated_at = @updated_at WHERE id = @id`,
           )
           .run({ ...values, id: customerId });
         if (before.credit_limit !== limit) this.audit(userId, 'customer.credit_limit', 'customer', customerId, { from: before.credit_limit, to: limit });
@@ -176,9 +183,9 @@ export class CustomerService extends Base {
         this.db
           .prepare(
             `INSERT INTO customers (id, code, name, contact, phone, email, address, taxpayer_number, credit_limit, payment_terms_days,
-               notes, active, created_at, updated_at)
+               notes, active, price_level, created_at, updated_at)
              VALUES (@id, @code, @name, @contact, @phone, @email, @address, @taxpayer_number, @credit_limit, @payment_terms_days,
-               @notes, @active, @created_at, @updated_at)`,
+               @notes, @active, @price_level, @created_at, @updated_at)`,
           )
           .run({ ...values, id: customerId, code: this.number('CLI', 'customer.code'), created_at: now });
       }

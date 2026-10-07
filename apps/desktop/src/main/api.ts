@@ -5,6 +5,7 @@ import {
   type MovementType,
   type Payment,
   type PaymentMethod,
+  type PriceLevel,
   type StatementLine,
   type StockLevel,
 } from '@superette/core';
@@ -254,7 +255,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (type === 'OUT' && user!.role === 'cashier') supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
-    'pos.priceLines': (lines: SaleLineInput[]) => s.pos.priceLines(ctx().storeId, lines),
+    'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
     'promotions.list': () => s.promotions.list(ctx(MANAGE).storeId),
@@ -316,6 +317,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (u.role === 'cashier') {
         const before = id ? s.customers.getCustomer(id).credit_limit : 0;
         if ((input.creditLimit ?? before) !== before) throw new AppError('Seul le gérant ou le comptable fixe le plafond de crédit', 'FORBIDDEN');
+        const level = id ? s.customers.getCustomer(id).price_level : 'retail';
+        if ((input.priceLevel ?? level) !== level) throw new AppError('Seul le gérant ou le comptable fixe le tarif du client', 'FORBIDDEN');
       }
       return s.customers.saveCustomer(u.id, input, id);
     },

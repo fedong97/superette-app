@@ -5,6 +5,7 @@ import {
   type Milli,
   type Payment,
   type PaymentMethod,
+  type PriceLevel,
   type PromotedLine,
   PAYMENT_METHODS,
   applyPromotions,
@@ -14,6 +15,7 @@ import {
   requiresReference,
   settle,
   splitTtc,
+  tariffPrice,
 } from '@superette/core';
 import type { AdminService } from './admin';
 import type { CatalogueService } from './catalogue';
@@ -43,10 +45,15 @@ export interface CashSession {
 /** Ligne envoyée par l'écran de caisse : le prix est relu en base, jamais pris de l'écran. */
 export interface SaleLineInput {
   articleId: string;
+  /** En unités de détail, même pour une vente par conditionnement. */
   qty: Milli;
   barcode?: string | null;
   discount?: Fcfa;
+  /** Conditionnement vendu (carton, paquet) : la quantité en est un multiple. */
+  packId?: string | null;
 }
+
+export type PricedLine = PromotedLine<CartLine & { barcode: string | null; packId: string | null; packName: string | null }>;
 
 export interface SaleInput {
   lines: SaleLineInput[];
@@ -76,6 +83,7 @@ export interface Sale {
   total_tva: Fcfa;
   total_discount: Fcfa;
   total_promo: Fcfa;
+  price_level: PriceLevel;
   change_given: Fcfa;
   original_sale_id: string | null;
   cancel_reason: string | null;
@@ -97,6 +105,9 @@ export interface Sale {
     unit: 'piece' | 'kg' | 'litre';
     promo: Fcfa;
     promotion_name: string | null;
+    pack_name: string | null;
+    pack_units: Milli | null;
+    pack_price: Fcfa | null;
   }[];
   payments: { method: PaymentMethod; amount: Fcfa; reference: string | null }[];
 }
@@ -215,7 +226,12 @@ export class PosService extends Base {
 
   /** Recalcule les lignes à partir des prix en base (prix magasin, étiquettes balance). */
   /** Prix des lignes au tarif du magasin, promotions du jour comprises. */
-  priceLines(storeId: string, input: SaleLineInput[]): PromotedLine<CartLine & { barcode: string | null }>[] {
+  /**
+   * Prix des lignes au tarif du client (détail, gros, super gros) : prix du magasin pour
+   * l'unité au détail, prix du conditionnement pour un carton ou un paquet. Les
+   * promotions ne valent qu'au détail.
+   */
+  priceLines(storeId: string, input: SaleLineInput[], level: PriceLevel = 'retail'): PricedLine[] {
     const lines = input.map((l) => {
       if (!Number.isSafeInteger(l.qty) || l.qty === 0) throw new AppError('Quantité invalide', 'INVALID');
       const article = this.catalogue.getArticle(l.articleId, storeId);
@@ -224,27 +240,39 @@ export class PosService extends Base {
       const fixedAmount = scan && scan.article.id === article.id && scan.fixedAmount !== undefined && l.qty === scan.qty ? scan.fixedAmount : undefined;
       const discount = l.discount ?? 0;
       if (!Number.isSafeInteger(discount) || discount < 0) throw new AppError('Remise invalide', 'INVALID');
-      const line: CartLine & { barcode: string | null } = {
+      const pack = l.packId ? article.packs.find((p) => p.id === l.packId) : undefined;
+      if (l.packId && !pack) throw new AppError(`Conditionnement inconnu pour ${article.name}`, 'INVALID');
+      if (pack && l.qty % pack.units !== 0) throw new AppError(`${article.name} : la quantité doit être un nombre entier de ${pack.name}`, 'INVALID');
+      const line: CartLine & { barcode: string | null; packId: string | null; packName: string | null } = {
         articleId: article.id,
         label: article.name,
-        unitPrice: article.store_price,
+        unitPrice: tariffPrice({ retail: article.store_price, wholesale: article.wholesale_price, superWholesale: article.super_wholesale_price }, level),
         qty: l.qty,
         vatRate: article.vat_rate_bp,
         discount,
         fixedAmount,
         barcode: l.barcode ?? null,
+        packId: pack?.id ?? null,
+        packName: pack?.name ?? null,
+        ...(pack
+          ? {
+              packPrice: tariffPrice({ retail: pack.sale_price, wholesale: pack.wholesale_price, superWholesale: pack.super_wholesale_price }, level),
+              packUnits: pack.units,
+            }
+          : {}),
       };
       if (lineTotal(line) < 0) throw new AppError(`Remise supérieure au prix : ${article.name}`, 'INVALID');
       return line;
     });
-    return applyPromotions(lines, this.promotions.activeRules(storeId));
+    return applyPromotions(lines, level === 'retail' ? this.promotions.activeRules(storeId) : []);
   }
 
   completeSale(ctx: Context, input: SaleInput): Sale {
     const session = this.requireOpenSession(ctx);
     if (input.lines.length === 0) throw new AppError('Ticket vide', 'EMPTY');
     if (input.lines.some((l) => l.qty < 0)) throw new AppError('Quantité négative : utilisez le retour client', 'INVALID');
-    const lines = this.priceLines(ctx.storeId, input.lines);
+    const level = input.customerId ? this.customers.getCustomer(input.customerId).price_level : 'retail';
+    const lines = this.priceLines(ctx.storeId, input.lines, level);
     const totals = computeTotals(lines);
     const quote = input.quoteId ? this.quotes.authorizeSaleDiscounts(ctx.storeId, input.quoteId, lines) : null;
     let discountBy = input.discountAuthorizedBy ?? null;
@@ -280,8 +308,8 @@ export class PosService extends Base {
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht,
-             total_tva, total_discount, total_promo, change_given, customer_id, due_date, created_at)
-           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             total_tva, total_discount, total_promo, price_level, change_given, customer_id, due_date, created_at)
+           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           saleId,
@@ -295,14 +323,16 @@ export class PosService extends Base {
           totals.totalTva,
           totals.totalDiscount,
           totals.totalPromo,
+          level,
           settlement.change,
           customer?.id ?? null,
           due,
           now,
         );
       const insertLine = this.db.prepare(
-        `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id,
+           pack_name, pack_units, pack_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       lines.forEach((line, i) => {
         const { unitCost } = this.stock.issue(ctx, {
@@ -313,7 +343,9 @@ export class PosService extends Base {
           refType: 'sale',
           refId: saleId,
         });
-        insertLine.run(newId(), saleId, i + 1, line.articleId, line.label, line.barcode, line.qty, line.unitPrice, line.discount, line.vatRate, lineTotal(line), unitCost, line.promo, line.promotionId);
+        insertLine.run(newId(), saleId, i + 1, line.articleId, line.label, line.barcode, line.qty, line.unitPrice, line.discount, line.vatRate, lineTotal(line), unitCost, line.promo, line.promotionId,
+          line.packName, line.packUnits ?? null, line.packPrice ?? null,
+        );
       });
       const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference) VALUES (?, ?, ?, ?, ?)');
       for (const p of input.payments) insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null);
@@ -338,7 +370,7 @@ export class PosService extends Base {
     const lines = this.db
       .prepare(
         `SELECT l.id, l.line_no, l.article_id, l.label, l.barcode, l.qty, l.unit_price, l.discount, l.vat_rate_bp, l.total_ttc, a.unit,
-           l.promo, p.name AS promotion_name
+           l.promo, p.name AS promotion_name, l.pack_name, l.pack_units, l.pack_price
          FROM sale_lines l JOIN articles a ON a.id = l.article_id LEFT JOIN promotions p ON p.id = l.promotion_id
          WHERE l.sale_id = ? ORDER BY l.line_no`,
       )

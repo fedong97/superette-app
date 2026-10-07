@@ -1,3 +1,4 @@
+import { PRICE_LEVELS, type PriceLevel } from '@superette/core';
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Field, Modal, fcfa, parseAmount, useLoad, useToast } from '../ui';
@@ -54,6 +55,15 @@ export function CustomerFields({
         <Field label="Délai de paiement (jours)">
           <input inputMode="numeric" value={value.terms} onChange={(e) => set({ terms: e.target.value })} />
         </Field>
+        <Field label="Tarif" hint={canSetCredit ? 'Prix appliqués en caisse : détail, gros (revendeurs) ou super gros' : 'Fixé par le gérant ou le comptable'}>
+          <select value={value.priceLevel} disabled={!canSetCredit} onChange={(e) => set({ priceLevel: e.target.value as PriceLevel })}>
+            {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
+              <option key={k} value={k}>
+                {PRICE_LEVELS[k]}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Notes">
           <input value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
@@ -73,6 +83,7 @@ export interface CustomerDraft {
   terms: string;
   notes: string;
   active: boolean;
+  priceLevel: PriceLevel;
 }
 
 export const draftOf = (c: Customer | null): CustomerDraft => ({
@@ -86,6 +97,7 @@ export const draftOf = (c: Customer | null): CustomerDraft => ({
   terms: String(c?.payment_terms_days ?? 30),
   notes: c?.notes ?? '',
   active: c ? c.active === 1 : true,
+  priceLevel: c?.price_level ?? 'retail',
 });
 
 export function inputOf(d: CustomerDraft) {
@@ -103,6 +115,7 @@ export function inputOf(d: CustomerDraft) {
     paymentTermsDays: terms,
     notes: d.notes || null,
     active: d.active,
+    priceLevel: d.priceLevel,
   };
 }
 

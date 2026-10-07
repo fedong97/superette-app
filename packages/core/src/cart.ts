@@ -13,6 +13,12 @@ export interface CartLine {
   discount: Fcfa;
   /** Montant imposé (étiquette balance à prix intégré), prioritaire sur unitPrice × qty. */
   fixedAmount?: Fcfa;
+  /**
+   * Vente par conditionnement (carton, paquet) : prix du conditionnement et nombre
+   * d'unités de détail qu'il contient. `qty` reste en unités de détail.
+   */
+  packPrice?: Fcfa;
+  packUnits?: Milli;
   /** Économie due à une promotion, en FCFA TTC (n'exige pas l'accord d'un gérant). */
   promo?: Fcfa;
 }
@@ -34,9 +40,15 @@ export interface CartTotals {
   vat: VatBreakdown[];
 }
 
+/** Montant avant remise : prix imposé, prix du conditionnement × nombre, ou prix unitaire × quantité. */
+export function lineGross(line: CartLine): Fcfa {
+  if (line.fixedAmount !== undefined) return line.fixedAmount;
+  if (line.packPrice !== undefined && line.packUnits) return Math.round((line.qty * line.packPrice) / line.packUnits);
+  return lineAmount(line.unitPrice, line.qty);
+}
+
 export function lineTotal(line: CartLine): Fcfa {
-  const gross = line.fixedAmount ?? lineAmount(line.unitPrice, line.qty);
-  return gross - line.discount - (line.promo ?? 0);
+  return lineGross(line) - line.discount - (line.promo ?? 0);
 }
 
 /**
@@ -54,7 +66,8 @@ export function computeTotals(lines: readonly CartLine[]): CartTotals {
     totalTtc += amount;
     totalDiscount += line.discount;
     totalPromo += line.promo ?? 0;
-    itemCount += line.qty % 1000 === 0 ? line.qty / 1000 : 1;
+    // Un carton compte pour un article, comme une pièce ; un poids compte pour un.
+    itemCount += line.packUnits ? line.qty / line.packUnits : line.qty % 1000 === 0 ? line.qty / 1000 : 1;
     byRate.set(line.vatRate, (byRate.get(line.vatRate) ?? 0) + amount);
   }
   const vat = [...byRate.entries()]

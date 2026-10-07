@@ -1,4 +1,4 @@
-import { PAYMENT_METHODS, formatFcfa, formatQty, formatRate, splitTtc, type Receipt } from '@superette/core';
+import { PAYMENT_METHODS, PRICE_LEVELS, formatFcfa, formatQty, formatRate, splitTtc, type Receipt } from '@superette/core';
 import type { AdminService } from './admin';
 import { CUSTOMER_PAYMENT_METHODS, type CustomerService } from './customers';
 import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
@@ -46,16 +46,15 @@ export class ReceiptService extends Base {
     if (sale.kind === 'return') r.push({ t: 'text', text: 'RETOUR CLIENT', bold: true });
     r.push({ t: 'text', text: `Ticket ${sale.number}` }, { t: 'text', text: `${dateFr(sale.created_at)} · ${sale.user_name}` });
     if (sale.customer_name) r.push({ t: 'text', text: `Client : ${sale.customer_name}` });
+    if (sale.price_level && sale.price_level !== 'retail') r.push({ t: 'text', text: `Tarif : ${PRICE_LEVELS[sale.price_level]}` });
     r.push({ t: 'rule' });
     for (const l of sale.lines) {
       r.push({ t: 'row', left: l.label, right: money(l.total_ttc + l.promo) });
-      if (l.qty !== 1000 || l.discount)
-        r.push({
-          t: 'row',
-          left: `${formatQty(Math.abs(l.qty), l.unit)} x ${money(l.unit_price)}${l.discount ? ` (remise ${money(l.discount)})` : ''}`,
-          right: '',
-          indent: 2,
-        });
+      const discount = l.discount ? ` (remise ${money(l.discount)})` : '';
+      if (l.pack_name && l.pack_units && l.pack_price !== null)
+        r.push({ t: 'row', left: `${Math.abs(l.qty) / l.pack_units} ${l.pack_name} x ${money(l.pack_price)}${discount}`, right: '', indent: 2 });
+      else if (l.qty !== 1000 || l.discount)
+        r.push({ t: 'row', left: `${formatQty(Math.abs(l.qty), l.unit)} x ${money(l.unit_price)}${discount}`, right: '', indent: 2 });
       if (l.promo) r.push({ t: 'row', left: `Promo ${l.promotion_name ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
     }
     r.push({ t: 'rule' }, { t: 'row', left: 'TOTAL FCFA', right: money(sale.total_ttc), bold: true, big: true });

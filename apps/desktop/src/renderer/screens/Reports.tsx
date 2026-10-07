@@ -77,12 +77,14 @@ type SortKey = 'label' | 'tickets' | 'qty' | 'revenueTtc' | 'margin' | 'rate' | 
  * choix et l'export Excel complet pour le comptable (synthèse, regroupement,
  * paiements, TVA, détail des lignes).
  */
-export function Reports() {
+export function Reports({ view }: { view?: string }) {
   const toast = useToast();
-  const [period, setPeriod] = useState(() => preset('month'));
-  const [presetId, setPresetId] = useState('month');
-  const [dimension, setDimension] = useState<Dimension>('department');
-  const [compare, setCompare] = useState<Compare>('previous');
+  // « evolution » : mois par mois depuis janvier, comparé à l'an dernier.
+  const yearly = view === 'evolution';
+  const [period, setPeriod] = useState(() => preset(yearly ? 'year' : 'month'));
+  const [presetId, setPresetId] = useState(yearly ? 'year' : 'month');
+  const [dimension, setDimension] = useState<Dimension>(yearly ? 'month' : DIMENSIONS.some(([d]) => d === view) ? (view as Dimension) : 'department');
+  const [compare, setCompare] = useState<Compare>(yearly ? 'last_year' : 'previous');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean } | null>(null);
   const input = { from: period.from, to: period.to, dimension, compare: compare || null };
   const report = useLoad(() => call('reports.sales', input), [period.from, period.to, dimension, compare]);

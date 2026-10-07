@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType, describeInPacks } from '@superette/core';
 import { type Result, call } from '../api';
+import { StockByWarehouse } from './Controls';
 import { PackUnitSelect, packChoices, purchaseUnits, switchUnits, toBase } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
@@ -8,21 +9,24 @@ import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty,
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves';
+type Tab = 'state' | 'critical' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves' | 'adjustments';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
 export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
-  const [tab, setTab] = useState<Tab>(initialTab);
+  // Les stocks critiques sont l'état du stock filtré sur les ruptures et alertes.
+  const [tab, setTab] = useState<Tab>(initialTab === 'critical' ? 'state' : initialTab);
   const canInventory = user.role === 'admin' || user.role === 'manager';
   const tabs: [Tab, string][] = [
     ['state', 'État du stock'],
+    ['warehouses', 'Articles par dépôt'],
     ['receive', 'Réception'],
     ['loss', 'Pertes et casse'],
     ['transfer', 'Transfert'],
     ...(canInventory ? ([['inventory', 'Inventaire']] as [Tab, string][]) : []),
     ['expiry', 'Péremptions'],
     ['moves', 'Mouvements'],
+    ['adjustments', 'Ajustements'],
   ];
   return (
     <div className="page">
@@ -30,22 +34,28 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
         <h1>Stock</h1>
       </header>
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
-      {tab === 'state' && <StockState />}
+      {tab === 'state' && <StockState critical={initialTab === 'critical'} />}
+      {tab === 'warehouses' && <StockByWarehouse />}
       {tab === 'receive' && <Reception />}
       {tab === 'loss' && <Loss />}
       {tab === 'transfer' && <Transfer />}
       {tab === 'inventory' && <Inventory />}
       {tab === 'expiry' && <Expiry />}
       {tab === 'moves' && <Moves />}
+      {tab === 'adjustments' && <Moves adjustments />}
     </div>
   );
 }
 
-function StockState() {
+function StockState({ critical = false }: { critical?: boolean }) {
   const [warehouseId, setWarehouseId] = useState('');
   const [search, setSearch] = useState('');
-  const [level, setLevel] = useState<'' | 'rupture' | 'alerte' | 'surstock'>('');
-  const rows = useLoad(() => call('stock.list', { warehouseId: warehouseId || undefined, search: search || undefined, level: level || undefined }), [warehouseId, search, level]);
+  const [level, setLevel] = useState<'' | 'critical' | 'rupture' | 'alerte' | 'surstock'>(critical ? 'critical' : '');
+  const loaded = useLoad(
+    () => call('stock.list', { warehouseId: warehouseId || undefined, search: search || undefined, level: level && level !== 'critical' ? level : undefined }),
+    [warehouseId, search, level],
+  );
+  const rows = { ...loaded, data: level === 'critical' ? loaded.data?.filter((r) => r.level === 'rupture' || r.level === 'alerte') : loaded.data };
   const wh = useLoad(() => call('admin.warehouses'));
   const total = (rows.data ?? []).reduce((s, r) => s + r.value, 0);
   return (
@@ -61,6 +71,7 @@ function StockState() {
         </select>
         <select value={level} onChange={(e) => setLevel(e.target.value as typeof level)}>
           <option value="">Tous les niveaux</option>
+          <option value="critical">Stocks critiques (ruptures et alertes)</option>
           <option value="rupture">Ruptures</option>
           <option value="alerte">Sous le seuil d'alerte</option>
           <option value="surstock">Surstocks</option>
@@ -547,8 +558,11 @@ function Expiry() {
   );
 }
 
-function Moves() {
-  const moves = useLoad(() => call('stock.movements'));
+const ADJUSTMENT_TYPES: MovementType[] = ['BREAKAGE', 'THEFT', 'EXPIRY', 'INTERNAL_USE', 'INVENTORY_ADJUST'];
+
+/** Mouvements de stock ; `adjustments` : seulement les pertes et écarts d'inventaire. */
+function Moves({ adjustments = false }: { adjustments?: boolean }) {
+  const moves = useLoad(() => call('stock.movements', undefined, adjustments ? ADJUSTMENT_TYPES : undefined), [adjustments]);
   return (
     <table className="list">
       <thead>

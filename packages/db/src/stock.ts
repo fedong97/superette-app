@@ -519,7 +519,7 @@ export class StockService extends Base {
       .all(articleId, storeId) as { id: string; lot_number: string | null; expiry: string | null; qty: number; received_at: string; warehouse_name: string }[];
   }
 
-  movements(storeId: string, opts: { articleId?: string; limit?: number } = {}) {
+  movements(storeId: string, opts: { articleId?: string; limit?: number; types?: MovementType[] } = {}) {
     return this.db
       .prepare(
         `SELECT m.id, m.type, m.qty, m.unit_cost, m.reason, m.ref_type, m.at, a.name AS article_name, a.unit,
@@ -529,9 +529,10 @@ export class StockService extends Base {
          JOIN warehouses w ON w.id = m.warehouse_id
          LEFT JOIN users u ON u.id = m.user_id
          WHERE w.store_id = @storeId AND (@articleId IS NULL OR m.article_id = @articleId)
+           AND (@types IS NULL OR m.type IN (SELECT value FROM json_each(@types)))
          ORDER BY m.at DESC LIMIT @limit`,
       )
-      .all({ storeId, articleId: opts.articleId ?? null, limit: opts.limit ?? 300 }) as {
+      .all({ storeId, articleId: opts.articleId ?? null, limit: opts.limit ?? 300, types: opts.types?.length ? JSON.stringify(opts.types) : null }) as {
       id: string;
       type: MovementType;
       qty: number;

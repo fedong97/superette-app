@@ -1,4 +1,5 @@
 import type { Fcfa } from '@superette/core';
+import { ChargeService } from './charges';
 import { AppError, Base, type Context, newId } from './util';
 
 export const EXPENSE_PAYMENT_METHODS = {
@@ -42,6 +43,8 @@ export interface Expense {
   cancel_reason: string | null;
   cancelled_by_name: string | null;
   created_at: string;
+  plan_id: string | null;
+  plan_period: string | null;
 }
 
 export interface ExpenseInput {
@@ -60,6 +63,9 @@ export interface ExpenseInput {
   atRegister?: boolean;
   /** Gérant qui a autorisé une sortie de caisse faite par un caissier. */
   authorizedBy?: string | null;
+  /** Échéance de charge fixe que la dépense constate (charge et mois AAAA-MM). */
+  planId?: string | null;
+  planPeriod?: string | null;
 }
 
 /**
@@ -114,6 +120,10 @@ export class ExpenseService extends Base {
       | { id: string; account_id: string; active: number }
       | undefined;
     if (!category || !category.active) throw new AppError('Choisissez la catégorie de la dépense', 'INVALID');
+    if (input.planId) {
+      if (!input.planPeriod) throw new AppError("Indiquez le mois de l'échéance", 'INVALID');
+      new ChargeService(this.db, this.clock).assertOpen(ctx.storeId, input.planId, input.planPeriod);
+    }
     let sessionId: string | null = null;
     let date = input.date || this.today();
     if (input.atRegister) {
@@ -131,9 +141,9 @@ export class ExpenseService extends Base {
       this.db
         .prepare(
           `INSERT INTO expenses (id, number, store_id, category_id, account_id, expense_date, label, beneficiary, amount, vat, method, reference,
-             register_id, session_id, user_id, authorized_by, status, created_at, updated_at)
+             register_id, session_id, user_id, authorized_by, status, plan_id, plan_period, created_at, updated_at)
            VALUES (@id, @number, @store, @category, @account, @date, @label, @beneficiary, @amount, @vat, @method, @reference,
-             @register, @session, @user, @authorizedBy, 'active', @now, @now)`,
+             @register, @session, @user, @authorizedBy, 'active', @planId, @planPeriod, @now, @now)`,
         )
         .run({
           id,
@@ -152,6 +162,8 @@ export class ExpenseService extends Base {
           session: sessionId,
           user: ctx.userId,
           authorizedBy: input.authorizedBy ?? null,
+          planId: input.planId || null,
+          planPeriod: input.planId ? input.planPeriod : null,
           now,
         });
       this.enqueue(ctx, 'expense', id, 'upsert', {});
@@ -232,7 +244,8 @@ export class ExpenseService extends Base {
     return this.db.prepare(
       `SELECT e.id, e.number, e.store_id, e.category_id, c.name AS category_name, e.account_id, e.expense_date, e.label, e.beneficiary,
               e.amount, e.vat, e.method, e.reference, e.register_id, g.name AS register_name, e.session_id, u.name AS user_name,
-              a.name AS authorized_by_name, e.status, e.cancel_reason, x.name AS cancelled_by_name, e.created_at
+              a.name AS authorized_by_name, e.status, e.cancel_reason, x.name AS cancelled_by_name, e.created_at,
+              e.plan_id, e.plan_period
        FROM expenses e JOIN expense_categories c ON c.id = e.category_id
        LEFT JOIN registers g ON g.id = e.register_id LEFT JOIN users u ON u.id = e.user_id
        LEFT JOIN users a ON a.id = e.authorized_by LEFT JOIN users x ON x.id = e.cancelled_by

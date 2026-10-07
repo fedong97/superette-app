@@ -121,6 +121,15 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Comparaison avec la période précédente (un mois entier avec le mois d'avant) ou la même période de l'an dernier, avec l'évolution en % par ligne.
 - Export Excel (.xlsx) pour le comptable : synthèse, regroupement choisi, encaissements par moyen de paiement, TVA collectée par taux et détail de chaque ligne vendue (date, ticket, caissier, client, article, quantité, prix, TVA, coût, marge). Les retours sont déduits au coût de la vente d'origine.
 
+**Menus rangés comme KONTROL**
+- Vente, Achats, Trésorerie, Produit, Fournisseur, Client et Charge reprennent l'ordre et les intitulés des menus de KONTROL, en groupes séparés par un trait.
+- Vente : ouvrir une facture par son numéro, registre des ventes de toutes les caisses (recherche par numéro, client ou montant, export Excel), retours clients, tickets annulés, factures cumulées par client, situation des ventes, évolution périodique et alertes sur les ventes (ventes à perte, remises importantes, annulations, retours, plafonds de crédit forcés).
+- Achats : nouvel achat, registre des achats, registre des achats par produit (coût mini, maxi et dernier coût, fournisseurs), registre des réceptions et marchandises commandées non encore reçues (reliquats, retards de livraison).
+- Trésorerie : positions des caisses, banques et Mobile Money, extrait de compte, listing des opérations de caisse (fonds de caisse, apports, prélèvements, dépenses au tiroir, règlements clients, écarts de clôture) et recherche dans les caisses.
+- Produit : ajout rapide, articles par dépôt, rayonnage (rayons et familles avec stock et ruptures), historique des ajustements de stock, déstockages et stocks critiques.
+- Fournisseur et Client : extrait de compte, situation, comptes dont le solde a bougé récemment ; contrôle des plafonds d'autorisation des clients à crédit.
+- Charge : types de charge, définition des charges fixes (loyer, ENEO, salaires, CNPS… avec rythme et jour d'échéance), historique des dépenses et constats de charges : chaque échéance est « constatée » par la dépense qui la paie, en un clic depuis l'échéancier. Les charges en retard sont signalées dans la barre d'état.
+
 **Sauvegardes**
 - Copie de la base une fois par jour, sans arrêter la caisse (Administration › Sauvegardes), dans le dossier « sauvegardes » à côté de la base ou un autre dossier. Chaque copie est relue et vérifiée, les 14 plus récentes sont gardées (nombre réglable).
 - Copie de chaque sauvegarde vers un second dossier : clé USB ou dossier OneDrive / Google Drive. Une clé débranchée est signalée sans bloquer la sauvegarde.

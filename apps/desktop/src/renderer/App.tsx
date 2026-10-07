@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { type Result, call } from './api';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
-import { Articles } from './screens/Articles';
+import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
 import { Dashboard } from './screens/Dashboard';
 import { Expenses, type ExpensesTab } from './screens/Expenses';
@@ -13,11 +13,11 @@ import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
 import { Quotes } from './screens/Quotes';
 import { Purchases, type PurchasesTab } from './screens/Purchases';
-import { Sales, type SalesTab } from './screens/Sales';
+import { SaleDetail, Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
 import { Stock, type StockTab } from './screens/Stock';
-import { Suppliers } from './screens/Suppliers';
-import { Modal, ToastProvider, useLoad, useToast } from './ui';
+import { Suppliers, type SuppliersTab } from './screens/Suppliers';
+import { Field, Modal, ToastProvider, fcfa, useLoad, useToast } from './ui';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -65,11 +65,15 @@ const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit';
+  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice';
+  /** Trait de séparation entre deux groupes, comme dans KONTROL. */
+  sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
   soon?: boolean;
   roles?: Role[];
 }
+
+const SEP: MenuItem = { label: '', sep: true };
 
 const MENUS: [string, MenuItem[]][] = [
   ['Fichier', [{ label: 'Synchroniser maintenant', action: 'sync' }, { label: "Changer d'utilisateur", action: 'logout' }, { label: 'Quitter', action: 'quit' }]],
@@ -87,21 +91,41 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Vente',
     [
-      { label: 'Tickets du jour', open: ['sales', 'tickets'] },
-      { label: 'Tableau de bord des ventes', open: ['dashboard'] },
-      { label: 'Rapports de ventes', open: ['reports'], roles: ACCOUNTING },
-      { label: 'Devis et proformas', open: ['quotes'] },
+      { label: 'Nouvelle fiche de facturation', open: ['cash1'] },
+      { label: 'Ouvrir une facture', action: 'openInvoice' },
+      { label: 'Facture à crédit (client en compte)', open: ['credit'] },
+      { label: 'Mes dernières factures', open: ['sales', 'tickets'] },
+      { label: 'Registre des ventes', open: ['sales', 'register'] },
+      SEP,
+      { label: "Retours d'articles des clients", open: ['sales', 'returns'] },
+      { label: 'Tickets et factures annulés', open: ['sales', 'cancelled'] },
+      SEP,
+      { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Factures cumulées par client', open: ['reports', 'customer'], roles: ACCOUNTING },
+      { label: 'Alertes sur les ventes', open: ['sales', 'alerts'] },
+      SEP,
       { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      { label: 'Situation des ventes', open: ['reports', 'department'], roles: ACCOUNTING },
+      { label: 'Évolution périodique', open: ['reports', 'evolution'], roles: ACCOUNTING },
+      { label: 'Tableau de bord', open: ['dashboard'] },
     ],
   ],
   [
     'Achats',
     [
-      { label: 'Bons de commande fournisseur', open: ['purchases', 'orders'], roles: BUY },
+      { label: 'Saisir un nouvel achat (bon de commande)', open: ['purchases', 'new-order'], roles: BUY },
+      { label: 'Saisir une facture à partir des BL', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Registre des achats', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Registre des achats par produits', open: ['purchases', 'byproduct'] },
+      SEP,
+      { label: 'Registre des réceptions', open: ['purchases', 'receptions'] },
+      { label: 'Saisir une nouvelle réception (sans commande)', open: ['stock', 'receive'] },
+      SEP,
+      { label: 'Bons de commande', open: ['purchases', 'orders'] },
       { label: 'Proposition de commande', open: ['purchases', 'reorder'], roles: BUY },
-      { label: 'Réceptions fournisseur', open: ['purchases', 'receptions'] },
-      { label: 'Réception libre (sans commande)', open: ['stock', 'receive'] },
-      { label: 'Factures fournisseur', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      SEP,
+      { label: 'Marchandises non encore reçues', open: ['purchases', 'pending'] },
       { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
     ],
   ],
@@ -109,44 +133,82 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Trésorerie',
     [
-      { label: 'Registre de caisse (Z)', open: ['sales', 'z'] },
-      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
-      { label: 'Créances clients', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: 'Opérations (journaux de trésorerie)', open: ['accounting', 'journals'], roles: ACCOUNTING },
+      { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },
+      { label: 'Extrait de compte (grand livre)', open: ['accounting', 'ledger'] },
+      { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'] },
+      SEP,
       { label: 'Règlements clients reçus', open: ['customers', 'payments'] },
-      { label: 'Banques, caisse et Mobile Money', open: ['accounting', 'treasury'] },
+      { label: 'Rechercher dans les caisses', open: ['sales', 'find'] },
+      SEP,
+      { label: 'Registre de caisse (Z)', open: ['sales', 'z'] },
       { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], roles: ACCOUNTING },
     ],
   ],
   [
     'Produit',
     [
-      { label: 'Fiches produits', open: ['articles'] },
-      { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      { label: 'Liste des produits', open: ['articles', 'list'] },
+      { label: 'Ajout rapide', open: ['articles', 'new'] },
+      { label: 'Recherche', open: ['articles', 'search'] },
+      SEP,
+      { label: 'Péremptions', open: ['stock', 'expiry'] },
       { label: 'Étiquettes de rayon', open: ['labels'] },
-      { label: 'État du stock', open: ['stock', 'state'] },
+      { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      SEP,
+      { label: 'Articles par dépôt', open: ['stock', 'warehouses'] },
+      { label: 'Rayonnage des articles', open: ['articles', 'shelving'] },
+      SEP,
+      { label: 'Stocks', open: ['stock', 'state'] },
+      { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'] },
+      { label: 'Mouvements de stock', open: ['stock', 'moves'] },
+      SEP,
+      { label: 'Inventaires', open: ['stock', 'inventory'], roles: MANAGE },
+      { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'] },
+      SEP,
+      { label: 'Stocks critiques', open: ['stock', 'critical'] },
+      { label: 'Proposition de commande', open: ['purchases', 'reorder'], roles: BUY },
     ],
   ],
   [
     'Fournisseur',
     [
-      { label: 'Fiches fournisseurs', open: ['suppliers'] },
-      { label: 'Factures et règlements', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Liste des fournisseurs', open: ['suppliers', 'list'] },
+      SEP,
+      { label: 'Consulter un extrait de compte', open: ['suppliers', 'statement'] },
+      { label: 'Situation des fournisseurs', open: ['suppliers', 'situation'], roles: ACCOUNTING },
+      { label: 'Les comptes dont le solde a bougé récemment', open: ['suppliers', 'recent'] },
+      SEP,
+      { label: 'Factures et avoirs fournisseurs', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
     ],
   ],
   [
     'Client',
     [
-      { label: 'Fiches clients', open: ['customers', 'list'] },
-      { label: 'Créances (balance âgée)', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: 'Liste', open: ['customers', 'list'] },
+      { label: 'Contrôle des échéances', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: "Contrôle des plafonds d'autorisation", open: ['customers', 'limits'], roles: ACCOUNTING },
+      SEP,
+      { label: 'Consulter un extrait de compte', open: ['customers', 'statement'] },
+      { label: 'Situation des clients', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: 'Les comptes dont le solde a bougé récemment', open: ['customers', 'recent'] },
+      SEP,
       { label: 'Règlements reçus', open: ['customers', 'payments'] },
+      { label: 'Retours et avoirs clients', open: ['sales', 'returns'] },
     ],
   ],
   [
     'Charge',
     [
-      { label: 'Dépenses', open: ['expenses', 'list'] },
+      { label: 'Types de charge', open: ['expenses', 'categories'] },
+      { label: 'Définition des charges fixes', open: ['expenses', 'plans'] },
+      { label: 'Dépenses (nouvelle dépense)', open: ['expenses', 'new'] },
+      SEP,
+      { label: 'Historique des dépenses', open: ['expenses', 'list'] },
       { label: 'Dépenses par catégorie', open: ['expenses', 'summary'] },
-      { label: 'Catégories de dépenses', open: ['expenses', 'categories'] },
+      SEP,
+      { label: 'Constats de charges', open: ['expenses', 'schedule'] },
     ],
   ],
   ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'] }]],
@@ -243,13 +305,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [active, setActive] = useState<WinKind>(first);
   const [menu, setMenu] = useState<string | null>(null);
   const [help, setHelp] = useState<'shortcuts' | 'about' | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
+  const chargesLate = useLoad(() => call('charges.late'), []);
 
   useEffect(() => {
     const t = setInterval(() => {
       sync.reload();
       backupLate.reload();
+      chargesLate.reload();
     }, 15000);
     return () => clearInterval(t);
   }, []);
@@ -280,6 +346,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (!rest.length) setWins([{ kind: first, nonce: 0 }]);
   };
 
+  /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
+  const visibleItems = (items: MenuItem[]) =>
+    items
+      .filter((i) => !i.roles || can(i.roles))
+      .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
+
   const run = async (item: MenuItem) => {
     setMenu(null);
     if (item.soon) return;
@@ -287,6 +359,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'quit') return window.close();
     if (item.action === 'shortcuts' || item.action === 'about') return setHelp(item.action);
+    if (item.action === 'openInvoice') return setFinding(true);
     if (item.action === 'sync') {
       try {
         const r = await call('sync.now');
@@ -310,6 +383,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               onClick={(e) => {
                 e.stopPropagation();
                 setMenu(menu === name ? null : name);
+                chargesLate.reload();
               }}
               onMouseEnter={() => menu && setMenu(name)}
             >
@@ -317,14 +391,16 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             </button>
             {menu === name && (
               <div className="menu-drop">
-                {items
-                  .filter((i) => !i.roles || can(i.roles))
-                  .map((i) => (
+                {visibleItems(items).map((i, n) =>
+                  i.sep ? (
+                    <hr key={`sep-${n}`} />
+                  ) : (
                     <button key={i.label} disabled={i.soon || (i.open && !can(WINDOWS[i.open[0]].roles))} onClick={() => void run(i)}>
                       {i.label}
                       {i.soon && <small>bientôt</small>}
                     </button>
-                  ))}
+                  ),
+                )}
               </div>
             )}
           </div>
@@ -366,16 +442,16 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 onListing={() => open('sales', 'tickets')}
               />
             )}
-            {w.kind === 'articles' && <Articles user={user} />}
+            {w.kind === 'articles' && <Articles user={user} view={w.tab as ArticlesView | undefined} />}
             {w.kind === 'stock' && <Stock user={user} initialTab={w.tab as StockTab | undefined} />}
             {w.kind === 'sales' && <Sales initialTab={w.tab as SalesTab | undefined} />}
             {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
-            {w.kind === 'suppliers' && <Suppliers user={user} />}
+            {w.kind === 'suppliers' && <Suppliers user={user} initialTab={w.tab as SuppliersTab | undefined} />}
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
-            {w.kind === 'reports' && <Reports />}
+            {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'dashboard' && <Dashboard />}
@@ -394,6 +470,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         {backupLate.data && (
           <button className="warn" disabled={!can(WINDOWS.admin.roles)} onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
+          </button>
+        )}
+        {Boolean(chargesLate.data?.count) && (
+          <button className="warn" onClick={() => open('expenses', 'schedule')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
+            {chargesLate.data!.count} charge(s) en retard
           </button>
         )}
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
@@ -424,6 +505,16 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           </table>
         </Modal>
       )}
+      {finding && (
+        <OpenInvoice
+          onClose={() => setFinding(false)}
+          onFound={(sale) => {
+            setFinding(false);
+            setFound(sale);
+          }}
+        />
+      )}
+      {found && <SaleDetail sale={found} onClose={() => setFound(null)} />}
       {help === 'about' && (
         <Modal title="À propos" onClose={() => setHelp(null)}>
           <p>
@@ -434,5 +525,39 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Ouvrir une facture : par son numéro, sur n'importe quelle caisse du magasin. */
+function OpenInvoice({ onClose, onFound }: { onClose: () => void; onFound: (sale: Result<'pos.sale'>) => void }) {
+  const toast = useToast();
+  const [number, setNumber] = useState('');
+  return (
+    <Modal title="Ouvrir une facture" onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            const sale = await call('pos.findSale', number);
+            if (sale) onFound(sale);
+            else toast.error(`Aucun ticket ni facture n° ${number.trim().toUpperCase()}`);
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <Field label="N° du ticket ou de la facture" hint="Tel qu'imprimé sur le ticket, par exemple DLA1-1-000123">
+          <input autoFocus value={number} onChange={(e) => setNumber(e.target.value)} required />
+        </Field>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary">
+            Ouvrir
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

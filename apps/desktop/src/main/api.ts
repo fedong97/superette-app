@@ -2,6 +2,7 @@ import {
   type DenominationCount,
   type LabelFormatId,
   labelsHtml,
+  xlsxWorkbook,
   type Fcfa,
   type Milli,
   type MovementType,
@@ -29,6 +30,7 @@ import {
   type AccountRole,
   type JournalCode,
   type LabelItem,
+  type SalesReportInput,
   type ReceptionLine,
   type Role,
   type SaleLineInput,
@@ -463,6 +465,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
     // --- Rapports -----------------------------------------------------------
     'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),
+    'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['admin', 'manager', 'accountant']).storeId, input),
+    /** Classeur .xlsx : octets envoyés tels quels à l'écran, qui propose l'enregistrement. */
+    'reports.salesXlsx': (input: SalesReportInput) => xlsxWorkbook(s.reports.salesWorkbook(ctx(['admin', 'manager', 'accountant']).storeId, input)),
     'reports.salesCsv': (from: string, to: string) => s.reports.salesExportCsv(ctx(['admin', 'manager', 'accountant']).storeId, from, to),
   };
 }

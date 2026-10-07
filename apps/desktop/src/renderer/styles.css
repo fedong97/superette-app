@@ -343,3 +343,16 @@ details.note .paragraph p { margin: 0 0 6px; white-space: pre-line; }
 .labels-side .actions { justify-content: space-between; align-items: center; }
 @media (max-width: 1100px) { .labels-body { grid-template-columns: 1fr; } .labels-side { position: static; } }
 .count-parts { display: flex; gap: 12px; flex-wrap: wrap; } .count-parts label { white-space: nowrap; }
+
+/* Rapports de ventes */
+.kpis.kpis-6 { grid-template-columns: repeat(6, 1fr); }
+.trend { font-weight: 600; }
+.trend.up { color: var(--ok); }
+.trend.down { color: var(--danger); }
+.seg.dims { flex-wrap: wrap; margin-bottom: 10px; }
+table.report th.sortable { cursor: pointer; user-select: none; }
+table.report td.share { position: relative; min-width: 140px; }
+table.report .share-bar { position: absolute; right: 6px; top: 6px; bottom: 6px; background: #dbe7f7; border-radius: 3px; }
+table.report td.share span { position: relative; }
+table.report tfoot td { font-weight: 700; border-top: 2px solid var(--line); }
+@media (max-width: 1200px) { .kpis.kpis-6 { grid-template-columns: repeat(3, 1fr); } }

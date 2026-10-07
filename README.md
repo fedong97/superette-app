@@ -115,6 +115,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Export CSV des ventes.
 - Magasins, caisses (code d'activation), dépôts, utilisateurs et rôles (administrateur, gérant, caissier, magasinier, comptable), paramètres, journal d'audit.
 
+**Rapports de ventes**
+- Vente › Rapports de ventes : chiffre d'affaires TTC et HT, marge brute et taux de marge, tickets, panier moyen, retours, remises et promotions, sur une période toute faite (aujourd'hui, semaine, mois, mois dernier, année) ou libre.
+- Regroupement au choix : jour, semaine, mois, heure, jour de la semaine, rayon, famille, article (avec quantités), caissier, caisse, client ou moyen de paiement (espèces nettes de la monnaie rendue). Colonnes triables et part de chaque ligne dans le CA.
+- Comparaison avec la période précédente (un mois entier avec le mois d'avant) ou la même période de l'an dernier, avec l'évolution en % par ligne.
+- Export Excel (.xlsx) pour le comptable : synthèse, regroupement choisi, encaissements par moyen de paiement, TVA collectée par taux et détail de chaque ligne vendue (date, ticket, caissier, client, article, quantité, prix, TVA, coût, marge). Les retours sont déduits au coût de la vente d'origine.
+
 **Sauvegardes**
 - Copie de la base une fois par jour, sans arrêter la caisse (Administration › Sauvegardes), dans le dossier « sauvegardes » à côté de la base ou un autre dossier. Chaque copie est relue et vérifiée, les 14 plus récentes sont gardées (nombre réglable).
 - Copie de chaque sauvegarde vers un second dossier : clé USB ou dossier OneDrive / Google Drive. Une clé débranchée est signalée sans bloquer la sauvegarde.

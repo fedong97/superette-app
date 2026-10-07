@@ -2,12 +2,12 @@ import { CODEPAGES, type Codepage } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
-import { Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'settings' | 'server' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'settings' | 'backups' | 'server' | 'audit';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -17,6 +17,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['warehouses', 'Dépôts'],
     ['users', 'Utilisateurs'],
     ['settings', 'Paramètres'],
+    ['backups', 'Sauvegardes'],
     ['server', 'Serveur central'],
     ['audit', "Journal d'audit"],
   ];
@@ -31,6 +32,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'warehouses' && <Warehouses />}
       {tab === 'users' && <Users currentRole={user.role} />}
       {tab === 'settings' && <Settings />}
+      {tab === 'backups' && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && <Audit />}
     </div>
@@ -675,5 +677,216 @@ function Audit() {
         ))}
       </tbody>
     </table>
+  );
+}
+
+type BackupInfo = Result<'backup.list'>[number];
+
+const KIND_LABELS: Record<BackupInfo['kind'], string> = { auto: 'Automatique', manual: 'Manuelle', safety: 'Avant restauration' };
+const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(bytes / 1024))} Ko`);
+
+/** Sauvegardes de la base de ce PC : automatique chaque jour, copie sur clé USB, restauration. */
+function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const status = useLoad(() => call('backup.status'));
+  const [busy, setBusy] = useState(false);
+  const [keep, setKeep] = useState('');
+  const [restoring, setRestoring] = useState<BackupInfo | null>(null);
+  const st = status.data;
+  useEffect(() => {
+    if (st) setKeep(String(st.keep));
+  }, [st?.keep]);
+  if (!st) return null;
+  const run = async (fn: () => Promise<BackupInfo | null>, ok: string) => {
+    setBusy(true);
+    try {
+      const info = await fn();
+      if (info) toast.ok(`${ok} : ${info.name} (${size(info.size)})`);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+      status.reload();
+      onChanged();
+    }
+  };
+  const configure = (input: { dir?: string | null; copyDir?: string | null; keep?: number }) =>
+    call('backup.configure', input).then(() => {
+      toast.ok('Réglage enregistré');
+      status.reload();
+    }, toast.error);
+  const choose = async (title: string, key: 'dir' | 'copyDir') => {
+    const dir = await call('backup.chooseFolder', title);
+    if (dir) await configure({ [key]: dir });
+  };
+  return (
+    <div>
+      <p>
+        La base de ce PC est copiée chaque jour, pendant que la caisse travaille. Gardez aussi une copie hors du PC (clé USB, dossier OneDrive ou Google
+        Drive) : en cas de vol ou de panne du disque, c'est elle qui sauve les ventes, le stock et la comptabilité.
+      </p>
+      <table className="list narrow">
+        <tbody>
+          <tr>
+            <th>Dernière sauvegarde</th>
+            <td>
+              {st.last_at ? dateTime(st.last_at) : 'Jamais'}{' '}
+              {st.overdue && <span className="tag rupture">En retard</span>}
+            </td>
+          </tr>
+          {st.last_error && (
+            <tr>
+              <th>Problème</th>
+              <td className="danger-text">{st.last_error}</td>
+            </tr>
+          )}
+          <tr>
+            <th>Dossier des sauvegardes</th>
+            <td>
+              <code>{st.dir}</code>{' '}
+              <button onClick={() => st.dir && call('backup.openFolder', st.dir).catch(toast.error)}>Ouvrir</button>{' '}
+              {isAdmin && <button onClick={() => void choose('Dossier des sauvegardes automatiques', 'dir')}>Changer</button>}
+            </td>
+          </tr>
+          <tr>
+            <th>Copie de chaque sauvegarde vers</th>
+            <td>
+              {st.copy_dir ? <code>{st.copy_dir}</code> : <span className="muted">aucun second dossier</span>}{' '}
+              {isAdmin && (
+                <>
+                  <button onClick={() => void choose('Clé USB ou dossier OneDrive / Google Drive', 'copyDir')}>{st.copy_dir ? 'Changer' : 'Choisir'}</button>{' '}
+                  {st.copy_dir && <button onClick={() => void configure({ copyDir: null })}>Retirer</button>}
+                </>
+              )}
+            </td>
+          </tr>
+          <tr>
+            <th>Sauvegardes automatiques gardées</th>
+            <td>
+              {isAdmin ? (
+                <form
+                  className="filters"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void configure({ keep: Number(keep) });
+                  }}
+                >
+                  <input inputMode="numeric" value={keep} onChange={(e) => setKeep(e.target.value)} style={{ width: 70 }} />
+                  <span className="muted">les plus récentes (les sauvegardes manuelles ne sont jamais effacées)</span>
+                  {Number(keep) !== st.keep && <button className="primary">Enregistrer</button>}
+                </form>
+              ) : (
+                st.keep
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="actions" style={{ justifyContent: 'flex-start' }}>
+        <button className="primary" disabled={busy} onClick={() => void run(() => call('backup.now'), 'Sauvegarde faite')}>
+          Sauvegarder maintenant
+        </button>
+        <button disabled={busy} onClick={() => void run(() => call('backup.toFolder'), 'Copie faite')}>
+          Copier sur une clé USB…
+        </button>
+        {isAdmin && (
+          <button
+            disabled={busy}
+            onClick={() =>
+              call('backup.chooseFile').then((info) => {
+                if (!info) return;
+                if (!info.ok) toast.error(info.error ?? 'Sauvegarde invalide');
+                else setRestoring(info);
+              }, toast.error)
+            }
+          >
+            Restaurer depuis un fichier…
+          </button>
+        )}
+      </div>
+      <h3>Sauvegardes de ce dossier</h3>
+      {st.backups.length === 0 ? (
+        <Empty>Aucune sauvegarde pour l'instant</Empty>
+      ) : (
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Magasin</th>
+              <th className="r">Articles</th>
+              <th className="r">Tickets</th>
+              <th>Dernière vente</th>
+              <th className="r">Taille</th>
+              <th>État</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {st.backups.map((b) => (
+              <tr key={b.file}>
+                <td title={b.name}>{dateTime(b.created_at)}</td>
+                <td>{KIND_LABELS[b.kind]}</td>
+                <td>{b.store_name}</td>
+                <td className="r">{b.articles}</td>
+                <td className="r">{b.sales}</td>
+                <td>{b.last_sale_at ? dateTime(b.last_sale_at) : '-'}</td>
+                <td className="r">{size(b.size)}</td>
+                <td>{b.ok ? <span className="tag normal">Vérifiée</span> : <span className="tag rupture" title={b.error ?? ''}>Inutilisable</span>}</td>
+                <td className="r">
+                  {isAdmin && b.ok && (
+                    <button className="danger" onClick={() => setRestoring(b)}>
+                      Restaurer
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {restoring && <RestoreDialog backup={restoring} onClose={() => setRestoring(null)} />}
+    </div>
+  );
+}
+
+function RestoreDialog({ backup, onClose }: { backup: BackupInfo; onClose: () => void }) {
+  const toast = useToast();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title="Restaurer une sauvegarde" onClose={onClose}>
+      <p>
+        La base de ce PC va être remplacée par la sauvegarde du <strong>{dateTime(backup.created_at)}</strong>
+        {backup.store_name ? ` (${backup.store_name})` : ''} : {backup.articles} articles, {backup.sales} tickets
+        {backup.last_sale_at ? `, dernière vente le ${dateTime(backup.last_sale_at)}` : ''}.
+      </p>
+      <p className="danger-text">
+        Tout ce qui a été fait sur ce PC après cette date (ventes, réceptions, écritures) disparaît de ce PC. La base actuelle est d'abord copiée dans le
+        dossier des sauvegardes (« Avant restauration ») pour pouvoir revenir en arrière. L'application redémarre ensuite.
+      </p>
+      <Field label="Tapez RESTAURER pour confirmer">
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
+      </Field>
+      <div className="actions">
+        <button onClick={onClose}>Annuler</button>
+        <button
+          className="danger"
+          disabled={typed.trim().toUpperCase() !== 'RESTAURER' || busy}
+          onClick={() => {
+            setBusy(true);
+            call('backup.restore', backup.file).then(
+              () => toast.ok('Restauration en cours, l’application redémarre…'),
+              (err) => {
+                setBusy(false);
+                toast.error(err);
+              },
+            );
+          }}
+        >
+          Restaurer et redémarrer
+        </button>
+      </div>
+    </Modal>
   );
 }

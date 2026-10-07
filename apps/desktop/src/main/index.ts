@@ -1,8 +1,9 @@
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { AppError, openServices } from '@superette/db';
-import { type ApiName, createApi } from './api';
+import { AppError, openServices, restoreDatabase } from '@superette/db';
+import { type ApiName, type SystemHooks, createApi } from './api';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 
@@ -53,8 +54,63 @@ void app.whenReady().then(() => {
     app.quit();
     return;
   }
+  // Restauration faite juste avant ce démarrage : on la trace dans la base restaurée.
+  const marker = `${dbFile}.restauration.json`;
+  if (existsSync(marker)) {
+    try {
+      const done = JSON.parse(readFileSync(marker, 'utf8')) as { userId: string | null };
+      services.backups.recordRestore(done.userId, done);
+    } catch (e) {
+      console.warn('[backup] trace de restauration illisible', e);
+    }
+    rmSync(marker, { force: true });
+  }
   const sync = createSyncRunner(services);
-  const api = createApi(services, createPrinter(services), sync, app.getVersion());
+
+  // Sauvegarde automatique : peu après le démarrage puis toutes les heures, une fois par jour.
+  const autoBackup = () => void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
+  const backupStart = setTimeout(autoBackup, 60_000);
+  const backupTimer = setInterval(autoBackup, 3_600_000);
+
+  const system: SystemHooks = {
+    chooseFolder: async (title) => {
+      const r = await dialog.showOpenDialog({ title, properties: ['openDirectory', 'createDirectory'] });
+      return r.canceled ? null : (r.filePaths[0] ?? null);
+    },
+    chooseBackupFile: async () => {
+      const r = await dialog.showOpenDialog({
+        title: 'Choisir la sauvegarde à restaurer',
+        defaultPath: services.backups.status().dir ?? undefined,
+        filters: [{ name: 'Sauvegarde Superette Gestion', extensions: ['db'] }],
+        properties: ['openFile'],
+      });
+      return r.canceled ? null : (r.filePaths[0] ?? null);
+    },
+    openFolder: async (path) => {
+      const error = await shell.openPath(path);
+      if (error) throw new AppError(error);
+    },
+    restore: (file, userId) => {
+      const safetyFile = services.backups.safetyFile();
+      const keep = services.backups.localSettings();
+      // Laisse partir la réponse à l'écran avant de fermer la base.
+      setTimeout(() => {
+        sync.stop();
+        clearTimeout(backupStart);
+        clearInterval(backupTimer);
+        services.db.close();
+        try {
+          restoreDatabase(dbFile, file, safetyFile, keep);
+          writeFileSync(marker, JSON.stringify({ userId, file, safetyFile, at: new Date().toISOString() }));
+        } catch (e) {
+          dialog.showErrorBox('Restauration impossible', `${String(e)}\n\nLa base actuelle n'a pas été modifiée.`);
+        }
+        app.relaunch();
+        app.exit(0);
+      }, 500);
+    },
+  };
+  const api = createApi(services, createPrinter(services), sync, app.getVersion(), system);
 
   ipcMain.handle('api', async (_event, name: ApiName, args: unknown[]) => {
     const fn = api[name] as ((...a: unknown[]) => unknown) | undefined;
@@ -77,6 +133,8 @@ void app.whenReady().then(() => {
   }
 
   app.on('before-quit', () => {
+    clearTimeout(backupStart);
+    clearInterval(backupTimer);
     sync.stop();
     services.db.close();
   });

@@ -80,6 +80,8 @@ code { background: var(--brand-soft); padding: 2px 6px; border-radius: 4px; font
 .window[hidden] { display: none; }
 .statusbar { display: flex; gap: 18px; align-items: center; background: #eef1f6; border-top: 1px solid #d5dae3; padding: 3px 10px; font-size: 12px; color: #4b5565; }
 .statusbar .ok { color: var(--ok); }
+.statusbar button.warn { border: none; background: none; padding: 0; color: var(--danger); font-size: 12px; font-weight: 600; }
+.danger-text { color: var(--danger); }
 .statusbar button.link { margin-left: auto; border: none; background: none; padding: 0; color: #2457a6; font-size: 12px; text-decoration: underline; }
 .content { overflow: auto; }
 .page { padding: 20px 24px; }

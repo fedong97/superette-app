@@ -174,6 +174,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Dépôts', open: ['admin', 'warehouses'] },
       { label: 'Utilisateurs', open: ['admin', 'users'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
+      { label: 'Sauvegardes', open: ['admin', 'backups'] },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: "Journal d'audit", open: ['admin', 'audit'] },
     ],
@@ -236,9 +237,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [menu, setMenu] = useState<string | null>(null);
   const [help, setHelp] = useState<'shortcuts' | 'about' | null>(null);
   const sync = useLoad(() => call('sync.state'), []);
+  const backupLate = useLoad(() => call('backup.overdue'), []);
 
   useEffect(() => {
-    const t = setInterval(sync.reload, 15000);
+    const t = setInterval(() => {
+      sync.reload();
+      backupLate.reload();
+    }, 15000);
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
@@ -377,6 +382,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Utilisateur : {user.name} ({ROLE_LABELS[user.role]})
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
+        {backupLate.data && (
+          <button className="warn" disabled={!can(WINDOWS.admin.roles)} onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
+            Sauvegarde en retard
+          </button>
+        )}
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
         </button>

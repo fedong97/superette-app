@@ -12,6 +12,7 @@ import {
   AppError,
   COMMITMENT_KINDS,
   SECURITY_KINDS,
+  inspectBackup,
   STAFF_CATEGORIES,
   type ArticleInput,
   type BootstrapInput,
@@ -36,6 +37,15 @@ import {
 } from '@superette/db';
 
 import type { SyncRunner } from './sync';
+
+/** Actions du poste qui passent par Windows (fenêtres de choix, redémarrage). */
+export interface SystemHooks {
+  chooseFolder(title: string): Promise<string | null>;
+  chooseBackupFile(): Promise<string | null>;
+  openFolder(path: string): Promise<void>;
+  /** Ferme la base, la remplace par la sauvegarde et relance l'application. */
+  restore(file: string, userId: string): void;
+}
 
 export interface Printer {
   /** `newSale` : ticket d'une vente qui vient d'être encaissée (ouvre le tiroir selon les réglages). */
@@ -64,7 +74,7 @@ export interface Printer {
  * caisse) sont tenus ici, côté processus principal : l'écran ne peut pas
  * se faire passer pour un autre utilisateur ni valider à la place d'un gérant.
  */
-export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVersion: string) {
+export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVersion: string, system: SystemHooks) {
   let user: User | null = null;
 
   const requireUser = (roles?: Role[]): User => {
@@ -403,6 +413,32 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.printBalance': (from?: string | null, to?: string | null) => printer.trialBalance(ctx(ACCOUNTING).storeId, from, to),
     'accounting.printJournal': (from?: string | null, to?: string | null, journal?: JournalCode | null) =>
       printer.journal(ctx(ACCOUNTING).storeId, from, to, journal),
+
+    // --- Sauvegardes -------------------------------------------------------
+    'backup.status': () => (requireUser(MANAGE), { ...s.backups.status(), backups: s.backups.list() }),
+    'backup.overdue': () => (requireUser(), s.backups.status().overdue),
+    'backup.now': () => s.backups.saveNow(requireUser(MANAGE).id),
+    'backup.toFolder': async () => {
+      const u = requireUser(MANAGE);
+      const dir = await system.chooseFolder('Choisir la clé USB ou le dossier de la copie');
+      return dir ? s.backups.backup(u.id, { dir, kind: 'manual' }) : null;
+    },
+    'backup.chooseFolder': (title: string) => (requireUser(['admin']), system.chooseFolder(title)),
+    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number }) => s.backups.configure(requireUser(['admin']).id, input),
+    'backup.list': (dir?: string | null) => (requireUser(MANAGE), s.backups.list(dir)),
+    'backup.chooseFile': async () => {
+      requireUser(['admin']);
+      const file = await system.chooseBackupFile();
+      return file ? inspectBackup(file) : null;
+    },
+    'backup.openFolder': (path: string) => (requireUser(MANAGE), system.openFolder(path)),
+    'backup.restore': (file: string) => {
+      const u = requireUser(['admin']);
+      const info = inspectBackup(file);
+      if (!info.ok) throw new AppError(info.error ?? 'Sauvegarde invalide', 'INVALID');
+      system.restore(file, u.id);
+      return info;
+    },
 
     // --- Rapports -----------------------------------------------------------
     'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),

@@ -102,6 +102,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Export CSV des ventes.
 - Magasins, caisses (code d'activation), dépôts, utilisateurs et rôles (administrateur, gérant, caissier, magasinier, comptable), paramètres, journal d'audit.
 
+**Sauvegardes**
+- Copie de la base une fois par jour, sans arrêter la caisse (Administration › Sauvegardes), dans le dossier « sauvegardes » à côté de la base ou un autre dossier. Chaque copie est relue et vérifiée, les 14 plus récentes sont gardées (nombre réglable).
+- Copie de chaque sauvegarde vers un second dossier : clé USB ou dossier OneDrive / Google Drive. Une clé débranchée est signalée sans bloquer la sauvegarde.
+- « Sauvegarder maintenant », « Copier sur une clé USB… » (jamais effacée par la rotation) et « Sauvegarde en retard » dans la barre d'état après 2 jours sans sauvegarde réussie.
+- Restauration par l'administrateur, depuis la liste ou un fichier : contrôle du fichier, confirmation en tapant RESTAURER, copie « Avant restauration » de la base actuelle, redémarrage, trace dans le journal d'audit. Les réglages de sauvegarde du PC sont conservés.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

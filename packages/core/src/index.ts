@@ -14,3 +14,4 @@ export * from './bankStatement';
 export * from './escpos';
 export * from './packs';
 export * from './promotion';
+export * from './labels';

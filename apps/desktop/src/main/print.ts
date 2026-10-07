@@ -7,6 +7,8 @@ import {
   formatFcfa,
   formatQty,
   formatRate,
+  LABEL_FORMATS,
+  type LabelFormatId,
   numberToWordsFr,
   receiptToEscPos,
   splitTtc,
@@ -146,6 +148,23 @@ export function createPrinter(s: Services): Printer {
     }
   }
 
+  /** Planche d'étiquettes : la fenêtre d'impression s'ouvre au format de la planche ou du rouleau. Renvoie false si annulé. */
+  async function printLabelsHtml(html: string, format: LabelFormatId): Promise<boolean> {
+    const f = LABEL_FORMATS[format];
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    try {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      return await new Promise<boolean>((resolve, reject) =>
+        win.webContents.print(
+          { silent: false, printBackground: true, pageSize: { width: f.pageW * 1000, height: f.pageH * 1000 }, margins: { marginType: 'none' } },
+          (ok, reason) => (ok ? resolve(true) : reason === 'cancelled' ? resolve(false) : reject(new Error(`Impression impossible : ${reason}`))),
+        ),
+      );
+    } finally {
+      win.destroy();
+    }
+  }
+
   function a4Head(store: { name: string; address: string | null; phone: string | null; taxpayer_number: string | null }): string {
     return `<div class="head"><div><h1>${esc(store.name)}</h1>${[store.address, store.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
       ${store.taxpayer_number ? `<div class="box">NIU : ${esc(store.taxpayer_number)}</div>` : ''}</div>`;
@@ -154,6 +173,33 @@ export function createPrinter(s: Services): Printer {
     `${from ? `Du ${dayFr(from)} ` : 'Depuis le début '}${to ? `au ${dayFr(to)}` : `au ${new Date().toLocaleDateString('fr-FR')}`}`;
 
   return {
+    labels: printLabelsHtml,
+
+    async countSheet(storeId, warehouseId, departmentId) {
+      const store = s.admin.getStore(storeId);
+      const wh = s.admin.listWarehouses(storeId).find((w) => w.id === warehouseId);
+      const families = departmentId ? new Set(s.catalogue.listDepartments().find((d) => d.id === departmentId)?.families.map((f) => f.id) ?? []) : null;
+      const articles = s.catalogue
+        .searchArticles('', storeId, { limit: 100_000 })
+        .filter((a) => !families || (a.family_id !== null && families.has(a.family_id)))
+        .sort((a, b) => (a.department_name ?? '~').localeCompare(b.department_name ?? '~', 'fr') || a.name.localeCompare(b.name, 'fr'));
+      let dept: string | null | undefined;
+      const rows = articles
+        .map((a) => {
+          const levels = a.unit === 'piece' ? [...a.packs.map((p) => p.name), a.unit_name || 'Pièce'] : [a.unit === 'kg' ? 'kg' : 'litres'];
+          const head = a.department_name !== dept ? `<tr><th colspan="3">${esc((dept = a.department_name) ?? 'Sans rayon')}</th></tr>` : '';
+          return `${head}<tr><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td class="count">${levels.map((l) => `<span>……… ${esc(l)}</span>`).join('')}</td></tr>`;
+        })
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Feuille de comptage d'inventaire</h1>
+        <p>Dépôt : <b>${esc(wh?.name ?? '')}</b> · imprimée le ${new Date().toLocaleDateString('fr-FR')} · ${articles.length} articles</p>
+        <p class="muted">Comptez chaque article en cartons, paquets et unités ; notez l'heure de fin de chaque rayon.</p>
+        <style>.count span { display: inline-block; min-width: 32mm; } th[colspan] { background: #e8eef7; text-align: left; }</style>
+        <table><tr><th style="width:22mm">Code</th><th>Article</th><th style="width:105mm">Compté</th></tr>${rows}</table>
+        <div class="sign"><span>Compté par : ……………………</span><span>Heure de fin : ……………</span><span>Signature : ……………………</span></div>`);
+    },
+
     async ticket(saleId, opts) {
       const cfg = config();
       let kick = false;

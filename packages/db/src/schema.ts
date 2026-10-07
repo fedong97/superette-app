@@ -805,4 +805,21 @@ ALTER TABLE sale_lines ADD COLUMN pack_price INTEGER;
 ALTER TABLE sales ADD COLUMN price_level TEXT NOT NULL DEFAULT 'retail';
 `,
   },
+  {
+    version: 13,
+    name: 'etiquettes',
+    sql: `
+-- Dernier prix imprimé sur l'étiquette de chaque article (pack = '' pour l'unité,
+-- sinon le nom du conditionnement) : sert à lister les étiquettes à refaire.
+-- Propre au poste, comme l'imprimante : non synchronisé.
+CREATE TABLE label_prints (
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+  pack TEXT NOT NULL DEFAULT '',
+  price INTEGER NOT NULL,
+  printed_at TEXT NOT NULL,
+  PRIMARY KEY (store_id, article_id, pack)
+);
+`,
+  },
 ];

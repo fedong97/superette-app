@@ -721,4 +721,21 @@ CREATE TABLE tax_years (
 );
 `,
   },
+  {
+    version: 10,
+    name: 'notes déclaratives de la DSF',
+    sql: `
+-- Saisie des notes déclaratives d'un exercice (engagements, méthodes, associés, effectifs,
+-- informations sociales), en JSON. Identifiant fixe « magasin:année », comme tax_years.
+CREATE TABLE dsf_disclosures (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  year INTEGER NOT NULL,
+  data TEXT NOT NULL DEFAULT '{}',
+  user_id TEXT REFERENCES users(id),
+  updated_at TEXT NOT NULL,
+  UNIQUE (store_id, year)
+);
+`,
+  },
 ];

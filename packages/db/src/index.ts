@@ -3,6 +3,7 @@ import { AdminService } from './admin';
 import { CatalogueService } from './catalogue';
 import { CustomerService } from './customers';
 import { type Db, openDatabase } from './database';
+import { DisclosureService } from './disclosures';
 import { ExpenseService } from './expenses';
 import { PosService } from './pos';
 import { PurchaseService } from './purchases';
@@ -22,6 +23,7 @@ export * from './admin';
 export * from './catalogue';
 export * from './customers';
 export * from './database';
+export * from './disclosures';
 export * from './expenses';
 export * from './pos';
 export * from './purchases';
@@ -54,6 +56,7 @@ export interface Services {
   reconciliation: ReconciliationService;
   tax: TaxService;
   notes: NotesService;
+  disclosures: DisclosureService;
   sync: SyncService;
 }
 
@@ -72,9 +75,10 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const statements = new FinancialStatementsService(db, clock, accounting, stock);
   const reconciliation = new ReconciliationService(db, clock, accounting);
   const tax = new TaxService(db, clock, accounting, statements);
-  const notes = new NotesService(db, clock, accounting, statements, tax);
+  const disclosures = new DisclosureService(db, clock);
+  const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, sync };
+  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

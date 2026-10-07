@@ -57,7 +57,14 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Stock de fin d'exercice valorisé au CMUP d'après les mouvements de stock : l'écart avec le compte 311 passe en variation de stock (6031), comme l'écriture d'inventaire. Les résultats des exercices précédents apparaissent en report à nouveau.
 - Tableau des flux de trésorerie (TFT) par la méthode indirecte : capacité d'autofinancement, variations du bilan, investissements, capitaux propres et emprunts (références ZA… ZH), avec contrôle de la trésorerie finale contre le bilan. Les à-nouveaux de reprise comptent comme trésorerie de départ.
 - Impression A4 (bilan actif, bilan passif, compte de résultat, tableau des flux) et export CSV des postes pour la saisie de la DSF. Les comptes qu'aucun poste ne reprend sont signalés.
-- Notes annexes calculées à partir des écritures (bouton Notes annexes) : immobilisations et amortissements (3A, 3C), stocks (6), clients (7), autres créances (8), disponibilités (11), capital (13), dettes financières (16A), fournisseurs (17), dettes fiscales et sociales (18), autres dettes (19), découverts (20), chiffre d'affaires et charges par compte (21 à 30), fiche de synthèse (34) et passage au résultat fiscal. Impression A4 et export CSV. Les notes déclaratives (engagements, effectifs, informations sociales) restent à rédiger par le comptable.
+- Notes annexes calculées à partir des écritures (bouton Notes annexes) : immobilisations et amortissements (3A, 3C), stocks (6), clients (7), autres créances (8), disponibilités (11), capital (13), dettes financières (16A), fournisseurs (17), dettes fiscales et sociales (18), autres dettes (19), découverts (20), chiffre d'affaires et charges par compte (21 à 30), fiche de synthèse (34) et passage au résultat fiscal. Impression A4 et export CSV.
+- Notes déclaratives saisies par exercice (Fiscal › Notes déclaratives de la DSF) et imprimées avec les autres :
+  - dettes garanties par des sûretés et engagements donnés ou reçus (1) ;
+  - informations obligatoires, avec des textes proposés qui décrivent les méthodes de l'application (2) ;
+  - répartition du capital entre associés, comparée au capital du bilan (13B) ;
+  - effectifs par catégorie, origine et sexe et masse salariale, comparée aux comptes 661 à 663 (27B) ;
+  - informations sociales et environnementales (35).
+  La saisie est partagée entre les PC du magasin.
 
 **Impôt sur le résultat**
 - Fiscal › Impôt sur le résultat : forme (société à l'IS ou entreprise individuelle à l'IRPP), régime (réel ou simplifié) et taux, exercice par exercice. Taux du CGI par défaut, modifiables : IS 30 % (25 % jusqu'à 3 milliards de chiffre d'affaires), minimum de perception 2 % au réel et 5 % au simplifié, barème IRPP 10 / 15 / 25 / 35 %, centimes additionnels communaux de 10 %.
@@ -159,4 +166,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 
 ## Prochaines étapes
 
-1. Notes déclaratives de la DSF (engagements, effectifs), à saisir dans l'application.
+1. Hébergement du serveur central (VPS ou PC toujours allumé) et adresse de mise à jour automatique.

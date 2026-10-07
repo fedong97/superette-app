@@ -403,19 +403,26 @@ export function createPrinter(s: Services): Printer {
     async notes(storeId, year) {
       const store = s.admin.getStore(storeId);
       const { notes } = s.notes.notes(storeId, year);
-      const v = (n: number) => (n ? (n < 0 ? `- ${money(-n)}` : money(n)) : '-');
+      const v = (n: number, unit?: 'fcfa' | 'number') => (n ? (unit === 'number' ? n.toLocaleString('fr-FR') : n < 0 ? `- ${money(-n)}` : money(n)) : '-');
       const body = notes
         .map((n) => {
+          const title = `<h3>${n.id === 'RF' ? '' : `Note ${esc(n.id)} : `}${esc(n.title)}</h3>`;
+          const comment = n.comment ? `<p class="muted">${esc(n.comment)}</p>` : '';
+          if (!n.columns.length) {
+            const text = n.paragraphs?.length
+              ? n.paragraphs.map((p) => `${p.heading ? `<h4>${esc(p.heading)}</h4>` : ''}<p style="white-space: pre-line">${esc(p.text)}</p>`).join('')
+              : '<p class="muted">Néant</p>';
+            return `<div style="break-inside: avoid">${title}${text}${comment}</div>`;
+          }
           const rows = n.rows.length
-            ? n.rows.map((r) => `<tr${r.total ? ' class="total"' : ''}><td>${esc(r.label)}</td>${r.values.map((x) => `<td class="r">${v(x)}</td>`).join('')}</tr>`).join('')
+            ? n.rows.map((r) => `<tr${r.total ? ' class="total"' : ''}><td>${esc(r.label)}</td>${r.values.map((x, j) => `<td class="r">${v(x, n.units?.[j])}</td>`).join('')}</tr>`).join('')
             : `<tr><td colspan="${n.columns.length + 1}" class="muted">Néant</td></tr>`;
-          return `<div style="break-inside: avoid"><h3>Note ${esc(n.id === 'RF' ? '' : n.id)}${n.id === 'RF' ? '' : ' : '}${esc(n.title)}</h3>
-            <table><thead><tr><th>Libellé</th>${n.columns.map((c) => `<th class="r">${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
-            ${n.comment ? `<p class="muted">${esc(n.comment)}</p>` : ''}</div>`;
+          return `<div style="break-inside: avoid">${title}
+            <table><thead><tr><th>Libellé</th>${n.columns.map((c) => `<th class="r">${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>${comment}</div>`;
         })
         .join('');
       await printA4(`${a4Head(store)}
-        <h1>Notes annexes : exercice ${year}</h1><div>Montants en FCFA · SYSCOHADA révisé, système normal · notes établies à partir des écritures ; les notes déclaratives (engagements, effectifs, informations sociales) sont à compléter par le comptable</div>
+        <h1>Notes annexes : exercice ${year}</h1><div>Montants en FCFA · SYSCOHADA révisé, système normal · notes calculées à partir des écritures, notes 1, 2, 13B, 27B et 35 déclarées par l'entreprise</div>
         ${body}`);
     },
 

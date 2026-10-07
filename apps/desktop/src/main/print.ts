@@ -1,8 +1,20 @@
 import { BrowserWindow } from 'electron';
-import { PAYMENT_METHODS, formatFcfa, formatQty, formatRate, numberToWordsFr, splitTtc } from '@superette/core';
+import {
+  PAYMENT_METHODS,
+  type Codepage,
+  type Receipt,
+  drawerKick,
+  formatFcfa,
+  formatQty,
+  formatRate,
+  numberToWordsFr,
+  receiptToEscPos,
+  splitTtc,
+} from '@superette/core';
 import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, JOURNALS } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
+import { sendNetwork, sendWindowsRaw } from './rawPrint';
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const money = (v: number) => formatFcfa(v, false);
@@ -19,7 +31,26 @@ const STYLE = `
   td { vertical-align: top; padding: 0; }
   hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
   .big { font-size: 15px; font-weight: bold; }
+  .row { display: flex; justify-content: space-between; gap: 6px; }
+  .row span:last-child { white-space: nowrap; }
 `;
+
+/** Rendu HTML d'un ticket, pour l'impression par le pilote Windows. */
+function receiptHtml(receipt: Receipt): string {
+  return receipt
+    .map((l) => {
+      if (l.t === 'rule') return '<hr>';
+      if (l.t === 'feed') return '<br>';
+      const cls = [l.bold ? 'b' : '', l.big ? 'big' : ''];
+      if (l.t === 'text') return `<div class="${[...cls, l.align === 'center' ? 'c' : l.align === 'right' ? 'r' : ''].join(' ').trim()}">${esc(l.text)}</div>`;
+      const pad = l.indent ? ` style="padding-left:${l.indent}ch"` : '';
+      return `<div class="row ${cls.join(' ').trim()}"><span${pad}>${esc(l.left)}</span><span>${esc(l.right)}</span></div>`;
+    })
+    .join('\n');
+}
+
+export type PrinterMode = 'driver' | 'windows' | 'network';
+export type DrawerMode = 'never' | 'cash' | 'always';
 
 const A4_STYLE = `
   @page { size: A4; margin: 15mm; }
@@ -37,10 +68,14 @@ const A4_STYLE = `
   .muted { color: #555; }
 `;
 
-/** Ticket de caisse 80 mm et rapport Z, imprimés par le pilote Windows de l'imprimante. */
+/**
+ * Ticket de caisse et rapport Z : par le pilote Windows (rendu HTML 80 mm) ou
+ * en ESC/POS direct (USB via le spouleur Windows, ou réseau port 9100), avec
+ * ouverture du tiroir-caisse. Les autres documents sont imprimés en A4.
+ */
 export function createPrinter(s: Services): Printer {
-  async function printHtml(body: string): Promise<void> {
-    if (s.admin.getSetting('printer.enabled') === '0') return;
+  async function printHtml(body: string, force = false): Promise<void> {
+    if (!force && s.admin.getSetting('printer.enabled') === '0') return;
     const deviceName = s.admin.getSetting('printer.name') || undefined;
     const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
     try {
@@ -54,6 +89,45 @@ export function createPrinter(s: Services): Printer {
     } finally {
       win.destroy();
     }
+  }
+
+  /** Réglages d'impression du poste (non synchronisés : chaque caisse a son imprimante). */
+  function config() {
+    const get = (k: string) => s.admin.getSetting(k);
+    return {
+      mode: (get('printer.mode') || 'driver') as PrinterMode,
+      name: get('printer.name') ?? '',
+      host: get('printer.host') ?? '',
+      port: Number(get('printer.port')) || 9100,
+      columns: Number(get('printer.columns')) || 48,
+      codepage: (get('printer.codepage') || 'pc850') as Codepage,
+      cut: get('printer.cut') !== '0',
+      drawer: (get('drawer.mode') || 'never') as DrawerMode,
+      enabled: get('printer.enabled') !== '0',
+    };
+  }
+
+  /** Octets ESC/POS bruts : par le réseau, sinon par le spouleur Windows (aussi en mode pilote, pour le tiroir). */
+  function sendRaw(cfg: ReturnType<typeof config>, data: Uint8Array): Promise<void> {
+    return cfg.mode === 'network' ? sendNetwork(cfg.host, cfg.port, data) : sendWindowsRaw(cfg.name, data);
+  }
+
+  /**
+   * Imprime un ticket selon le mode du poste et ouvre le tiroir si demandé.
+   * Le tiroir s'ouvre même quand l'impression automatique est coupée.
+   */
+  async function printReceipt(receipt: Receipt, kick: boolean, force = false): Promise<void> {
+    const cfg = config();
+    const print = cfg.enabled || force;
+    if (cfg.mode === 'driver') {
+      const errors: unknown[] = [];
+      if (kick) await sendRaw(cfg, drawerKick()).catch((err) => errors.push(err));
+      if (print) await printHtml(receiptHtml(receipt), true).catch((err) => errors.push(err));
+      if (errors.length) throw errors[0];
+      return;
+    }
+    if (print) await sendRaw(cfg, receiptToEscPos(receipt, { columns: cfg.columns, codepage: cfg.codepage, cut: cfg.cut, kick }));
+    else if (kick) await sendRaw(cfg, drawerKick());
   }
 
   /** Document A4 (bon de commande) : la fenêtre d'impression Windows s'ouvre pour choisir l'imprimante ou « Enregistrer en PDF ». */
@@ -72,15 +146,6 @@ export function createPrinter(s: Services): Printer {
     }
   }
 
-  function header(): string {
-    const station = s.admin.station();
-    if (!station) return '';
-    const st = station.store;
-    return `<h1>${esc(st.name)}</h1>
-      <div class="c">${[st.address, st.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
-      ${st.taxpayer_number ? `<div class="c">NIU : ${esc(st.taxpayer_number)}</div>` : ''}<hr>`;
-  }
-
   function a4Head(store: { name: string; address: string | null; phone: string | null; taxpayer_number: string | null }): string {
     return `<div class="head"><div><h1>${esc(store.name)}</h1>${[store.address, store.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
       ${store.taxpayer_number ? `<div class="box">NIU : ${esc(store.taxpayer_number)}</div>` : ''}</div>`;
@@ -89,54 +154,27 @@ export function createPrinter(s: Services): Printer {
     `${from ? `Du ${dayFr(from)} ` : 'Depuis le début '}${to ? `au ${dayFr(to)}` : `au ${new Date().toLocaleDateString('fr-FR')}`}`;
 
   return {
-    async ticket(saleId) {
-      const sale = s.pos.getSale(saleId);
-      const footer = s.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !';
-      const lines = sale.lines
-        .map((l) => {
-          const qty = l.qty === 1000 ? '' : `<tr><td colspan="2">&nbsp;&nbsp;${formatQty(Math.abs(l.qty), l.unit)} x ${money(l.unit_price)}${l.discount ? ` (remise ${money(l.discount)})` : ''}</td></tr>`;
-          return `<tr><td>${esc(l.label)}</td><td class="r">${money(l.total_ttc)}</td></tr>${qty}`;
-        })
-        .join('');
-      const byRate = new Map<number, number>();
-      for (const l of sale.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-      const payments = sale.payments
-        .map((p) => `<tr><td>${esc(PAYMENT_METHODS[p.method])}${p.reference ? ` ${esc(p.reference)}` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
-        .join('');
-      await printHtml(`${header()}
-        <div>${sale.kind === 'return' ? '<b>RETOUR CLIENT</b><br>' : ''}Ticket ${esc(sale.number)}<br>${dateFr(sale.created_at)} · ${esc(sale.user_name)}${
-          sale.customer_name ? `<br>Client : ${esc(sale.customer_name)}` : ''
-        }</div><hr>
-        <table>${lines}</table><hr>
-        <table><tr><td class="big">TOTAL FCFA</td><td class="r big">${money(sale.total_ttc)}</td></tr>${payments}
-        ${sale.change_given ? `<tr><td>Rendu monnaie</td><td class="r">${money(sale.change_given)}</td></tr>` : ''}</table>
-        ${sale.due_date ? `<div>À régler avant le ${dayFr(sale.due_date)}</div>` : ''}<hr>
-        <table>${[...byRate.entries()]
-          .map(([rate, ttc]) => `<tr><td>TVA ${formatRate(rate)} sur ${money(ttc)}</td><td class="r"></td></tr>`)
-          .join('')}
-        <tr><td>dont TVA</td><td class="r">${money(sale.total_tva)}</td></tr></table><hr>
-        <div class="c">${esc(footer)}</div>`);
+    async ticket(saleId, opts) {
+      const cfg = config();
+      let kick = false;
+      if (opts?.newSale && cfg.drawer !== 'never') {
+        const sale = s.pos.getSale(saleId);
+        kick = cfg.drawer === 'always' || sale.change_given > 0 || sale.payments.some((p) => p.method === 'CASH');
+      }
+      await printReceipt(s.receipts.ticket(saleId), kick);
     },
 
     async zReport(sessionId) {
-      const z = s.pos.zReport(sessionId);
-      const row = (label: string, v: number) => `<tr><td>${esc(label)}</td><td class="r">${money(v)}</td></tr>`;
-      await printHtml(`${header()}
-        <div class="c b">RAPPORT Z${z.session.z_number ? ` N° ${z.session.z_number}` : ' (provisoire)'}</div>
-        <div>${esc(z.registerName)} · ${esc(z.session.user_name)}<br>Ouverture ${dateFr(z.session.opened_at)}${
-          z.session.closed_at ? `<br>Clôture ${dateFr(z.session.closed_at)}` : ''
-        }</div><hr>
-        <table>${row('Tickets', z.ticketCount)}${row('Ventes TTC', z.salesTtc)}${row('Retours', z.returnsTtc)}
-        ${row('CA net TTC', z.netTtc)}${row('Remises', z.discounts)}${row(`Annulations (${z.cancelled.count})`, z.cancelled.amount)}</table><hr>
-        <div class="b">Encaissements</div><table>${z.byMethod.map((m) => row(m.label, m.amount)).join('')}</table><hr>
-        ${z.customerReceipts.length ? `<div class="b">Règlements clients (crédit)</div><table>${z.customerReceipts.map((m) => row(m.label, m.amount)).join('')}</table><hr>` : ''}
-        ${z.expenses.length ? `<div class="b">Dépenses payées en caisse</div><table>${z.expenses.map((e) => row(`${e.number} ${e.label}`, e.amount)).join('')}</table><hr>` : ''}
-        <div class="b">TVA</div><table>${z.vat.map((v) => row(`${formatRate(v.rate)} HT ${money(v.ht)}`, v.tva)).join('')}</table><hr>
-        <div class="b">Espèces</div><table>${row('Fond de caisse', z.cash.openingFloat)}${row('Ventes espèces', z.cash.cashSales)}
-        ${row('Remboursements', -z.cash.cashRefunds)}${row('Apports', z.cash.cashIn)}${row('Prélèvements', -z.cash.cashOut)}
-        ${z.cash.customerReceipts ? row('Règlements clients', z.cash.customerReceipts) : ''}
-        ${z.cash.expenses ? row('Dépenses payées', -z.cash.expenses) : ''}
-        ${row('Théorique', z.cash.expected)}${z.counted !== null ? row('Compté', z.counted) + row('Écart', z.difference ?? 0) : ''}</table>`);
+      await printReceipt(s.receipts.zReport(sessionId), false);
+    },
+
+    async openDrawer() {
+      await sendRaw(config(), drawerKick());
+    },
+
+    async testPage(withDrawer) {
+      const cfg = config();
+      await printReceipt(s.receipts.testPage(cfg.columns), withDrawer, true);
     },
 
     async purchaseOrder(orderId) {
@@ -280,30 +318,11 @@ export function createPrinter(s: Services): Printer {
     },
 
     async customerReceipt(paymentId) {
-      const p = s.customers.getPayment(paymentId);
-      const acc = s.customers.account(p.store_id, p.customer_id);
-      await printHtml(`${header()}
-        <div class="c b">REÇU DE RÈGLEMENT</div>
-        <div>${esc(p.number)}<br>${dateFr(p.paid_at)}${p.user_name ? ` · ${esc(p.user_name)}` : ''}<br>Client : ${esc(p.customer_name)}</div><hr>
-        <table><tr><td class="big">Reçu FCFA</td><td class="r big">${money(p.amount)}</td></tr>
-        <tr><td>${esc(CUSTOMER_PAYMENT_METHODS[p.method])}${p.reference ? ` ${esc(p.reference)}` : ''}</td><td></td></tr>
-        <tr><td>Reste dû après règlement</td><td class="r">${money(acc.balance)}</td></tr></table><hr>
-        <div class="c">Merci !</div>`);
+      await printReceipt(s.receipts.customerReceipt(paymentId), false);
     },
 
     async expenseVoucher(expenseId) {
-      const e = s.expenses.get(expenseId);
-      await printHtml(`${header()}
-        <div class="c b">${e.session_id ? 'BON DE SORTIE DE CAISSE' : 'PIÈCE DE DÉPENSE'}</div>
-        <div>${esc(e.number)}${e.status === 'cancelled' ? ' · <b>ANNULÉE</b>' : ''}<br>${dayFr(e.expense_date)}${e.register_name ? ` · ${esc(e.register_name)}` : ''}${
-          e.user_name ? ` · ${esc(e.user_name)}` : ''
-        }</div><hr>
-        <div>${esc(e.category_name)}<br><b>${esc(e.label)}</b>${e.beneficiary ? `<br>Bénéficiaire : ${esc(e.beneficiary)}` : ''}</div><hr>
-        <table><tr><td class="big">Montant FCFA</td><td class="r big">${money(e.amount)}</td></tr>
-        ${e.vat ? `<tr><td>dont TVA récupérable</td><td class="r">${money(e.vat)}</td></tr>` : ''}
-        <tr><td>${esc(EXPENSE_PAYMENT_METHODS[e.method])}${e.reference ? ` ${esc(e.reference)}` : ''}</td><td></td></tr></table>
-        ${e.authorized_by_name ? `<div>Autorisé par ${esc(e.authorized_by_name)}</div>` : ''}<hr>
-        <table><tr><td>Le bénéficiaire</td><td class="r">Le responsable</td></tr></table><br><br><br>`);
+      await printReceipt(s.receipts.expenseVoucher(expenseId), false);
     },
 
     async vatReturn(storeId, month) {

@@ -15,7 +15,8 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Remises par ligne, validées par le code d'un gérant si le caissier n'en a pas le droit.
 - Tickets en attente, annulation et retour client sous code gérant, apports et prélèvements d'espèces.
 - Ouverture avec fond de caisse, clôture Z avec comptage par coupure FCFA et écart, rapport X/Z réimprimable.
-- Ticket 80 mm imprimé par le pilote Windows de l'imprimante.
+- Ticket, rapport Z, reçu de règlement et bon de sortie de caisse imprimés au choix par le pilote Windows ou en ESC/POS direct : imprimante USB installée sous Windows (envoi brut par le spouleur) ou imprimante réseau (IP, port 9100). Papier 80 mm (48 ou 42 caractères) ou 58 mm (32), accents français (tables PC850, PC858 ou WPC1252), coupe automatique.
+- Tiroir-caisse branché sur l'imprimante : ouverture à chaque encaissement en espèces ou à chaque vente, bouton Tiroir (F5) tracé dans le journal d'audit, page de test dans Administration › Paramètres.
 
 **Stock**
 - Fiches articles : rayon/famille, marque, unité, TVA, prix d'achat, prix de vente TTC, marge, prix propre à un magasin, historique des prix, plusieurs codes-barres, codes internes générés (préfixe 20).
@@ -158,5 +159,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 
 ## Prochaines étapes
 
-1. Impression ESC/POS directe et ouverture du tiroir-caisse sans pilote.
-2. Notes déclaratives de la DSF (engagements, effectifs), à saisir dans l'application.
+1. Notes déclaratives de la DSF (engagements, effectifs), à saisir dans l'application.

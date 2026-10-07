@@ -33,8 +33,11 @@ import {
 import type { SyncRunner } from './sync';
 
 export interface Printer {
-  ticket(saleId: string): Promise<void>;
+  /** `newSale` : ticket d'une vente qui vient d'être encaissée (ouvre le tiroir selon les réglages). */
+  ticket(saleId: string, opts?: { newSale?: boolean }): Promise<void>;
   zReport(sessionId: string): Promise<void>;
+  openDrawer(): Promise<void>;
+  testPage(withDrawer: boolean): Promise<void>;
   purchaseOrder(orderId: string): Promise<void>;
   invoice(saleId: string): Promise<void>;
   statement(storeId: string, customerId: string, from?: string | null, to?: string | null): Promise<void>;
@@ -121,7 +124,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
     'admin.settings': () => {
       requireUser();
-      const keys = ['scale.prefixes', 'scale.valueType', 'printer.name', 'printer.enabled', 'ticket.footer'];
+      const keys = [
+        'scale.prefixes',
+        'scale.valueType',
+        'printer.mode',
+        'printer.name',
+        'printer.host',
+        'printer.port',
+        'printer.columns',
+        'printer.codepage',
+        'printer.cut',
+        'printer.enabled',
+        'drawer.mode',
+        'ticket.footer',
+      ];
       return Object.fromEntries(keys.map((k) => [k, s.admin.getSetting(k)])) as Record<string, string | null>;
     },
     'admin.saveSettings': (values: Record<string, string>) => {
@@ -130,6 +146,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'admin.audit': () => (requireUser(MANAGE), s.admin.auditLog()),
     'admin.printers': () => (requireUser(), printer.list()),
+    'admin.printTest': (withDrawer: boolean) => (requireUser(MANAGE), printer.testPage(withDrawer)),
 
     // --- Serveur central ----------------------------------------------------
     'sync.state': () => (requireUser(), s.sync.state()),
@@ -259,7 +276,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.zReport': (sessionId: string) => (requireUser(), s.pos.zReport(sessionId)),
     'pos.close': (counted: DenominationCount) => s.pos.closeSession(ctx(POS), counted),
     'pos.sessions': () => s.pos.listSessions(ctx(MANAGE).storeId),
-    'pos.printTicket': (saleId: string) => printer.ticket(saleId),
+    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean }) =>
+      printer.ticket(saleId, { newSale: Boolean(opts?.newSale && requireUser(POS)) }),
+    /** Ouverture du tiroir sans encaissement : tracée dans le journal d'audit. */
+    'pos.openDrawer': async () => {
+      const c = ctx(POS);
+      await printer.openDrawer();
+      s.receipts.drawerOpened(c);
+    },
     'pos.printZ': (sessionId: string) => printer.zReport(sessionId),
     'pos.printInvoice': (saleId: string) => (requireUser(), printer.invoice(saleId)),
 

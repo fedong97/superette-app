@@ -189,7 +189,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     setDialog(null);
     setCustomer(null);
     setQuote(null);
-    call('pos.printTicket', sale.id).catch((err) => toast.error(err));
+    call('pos.printTicket', sale.id, { newSale: true }).catch((err) => toast.error(err));
   };
 
   /**
@@ -291,6 +291,10 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     else toast.error('Aucun ticket à réimprimer');
   };
 
+  const openDrawer = () => {
+    call('pos.openDrawer').then(() => toast.ok('Tiroir ouvert'), toast.error);
+  };
+
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
@@ -299,6 +303,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
         F2: reprint,
         F3: () => void hold(),
         F4: () => void validate(),
+        F5: openDrawer,
         F6: () => selected !== null && setDialog('discount'),
         F7: onListing,
         F8: () => setDialog('customer'),
@@ -625,6 +630,9 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
           <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
             Facture A4 <kbd>F9</kbd>
           </button>
+          <button onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
+            Tiroir <kbd>F5</kbd>
+          </button>
           <hr />
           <button disabled={!sel} onClick={() => setDialog('vary')}>
             Varier
@@ -659,6 +667,9 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
         </span>
         <span>
           <kbd>F2</kbd> Ticket
+        </span>
+        <span>
+          <kbd>F5</kbd> Tiroir
         </span>
         <span>
           <kbd>F7</kbd> Listing

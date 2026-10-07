@@ -11,3 +11,4 @@ export * from './purchase';
 export * from './credit';
 export * from './words';
 export * from './bankStatement';
+export * from './escpos';

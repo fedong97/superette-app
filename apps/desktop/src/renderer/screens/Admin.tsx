@@ -1,3 +1,4 @@
+import { CODEPAGES, type Codepage } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
@@ -374,29 +375,97 @@ function Settings() {
   if (!settings.data) return null;
   const v = (k: string, d = '') => draft[k] ?? settings.data![k] ?? d;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setDraft({ ...draft, [k]: e.target.value });
+  const mode = v('printer.mode', 'driver');
   return (
     <div className="narrow">
-      <h3>Impression</h3>
+      <h3>Imprimante ticket et tiroir-caisse</h3>
       <div className="grid2">
-        <Field label="Imprimante ticket">
-          <select value={v('printer.name')} onChange={set('printer.name')}>
-            <option value="">Imprimante par défaut de Windows</option>
-            {(printers.data ?? []).map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
+        <Field label="Mode d'impression" hint="ESC/POS : plus rapide, accents gérés, coupe du papier et tiroir">
+          <select value={mode} onChange={set('printer.mode')}>
+            <option value="driver">Pilote Windows (comme une imprimante normale)</option>
+            <option value="windows">ESC/POS direct, imprimante USB installée sous Windows</option>
+            <option value="network">ESC/POS direct, imprimante réseau (IP)</option>
           </select>
         </Field>
+        {mode === 'network' ? (
+          <>
+            <Field label="Adresse IP de l'imprimante" hint="Imprimée sur la page d'autotest de l'imprimante">
+              <input value={v('printer.host')} placeholder="192.168.1.100" onChange={set('printer.host')} />
+            </Field>
+            <Field label="Port">
+              <input value={v('printer.port', '9100')} inputMode="numeric" onChange={set('printer.port')} />
+            </Field>
+          </>
+        ) : (
+          <Field label="Imprimante ticket">
+            <select value={v('printer.name')} onChange={set('printer.name')}>
+              <option value="">Imprimante par défaut de Windows</option>
+              {(printers.data ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {mode !== 'driver' && (
+          <>
+            <Field label="Largeur du papier">
+              <select value={v('printer.columns', '48')} onChange={set('printer.columns')}>
+                <option value="48">80 mm (48 caractères)</option>
+                <option value="42">80 mm (42 caractères)</option>
+                <option value="32">58 mm (32 caractères)</option>
+              </select>
+            </Field>
+            <Field label="Table de caractères" hint="Si les accents sortent faux sur la page de test, essayez une autre table">
+              <select value={v('printer.codepage', 'pc850')} onChange={set('printer.codepage')}>
+                {(Object.keys(CODEPAGES) as Codepage[]).map((c) => (
+                  <option key={c} value={c}>
+                    {CODEPAGES[c].label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Coupe automatique du papier">
+              <select value={v('printer.cut', '1')} onChange={set('printer.cut')}>
+                <option value="1">Oui</option>
+                <option value="0">Non (imprimante sans massicot)</option>
+              </select>
+            </Field>
+          </>
+        )}
         <Field label="Impression automatique du ticket">
           <select value={v('printer.enabled', '1')} onChange={set('printer.enabled')}>
             <option value="1">Oui</option>
             <option value="0">Non</option>
           </select>
         </Field>
+        <Field label="Ouverture du tiroir-caisse" hint="Tiroir branché sur l'imprimante (prise RJ11)">
+          <select value={v('drawer.mode', 'never')} onChange={set('drawer.mode')}>
+            <option value="never">Jamais automatiquement</option>
+            <option value="cash">À chaque encaissement en espèces</option>
+            <option value="always">À chaque vente</option>
+          </select>
+        </Field>
         <Field label="Pied de ticket">
           <input value={v('ticket.footer', 'Merci de votre visite !')} onChange={set('ticket.footer')} />
         </Field>
+      </div>
+      <div className="actions">
+        <button
+          disabled={Object.keys(draft).length > 0}
+          title={Object.keys(draft).length ? "Enregistrez d'abord les paramètres" : undefined}
+          onClick={() => call('admin.printTest', false).then(() => toast.ok('Page de test envoyée'), toast.error)}
+        >
+          Imprimer une page de test
+        </button>
+        <button
+          disabled={Object.keys(draft).length > 0}
+          title={Object.keys(draft).length ? "Enregistrez d'abord les paramètres" : undefined}
+          onClick={() => call('admin.printTest', true).then(() => toast.ok('Page de test envoyée, le tiroir doit s’ouvrir'), toast.error)}
+        >
+          Page de test et tiroir
+        </button>
       </div>
       <h3>Étiquettes balance</h3>
       <div className="grid2">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, PAYMENT_METHODS, applyPromotions, computeTotals, formatFcfa, lineTotal } from '@superette/core';
+import { type CartLine, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -11,29 +11,61 @@ import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, Ret
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 
+interface PosPack {
+  id: string;
+  name: string;
+  units: number;
+  tariff: Tariff;
+}
+
 export interface PosLine extends CartLine {
   key: number;
   ref: string;
   unit: Article['unit'];
+  unitName: string;
   barcode: string | null;
+  /** Tarifs de l'unité et des conditionnements : le prix suit le tarif du client (détail, gros). */
+  tariff: Tariff;
+  packs: PosPack[];
+  /** Conditionnement vendu (carton, paquet), sinon l'unité de détail. */
+  packId: string | null;
 }
 
 let keySeq = 0;
 
-function toLine(article: Article, qtyMilli: number, barcode: string | null, fixedAmount?: number): PosLine {
+function toLine(article: Article, qtyMilli: number, barcode: string | null, fixedAmount?: number, packId?: string | null): PosLine {
+  const packs = article.packs.map((p) => ({ id: p.id, name: p.name, units: p.units, tariff: { retail: p.sale_price, wholesale: p.wholesale_price, superWholesale: p.super_wholesale_price } }));
+  const pack = packId ? packs.find((p) => p.id === packId) : undefined;
   return {
     key: ++keySeq,
     ref: article.code,
     articleId: article.id,
     label: article.name,
     unit: article.unit,
+    unitName: article.unit_name ?? UNIT_LABEL[article.unit],
     unitPrice: article.store_price,
     qty: qtyMilli,
     vatRate: article.vat_rate_bp,
     discount: 0,
     fixedAmount,
     barcode,
+    tariff: { retail: article.store_price, wholesale: article.wholesale_price, superWholesale: article.super_wholesale_price },
+    packs,
+    packId: pack?.id ?? null,
+    ...(pack ? { packPrice: pack.tariff.retail, packUnits: pack.units } : {}),
   };
+}
+
+/** Prix de la ligne au tarif du client (le conditionnement garde son propre prix). */
+function atLevel(l: PosLine, level: Parameters<typeof tariffPrice>[1]): PosLine {
+  const pack = l.packId ? l.packs.find((p) => p.id === l.packId) : undefined;
+  return { ...l, unitPrice: tariffPrice(l.tariff, level), packPrice: pack ? tariffPrice(pack.tariff, level) : undefined, packUnits: pack?.units };
+}
+
+/** Quantité affichée : « 2 Carton » pour une vente par conditionnement. */
+function lineQty(l: PosLine): string {
+  const pack = l.packId ? l.packs.find((p) => p.id === l.packId) : undefined;
+  return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
 type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
@@ -85,7 +117,11 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   const scanRef = useRef<HTMLInputElement>(null);
   /** Promotions du jour : appliquées à l'écran comme elles le seront à l'encaissement. */
   const promoRules = useLoad(() => call('promotions.active'), []);
-  const priced = useMemo(() => applyPromotions(lines, promoRules.data ?? []), [lines, promoRules.data]);
+  const level = customer?.price_level ?? 'retail';
+  const priced = useMemo(
+    () => applyPromotions(lines.map((l) => atLevel(l, level)), level === 'retail' ? (promoRules.data ?? []) : []),
+    [lines, promoRules.data, level],
+  );
   const totals = useMemo(() => computeTotals(priced), [priced]);
 
   const focusScan = useCallback(() => setTimeout(() => scanRef.current?.focus(), 0), []);
@@ -105,8 +141,11 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
 
   const addLine = (line: PosLine) => {
     setLines((ls) => {
-      // Même article à la pièce sans remise : on cumule la quantité.
-      const same = line.fixedAmount === undefined && line.unit === 'piece' ? ls.find((l) => l.articleId === line.articleId && !l.discount && l.fixedAmount === undefined) : undefined;
+      // Même article (et même conditionnement) à la pièce sans remise : on cumule la quantité.
+      const same =
+        line.fixedAmount === undefined && line.unit === 'piece'
+          ? ls.find((l) => l.articleId === line.articleId && l.packId === line.packId && !l.discount && l.fixedAmount === undefined)
+          : undefined;
       if (same) {
         setSelected(same.key);
         return ls.map((l) => (l === same ? { ...l, qty: l.qty + line.qty } : l));
@@ -154,8 +193,9 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       const hit = await call('catalogue.scan', code);
       if (hit) {
         if (hit.fixedAmount !== undefined || hit.article.unit === 'piece' || hit.qty !== 1000) {
-          const q = mult ? Math.round((hit.qty * mult) / 1000) : hit.qty;
-          addLine(toLine(hit.article, q, hit.barcode, hit.fixedAmount));
+          // « 3*code du carton » = 3 cartons ; un multiplicateur décimal n'a pas de sens pour un carton.
+          const q = mult ? (hit.pack ? Math.max(1, Math.round(mult / 1000)) * hit.qty : Math.round((hit.qty * mult) / 1000)) : hit.qty;
+          addLine(toLine(hit.article, q, hit.barcode, hit.fixedAmount, hit.pack?.id));
         } else {
           addArticle(hit.article, mult ?? 1000);
         }
@@ -174,7 +214,14 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   };
 
   const changeQty = (key: number, delta: number) =>
-    setLines((ls) => ls.map((l) => (l.key === key && l.fixedAmount === undefined ? { ...l, qty: Math.max(1000, l.qty + delta) } : l)));
+    setLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key || l.fixedAmount !== undefined) return l;
+        // Un carton de plus (ou de moins) pour une ligne vendue au carton.
+        const step = l.packId ? (l.packs.find((p) => p.id === l.packId)?.units ?? 1000) : 1000;
+        return { ...l, qty: Math.max(step, l.qty + Math.sign(delta) * Math.max(Math.abs(delta), step)) };
+      }),
+    );
   const removeLine = (key: number) => {
     setLines((ls) => ls.filter((l) => l.key !== key));
     setSelected(null);
@@ -186,7 +233,13 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     setSelected(null);
   };
 
-  const saleInput = () => lines.map((l) => ({ articleId: l.articleId, qty: l.qty, barcode: l.barcode, discount: l.discount }));
+  const saleInput = () => lines.map((l) => ({ articleId: l.articleId, qty: l.qty, barcode: l.barcode, discount: l.discount, packId: l.packId }));
+  /** Lignes rechargées (ticket en attente, devis) : on reprend les fiches pour les tarifs et conditionnements. */
+  const reload = async (input: { articleId: string; qty: number; barcode?: string | null; discount?: number; packId?: string | null }[]) => {
+    const priced = await call('pos.priceLines', input);
+    const arts = await Promise.all(priced.map((p) => call('catalogue.get', p.articleId)));
+    return priced.map((p, i) => ({ ...toLine(arts[i]!, p.qty, p.barcode, p.fixedAmount, p.packId), discount: p.discount }));
+  };
 
   const finish = (sale: Result<'pos.sell'>) => {
     setLines([]);
@@ -264,10 +317,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
 
   const resume = async (id: string) => {
     try {
-      const saved = await call('pos.resume', id);
-      const priced = await call('pos.priceLines', saved);
-      const arts = await Promise.all(priced.map((p) => call('catalogue.get', p.articleId)));
-      setLines(priced.map((p, i) => ({ ...p, key: ++keySeq, ref: arts[i]!.code, unit: arts[i]!.unit, barcode: p.barcode })));
+      setLines(await reload(await call('pos.resume', id)));
       setDialog(null);
     } catch (err) {
       toast.error(err);
@@ -279,9 +329,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
     try {
       const q = await call('quotes.get', id);
-      const priced = await call('pos.priceLines', await call('quotes.saleLines', id));
-      const arts = await Promise.all(priced.map((p) => call('catalogue.get', p.articleId)));
-      setLines(priced.map((p, i) => ({ ...p, key: ++keySeq, ref: arts[i]!.code, unit: arts[i]!.unit, barcode: p.barcode })));
+      setLines(await reload(await call('quotes.saleLines', id)));
       setCustomer(q.customer_id ? await call('customers.get', q.customer_id) : null);
       setQuote({ id: q.id, number: q.number, validUntil: q.valid_until });
       setLastSale(null);
@@ -371,6 +419,11 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
               title="Choisir le client (F8)"
               onClick={() => setDialog('customer')}
             />
+            {level !== 'retail' && (
+              <span className="tag surstock" title="Prix de gros appliqués à ce client">
+                Tarif {PRICE_LEVELS[level].toLowerCase()}
+              </span>
+            )}
             {customer ? (
               <button className="client-clear" title="Revenir au client comptoir" onClick={() => setCustomer(null)}>
                 ✕ {customer.code}
@@ -423,9 +476,12 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                   <SuggestionList s={suggestions} onPick={pickSuggestion} query={suggestQuery} />
                 </div>
                 <label>Grille tarif.</label>
-                <select defaultValue="detail">
-                  <option value="detail">Détail</option>
-                  <option disabled>Gros (bientôt)</option>
+                <select value={level} disabled title="Le tarif suit la fiche du client (Client › Tarif) : détail pour le client comptoir">
+                  {Object.entries(PRICE_LEVELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
                 </select>
                 <label>Dépôt</label>
                 <select value={salesWarehouse?.id ?? ''} disabled title="La vente sort du dépôt « surface de vente » du magasin">
@@ -490,10 +546,10 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                                 </span>
                               )}
                             </td>
-                            <td className="r">{qty(l.qty, l.unit)}</td>
+                            <td className="r">{lineQty(l)}</td>
                             {withDiscount && <td className="r">{l.discount ? amount(l.discount) : ''}</td>}
-                            <td>{UNIT_LABEL[l.unit]}</td>
-                            <td className="r">{amount(l.unitPrice)}</td>
+                            <td className={l.packId ? 'pack-unit' : ''}>{l.packId ? l.packs.find((p) => p.id === l.packId)?.name : l.unitName}</td>
+                            <td className="r">{amount(l.packPrice ?? l.unitPrice)}</td>
                             <td className="r">{amount(lineTotal(l))}</td>
                           </tr>
                         );
@@ -794,10 +850,11 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       {dialog === 'vary' && sel && (
         <VaryDialog
           line={sel}
+          level={level}
           onClose={() => setDialog(null)}
           onDiscount={() => setDialog('discount')}
-          onDone={(q) => {
-            setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, qty: q } : l)));
+          onDone={(q, packId) => {
+            setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, qty: q, packId } : l)));
             setDialog(null);
           }}
         />
@@ -822,23 +879,72 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   );
 }
 
-/** Varier : changer la quantité de la ligne sélectionnée (ou passer à la remise). */
-function VaryDialog({ line, onClose, onDone, onDiscount }: { line: PosLine; onClose: () => void; onDone: (qty: number) => void; onDiscount: () => void }) {
-  const [value, setValue] = useState(String(line.qty / 1000).replace('.', ','));
-  const q = parseQty(value);
+/**
+ * Varier : changer la quantité de la ligne sélectionnée, ou le conditionnement
+ * vendu (passer de 12 ampoules à 1 paquet, ou d'un paquet au carton).
+ */
+function VaryDialog({
+  line,
+  level,
+  onClose,
+  onDone,
+  onDiscount,
+}: {
+  line: PosLine;
+  level: Parameters<typeof tariffPrice>[1];
+  onClose: () => void;
+  onDone: (qty: number, packId: string | null) => void;
+  onDiscount: () => void;
+}) {
+  const [packId, setPackId] = useState<string | null>(line.packId);
+  const pack = packId ? line.packs.find((p) => p.id === packId) : undefined;
+  const [value, setValue] = useState(String(pack ? line.qty / pack.units : line.qty / 1000).replace('.', ','));
   const fixed = line.fixedAmount !== undefined;
+  const n = parseQty(value);
+  // Quantité en unités de détail : un nombre entier de cartons, ou la quantité saisie.
+  const q = n === null ? null : pack ? (n % 1000 === 0 && n > 0 ? (n / 1000) * pack.units : null) : n;
+  const choose = (id: string | null) => {
+    const next = id ? line.packs.find((p) => p.id === id) : undefined;
+    // On garde la même quantité totale quand elle tombe juste, sinon un seul conditionnement.
+    const current = q ?? line.qty;
+    setValue(String(next ? (current % next.units === 0 ? current / next.units : 1) : current / 1000).replace('.', ','));
+    setPackId(id);
+  };
+  const preview = q ? atLevel({ ...line, qty: q, packId }, level) : null;
   return (
     <Modal title={line.label} onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (q && !fixed) onDone(q);
+          if (q && !fixed) onDone(q, packId);
         }}
       >
-        <Field label={`Quantité (${UNIT_LABEL[line.unit].toLowerCase()})`} hint={fixed ? 'Étiquette balance à prix imposé : quantité non modifiable' : `PU TTC : ${fcfa(line.unitPrice)}`}>
+        {line.packs.length > 0 && !fixed && (
+          <div className="seg pack-seg">
+            {line.packs.map((p) => (
+              <button type="button" key={p.id} className={packId === p.id ? 'active' : ''} onClick={() => choose(p.id)}>
+                {p.name} <small>({p.units / 1000})</small>
+              </button>
+            ))}
+            <button type="button" className={packId === null ? 'active' : ''} onClick={() => choose(null)}>
+              {line.unitName}
+            </button>
+          </div>
+        )}
+        <Field
+          label={`Quantité (${(pack?.name ?? line.unitName).toLowerCase()})`}
+          hint={
+            fixed
+              ? 'Étiquette balance à prix imposé : quantité non modifiable'
+              : pack
+                ? `Prix du ${pack.name.toLowerCase()} : ${fcfa(tariffPrice(pack.tariff, level))} · ${pack.units / 1000} ${line.unitName.toLowerCase()}`
+                : `PU TTC : ${fcfa(tariffPrice(line.tariff, level))}`
+          }
+        >
           <input autoFocus inputMode="decimal" value={value} disabled={fixed} onChange={(e) => setValue(e.target.value)} />
         </Field>
-        {q && !fixed && <p className="big-total">{fcfa(lineTotal({ ...line, qty: q }))}</p>}
+        {pack && n !== null && q === null && <p className="danger-text">Nombre entier de {pack.name.toLowerCase()} uniquement</p>}
+        {preview && !fixed && <p className="big-total">{fcfa(lineTotal(preview))}</p>}
         <div className="actions">
           <button type="button" onClick={onDiscount}>
             Remise (F6)

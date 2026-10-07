@@ -59,13 +59,14 @@ function saving(rule: PromotionRule, lines: CartLine[]): Fcfa {
 /**
  * Applique la meilleure promotion de chaque article. L'économie d'une offre par quantité est
  * portée par les dernières lignes de l'article (jamais au-delà de leur montant). Les lignes à
- * prix imposé (étiquettes balance) et les quantités négatives n'en bénéficient pas.
+ * prix imposé (étiquettes balance), les ventes par conditionnement (carton, paquet : leur prix
+ * est déjà un prix de lot) et les quantités négatives n'en bénéficient pas.
  */
 export function applyPromotions<L extends CartLine>(lines: readonly L[], rules: readonly PromotionRule[]): PromotedLine<L>[] {
   const out: PromotedLine<L>[] = lines.map((l) => ({ ...l, promo: 0, promotionId: null, promotionName: null }));
   const byArticle = new Map<string, number[]>();
   out.forEach((l, i) => {
-    if (l.fixedAmount !== undefined || l.qty <= 0) return;
+    if (l.fixedAmount !== undefined || l.packPrice !== undefined || l.qty <= 0) return;
     byArticle.set(l.articleId, [...(byArticle.get(l.articleId) ?? []), i]);
   });
   for (const [articleId, idx] of byArticle) {

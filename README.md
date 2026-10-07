@@ -92,6 +92,13 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - La caisse applique d'elle-même la meilleure promotion de chaque article, sans code gérant : l'écran affiche « Promo −X » sur la ligne et le total des promotions, le ticket détaille chaque promotion et « Vous avez économisé ». Les offres par quantité comptent les pièces sur toutes les lignes du même article.
 - Arrêt ou relance d'une promotion à tout moment, suivi des quantités vendues et de l'économie accordée, total des promotions au rapport Z. Les promotions circulent vers tous les PC.
 
+**Conditionnements et tarifs de gros**
+- Jusqu'à trois conditionnements par article vendu à la pièce, du plus grand au plus petit, sur le modèle de KONTROL : un carton contient 10 paquets, un paquet 10 ampoules ; une palette contient 50 packs de 24 canettes. Le stock reste tenu à l'unité de détail.
+- Pour chaque niveau : contenu, coût d'achat, prix de vente détail, gros et super gros, code-barres. La fiche indique le prix ramené à l'unité, l'économie par rapport à l'unité, la marge, et signale un carton vendu à perte ou plus cher que ses unités vendues séparément.
+- À la caisse, scanner le code du carton ajoute un carton (« 3*code » pour 3 cartons) ; « Varier » passe une ligne du carton au paquet ou à l'unité. Le ticket et la facture A4 affichent « 2 Carton x 10 500 ».
+- Tarif de chaque client (Détail, Gros, Super gros) sur sa fiche : la caisse applique ses prix dès qu'il est choisi, sans code gérant ; un prix de gros vide reprend le prix de détail. Les promotions ne s'appliquent qu'au détail.
+- Bons de commande, réceptions et réception libre se saisissent par conditionnement (1 carton à 10 000 FCFA plutôt que 100 ampoules à 100 FCFA), proposé par défaut au conditionnement d'achat. L'état du stock affiche aussi la quantité en cartons, paquets et unités.
+
 **Devis et factures proforma**
 - Devis (DV-) ou facture proforma (PF-) pour un client enregistré ou un simple prospect, avec durée de validité, remises par ligne (code du gérant pour un caissier) et conditions.
 - Impression A4 avec le montant en lettres (« Arrêtée la présente facture proforma à la somme de cent-cinquante-cinq-mille francs CFA »), la date de validité et le « Bon pour accord » du client.

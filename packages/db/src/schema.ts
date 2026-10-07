@@ -768,4 +768,41 @@ ALTER TABLE sale_lines ADD COLUMN promotion_id TEXT;
 ALTER TABLE sales ADD COLUMN total_promo INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 12,
+    name: 'conditionnements',
+    sql: `
+-- Conditionnements d'un article, du plus grand (position 1) au plus petit : carton, paquet…
+-- L'unité de détail est l'article lui-même ; units = unités de détail contenues (millièmes).
+CREATE TABLE article_packs (
+  id TEXT PRIMARY KEY,
+  article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  contains INTEGER NOT NULL,
+  units INTEGER NOT NULL,
+  sale_price INTEGER NOT NULL,
+  wholesale_price INTEGER,
+  super_wholesale_price INTEGER,
+  barcode TEXT,
+  is_purchase INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (article_id, position)
+);
+CREATE INDEX article_packs_barcode ON article_packs(barcode);
+
+-- Unité de détail nommée (Ampoule, Bouteille) et tarifs gros / super gros de cette unité.
+ALTER TABLE articles ADD COLUMN unit_name TEXT;
+ALTER TABLE articles ADD COLUMN wholesale_price INTEGER;
+ALTER TABLE articles ADD COLUMN super_wholesale_price INTEGER;
+
+-- Tarif appliqué au client : détail, gros ou super gros.
+ALTER TABLE customers ADD COLUMN price_level TEXT NOT NULL DEFAULT 'retail' CHECK (price_level IN ('retail', 'wholesale', 'super_wholesale'));
+
+-- Ligne vendue par conditionnement, et tarif du ticket.
+ALTER TABLE sale_lines ADD COLUMN pack_name TEXT;
+ALTER TABLE sale_lines ADD COLUMN pack_units INTEGER;
+ALTER TABLE sale_lines ADD COLUMN pack_price INTEGER;
+ALTER TABLE sales ADD COLUMN price_level TEXT NOT NULL DEFAULT 'retail';
+`,
+  },
 ];

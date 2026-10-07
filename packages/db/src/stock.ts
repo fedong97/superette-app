@@ -7,6 +7,7 @@ import {
   LOSS_TYPES,
   allocateFefo,
   daysUntil,
+  describeInPacks,
   expiryAlert,
   stockLevel,
   weightedAverageCost,
@@ -37,6 +38,8 @@ export interface StockRow {
   max_qty: Milli | null;
   level: StockLevel;
   next_expiry: string | null;
+  /** Quantité en conditionnements (« 2 Carton 3 Paquet 4 Ampoule ») ; vide sans conditionnement. */
+  in_packs: string;
 }
 
 export interface ExpiringLot {
@@ -454,7 +457,7 @@ export class StockService extends Base {
   list(storeId: string, opts: { warehouseId?: string; search?: string; level?: StockLevel } = {}): StockRow[] {
     const rows = this.db
       .prepare(
-        `SELECT a.id AS article_id, a.code, a.name, a.unit, d.name AS department_name, a.alert_qty, a.max_qty,
+        `SELECT a.id AS article_id, a.code, a.name, a.unit, a.unit_name, d.name AS department_name, a.alert_qty, a.max_qty,
                 COALESCE(SUM(s.qty), 0) AS qty,
                 CASE WHEN SUM(CASE WHEN s.qty > 0 THEN s.qty END) > 0
                      THEN CAST(ROUND(SUM(CASE WHEN s.qty > 0 THEN s.qty * s.avg_cost END) * 1.0 / SUM(CASE WHEN s.qty > 0 THEN s.qty END)) AS INTEGER)
@@ -471,15 +474,22 @@ export class StockService extends Base {
          GROUP BY a.id
          ORDER BY a.name`,
       )
-      .all({ storeId, warehouseId: opts.warehouseId ?? null, search: opts.search ? `%${opts.search}%` : null }) as Omit<
+      .all({ storeId, warehouseId: opts.warehouseId ?? null, search: opts.search ? `%${opts.search}%` : null }) as (Omit<
       StockRow,
-      'level' | 'value'
-    >[];
+      'level' | 'value' | 'in_packs'
+    > & { unit_name: string | null })[];
+    const packs = new Map<string, { name: string; units: Milli }[]>();
+    for (const p of this.db.prepare('SELECT article_id, name, units FROM article_packs ORDER BY article_id, position').all() as { article_id: string; name: string; units: Milli }[]) {
+      const list = packs.get(p.article_id) ?? [];
+      list.push(p);
+      packs.set(p.article_id, list);
+    }
     return rows
-      .map((r) => ({
+      .map(({ unit_name, ...r }) => ({
         ...r,
         value: Math.round((Math.max(0, r.qty) * r.avg_cost) / 1000),
         level: stockLevel(r.qty, { alert: r.alert_qty, max: r.max_qty }),
+        in_packs: packs.has(r.article_id) ? describeInPacks(r.qty, packs.get(r.article_id)!, unit_name || 'Pièce') : '',
       }))
       .filter((r) => !opts.level || r.level === opts.level);
   }

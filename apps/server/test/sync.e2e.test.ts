@@ -224,6 +224,16 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     for (const s of [pc1, pc2]) expect(s.db.prepare('SELECT COUNT(*) FROM tax_years').pluck().get()).toBe(1);
   });
 
+  it('les notes déclaratives saisies sur un PC arrivent sur l’autre', async () => {
+    pc1.disclosures.save(ctx1, 2026, { shareholders: [{ name: 'Steve Fedong', nationality: 'Camerounaise', shares: 100, nominal: 10_000 }], social: 'Tri des cartons.' });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    const got = pc2.disclosures.get(ctx1.storeId, 2026);
+    expect(got.shareholders).toEqual([{ name: 'Steve Fedong', nationality: 'Camerounaise', shares: 100, nominal: 10_000 }]);
+    expect(got.social).toBe('Tri des cartons.');
+    expect(got.updatedBy).toBe(pc1.admin.getUser(ctx1.userId).name);
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);

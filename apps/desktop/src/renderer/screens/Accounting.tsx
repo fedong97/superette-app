@@ -2,11 +2,12 @@ import { Fragment, useState } from 'react';
 import { type StatementLine, parseStatementCsv } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { Disclosures } from './Disclosures';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts';
 
 const JOURNALS: Record<JournalCode, string> = {
   VE: 'Ventes',
@@ -67,6 +68,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
           ['ledger', 'Grand livre'],
           ['balance', 'Balance'],
           ['statements', 'États financiers'],
+          ['dsf', 'Notes déclaratives'],
           ['vat', 'Déclaration de TVA'],
           ['tax', 'Impôt sur le résultat'],
           ['treasury', 'Trésorerie'],
@@ -78,6 +80,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'ledger' && <Ledger account={ledgerAccount} onAccount={setLedgerAccount} />}
       {tab === 'balance' && <Balance onOpen={openLedger} />}
       {tab === 'statements' && <Statements onOpen={openLedger} />}
+      {tab === 'dsf' && <Disclosures />}
       {tab === 'vat' && <VatReturn />}
       {tab === 'tax' && <TaxReturn />}
       {tab === 'treasury' && <Treasury onOpen={openLedger} />}
@@ -637,15 +640,15 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
       {view === 'notes' && notes.data && (
         <>
           <p className="muted">
-            Notes établies à partir des écritures de l'exercice. Les notes déclaratives (engagements donnés et reçus, effectifs, informations sociales et
-            environnementales) restent à rédiger par votre comptable.
+            Notes calculées à partir des écritures de l'exercice. Les notes déclaratives (1, 2, 13B, 27B et 35) viennent de l'onglet Notes déclaratives.
           </p>
           {notes.data.notes.map((n) => (
             <details key={n.id} className="note" open={n.id === '3A'}>
               <summary>
                 <strong>{n.id === 'RF' ? '' : `Note ${n.id} · `}</strong>
                 {n.title}
-                {n.rows.length === 0 && <span className="muted"> · néant</span>}
+                {n.declared && <span className="muted"> · déclarée</span>}
+                {n.rows.length === 0 && !n.paragraphs?.length && <span className="muted"> · néant</span>}
               </summary>
               {n.rows.length > 0 && (
                 <table className="list compact">
@@ -665,7 +668,7 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
                         <td>{r.label}</td>
                         {r.values.map((x, j) => (
                           <td key={j} className={`r ${x < 0 ? 'neg' : ''}`}>
-                            {x ? fcfa(x) : '-'}
+                            {x ? (n.units?.[j] === 'number' ? x.toLocaleString('fr-FR') : fcfa(x)) : '-'}
                           </td>
                         ))}
                       </tr>
@@ -673,6 +676,12 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
                   </tbody>
                 </table>
               )}
+              {n.paragraphs?.map((p, k) => (
+                <div key={k} className="paragraph">
+                  {p.heading && <h4>{p.heading}</h4>}
+                  <p>{p.text}</p>
+                </div>
+              ))}
               {n.comment && <p className="muted">{n.comment}</p>}
             </details>
           ))}

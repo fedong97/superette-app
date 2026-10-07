@@ -10,11 +10,15 @@ import {
 } from '@superette/core';
 import {
   AppError,
+  COMMITMENT_KINDS,
+  SECURITY_KINDS,
+  STAFF_CATEGORIES,
   type ArticleInput,
   type BootstrapInput,
   type Context,
   type CustomerInput,
   type CustomerPaymentMethod,
+  type DisclosuresInput,
   type ExpenseInput,
   type QuoteInput,
   type QuoteState,
@@ -370,6 +374,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(ACCOUNTING).storeId, opts),
     'accounting.cashFlow': (opts: { from: string; to: string }) => s.statements.cashFlow(ctx(ACCOUNTING).storeId, opts),
     'accounting.notes': (year: number) => s.notes.notes(ctx(ACCOUNTING).storeId, year),
+    'accounting.disclosures': (year: number) => ({
+      ...s.disclosures.get(ctx(ACCOUNTING).storeId, year),
+      labels: { security: SECURITY_KINDS, commitment: COMMITMENT_KINDS, staff: STAFF_CATEGORIES },
+    }),
+    'accounting.saveDisclosures': (year: number, input: DisclosuresInput) => s.disclosures.save(ctx(ACCOUNTING), year, input),
     'accounting.notesCsv': (year: number) => s.notes.exportCsv(ctx(ACCOUNTING).storeId, year),
     'accounting.printNotes': (year: number) => printer.notes(ctx(ACCOUNTING).storeId, year),
     'accounting.statementsCsv': (opts: { from: string; to: string }) => s.statements.exportCsv(ctx(ACCOUNTING).storeId, opts),

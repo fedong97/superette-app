@@ -1,5 +1,6 @@
 import type { Fcfa } from '@superette/core';
 import type { AccountingService } from './accounting';
+import type { DisclosureService } from './disclosures';
 import type { FinancialStatementsService } from './statements';
 import type { TaxService } from './tax';
 import { AppError, Base } from './util';
@@ -10,6 +11,12 @@ export interface Note {
   title: string;
   columns: string[];
   rows: { label: string; values: Fcfa[]; total?: boolean }[];
+  /** Unité de chaque colonne (montants en FCFA par défaut, ou nombres : effectifs, parts). */
+  units?: ('fcfa' | 'number')[];
+  /** Note rédigée (règles comptables, informations sociales…). */
+  paragraphs?: { heading: string; text: string }[];
+  /** Note déclarée par l'entreprise et non calculée à partir des écritures. */
+  declared?: boolean;
   comment?: string;
 }
 
@@ -36,8 +43,8 @@ const starts = (account: string, prefixes: string[], except: string[] = []) =>
  * Notes annexes du SYSCOHADA révisé (système normal) que l'application sait établir à partir
  * des écritures : tableaux de mouvements (immobilisations, amortissements, dettes financières),
  * détail des postes du bilan et du compte de résultat, fiche de synthèse et passage au résultat
- * fiscal. Les notes purement déclaratives (engagements, effectifs, informations sociales) restent
- * à rédiger par le comptable.
+ * fiscal. Les notes déclaratives (engagements, méthodes, associés, effectifs, informations
+ * sociales) viennent de la saisie de l'exercice (DisclosureService).
  */
 export class NotesService extends Base {
   constructor(
@@ -46,6 +53,7 @@ export class NotesService extends Base {
     private readonly accounting: AccountingService,
     private readonly statements: FinancialStatementsService,
     private readonly tax: TaxService,
+    private readonly disclosures: DisclosureService,
   ) {
     super(db, clock);
   }
@@ -187,7 +195,14 @@ export class NotesService extends Base {
       comment: t.provisional ? 'Exercice en cours : calcul provisoire.' : undefined,
     });
 
+    // --- Notes déclaratives ------------------------------------------------------------------
+    const closing = (prefixes: string[]) =>
+      [...cur.sheet.values()].filter((m) => starts(m.account, prefixes)).reduce((t, m) => t - (m.opening + m.debit - m.credit), 0);
+    const wages = [...cur.period].filter(([a]) => starts(a, ['661', '662', '663'])).reduce((t, [, v]) => t + v, 0);
+    notes.push(...this.disclosures.notes(storeId, year, { capital: closing(['101', '102', '103', '104']), wages }));
+
     for (const n of notes) for (const r of n.rows) r.values = r.values.map((v) => v + 0); // pas de « -0 »
+    notes.sort((a, b) => order(a.id) - order(b.id));
     return { from, to, notes };
   }
 
@@ -195,7 +210,10 @@ export class NotesService extends Base {
   exportCsv(storeId: string, year: number): string {
     const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const rows = ['Note;Titre;Libelle;Valeur 1;Valeur 2;Valeur 3;Valeur 4'];
-    for (const n of this.notes(storeId, year).notes) for (const r of n.rows) rows.push([n.id, q(n.title), q(r.label), ...r.values].join(';'));
+    for (const n of this.notes(storeId, year).notes) {
+      for (const r of n.rows) rows.push([n.id, q(n.title), q(r.label), ...r.values].join(';'));
+      for (const p of n.paragraphs ?? []) rows.push([n.id, q(n.title), q(p.heading ? `${p.heading} : ${p.text}` : p.text)].join(';'));
+    }
     return `﻿${rows.join('\r\n')}\r\n`;
   }
 
@@ -226,6 +244,13 @@ export class NotesService extends Base {
     }
     return { sheet, period, reopenedStock };
   }
+}
+
+/** Ordre des notes : numéro puis lettre (3A, 3C, 6, 13, 13B…), le passage au résultat fiscal en dernier. */
+function order(id: string): number {
+  if (id === 'RF') return 1e6;
+  const m = /^(\d+)([A-Z]?)$/.exec(id);
+  return m ? Number(m[1]) * 100 + (m[2] ? m[2].charCodeAt(0) - 64 : 0) : 1e5;
 }
 
 function withTotal(rows: { label: string; values: number[] }[]): Note['rows'] {

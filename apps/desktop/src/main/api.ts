@@ -25,6 +25,9 @@ import {
   type CustomerPaymentMethod,
   type DisclosuresInput,
   type ExpenseInput,
+  type ChargePlanInput,
+  type Period,
+  type SalesRegisterFilter,
   type QuoteInput,
   type QuoteState,
   type AccountRole,
@@ -225,7 +228,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'stock.expiring': (days?: number) => s.stock.expiringLots(ctx().storeId, days),
     'stock.lots': (articleId: string) => s.stock.lotsOf(articleId, ctx().storeId),
-    'stock.movements': (articleId?: string) => s.stock.movements(ctx().storeId, { articleId }),
+    'stock.movements': (articleId?: string, types?: MovementType[]) => s.stock.movements(ctx().storeId, { articleId, types }),
+    'stock.shelving': () => s.controls.shelving(ctx().storeId),
+    'stock.byWarehouse': (opts: { search?: string | null; inStockOnly?: boolean }) => s.controls.stockByWarehouse(ctx().storeId, opts),
 
     // --- Fournisseurs et achats -----------------------------------------------
     'suppliers.list': (opts?: { search?: string; includeInactive?: boolean }) => (requireUser(), s.purchases.listSuppliers(opts)),
@@ -464,6 +469,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Rapports -----------------------------------------------------------
+    // --- Registres et contrôles (menus KONTROL) ------------------------------------
+    'controls.salesRegister': (f: SalesRegisterFilter) => s.controls.salesRegister(ctx([...MANAGE, 'accountant']).storeId, f),
+    'controls.salesAlerts': (p: Period & { discountRate?: number }) => s.controls.salesAlerts(ctx([...MANAGE, 'accountant']).storeId, p, p),
+    'controls.purchasesByProduct': (p: Period & { supplierId?: string | null }) => s.controls.purchasesByProduct(ctx(['admin', 'manager', 'stock', 'accountant']).storeId, p),
+    'controls.pendingReceipts': () => s.controls.pendingReceipts(ctx(['admin', 'manager', 'stock', 'accountant']).storeId),
+    'controls.cashOperations': (p: Period & { registerId?: string | null }) => s.controls.cashOperations(ctx([...MANAGE, 'accountant']).storeId, p),
+    'controls.supplierStatement': (supplierId: string, p?: Partial<Period>) => s.controls.supplierStatement(ctx(['admin', 'manager', 'stock', 'accountant']).storeId, supplierId, p),
+    'controls.supplierSituation': () => s.controls.supplierSituation(ctx(['admin', 'manager', 'stock', 'accountant']).storeId),
+    'controls.recentAccounts': (party: 'supplier' | 'customer', days?: number) =>
+      s.controls.recentAccounts(ctx(party === 'supplier' ? ['admin', 'manager', 'stock', 'accountant'] : [...MANAGE, 'accountant', 'cashier']).storeId, party, days),
+    'controls.creditControl': () => s.controls.creditControl(ctx([...MANAGE, 'accountant']).storeId),
+    'charges.plans': (includeInactive?: boolean) => s.charges.listPlans(ctx(ACCOUNTING).storeId, includeInactive),
+    'charges.savePlan': (input: ChargePlanInput, id?: string | null) => s.charges.savePlan(ctx(ACCOUNTING), input, id),
+    'charges.schedule': (from: string, to: string) => s.charges.schedule(ctx(ACCOUNTING).storeId, from, to),
+    'charges.late': () => (['admin', 'manager', 'accountant'].includes(user?.role ?? '') ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
+
     'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),
     'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['admin', 'manager', 'accountant']).storeId, input),
     /** Classeur .xlsx : octets envoyés tels quels à l'écran, qui propose l'enregistrement. */

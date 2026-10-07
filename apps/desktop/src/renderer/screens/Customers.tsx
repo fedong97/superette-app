@@ -1,18 +1,26 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, today, useLoad, useToast } from '../ui';
+import { CreditControl, RecentAccounts } from './Controls';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, draftOf, inputOf } from './customerDialogs';
 
 type User = NonNullable<Result<'app.state'>['user']>;
-export type CustomersTab = 'list' | 'receivables' | 'payments';
+export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments';
 
 /** Clients : fiches, comptes à crédit, balance âgée et règlements reçus. */
 export function Customers({ user, initialTab = 'list' }: { user: User; initialTab?: CustomersTab }) {
   const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
   const [tab, setTab] = useState<CustomersTab>(initialTab);
   const tabs: [CustomersTab, string][] = [
-    ['list', 'Fiches clients'],
-    ...(accounting ? ([['receivables', 'Créances (balance âgée)']] as [CustomersTab, string][]) : []),
+    ['list', 'Liste'],
+    ['statement', 'Extrait de compte'],
+    ...(accounting
+      ? ([
+          ['receivables', 'Situation (balance âgée)'],
+          ['limits', "Plafonds d'autorisation"],
+        ] as [CustomersTab, string][])
+      : []),
+    ['recent', 'Soldes qui ont bougé'],
     ['payments', 'Règlements reçus'],
   ];
   return (
@@ -22,7 +30,10 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       </header>
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'list' && <CustomerList user={user} />}
+      {tab === 'statement' && <StatementPicker />}
       {tab === 'receivables' && accounting && <Receivables user={user} />}
+      {tab === 'limits' && accounting && <CreditControl />}
+      {tab === 'recent' && <RecentAccounts party="customer" />}
       {tab === 'payments' && <Payments />}
     </div>
   );
@@ -231,6 +242,28 @@ function Account({ customer }: { customer: Customer }) {
           }}
         />
       )}
+    </>
+  );
+}
+
+/** Extrait de compte d'un client choisi dans la liste. */
+function StatementPicker() {
+  const list = useLoad(() => call('customers.list', {}), []);
+  const [id, setId] = useState('');
+  const customer = list.data?.find((c) => c.id === id);
+  return (
+    <>
+      <div className="filters">
+        <select value={id} onChange={(e) => setId(e.target.value)} autoFocus>
+          <option value="">Choisir le client…</option>
+          {list.data?.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} {c.balance ? `(doit ${fcfa(c.balance)})` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      {customer ? <Statement customer={customer} /> : <Empty>Choisissez un client pour voir son compte.</Empty>}
     </>
   );
 }

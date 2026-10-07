@@ -2,27 +2,37 @@ import { useState } from 'react';
 import { PAYMENT_METHODS } from '@superette/core';
 import { type Result, call } from '../api';
 import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useLoad, useToast } from '../ui';
+import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
 import { ZView } from './PosDialogs';
 
-export type SalesTab = 'tickets' | 'z' | 'export';
+export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export';
+type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
 
 export function Sales({ initialTab = 'tickets' }: { initialTab?: SalesTab }) {
-  const [tab, setTab] = useState<SalesTab>(initialTab);
+  // Retours, annulés et recherche s'ouvrent sur le registre, déjà filtré.
+  const preset: RegisterPreset = initialTab === 'returns' ? 'returns' : initialTab === 'cancelled' ? 'cancelled' : 'all';
+  const [tab, setTab] = useState<ShownTab>(initialTab === 'returns' || initialTab === 'cancelled' || initialTab === 'find' ? 'register' : initialTab);
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Ventes et clôtures</h1>
+        <h1>Ventes et caisses</h1>
       </header>
       <Tabs
         value={tab}
         onChange={setTab}
         tabs={[
-          ['tickets', 'Tickets'],
+          ['tickets', 'Mes dernières factures'],
+          ['register', 'Registre des ventes'],
+          ['alerts', 'Alertes sur les ventes'],
+          ['cashops', 'Opérations de caisse'],
           ['z', 'Clôtures Z'],
           ['export', 'Export comptable'],
         ]}
       />
       {tab === 'tickets' && <Tickets />}
+      {tab === 'register' && <SalesRegister preset={preset} focusSearch={initialTab === 'find'} />}
+      {tab === 'alerts' && <SalesAlerts />}
+      {tab === 'cashops' && <CashOperations />}
       {tab === 'z' && <Sessions />}
       {tab === 'export' && <Export />}
     </div>
@@ -63,42 +73,7 @@ function Tickets() {
           ))}
         </tbody>
       </table>
-      {open && (
-        <Modal title={`Ticket ${open.number}`} onClose={() => setOpen(null)}>
-          <p className="muted">
-            {dateTime(open.created_at)} · {open.user_name}
-            {open.cancel_reason && ` · ${open.status === 'cancelled' ? 'Annulé' : 'Motif'} : ${open.cancel_reason}`}
-          </p>
-          <table className="list compact">
-            <tbody>
-              {open.lines.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.label}</td>
-                  <td className="r">{qty(l.qty, l.unit)}</td>
-                  <td className="r">{fcfa(l.total_ttc)}</td>
-                </tr>
-              ))}
-              <tr className="b">
-                <td>Total</td>
-                <td />
-                <td className="r">{fcfa(open.total_ttc)}</td>
-              </tr>
-              {open.payments.map((p, i) => (
-                <tr key={i}>
-                  <td>
-                    {PAYMENT_METHODS[p.method]} {p.reference && <small>· {p.reference}</small>}
-                  </td>
-                  <td />
-                  <td className="r">{fcfa(p.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="actions">
-            <button onClick={() => call('pos.printTicket', open.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>Réimprimer</button>
-          </div>
-        </Modal>
-      )}
+      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
     </>
   );
 }
@@ -177,5 +152,46 @@ function Export() {
         Télécharger le CSV
       </button>
     </div>
+  );
+}
+
+/** Détail d'un ticket ou d'une facture, avec réimpression. */
+export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClose: () => void }) {
+  const toast = useToast();
+  return (
+    <Modal title={`Ticket ${sale.number}`} onClose={() => onClose()}>
+      <p className="muted">
+        {dateTime(sale.created_at)} · {sale.user_name}
+        {sale.cancel_reason && ` · ${sale.status === 'cancelled' ? 'Annulé' : 'Motif'} : ${sale.cancel_reason}`}
+      </p>
+      <table className="list compact">
+        <tbody>
+          {sale.lines.map((l) => (
+            <tr key={l.id}>
+              <td>{l.label}</td>
+              <td className="r">{qty(l.qty, l.unit)}</td>
+              <td className="r">{fcfa(l.total_ttc)}</td>
+            </tr>
+          ))}
+          <tr className="b">
+            <td>Total</td>
+            <td />
+            <td className="r">{fcfa(sale.total_ttc)}</td>
+          </tr>
+          {sale.payments.map((p, i) => (
+            <tr key={i}>
+              <td>
+                {PAYMENT_METHODS[p.method]} {p.reference && <small>· {p.reference}</small>}
+              </td>
+              <td />
+              <td className="r">{fcfa(p.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="actions">
+        <button onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>Réimprimer</button>
+      </div>
+    </Modal>
   );
 }

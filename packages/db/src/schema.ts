@@ -822,4 +822,34 @@ CREATE TABLE label_prints (
 );
 `,
   },
+  {
+    version: 14,
+    name: 'charges fixes',
+    sql: `
+-- Charges fixes prévues (loyer, ENEO, salaires…) : montant attendu, rythme et
+-- jour d'échéance. Chaque échéance est « constatée » par la dépense qui la paie.
+CREATE TABLE charge_plans (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  category_id TEXT NOT NULL REFERENCES expense_categories(id),
+  label TEXT NOT NULL,
+  beneficiary TEXT,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  frequency TEXT NOT NULL CHECK (frequency IN ('monthly', 'quarterly', 'yearly')),
+  due_day INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 28),
+  start_month TEXT NOT NULL,
+  end_month TEXT,
+  method TEXT NOT NULL DEFAULT 'CASH',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX charge_plans_store ON charge_plans(store_id);
+
+-- Échéance payée par la dépense : charge prévue et mois de l'échéance (AAAA-MM).
+ALTER TABLE expenses ADD COLUMN plan_id TEXT REFERENCES charge_plans(id);
+ALTER TABLE expenses ADD COLUMN plan_period TEXT;
+CREATE INDEX expenses_plan ON expenses(plan_id, plan_period);
+`,
+  },
 ];

@@ -2,13 +2,14 @@ import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast } from '../ui';
+import { PendingReceipts, PurchasesByProduct } from './Controls';
 import { PackUnitSelect, packChoices, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
 type Invoice = Result<'purchases.invoice'>['invoice'];
-export type PurchasesTab = 'orders' | 'receptions' | 'invoices' | 'due' | 'reorder';
+export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'due' | 'reorder';
 
 const ORDER_STATES: Record<Order['state'], string> = {
   draft: 'Brouillon',
@@ -43,11 +44,13 @@ const deliveryNote = (n: string) => (/^b\.?l\b/i.test(n.trim()) ? n.trim() : `BL
 export function Purchases({ user, initialTab = 'orders' }: { user: User; initialTab?: PurchasesTab }) {
   const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
   const buying = ['admin', 'manager', 'stock'].includes(user.role);
-  const [tab, setTab] = useState<PurchasesTab>(initialTab);
+  const [tab, setTab] = useState<PurchasesTab>(initialTab === 'new-order' ? 'orders' : initialTab);
   const tabs: [PurchasesTab, string][] = [
     ['orders', 'Bons de commande'],
-    ['receptions', 'Réceptions'],
-    ...(accounting ? ([['invoices', 'Factures fournisseurs'], ['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
+    ['receptions', 'Registre des réceptions'],
+    ['pending', 'Non encore reçues'],
+    ...(accounting ? ([['invoices', 'Registre des achats'], ['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
+    ['byproduct', 'Achats par produit'],
     ...(buying ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
   ];
   return (
@@ -56,8 +59,10 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
         <h1>Achats</h1>
       </header>
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
-      {tab === 'orders' && <Orders canEdit={buying} />}
+      {tab === 'orders' && <Orders canEdit={buying} startNew={initialTab === 'new-order' && buying} />}
       {tab === 'receptions' && <Receptions />}
+      {tab === 'pending' && <PendingReceipts />}
+      {tab === 'byproduct' && <PurchasesByProduct />}
       {tab === 'invoices' && <Invoices />}
       {tab === 'due' && <Due />}
       {tab === 'reorder' && <Reorder onCreated={() => setTab('orders')} />}
@@ -69,8 +74,8 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
 
 type OrderView = { mode: 'list' } | { mode: 'edit'; order: Order | null } | { mode: 'view'; id: string } | { mode: 'receive'; id: string };
 
-function Orders({ canEdit }: { canEdit: boolean }) {
-  const [view, setView] = useState<OrderView>({ mode: 'list' });
+function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: boolean }) {
+  const [view, setView] = useState<OrderView>(startNew ? { mode: 'edit', order: null } : { mode: 'list' });
   const [open, setOpen] = useState(true);
   const list = useLoad(() => call('purchases.orders', { open }), [open, view.mode]);
   if (view.mode === 'edit') return <OrderEditor order={view.order} onDone={(id) => setView(id ? { mode: 'view', id } : { mode: 'list' })} />;

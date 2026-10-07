@@ -1,6 +1,8 @@
 import { AccountingService } from './accounting';
 import { AdminService } from './admin';
 import { CatalogueService } from './catalogue';
+import { ChargeService } from './charges';
+import { ControlService } from './controls';
 import { CustomerService } from './customers';
 import { type Db, openDatabase } from './database';
 import { DisclosureService } from './disclosures';
@@ -24,6 +26,8 @@ import type { Clock } from './util';
 export * from './accounting';
 export * from './admin';
 export * from './catalogue';
+export * from './charges';
+export * from './controls';
 export * from './customers';
 export * from './database';
 export * from './disclosures';
@@ -52,6 +56,8 @@ export interface Services {
   stock: StockService;
   customers: CustomerService;
   expenses: ExpenseService;
+  charges: ChargeService;
+  controls: ControlService;
   quotes: QuoteService;
   pos: PosService;
   promotions: PromotionService;
@@ -75,6 +81,8 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const stock = new StockService(db, clock);
   const customers = new CustomerService(db, clock);
   const expenses = new ExpenseService(db, clock);
+  const charges = new ChargeService(db, clock);
+  const controls = new ControlService(db, clock, customers);
   const quotes = new QuoteService(db, clock, admin, catalogue);
   const promotions = new PromotionService(db, clock, catalogue);
   const backups = new BackupService(db, clock);
@@ -90,7 +98,7 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const disclosures = new DisclosureService(db, clock);
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, sync };
+  return { db, admin, catalogue, stock, customers, expenses, charges, controls, quotes, pos, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

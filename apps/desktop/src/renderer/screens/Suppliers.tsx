@@ -1,32 +1,61 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 
 type Supplier = Result<'suppliers.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 
+export type SuppliersTab = 'list' | 'statement' | 'situation' | 'recent';
+
+/** Fournisseurs : fiches, extrait de compte, situation et comptes qui ont bougé. */
+export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTab?: SuppliersTab }) {
+  const [tab, setTab] = useState<SuppliersTab>(initialTab);
+  const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
+  return (
+    <div className="page">
+      <header className="page-head">
+        <h1>Fournisseurs</h1>
+      </header>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          ['list', 'Liste des fournisseurs'],
+          ['statement', 'Extrait de compte'],
+          ...(accounting ? ([['situation', 'Situation des fournisseurs']] as [SuppliersTab, string][]) : []),
+          ['recent', 'Soldes qui ont bougé'],
+        ]}
+      />
+      {tab === 'list' && <SupplierList user={user} />}
+      {tab === 'statement' && <SupplierStatement />}
+      {tab === 'situation' && <SupplierSituation />}
+      {tab === 'recent' && <RecentAccounts party="supplier" />}
+    </div>
+  );
+}
+
 /** Fiches fournisseurs : identité, conditions, articles référencés et compte. */
-export function Suppliers({ user }: { user: User }) {
+function SupplierList({ user }: { user: User }) {
   const [search, setSearch] = useState('');
   const [inactive, setInactive] = useState(false);
   const list = useLoad(() => call('suppliers.list', { search: search || undefined, includeInactive: inactive }), [search, inactive]);
   const [open, setOpen] = useState<Supplier | 'new' | null>(null);
   const canEdit = user.role === 'admin' || user.role === 'manager' || user.role === 'stock';
   return (
-    <div className="page">
-      <header className="page-head">
-        <h1>Fournisseurs</h1>
+    <>
+      <div className="filters">
         <input className="search" placeholder="Rechercher un fournisseur" value={search} onChange={(e) => setSearch(e.target.value)} />
         <label>
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Inactifs
         </label>
         {canEdit && (
-          <button className="primary" onClick={() => setOpen('new')}>
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
             Nouveau fournisseur
           </button>
         )}
-      </header>
+      </div>
       {list.data?.length === 0 ? (
         <Empty>Aucun fournisseur. Créez vos fournisseurs habituels (SABC, Guinness, Nestlé, grossistes…) pour passer vos commandes.</Empty>
       ) : (
@@ -70,7 +99,7 @@ export function Suppliers({ user }: { user: User }) {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 

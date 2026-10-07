@@ -1,29 +1,53 @@
 import { useState } from 'react';
 import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast } from '../ui';
+import { Shelving } from './Controls';
 import { type PackDraft, PackGrid, newPackKey } from './packs';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 
-export function Articles({ user }: { user: User }) {
-  const [search, setSearch] = useState('');
-  const [editing, setEditing] = useState<Article | 'new' | null>(null);
-  const [importing, setImporting] = useState(false);
-  const articles = useLoad(() => call('catalogue.search', search, { includeInactive: true }), [search]);
+export type ArticlesView = 'list' | 'new' | 'search' | 'shelving';
+
+export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesView }) {
+  const [tab, setTab] = useState<'list' | 'shelving'>(view === 'shelving' ? 'shelving' : 'list');
+  const canEdit = user.role === 'admin' || user.role === 'manager' || user.role === 'stock';
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Articles</h1>
-        <input className="search" placeholder="Rechercher (nom, code, code-barres, marque)" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <h1>Produits</h1>
+      </header>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          ['list', 'Liste des produits'],
+          ['shelving', 'Rayonnage'],
+        ]}
+      />
+      {tab === 'list' && <ArticleList user={user} startNew={view === 'new'} focusSearch={view === 'search'} />}
+      {tab === 'shelving' && <Shelving canEdit={canEdit} />}
+    </div>
+  );
+}
+
+function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: boolean; focusSearch: boolean }) {
+  const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<Article | 'new' | null>(startNew ? 'new' : null);
+  const [importing, setImporting] = useState(false);
+  const articles = useLoad(() => call('catalogue.search', search, { includeInactive: true }), [search]);
+  return (
+    <>
+      <div className="filters">
+        <input className="search" autoFocus={focusSearch} placeholder="Rechercher (nom, code, code-barres, marque)" value={search} onChange={(e) => setSearch(e.target.value)} />
         {(user.role === 'admin' || user.role === 'manager') && (
           <button onClick={() => setImporting(true)}>Importer (CSV)</button>
         )}
-        <button className="primary" onClick={() => setEditing('new')}>
+        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
           Nouvel article
         </button>
-      </header>
+      </div>
       {articles.data?.length === 0 ? (
         <Empty>Aucun article. Créez-en un ou importez votre catalogue.</Empty>
       ) : (
@@ -91,7 +115,7 @@ export function Articles({ user }: { user: User }) {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 

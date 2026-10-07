@@ -99,6 +99,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Tarif de chaque client (Détail, Gros, Super gros) sur sa fiche : la caisse applique ses prix dès qu'il est choisi, sans code gérant ; un prix de gros vide reprend le prix de détail. Les promotions ne s'appliquent qu'au détail.
 - Bons de commande, réceptions et réception libre se saisissent par conditionnement (1 carton à 10 000 FCFA plutôt que 100 ampoules à 100 FCFA), proposé par défaut au conditionnement d'achat. L'état du stock affiche aussi la quantité en cartons, paquets et unités.
 
+**Étiquettes de rayon et inventaire**
+- Produit › Étiquettes de rayon : liste « À refaire » des étiquettes à imprimer, articles reçus jamais étiquetés et prix changés depuis la dernière impression (ancien prix barré), par rayon ou par recherche. Une étiquette par unité et par conditionnement (Carton de 100 : 10 500 F, soit 105 F l'unité).
+- Prix du magasin, promotion comprise (ancien prix barré, bandeau PROMO ou « 3 pour 2 »), code-barres EAN-13, EAN-8 ou Code 128 dessiné sur l'étiquette, date d'impression pour repérer une étiquette périmée.
+- Planches A4 de 24, 40 ou 65 étiquettes, ou rouleau d'imprimante d'étiquettes 50 × 30 mm. Aperçu fidèle avant impression, nombre d'exemplaires par article, et « étiquettes déjà utilisées » pour finir une planche entamée.
+- Inventaire saisi en cartons, paquets et unités (3 cartons 2 paquets 4 ampoules = 324), écarts affichés aussi en conditionnements. Feuille de comptage A4 par rayon à imprimer avant de compter.
+
 **Devis et factures proforma**
 - Devis (DV-) ou facture proforma (PF-) pour un client enregistré ou un simple prospect, avec durée de validité, remises par ligne (code du gérant pour un caissier) et conditions.
 - Impression A4 avec le montant en lettres (« Arrêtée la présente facture proforma à la somme de cent-cinquante-cinq-mille francs CFA »), la date de validité et le « Bon pour accord » du client.

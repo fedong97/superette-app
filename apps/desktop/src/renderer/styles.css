@@ -331,3 +331,15 @@ details.note .paragraph p { margin: 0 0 6px; white-space: pre-line; }
 .small { font-size: 12px; }
 .block { display: block; }
 .pack-unit { min-width: 120px; }
+
+/* Étiquettes de rayon : liste à gauche, aperçu de la planche à droite. */
+.labels-body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.labels-list { min-width: 0; }
+.labels-list .tag { margin-left: 6px; }
+.labels-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; }
+.labels-side label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.labels-preview { height: 430px; overflow: auto; background: #e9edf2; border: 1px solid var(--border, #d0d7de); border-radius: 6px; padding: 8px; }
+.labels-preview iframe { border: 0; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); zoom: 0.42; display: block; margin: 0 auto; }
+.labels-side .actions { justify-content: space-between; align-items: center; }
+@media (max-width: 1100px) { .labels-body { grid-template-columns: 1fr; } .labels-side { position: static; } }
+.count-parts { display: flex; gap: 12px; flex-wrap: wrap; } .count-parts label { white-space: nowrap; }

@@ -8,6 +8,7 @@ import { Dashboard } from './screens/Dashboard';
 import { Expenses, type ExpensesTab } from './screens/Expenses';
 import { Login } from './screens/Login';
 import { Pos } from './screens/Pos';
+import { Labels } from './screens/Labels';
 import { Promotions } from './screens/Promotions';
 import { Quotes } from './screens/Quotes';
 import { Purchases, type PurchasesTab } from './screens/Purchases';
@@ -22,7 +23,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'accounting' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'accounting' | 'dashboard' | 'admin';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -53,6 +54,7 @@ const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
   expenses: { label: 'Dépenses', roles: ACCOUNTING },
   quotes: { label: 'Devis et proformas', roles: QUOTES },
   promotions: { label: 'Promotions', roles: MANAGE },
+  labels: { label: 'Étiquettes', roles: STOCK },
   accounting: { label: 'Comptabilité', roles: ACCOUNTING },
   dashboard: { label: 'Tableau de bord', roles: MANAGE },
   admin: { label: 'Administration', roles: MANAGE },
@@ -117,6 +119,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Fiches produits', open: ['articles'] },
       { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      { label: 'Étiquettes de rayon', open: ['labels'] },
       { label: 'État du stock', open: ['stock', 'state'] },
     ],
   ],
@@ -152,6 +155,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Pertes et casse', open: ['stock', 'loss'] },
       { label: 'Inventaire', open: ['stock', 'inventory'], roles: MANAGE },
       { label: 'Péremptions', open: ['stock', 'expiry'] },
+      { label: 'Étiquettes de rayon', open: ['labels'] },
     ],
   ],
   [
@@ -367,6 +371,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
+            {w.kind === 'labels' && <Labels active={w.kind === active} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'dashboard' && <Dashboard />}

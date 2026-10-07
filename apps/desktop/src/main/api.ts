@@ -1,5 +1,7 @@
 import {
   type DenominationCount,
+  type LabelFormatId,
+  labelsHtml,
   type Fcfa,
   type Milli,
   type MovementType,
@@ -26,6 +28,7 @@ import {
   type QuoteState,
   type AccountRole,
   type JournalCode,
+  type LabelItem,
   type ReceptionLine,
   type Role,
   type SaleLineInput,
@@ -68,6 +71,9 @@ export interface Printer {
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
+  /** Planche d'étiquettes déjà mise en page ; false si l'utilisateur annule. */
+  labels(html: string, format: LabelFormatId): Promise<boolean>;
+  countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
 }
 
 /**
@@ -203,6 +209,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.stock.transfer(ctx(STOCK), input),
     'stock.inventory': (input: { warehouseId: string; counts: { articleId: string; counted: Milli; countedAt: string }[] }) =>
       s.stock.applyInventory(ctx(MANAGE), input),
+    'stock.printCountSheet': (warehouseId: string, departmentId?: string | null) => {
+      const storeId = ctx(STOCK).storeId;
+      return printer.countSheet(storeId, warehouseId || s.admin.salesWarehouse(storeId).id, departmentId);
+    },
+    'labels.candidates': (opts?: { redo?: boolean; departmentId?: string | null; search?: string }) => s.labels.candidates(ctx(STOCK).storeId, opts),
+    'labels.preview': (items: LabelItem[], format: LabelFormatId, skip?: number) => labelsHtml(s.labels.build(ctx(STOCK).storeId, items), format, skip),
+    'labels.print': async (items: LabelItem[], format: LabelFormatId, skip?: number) => {
+      const storeId = ctx(STOCK).storeId;
+      const printed = await printer.labels(labelsHtml(s.labels.build(storeId, items), format, skip), format);
+      if (printed) s.labels.markPrinted(storeId, items);
+      return printed;
+    },
     'stock.expiring': (days?: number) => s.stock.expiringLots(ctx().storeId, days),
     'stock.lots': (articleId: string) => s.stock.lotsOf(articleId, ctx().storeId),
     'stock.movements': (articleId?: string) => s.stock.movements(ctx().storeId, { articleId }),

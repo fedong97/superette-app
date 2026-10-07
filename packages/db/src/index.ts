@@ -6,6 +6,7 @@ import { type Db, openDatabase } from './database';
 import { ExpenseService } from './expenses';
 import { PosService } from './pos';
 import { PurchaseService } from './purchases';
+import { ReceiptService } from './receipts';
 import { QuoteService } from './quotes';
 import { ReportService } from './reports';
 import { ReconciliationService } from './reconciliation';
@@ -24,6 +25,7 @@ export * from './database';
 export * from './expenses';
 export * from './pos';
 export * from './purchases';
+export * from './receipts';
 export * from './quotes';
 export * from './reports';
 export * from './reconciliation';
@@ -44,6 +46,7 @@ export interface Services {
   expenses: ExpenseService;
   quotes: QuoteService;
   pos: PosService;
+  receipts: ReceiptService;
   purchases: PurchaseService;
   reports: ReportService;
   accounting: AccountingService;
@@ -62,6 +65,7 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const expenses = new ExpenseService(db, clock);
   const quotes = new QuoteService(db, clock, admin, catalogue);
   const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes);
+  const receipts = new ReceiptService(db, clock, admin, pos, customers, expenses);
   const purchases = new PurchaseService(db, clock, stock);
   const reports = new ReportService(db, clock);
   const accounting = new AccountingService(db, clock);
@@ -70,7 +74,7 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const tax = new TaxService(db, clock, accounting, statements);
   const notes = new NotesService(db, clock, accounting, statements, tax);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, purchases, reports, accounting, statements, reconciliation, tax, notes, sync };
+  return { db, admin, catalogue, stock, customers, expenses, quotes, pos, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

@@ -327,7 +327,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
                 reason,
               });
               toast.ok(`Retour ${ret.number} enregistré`);
-              call('pos.printTicket', ret.id).catch(toast.error);
+              call('pos.printTicket', ret.id, { newSale: true }).catch(toast.error);
               onClose();
             } catch (e) {
               toast.error(e);

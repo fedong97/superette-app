@@ -51,6 +51,7 @@ const TABLES: Record<string, string> = {
   bank_line: 'bank_lines',
   tax_year: 'tax_years',
   dsf_disclosure: 'dsf_disclosures',
+  promotion: 'promotions',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -331,6 +332,12 @@ export class SyncService extends Base {
         // Paramètres fiscaux modifiés sur deux PC : la modification la plus récente l'emporte.
         if (this.keepsLocal('tax_years', event.entityId, p)) return;
         this.upsert('tax_years', p);
+        return;
+      }
+      case 'promotion': {
+        // Promotion modifiée sur deux PC : la modification la plus récente l'emporte.
+        if (this.keepsLocal('promotions', event.entityId, p)) return;
+        this.upsert('promotions', p);
         return;
       }
       case 'dsf_disclosure': {

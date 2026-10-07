@@ -5,7 +5,9 @@ import {
   type Milli,
   type Payment,
   type PaymentMethod,
+  type PromotedLine,
   PAYMENT_METHODS,
+  applyPromotions,
   closingDifference,
   computeTotals,
   lineTotal,
@@ -16,6 +18,7 @@ import {
 import type { AdminService } from './admin';
 import type { CatalogueService } from './catalogue';
 import type { CustomerService } from './customers';
+import type { PromotionService } from './promotions';
 import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
 import { AppError, Base, type Clock, type Context, newId } from './util';
@@ -72,6 +75,7 @@ export interface Sale {
   total_ht: Fcfa;
   total_tva: Fcfa;
   total_discount: Fcfa;
+  total_promo: Fcfa;
   change_given: Fcfa;
   original_sale_id: string | null;
   cancel_reason: string | null;
@@ -91,6 +95,8 @@ export interface Sale {
     vat_rate_bp: number;
     total_ttc: Fcfa;
     unit: 'piece' | 'kg' | 'litre';
+    promo: Fcfa;
+    promotion_name: string | null;
   }[];
   payments: { method: PaymentMethod; amount: Fcfa; reference: string | null }[];
 }
@@ -104,6 +110,8 @@ export interface ZReport {
   returnsTtc: Fcfa;
   netTtc: Fcfa;
   discounts: Fcfa;
+  /** Économies accordées par les promotions. */
+  promotions: Fcfa;
   cancelled: { count: number; amount: Fcfa };
   byMethod: { method: PaymentMethod; label: string; amount: Fcfa }[];
   vat: { rate: number; ht: Fcfa; tva: Fcfa; ttc: Fcfa }[];
@@ -125,6 +133,7 @@ export class PosService extends Base {
     private readonly stock: StockService,
     private readonly customers: CustomerService,
     private readonly quotes: QuoteService,
+    private readonly promotions: PromotionService,
   ) {
     super(db, clock);
   }
@@ -205,8 +214,9 @@ export class PosService extends Base {
   }
 
   /** Recalcule les lignes à partir des prix en base (prix magasin, étiquettes balance). */
-  priceLines(storeId: string, input: SaleLineInput[]): (CartLine & { barcode: string | null })[] {
-    return input.map((l) => {
+  /** Prix des lignes au tarif du magasin, promotions du jour comprises. */
+  priceLines(storeId: string, input: SaleLineInput[]): PromotedLine<CartLine & { barcode: string | null }>[] {
+    const lines = input.map((l) => {
       if (!Number.isSafeInteger(l.qty) || l.qty === 0) throw new AppError('Quantité invalide', 'INVALID');
       const article = this.catalogue.getArticle(l.articleId, storeId);
       if (!article.active) throw new AppError(`Article inactif : ${article.name}`, 'INACTIVE');
@@ -227,6 +237,7 @@ export class PosService extends Base {
       if (lineTotal(line) < 0) throw new AppError(`Remise supérieure au prix : ${article.name}`, 'INVALID');
       return line;
     });
+    return applyPromotions(lines, this.promotions.activeRules(storeId));
   }
 
   completeSale(ctx: Context, input: SaleInput): Sale {
@@ -269,8 +280,8 @@ export class PosService extends Base {
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht,
-             total_tva, total_discount, change_given, customer_id, due_date, created_at)
-           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)`,
+             total_tva, total_discount, total_promo, change_given, customer_id, due_date, created_at)
+           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           saleId,
@@ -283,14 +294,15 @@ export class PosService extends Base {
           totals.totalHt,
           totals.totalTva,
           totals.totalDiscount,
+          totals.totalPromo,
           settlement.change,
           customer?.id ?? null,
           due,
           now,
         );
       const insertLine = this.db.prepare(
-        `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       lines.forEach((line, i) => {
         const { unitCost } = this.stock.issue(ctx, {
@@ -301,7 +313,7 @@ export class PosService extends Base {
           refType: 'sale',
           refId: saleId,
         });
-        insertLine.run(newId(), saleId, i + 1, line.articleId, line.label, line.barcode, line.qty, line.unitPrice, line.discount, line.vatRate, lineTotal(line), unitCost);
+        insertLine.run(newId(), saleId, i + 1, line.articleId, line.label, line.barcode, line.qty, line.unitPrice, line.discount, line.vatRate, lineTotal(line), unitCost, line.promo, line.promotionId);
       });
       const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference) VALUES (?, ?, ?, ?, ?)');
       for (const p of input.payments) insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null);
@@ -325,8 +337,10 @@ export class PosService extends Base {
     if (!sale) throw new AppError('Ticket introuvable', 'NOT_FOUND');
     const lines = this.db
       .prepare(
-        `SELECT l.id, l.line_no, l.article_id, l.label, l.barcode, l.qty, l.unit_price, l.discount, l.vat_rate_bp, l.total_ttc, a.unit
-         FROM sale_lines l JOIN articles a ON a.id = l.article_id WHERE l.sale_id = ? ORDER BY l.line_no`,
+        `SELECT l.id, l.line_no, l.article_id, l.label, l.barcode, l.qty, l.unit_price, l.discount, l.vat_rate_bp, l.total_ttc, a.unit,
+           l.promo, p.name AS promotion_name
+         FROM sale_lines l JOIN articles a ON a.id = l.article_id LEFT JOIN promotions p ON p.id = l.promotion_id
+         WHERE l.sale_id = ? ORDER BY l.line_no`,
       )
       .all(id) as Sale['lines'];
     const payments = this.db.prepare('SELECT method, amount, reference FROM sale_payments WHERE sale_id = ?').all(id) as Sale['payments'];
@@ -506,6 +520,7 @@ export class PosService extends Base {
            COALESCE(SUM(CASE WHEN kind = 'sale' AND status = 'completed' THEN total_ttc END), 0) AS salesTtc,
            COALESCE(SUM(CASE WHEN kind = 'return' AND status = 'completed' THEN total_ttc END), 0) AS returnsTtc,
            COALESCE(SUM(CASE WHEN status = 'completed' THEN total_discount END), 0) AS discounts,
+           COALESCE(SUM(CASE WHEN status = 'completed' THEN total_promo END), 0) AS promotions,
            COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 END), 0) AS cancelledCount,
            COALESCE(SUM(CASE WHEN status = 'cancelled' THEN total_ttc END), 0) AS cancelledAmount,
            COALESCE(SUM(CASE WHEN status = 'completed' THEN change_given END), 0) AS changeGiven
@@ -516,6 +531,7 @@ export class PosService extends Base {
       salesTtc: number;
       returnsTtc: number;
       discounts: number;
+      promotions: number;
       cancelledCount: number;
       cancelledAmount: number;
       changeGiven: number;
@@ -573,6 +589,7 @@ export class PosService extends Base {
       returnsTtc: agg.returnsTtc,
       netTtc: agg.salesTtc + agg.returnsTtc,
       discounts: agg.discounts,
+      promotions: agg.promotions,
       cancelled: { count: agg.cancelledCount, amount: agg.cancelledAmount },
       byMethod,
       vat,

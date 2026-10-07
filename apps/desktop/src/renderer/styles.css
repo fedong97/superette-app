@@ -128,6 +128,7 @@ th.r { text-align: right !important; }
 /* Fenêtres */
 .modal-back { position: fixed; inset: 0; background: rgba(16, 24, 40, 0.45); display: grid; place-items: center; z-index: 10; }
 .modal { background: var(--panel); border-radius: 12px; padding: 18px 22px; width: min(520px, 94vw); max-height: 92vh; overflow: auto; }
+.modal .grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .modal.wide { width: min(980px, 96vw); }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .pick-list { display: flex; flex-direction: column; gap: 4px; }
@@ -303,3 +304,6 @@ input.amount { width: 130px; text-align: right; }
 .disclosures table input:not(.count):not(.amount):not(.qty) { width: 100%; }
 details.note .paragraph h4 { margin: 8px 0 2px; font-size: 14px; }
 details.note .paragraph p { margin: 0 0 6px; white-space: pre-line; }
+
+/* Promotions */
+.tag.promo { margin-left: 8px; font-weight: 600; }

@@ -738,4 +738,34 @@ CREATE TABLE dsf_disclosures (
 );
 `,
   },
+  {
+    version: 11,
+    name: 'promotions',
+    sql: `
+-- Promotions datées : prix promo, N achetés M payés, lot à prix fixe. store_id NULL = tous les magasins.
+CREATE TABLE promotions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('price', 'x_for_y', 'lot')),
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  store_id TEXT REFERENCES stores(id),
+  starts_on TEXT NOT NULL,
+  ends_on TEXT NOT NULL,
+  promo_price INTEGER,
+  buy_qty INTEGER,
+  pay_qty INTEGER,
+  lot_price INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX promotions_article ON promotions(article_id, starts_on, ends_on);
+
+-- Économie accordée par la promotion sur la ligne (en plus de la remise manuelle).
+ALTER TABLE sale_lines ADD COLUMN promo INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sale_lines ADD COLUMN promotion_id TEXT;
+ALTER TABLE sales ADD COLUMN total_promo INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

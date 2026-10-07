@@ -234,6 +234,22 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(got.updatedBy).toBe(pc1.admin.getUser(ctx1.userId).name);
   });
 
+  it('une promotion créée sur un PC s’applique sur l’autre et ses ventes remontent', async () => {
+    const promo = pc1.promotions.save(ctx1.userId, { name: 'Coca 2 pour 1', kind: 'x_for_y', articleId, storeId: null, startsOn: '2000-01-01', endsOn: '2100-12-31', buyQty: 2, payQty: 1 });
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    expect(pc2.promotions.activeRules(ctx2.storeId).map((r) => r.id)).toEqual([promo.id]);
+    const sale = pc2.pos.completeSale(ctx2, { lines: [{ articleId, qty: 2000 }], payments: [{ method: 'CASH', amount: 650 }] });
+    expect(sale.total_promo).toBe(650);
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+    expect(pc1.promotions.get(promo.id)).toMatchObject({ sold_qty: 2000, given: 650 });
+    pc1.promotions.setActive(ctx1.userId, promo.id, false);
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    expect(pc2.promotions.activeRules(ctx2.storeId)).toEqual([]);
+  });
+
   it("un autre magasin reçoit le catalogue mais pas les ventes ni le stock d'Akwa", async () => {
     const yde = pc1.admin.createStore(ctx1.userId, { storeCode: 'YDE1', storeName: 'Superette Bastos' });
     const reg = pc1.admin.createRegister(ctx1.userId, yde.id);

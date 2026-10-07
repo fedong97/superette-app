@@ -87,6 +87,11 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 **Recherche de produits**
 - Dès 2 lettres tapées, à la caisse comme dans les devis, achats et stock, une liste propose les produits correspondants avec leur prix : flèches pour choisir, Entrée pour ajouter, Échap pour fermer. Plusieurs mots se combinent (« riz 25 »), sans tenir compte des accents ni des majuscules (« creme » trouve « Crème fraîche »), et la marque compte aussi. « 3*riz » ajoute 3 fois le produit choisi. Un code-barres scanné passe directement.
 
+**Promotions**
+- Prix promotionnel (à l'unité ou au kg), offre « N achetés, M payés » (3 pour 2) ou lot à prix fixe (3 savons pour 1 000 FCFA), sur une période, pour tous les magasins ou un seul (Vente › Promotions ou Produit › Promotions).
+- La caisse applique d'elle-même la meilleure promotion de chaque article, sans code gérant : l'écran affiche « Promo −X » sur la ligne et le total des promotions, le ticket détaille chaque promotion et « Vous avez économisé ». Les offres par quantité comptent les pièces sur toutes les lignes du même article.
+- Arrêt ou relance d'une promotion à tout moment, suivi des quantités vendues et de l'économie accordée, total des promotions au rapport Z. Les promotions circulent vers tous les PC.
+
 **Devis et factures proforma**
 - Devis (DV-) ou facture proforma (PF-) pour un client enregistré ou un simple prospect, avec durée de validité, remises par ligne (code du gérant pour un caissier) et conditions.
 - Impression A4 avec le montant en lettres (« Arrêtée la présente facture proforma à la somme de cent-cinquante-cinq-mille francs CFA »), la date de validité et le « Bon pour accord » du client.

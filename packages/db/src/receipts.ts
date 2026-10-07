@@ -48,7 +48,7 @@ export class ReceiptService extends Base {
     if (sale.customer_name) r.push({ t: 'text', text: `Client : ${sale.customer_name}` });
     r.push({ t: 'rule' });
     for (const l of sale.lines) {
-      r.push({ t: 'row', left: l.label, right: money(l.total_ttc) });
+      r.push({ t: 'row', left: l.label, right: money(l.total_ttc + l.promo) });
       if (l.qty !== 1000 || l.discount)
         r.push({
           t: 'row',
@@ -56,8 +56,10 @@ export class ReceiptService extends Base {
           right: '',
           indent: 2,
         });
+      if (l.promo) r.push({ t: 'row', left: `Promo ${l.promotion_name ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
     }
     r.push({ t: 'rule' }, { t: 'row', left: 'TOTAL FCFA', right: money(sale.total_ttc), bold: true, big: true });
+    if (sale.total_promo > 0) r.push({ t: 'row', left: 'Vous avez économisé', right: money(sale.total_promo), bold: true });
     for (const p of sale.payments) r.push({ t: 'row', left: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, right: money(p.amount) });
     if (sale.change_given) r.push({ t: 'row', left: 'Rendu monnaie', right: money(sale.change_given), bold: true });
     if (sale.due_date) r.push({ t: 'text', text: `À régler avant le ${dayFr(sale.due_date)}` });
@@ -87,6 +89,7 @@ export class ReceiptService extends Base {
       row('Retours', z.returnsTtc),
       { ...row('CA net TTC', z.netTtc), bold: true },
       row('Remises', z.discounts),
+      row('Promotions', z.promotions),
       row(`Annulations (${z.cancelled.count})`, z.cancelled.amount),
       { t: 'rule' },
       title('Encaissements'),

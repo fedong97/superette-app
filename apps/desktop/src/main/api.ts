@@ -28,6 +28,7 @@ import {
   type Role,
   type SaleLineInput,
   type Services,
+  type PromotionInput,
   type PurchaseOrderLineInput,
   type SupplierInput,
   type SupplierPaymentMethod,
@@ -244,6 +245,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.priceLines': (lines: SaleLineInput[]) => s.pos.priceLines(ctx().storeId, lines),
+    /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
+    'promotions.active': () => s.promotions.activeRules(ctx().storeId),
+    'promotions.list': () => s.promotions.list(ctx(MANAGE).storeId),
+    'promotions.save': (input: PromotionInput, id?: string) => s.promotions.save(requireUser(MANAGE).id, input, id),
+    'promotions.setActive': (id: string, active: boolean) => s.promotions.setActive(requireUser(MANAGE).id, id, active),
     'pos.sell': (input: {
       lines: SaleLineInput[];
       payments: Payment[];

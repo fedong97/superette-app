@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, PAYMENT_METHODS, computeTotals, formatFcfa, lineTotal } from '@superette/core';
+import { type CartLine, PAYMENT_METHODS, applyPromotions, computeTotals, formatFcfa, lineTotal } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -83,14 +83,20 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   const [pending, setPending] = useState<{ payments: SellPayments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string } | null>(null);
   const credit = mode === 'credit';
   const scanRef = useRef<HTMLInputElement>(null);
-  const totals = useMemo(() => computeTotals(lines), [lines]);
+  /** Promotions du jour : appliquées à l'écran comme elles le seront à l'encaissement. */
+  const promoRules = useLoad(() => call('promotions.active'), []);
+  const priced = useMemo(() => applyPromotions(lines, promoRules.data ?? []), [lines, promoRules.data]);
+  const totals = useMemo(() => computeTotals(priced), [priced]);
 
   const focusScan = useCallback(() => setTimeout(() => scanRef.current?.focus(), 0), []);
   useEffect(() => {
     if (!dialog && active) focusScan();
   }, [dialog, active, focusScan]);
   useEffect(() => {
-    if (active) session.reload();
+    if (active) {
+      session.reload();
+      promoRules.reload();
+    }
   }, [active]);
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -465,7 +471,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                     </thead>
                     <tbody>
                       {Array.from({ length: rows }, (_, i) => {
-                        const l = lines[i];
+                        const l = priced[i];
                         if (!l)
                           return (
                             <tr key={`empty-${i}`} className="empty-row">
@@ -476,7 +482,14 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                           <tr key={l.key} className={l.key === selected ? 'sel' : ''} onClick={() => setSelected(l.key)} onDoubleClick={() => setDialog('vary')}>
                             <td className="n">{i + 1}</td>
                             <td className="ref">{l.ref}</td>
-                            <td>{l.label}</td>
+                            <td>
+                              {l.label}
+                              {l.promo > 0 && (
+                                <span className="tag normal promo" title={l.promotionName ?? ''}>
+                                  Promo −{amount(l.promo)}
+                                </span>
+                              )}
+                            </td>
                             <td className="r">{qty(l.qty, l.unit)}</td>
                             {withDiscount && <td className="r">{l.discount ? amount(l.discount) : ''}</td>}
                             <td>{UNIT_LABEL[l.unit]}</td>
@@ -488,7 +501,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                     </tbody>
                     <tfoot>
                       <tr>
-                        <td colSpan={3}>Total</td>
+                        <td colSpan={3}>Total{totals.totalPromo > 0 && <span className="tag normal promo">Promotions −{amount(totals.totalPromo)}</span>}</td>
                         <td className="r">{lines.length ? totals.itemCount : ''}</td>
                         {withDiscount && <td className="r">{totals.totalDiscount ? amount(totals.totalDiscount) : ''}</td>}
                         <td colSpan={2}></td>

@@ -66,7 +66,7 @@ export function applyPromotions<L extends CartLine>(lines: readonly L[], rules: 
   const out: PromotedLine<L>[] = lines.map((l) => ({ ...l, promo: 0, promotionId: null, promotionName: null }));
   const byArticle = new Map<string, number[]>();
   out.forEach((l, i) => {
-    if (l.fixedAmount !== undefined || l.packPrice !== undefined || l.qty <= 0) return;
+    if (l.fixedAmount !== undefined || l.packPrice !== undefined || l.priceSet || l.qty <= 0) return;
     byArticle.set(l.articleId, [...(byArticle.get(l.articleId) ?? []), i]);
   });
   for (const [articleId, idx] of byArticle) {

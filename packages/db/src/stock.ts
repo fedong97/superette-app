@@ -23,6 +23,9 @@ export interface ReceptionLine {
   expiry?: string | null;
   /** Ligne de bon de commande soldée par cette réception. */
   orderLineId?: string | null;
+  /** Prix payé pour un conditionnement (la palette) et unités qu'il contient : garde le prix exact. */
+  packCost?: Fcfa;
+  packUnits?: Milli;
 }
 
 export interface StockRow {
@@ -321,13 +324,34 @@ export class StockService extends Base {
           line.lotNumber ?? null,
           line.expiry ?? null,
         );
-        this.db.prepare('UPDATE articles SET purchase_price = ?, updated_at = ? WHERE id = ?').run(line.unitCost, now, line.articleId);
+        this.updatePurchasePrice(line, now);
         this.enqueue(null, 'article', line.articleId, 'upsert', {});
       });
       this.enqueue(ctx, 'reception', receptionId, 'upsert', reception);
       this.audit(ctx.userId, 'stock.receive', 'reception', receptionId, { number, reference: input.reference, lines: input.lines.length });
       return { id: receptionId, number };
     });
+  }
+
+  /**
+   * Dernier prix d'achat de l'article, à l'unité et au conditionnement d'achat.
+   * Le prix de revient garde son écart avec l'achat (transport, manutention).
+   */
+  private updatePurchasePrice(line: ReceptionLine, now: string): void {
+    const a = this.db
+      .prepare(
+        `SELECT a.pack_purchase_price, a.pack_cost_price, COALESCE((SELECT units FROM article_packs p WHERE p.article_id = a.id AND p.position = 1), 1000) AS units
+         FROM articles a WHERE a.id = ?`,
+      )
+      .get(line.articleId) as { pack_purchase_price: Fcfa | null; pack_cost_price: Fcfa | null; units: Milli };
+    const packPrice =
+      line.packCost !== undefined && line.packUnits === a.units && Number.isSafeInteger(line.packCost) && line.packCost >= 0
+        ? line.packCost
+        : Math.round((line.unitCost * a.units) / 1000);
+    const cost = a.pack_cost_price !== null && a.pack_purchase_price !== null ? Math.max(0, a.pack_cost_price + packPrice - a.pack_purchase_price) : packPrice;
+    this.db
+      .prepare('UPDATE articles SET purchase_price = ?, pack_purchase_price = ?, pack_cost_price = ?, updated_at = ? WHERE id = ?')
+      .run(line.unitCost, packPrice, cost, now, line.articleId);
   }
 
   /** Sortie en perte (casse, vol, péremption, consommation interne), motif obligatoire. */

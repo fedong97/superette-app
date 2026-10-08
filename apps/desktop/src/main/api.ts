@@ -8,6 +8,7 @@ import {
   type MovementType,
   type Payment,
   type PaymentMethod,
+  type Permission,
   type PriceLevel,
   type StatementLine,
   type StockLevel,
@@ -89,24 +90,37 @@ export interface Printer {
 export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVersion: string, system: SystemHooks) {
   let user: User | null = null;
 
-  const requireUser = (roles?: Role[]): User => {
+  /** Droits réglés par rôle (Administration › Droits) : il suffit d'un des droits demandés. */
+  const can = (u: User, need: readonly Permission[]) => need.some((p) => s.admin.hasRight(u, p));
+  const requireUser = (need?: readonly Permission[]): User => {
     if (!user) throw new AppError('Session expirée, reconnectez-vous', 'NOT_LOGGED_IN');
-    if (roles && !roles.includes(user.role)) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
+    if (need && !can(user, need)) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
     return user;
   };
-  const ctx = (roles?: Role[]): Context => {
-    const u = requireUser(roles);
+  /** Réservé au rôle Administrateur (magasins, serveur, restauration). */
+  const requireAdmin = (): User => {
+    const u = requireUser();
+    if (u.role !== 'admin') throw new AppError("Réservé à l'administrateur", 'FORBIDDEN');
+    return u;
+  };
+  const ctx = (need?: readonly Permission[]): Context => {
+    const u = requireUser(need);
     const station = s.admin.station();
     if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
     return { storeId: station.store.id, registerId: station.register?.id ?? null, userId: u.id };
   };
   const supervisor = (pin: string) => s.admin.authorizeSupervisor(pin);
 
-  const MANAGE: Role[] = ['admin', 'manager'];
-  const ACCOUNTING: Role[] = ['admin', 'manager', 'accountant'];
-  const BUY: Role[] = ['admin', 'manager', 'stock'];
-  const STOCK: Role[] = ['admin', 'manager', 'stock'];
-  const POS: Role[] = ['admin', 'manager', 'cashier'];
+  const ADMIN: Permission[] = ['admin'];
+  const ACCOUNTING: Permission[] = ['sales', 'reports', 'expenses', 'accounting', 'purchase_invoices', 'receivables'];
+  const BUY: Permission[] = ['purchase_orders', 'purchases'];
+  const STOCK: Permission[] = ['articles', 'stock', 'labels'];
+  const POS: Permission[] = ['cash', 'credit'];
+  const SALES: Permission[] = ['sales', 'reports', 'receivables'];
+  const SUPPLIERS: Permission[] = ['purchases', 'suppliers', 'purchase_invoices'];
+  const CUSTOMERS: Permission[] = ['customers', 'receivables'];
+  /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
+  const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
 
   return {
     // --- Application et connexion -------------------------------------------
@@ -114,7 +128,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       version: appVersion,
       initialized: s.admin.isInitialized(),
       station: s.admin.station(),
-      user,
+      /** Utilisateur connecté et ses droits : menus et boutons s'y règlent. */
+      user: user ? { ...user, rights: s.admin.rights(user.role) } : null,
     }),
     'setup.bootstrap': (input: BootstrapInput) => {
       const result = s.admin.bootstrap(input);
@@ -136,18 +151,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Administration -----------------------------------------------------
     'admin.stores': () => (requireUser(), s.admin.listStores()),
     'admin.createStore': (input: { storeCode: string; storeName: string; address?: string; phone?: string; taxpayerNumber?: string }) =>
-      s.admin.createStore(requireUser(['admin']).id, input),
+      s.admin.createStore(requireAdmin().id, input),
     'admin.updateStore': (id: string, patch: { name?: string; address?: string | null; phone?: string | null; taxpayer_number?: string | null }) =>
-      s.admin.updateStore(requireUser(['admin']).id, id, patch),
-    'admin.registers': (storeId: string) => (requireUser(MANAGE), s.admin.listRegisters(storeId)),
-    'admin.createRegister': (storeId: string, name?: string) => s.admin.createRegister(requireUser(['admin']).id, storeId, name),
+      s.admin.updateStore(requireAdmin().id, id, patch),
+    'admin.registers': (storeId: string) => (requireUser(ADMIN), s.admin.listRegisters(storeId)),
+    'admin.createRegister': (storeId: string, name?: string) => s.admin.createRegister(requireAdmin().id, storeId, name),
     'admin.warehouses': () => s.admin.listWarehouses(ctx().storeId),
-    'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(MANAGE).storeId, name, kind),
-    'admin.users': () => (requireUser(MANAGE), s.admin.listUsers()),
+    'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(ADMIN).storeId, name, kind),
+    'admin.users': () => (requireUser(ADMIN), s.admin.listUsers()),
     'admin.createUser': (input: { name: string; login: string; pin: string; role: Role; storeId: string | null }) =>
-      s.admin.createUser(requireUser(MANAGE).id, input),
+      s.admin.createUser(requireUser(ADMIN).id, input),
     'admin.updateUser': (id: string, patch: { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }) =>
-      s.admin.updateUser(requireUser(MANAGE).id, id, patch),
+      s.admin.updateUser(requireUser(ADMIN).id, id, patch),
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
     'admin.settings': () => {
       requireUser();
@@ -168,20 +183,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return Object.fromEntries(keys.map((k) => [k, s.admin.getSetting(k)])) as Record<string, string | null>;
     },
     'admin.saveSettings': (values: Record<string, string>) => {
-      requireUser(MANAGE);
+      requireUser(ADMIN);
       for (const [k, v] of Object.entries(values)) s.admin.setSetting(k, v);
     },
-    'admin.audit': () => (requireUser(MANAGE), s.admin.auditLog()),
+    'admin.rights': () => (requireUser(ADMIN), s.admin.rightsMatrix()),
+    'admin.saveRights': (role: Role, rights: Permission[]) => s.admin.saveRights(requireAdmin().id, role, rights),
+    'admin.audit': () => (requireUser(ADMIN), s.admin.auditLog()),
     'admin.printers': () => (requireUser(), printer.list()),
-    'admin.printTest': (withDrawer: boolean) => (requireUser(MANAGE), printer.testPage(withDrawer)),
+    'admin.printTest': (withDrawer: boolean) => (requireUser(ADMIN), printer.testPage(withDrawer)),
 
     // --- Serveur central ----------------------------------------------------
     'sync.state': () => (requireUser(), s.sync.state()),
-    'sync.connect': (url: string, enrollmentKey: string) => (requireUser(['admin']), sync.connect(url, enrollmentKey)),
+    'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
-    'sync.conflicts': () => (requireUser(MANAGE), s.sync.conflicts()),
+    'sync.conflicts': () => (requireUser(ADMIN), s.sync.conflicts()),
     'sync.disconnect': () => {
-      requireUser(['admin']);
+      requireAdmin();
       s.sync.disconnect();
     },
 
@@ -192,7 +209,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'catalogue.get': (id: string) => s.catalogue.getArticle(id, ctx().storeId),
     'catalogue.save': (input: ArticleInput, id?: string) => s.catalogue.saveArticle(requireUser(STOCK).id, input, id),
     'catalogue.setStorePrice': (articleId: string, price: Fcfa | null) => {
-      const c = ctx(MANAGE);
+      const c = ctx(['store_price']);
       s.catalogue.setStorePrice(c.userId, articleId, c.storeId, price);
     },
     'catalogue.priceHistory': (articleId: string) => (requireUser(), s.catalogue.priceHistory(articleId)),
@@ -202,7 +219,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'catalogue.newInternalBarcode': () => (requireUser(STOCK), s.catalogue.generateInternalBarcode()),
     'catalogue.quickKeys': () => s.catalogue.quickKeys(ctx().storeId),
     'catalogue.scan': (code: string) => s.catalogue.scan(code, ctx().storeId),
-    'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) => s.catalogue.importArticles(requireUser(MANAGE).id, rows),
+    'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) => s.catalogue.importArticles(requireUser(['import']).id, rows),
 
     // --- Stock --------------------------------------------------------------
     'stock.list': (opts?: { warehouseId?: string; search?: string; level?: StockLevel }) => s.stock.list(ctx().storeId, opts),
@@ -213,7 +230,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
       s.stock.transfer(ctx(STOCK), input),
     'stock.inventory': (input: { warehouseId: string; counts: { articleId: string; counted: Milli; countedAt: string }[] }) =>
-      s.stock.applyInventory(ctx(MANAGE), input),
+      s.stock.applyInventory(ctx(['inventory']), input),
     'stock.printCountSheet': (warehouseId: string, departmentId?: string | null) => {
       const storeId = ctx(STOCK).storeId;
       return printer.countSheet(storeId, warehouseId || s.admin.salesWarehouse(storeId).id, departmentId);
@@ -277,15 +294,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.cashOperation': (type: 'IN' | 'OUT', amount: Fcfa, reason: string, supervisorPin?: string) => {
       const c = ctx(POS);
       // Un prélèvement par un caissier doit être validé par le gérant.
-      if (type === 'OUT' && user!.role === 'cashier') supervisor(supervisorPin ?? '');
+      if (type === 'OUT' && !can(user!, ['cashout'])) supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
+    'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean }) => s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
-    'promotions.list': () => s.promotions.list(ctx(MANAGE).storeId),
-    'promotions.save': (input: PromotionInput, id?: string) => s.promotions.save(requireUser(MANAGE).id, input, id),
-    'promotions.setActive': (id: string, active: boolean) => s.promotions.setActive(requireUser(MANAGE).id, id, active),
+    'promotions.list': () => s.promotions.list(ctx(['promotions']).storeId),
+    'promotions.save': (input: PromotionInput, id?: string) => s.promotions.save(requireUser(['promotions']).id, input, id),
+    'promotions.setActive': (id: string, active: boolean) => s.promotions.setActive(requireUser(['promotions']).id, id, active),
     'pos.sell': (input: {
       lines: SaleLineInput[];
       payments: Payment[];
@@ -293,9 +311,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       customerId?: string | null;
       creditPin?: string;
       quoteId?: string | null;
+      clientName?: string | null;
     }) => {
       const c = ctx(POS);
-      const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : null;
+      if (input.lines.some((l) => l.price != null) && !can(user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
+      const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(user!, ['discount']) ? user!.id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
       return s.pos.completeSale(c, {
         lines: input.lines,
@@ -304,6 +324,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         customerId: input.customerId ?? null,
         creditAuthorizedBy: creditBy,
         quoteId: input.quoteId ?? null,
+        clientName: input.clientName ?? null,
       });
     },
     'pos.cancel': (saleId: string, supervisorPin: string, reason: string) =>
@@ -321,7 +342,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.resume': (id: string) => (requireUser(POS), s.pos.resumeHeld(id)),
     'pos.zReport': (sessionId: string) => (requireUser(), s.pos.zReport(sessionId)),
     'pos.close': (counted: DenominationCount) => s.pos.closeSession(ctx(POS), counted),
-    'pos.sessions': () => s.pos.listSessions(ctx(MANAGE).storeId),
+    'pos.sessions': () => s.pos.listSessions(ctx(SALES).storeId),
     'pos.printTicket': (saleId: string, opts?: { newSale?: boolean }) =>
       printer.ticket(saleId, { newSale: Boolean(opts?.newSale && requireUser(POS)) }),
     /** Ouverture du tiroir sans encaissement : tracée dans le journal d'audit. */
@@ -337,9 +358,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean }) => s.customers.listCustomers(ctx().storeId, opts),
     'customers.get': (id: string) => (requireUser(), s.customers.getCustomer(id)),
     'customers.save': (input: CustomerInput, id?: string) => {
-      const u = requireUser([...MANAGE, 'accountant', 'cashier']);
+      const u = requireUser(CUSTOMERS);
       // Le caissier peut créer ou corriger une fiche, mais pas accorder de crédit.
-      if (u.role === 'cashier') {
+      if (!can(u, ['receivables'])) {
         const before = id ? s.customers.getCustomer(id).credit_limit : 0;
         if ((input.creditLimit ?? before) !== before) throw new AppError('Seul le gérant ou le comptable fixe le plafond de crédit', 'FORBIDDEN');
         const level = id ? s.customers.getCustomer(id).price_level : 'retail';
@@ -352,14 +373,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.customers.statement(ctx().storeId, id, { from: from ?? undefined, to: to ?? undefined }),
     'customers.sales': (id: string) => s.pos.listSales({ storeId: ctx().storeId, customerId: id, limit: 100 }),
     'customers.pay': (input: { customerId: string; method: CustomerPaymentMethod; amount: Fcfa; reference?: string | null; notes?: string | null; atRegister?: boolean }) => {
-      const c = ctx([...POS, 'accountant']);
+      const c = ctx([...POS, 'customers', 'quotes']);
       // Encaissé à la caisse : rattaché à la session ouverte, les espèces vont dans le tiroir.
       const session = input.atRegister && c.registerId ? s.pos.currentSession(c.registerId) : null;
       if (input.atRegister && !session) throw new AppError("Ouvrez la caisse avant d'encaisser un règlement client", 'NO_SESSION');
       return s.customers.receivePayment(c, { ...input, sessionId: session?.id ?? null });
     },
     'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
-    'customers.receivables': () => s.customers.receivables(ctx([...MANAGE, 'accountant']).storeId),
+    'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
 
@@ -368,10 +389,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'quotes.get': (id: string) => (requireUser(), s.quotes.get(id)),
     /** Remise sur un devis : gérant, ou code d'un gérant. */
     'quotes.save': (input: QuoteInput, id?: string | null, supervisorPin?: string) => {
-      const c = ctx([...POS, 'accountant']);
+      const c = ctx([...POS, 'customers', 'quotes']);
       return s.quotes.save(c, input, { id: id ?? undefined, discountAuthorizedBy: supervisorPin ? supervisor(supervisorPin).id : null });
     },
-    'quotes.cancel': (id: string) => s.quotes.cancel(ctx([...POS, 'accountant']), id),
+    'quotes.cancel': (id: string) => s.quotes.cancel(ctx([...POS, 'customers', 'quotes']), id),
     'quotes.print': (id: string) => (requireUser(), printer.quote(id)),
     /** Lignes à charger dans la fiche de facturation, aux prix garantis par le devis. */
     'quotes.saleLines': (id: string) => s.quotes.saleLines(ctx(POS).storeId, id),
@@ -384,12 +405,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'expenses.record': (input: Omit<ExpenseInput, 'authorizedBy'> & { supervisorPin?: string }) => {
       const { supervisorPin, ...rest } = input;
       const c = ctx(input.atRegister ? POS : ACCOUNTING);
-      const authorizedBy = user!.role === 'cashier' ? supervisor(supervisorPin ?? '').id : null;
+      const authorizedBy = input.atRegister && !can(user!, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
       return s.expenses.record(c, { ...rest, authorizedBy });
     },
     'expenses.cancel': (id: string, reason: string, supervisorPin?: string) => {
-      const c = ctx([...POS, 'accountant']);
-      const sup = MANAGE.includes(user!.role) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const c = ctx([...POS, 'customers', 'quotes']);
+      const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
       return s.expenses.cancel(c, id, sup, reason);
     },
     'expenses.get': (id: string) => (requireUser(), s.expenses.get(id)),
@@ -443,25 +464,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       printer.journal(ctx(ACCOUNTING).storeId, from, to, journal),
 
     // --- Sauvegardes -------------------------------------------------------
-    'backup.status': () => (requireUser(MANAGE), { ...s.backups.status(), backups: s.backups.list() }),
+    'backup.status': () => (requireUser(ADMIN), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),
-    'backup.now': () => s.backups.saveNow(requireUser(MANAGE).id),
+    'backup.now': () => s.backups.saveNow(requireUser(ADMIN).id),
     'backup.toFolder': async () => {
-      const u = requireUser(MANAGE);
+      const u = requireUser(ADMIN);
       const dir = await system.chooseFolder('Choisir la clé USB ou le dossier de la copie');
       return dir ? s.backups.backup(u.id, { dir, kind: 'manual' }) : null;
     },
-    'backup.chooseFolder': (title: string) => (requireUser(['admin']), system.chooseFolder(title)),
-    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number }) => s.backups.configure(requireUser(['admin']).id, input),
-    'backup.list': (dir?: string | null) => (requireUser(MANAGE), s.backups.list(dir)),
+    'backup.chooseFolder': (title: string) => (requireAdmin(), system.chooseFolder(title)),
+    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number }) => s.backups.configure(requireAdmin().id, input),
+    'backup.list': (dir?: string | null) => (requireUser(ADMIN), s.backups.list(dir)),
     'backup.chooseFile': async () => {
-      requireUser(['admin']);
+      requireAdmin();
       const file = await system.chooseBackupFile();
       return file ? inspectBackup(file) : null;
     },
-    'backup.openFolder': (path: string) => (requireUser(MANAGE), system.openFolder(path)),
+    'backup.openFolder': (path: string) => (requireUser(ADMIN), system.openFolder(path)),
     'backup.restore': (file: string) => {
-      const u = requireUser(['admin']);
+      const u = requireAdmin();
       const info = inspectBackup(file);
       if (!info.ok) throw new AppError(info.error ?? 'Sauvegarde invalide', 'INVALID');
       system.restore(file, u.id);
@@ -470,26 +491,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
     // --- Rapports -----------------------------------------------------------
     // --- Registres et contrôles (menus KONTROL) ------------------------------------
-    'controls.salesRegister': (f: SalesRegisterFilter) => s.controls.salesRegister(ctx([...MANAGE, 'accountant']).storeId, f),
-    'controls.salesAlerts': (p: Period & { discountRate?: number }) => s.controls.salesAlerts(ctx([...MANAGE, 'accountant']).storeId, p, p),
-    'controls.purchasesByProduct': (p: Period & { supplierId?: string | null }) => s.controls.purchasesByProduct(ctx(['admin', 'manager', 'stock', 'accountant']).storeId, p),
-    'controls.pendingReceipts': () => s.controls.pendingReceipts(ctx(['admin', 'manager', 'stock', 'accountant']).storeId),
-    'controls.cashOperations': (p: Period & { registerId?: string | null }) => s.controls.cashOperations(ctx([...MANAGE, 'accountant']).storeId, p),
-    'controls.supplierStatement': (supplierId: string, p?: Partial<Period>) => s.controls.supplierStatement(ctx(['admin', 'manager', 'stock', 'accountant']).storeId, supplierId, p),
-    'controls.supplierSituation': () => s.controls.supplierSituation(ctx(['admin', 'manager', 'stock', 'accountant']).storeId),
+    'controls.salesRegister': (f: SalesRegisterFilter) => s.controls.salesRegister(ctx(SALES).storeId, f),
+    'controls.salesAlerts': (p: Period & { discountRate?: number }) => s.controls.salesAlerts(ctx(SALES).storeId, p, p),
+    'controls.purchasesByProduct': (p: Period & { supplierId?: string | null }) => s.controls.purchasesByProduct(ctx(SUPPLIERS).storeId, p),
+    'controls.pendingReceipts': () => s.controls.pendingReceipts(ctx(SUPPLIERS).storeId),
+    'controls.cashOperations': (p: Period & { registerId?: string | null }) => s.controls.cashOperations(ctx(SALES).storeId, p),
+    'controls.supplierStatement': (supplierId: string, p?: Partial<Period>) => s.controls.supplierStatement(ctx(SUPPLIERS).storeId, supplierId, p),
+    'controls.supplierSituation': () => s.controls.supplierSituation(ctx(SUPPLIERS).storeId),
     'controls.recentAccounts': (party: 'supplier' | 'customer', days?: number) =>
-      s.controls.recentAccounts(ctx(party === 'supplier' ? ['admin', 'manager', 'stock', 'accountant'] : [...MANAGE, 'accountant', 'cashier']).storeId, party, days),
-    'controls.creditControl': () => s.controls.creditControl(ctx([...MANAGE, 'accountant']).storeId),
+      s.controls.recentAccounts(ctx(party === 'supplier' ? SUPPLIERS : CUSTOMERS).storeId, party, days),
+    'controls.creditControl': () => s.controls.creditControl(ctx(SALES).storeId),
     'charges.plans': (includeInactive?: boolean) => s.charges.listPlans(ctx(ACCOUNTING).storeId, includeInactive),
     'charges.savePlan': (input: ChargePlanInput, id?: string | null) => s.charges.savePlan(ctx(ACCOUNTING), input, id),
     'charges.schedule': (from: string, to: string) => s.charges.schedule(ctx(ACCOUNTING).storeId, from, to),
-    'charges.late': () => (['admin', 'manager', 'accountant'].includes(user?.role ?? '') ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
+    'charges.late': () => (user && can(user, ['expenses']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
 
-    'reports.daily': (date: string) => s.reports.daily(ctx(MANAGE).storeId, date),
-    'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['admin', 'manager', 'accountant']).storeId, input),
+    'reports.daily': (date: string) => s.reports.daily(ctx(['dashboard']).storeId, date),
+    'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['reports', 'sales']).storeId, input),
     /** Classeur .xlsx : octets envoyés tels quels à l'écran, qui propose l'enregistrement. */
-    'reports.salesXlsx': (input: SalesReportInput) => xlsxWorkbook(s.reports.salesWorkbook(ctx(['admin', 'manager', 'accountant']).storeId, input)),
-    'reports.salesCsv': (from: string, to: string) => s.reports.salesExportCsv(ctx(['admin', 'manager', 'accountant']).storeId, from, to),
+    'reports.salesXlsx': (input: SalesReportInput) => xlsxWorkbook(s.reports.salesWorkbook(ctx(['reports', 'sales']).storeId, input)),
+    'reports.salesCsv': (from: string, to: string) => s.reports.salesExportCsv(ctx(['reports', 'sales']).storeId, from, to),
   };
 }
 

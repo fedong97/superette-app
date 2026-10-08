@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Expense = Result<'expenses.get'>;

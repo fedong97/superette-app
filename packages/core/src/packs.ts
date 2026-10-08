@@ -84,3 +84,40 @@ export function describeInPacks(qty: Milli, packs: readonly { name: string; unit
   if (left > 0) parts.push(`${left / 1000} ${unitName}`);
   return parts.join(' ');
 }
+
+/**
+ * Fiche KONTROL : chaque conditionnement de vente donne son diviseur par rapport
+ * au conditionnement d'achat (PALETTE 1, PACK 4, CANETTE 24). Renvoie ce que
+ * contient chaque niveau sauf le dernier (PALETTE 4 PACK, PACK 6 CANETTE), ou le
+ * message d'erreur.
+ */
+export function containsFromDivisors(levels: readonly { name: string; divisor: number }[]): number[] | string {
+  if (levels.length === 0) return 'Indiquez le conditionnement d’achat';
+  if (levels[0]!.divisor !== 1) return 'Le conditionnement d’achat a toujours le diviseur 1';
+  const out: number[] = [];
+  for (let i = 1; i < levels.length; i++) {
+    const prev = levels[i - 1]!;
+    const l = levels[i]!;
+    const name = l.name.trim() || `n° ${i + 1}`;
+    if (!Number.isSafeInteger(l.divisor) || l.divisor < 2 || l.divisor > 10_000) return `Diviseur du conditionnement « ${name} » invalide (2 à 10 000)`;
+    if (l.divisor <= prev.divisor) return `Les conditionnements vont du plus grand au plus petit : le diviseur de « ${name} » doit dépasser ${prev.divisor}`;
+    if (l.divisor % prev.divisor !== 0) return `Le diviseur de « ${name} » (${l.divisor}) doit être un multiple de celui de « ${prev.name.trim()} » (${prev.divisor})`;
+    out.push(l.divisor / prev.divisor);
+  }
+  return out;
+}
+
+/**
+ * Coût de revient d'un conditionnement (la canette d'une palette à 17 000 de
+ * revient : 708). Plancher du prix saisi à la caisse.
+ */
+export function levelCost(a: { purchase_price: Fcfa; pack_cost_price: Fcfa | null; packs: readonly { units: Milli }[] }, units: Milli): Fcfa {
+  const top = a.packs[0]?.units ?? 1000;
+  const packCost = a.pack_cost_price ?? Math.round((a.purchase_price * top) / 1000);
+  return Math.round((packCost * units) / top);
+}
+
+/** Part d'un prix du conditionnement d'achat revenant à un conditionnement plus petit : 17 000 / 24 = 708. */
+export function dividePrice(price: Fcfa, divisor: number): Fcfa {
+  return Math.round(price / divisor);
+}

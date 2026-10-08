@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CartLine, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { QuotePickDialog } from './Quotes';
-import { SuggestionList, useArticleSuggestions } from './pickers';
+import { ArticleForm } from './Articles';
+import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, useSaleRows } from './SaleSearch';
 import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 
 type Article = Result<'catalogue.get'>;
@@ -29,11 +30,13 @@ export interface PosLine extends CartLine {
   packs: PosPack[];
   /** Conditionnement vendu (carton, paquet), sinon l'unité de détail. */
   packId: string | null;
+  /** Prix saisi à la caisse pour ce conditionnement (sinon le tarif du client). */
+  price?: number;
 }
 
 let keySeq = 0;
 
-function toLine(article: Article, qtyMilli: number, barcode: string | null, fixedAmount?: number, packId?: string | null): PosLine {
+function toLine(article: Article, qtyMilli: number, barcode: string | null, fixedAmount?: number, packId?: string | null, price?: number): PosLine {
   const packs = article.packs.map((p) => ({ id: p.id, name: p.name, units: p.units, tariff: { retail: p.sale_price, wholesale: p.wholesale_price, superWholesale: p.super_wholesale_price } }));
   const pack = packId ? packs.find((p) => p.id === packId) : undefined;
   return {
@@ -53,13 +56,20 @@ function toLine(article: Article, qtyMilli: number, barcode: string | null, fixe
     packs,
     packId: pack?.id ?? null,
     ...(pack ? { packPrice: pack.tariff.retail, packUnits: pack.units } : {}),
+    ...(price !== undefined ? { price } : {}),
   };
 }
 
-/** Prix de la ligne au tarif du client (le conditionnement garde son propre prix). */
+/** Prix de la ligne au tarif du client (le conditionnement garde son propre prix), ou prix saisi à la caisse. */
 function atLevel(l: PosLine, level: Parameters<typeof tariffPrice>[1]): PosLine {
   const pack = l.packId ? l.packs.find((p) => p.id === l.packId) : undefined;
-  return { ...l, unitPrice: tariffPrice(l.tariff, level), packPrice: pack ? tariffPrice(pack.tariff, level) : undefined, packUnits: pack?.units };
+  return {
+    ...l,
+    unitPrice: !pack && l.price !== undefined ? l.price : tariffPrice(l.tariff, level),
+    packPrice: pack ? (l.price ?? tariffPrice(pack.tariff, level)) : undefined,
+    packUnits: pack?.units,
+    priceSet: l.price !== undefined,
+  };
 }
 
 /** Quantité affichée : « 2 Carton » pour une vente par conditionnement. */
@@ -68,7 +78,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
+type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'extra';
 
@@ -104,10 +114,17 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   const [showDiscount, setShowDiscount] = useState(false);
   const [showTaxes, setShowTaxes] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const [searchResults, setSearchResults] = useState<Article[]>([]);
+  /** Recherche complète (F1) et ligne choisie dont on demande la quantité. */
+  const [searchQuery, setSearchQuery] = useState('');
+  const [picked, setPicked] = useState<{ row: SaleRow; initial?: string } | null>(null);
+  /** Fiche article ouverte depuis la recherche : article absent, ou conditionnement à ajouter. */
+  const [creating, setCreating] = useState<{ article: Article | null; name?: string; addLevel?: 'top' | 'bottom' } | null>(null);
+  const canCreate = has(user, 'articles');
   const [weightFor, setWeightFor] = useState<Article | null>(null);
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
+  /** Nom donné par un client comptoir (facultatif), imprimé sur le ticket et la facture. */
+  const [clientName, setClientName] = useState('');
   /** Devis ou proforma chargé : ses prix garantis valent accord de remise. */
   const [quote, setQuote] = useState<{ id: string; number: string; validUntil: string } | null>(null);
   const account = useLoad(() => (customer ? call('customers.account', customer.id) : Promise.resolve(null)), [customer?.id]);
@@ -144,7 +161,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       // Même article (et même conditionnement) à la pièce sans remise : on cumule la quantité.
       const same =
         line.fixedAmount === undefined && line.unit === 'piece'
-          ? ls.find((l) => l.articleId === line.articleId && l.packId === line.packId && !l.discount && l.fixedAmount === undefined)
+          ? ls.find((l) => l.articleId === line.articleId && l.packId === line.packId && l.price === line.price && !l.discount && l.fixedAmount === undefined)
           : undefined;
       if (same) {
         setSelected(same.key);
@@ -166,15 +183,31 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     addLine(toLine(article, multiplier, null));
   };
 
-  // « 3*riz » : suggestions sur « riz », l'article choisi est ajouté 3 fois.
+  // « 3*mut » : lignes sur « mut », la quantité proposée est 3.
   const multiplied = /^(\d+(?:[.,]\d+)?)\*(.*)$/.exec(input.trim());
   const suggestQuery = multiplied ? multiplied[2]! : input;
-  const suggestions = useArticleSuggestions(suggestQuery);
-  const pickSuggestion = (a: Article) => {
-    const mult = multiplied ? parseQty(multiplied[1]!) : null;
+  const suggestions = useSaleRows(suggestQuery, customer?.id ?? null);
+  /** Une ligne choisie (conditionnement d'un article) : on demande d'abord la quantité. */
+  const askQty = (row: SaleRow, initial?: string) => {
+    setPicked({ row, initial });
+    setDialog('qty');
+  };
+  const pickSuggestion = (row: SaleRow) => {
+    const mult = multiplied?.[1];
     setInput('');
-    addArticle(a, mult ?? 1000);
-    scanRef.current?.focus();
+    askQty(row, mult);
+  };
+  const addRow = async (row: SaleRow, q: number, price: number | null) => {
+    try {
+      const article = await call('catalogue.get', row.article_id);
+      addLine(toLine(article, q, null, undefined, row.pack_id, price ?? undefined));
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const openSearch = (q: string) => {
+    setSearchQuery(q);
+    setDialog('search');
   };
 
   const onScan = async (e: React.FormEvent) => {
@@ -201,13 +234,10 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
         }
         return;
       }
-      const found = await call('catalogue.suggest', code);
-      if (found.length === 1) addArticle(found[0]!, mult ?? 1000);
-      else if (found.length === 0) toast.error(`Article introuvable : ${code}`);
-      else {
-        setSearchResults(found);
-        setDialog('search');
-      }
+      // Pas un code-barres : une seule ligne en stock → quantité, sinon la recherche complète.
+      const rows = /^[\d\s]+$/.test(code) ? [] : await call('pos.search', code, { customerId: customer?.id ?? null });
+      if (rows.length === 1) askQty(rows[0]!, m?.[1]);
+      else openSearch(code);
     } catch (err) {
       toast.error(err);
     }
@@ -228,17 +258,18 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
   };
   const clear = () => {
     setQuote(null);
+    setClientName('');
     setLines([]);
     setCashGiven(0);
     setSelected(null);
   };
 
-  const saleInput = () => lines.map((l) => ({ articleId: l.articleId, qty: l.qty, barcode: l.barcode, discount: l.discount, packId: l.packId }));
+  const saleInput = () => lines.map((l) => ({ articleId: l.articleId, qty: l.qty, barcode: l.barcode, discount: l.discount, packId: l.packId, price: l.price ?? null }));
   /** Lignes rechargées (ticket en attente, devis) : on reprend les fiches pour les tarifs et conditionnements. */
-  const reload = async (input: { articleId: string; qty: number; barcode?: string | null; discount?: number; packId?: string | null }[]) => {
+  const reload = async (input: { articleId: string; qty: number; barcode?: string | null; discount?: number; packId?: string | null; price?: number | null }[]) => {
     const priced = await call('pos.priceLines', input);
     const arts = await Promise.all(priced.map((p) => call('catalogue.get', p.articleId)));
-    return priced.map((p, i) => ({ ...toLine(arts[i]!, p.qty, p.barcode, p.fixedAmount, p.packId), discount: p.discount }));
+    return priced.map((p, i) => ({ ...toLine(arts[i]!, p.qty, p.barcode, p.fixedAmount, p.packId, p.priceSet ? (p.packPrice ?? p.unitPrice) : undefined), discount: p.discount }));
   };
 
   const finish = (sale: Result<'pos.sell'>) => {
@@ -247,6 +278,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     setLastSale(sale);
     setDialog(null);
     setCustomer(null);
+    setClientName('');
     setQuote(null);
     call('pos.printTicket', sale.id, { newSale: true }).catch((err) => toast.error(err));
   };
@@ -257,7 +289,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
    */
   const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string } = {}) => {
     try {
-      finish(await call('pos.sell', { lines: saleInput(), payments: payments as never, customerId: customer?.id ?? null, quoteId: quote?.id ?? null, ...pins }));
+      finish(await call('pos.sell', { lines: saleInput(), payments: payments as never, customerId: customer?.id ?? null, clientName: customer ? null : clientName.trim() || null, quoteId: quote?.id ?? null, ...pins }));
       setCashGiven(0);
       setPending(null);
     } catch (err) {
@@ -295,7 +327,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       await sell(payments);
       return;
     }
-    const needsSupervisor = totals.totalDiscount > 0 && user.role === 'cashier' && !quote;
+    const needsSupervisor = totals.totalDiscount > 0 && !has(user, 'discount') && !quote;
     if (cashGiven >= totals.totalTtc && !needsSupervisor) {
       await sell([{ method: 'CASH', amount: cashGiven }]);
       return;
@@ -354,6 +386,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     const onKey = (e: KeyboardEvent) => {
       if (dialog) return;
       const fn: Record<string, () => void> = {
+        F1: () => openSearch(input),
         F2: reprint,
         F3: () => void hold(),
         F4: () => void validate(),
@@ -369,6 +402,8 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       } else if (e.ctrlKey && e.key.toLowerCase() === 'e' && lines.length) {
         e.preventDefault();
         setDialog('pay');
+      } else if (e.target instanceof HTMLInputElement && e.target !== scanRef.current) {
+        // Saisie dans une cellule (quantité) : les touches gardent leur sens.
       } else if (e.key === 'Delete' && selected !== null && !input) {
         removeLine(selected);
       } else if ((e.key === '+' || e.key === '-') && selected !== null && !input) {
@@ -442,6 +477,17 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
             </div>
             <label>Date</label>
             <input readOnly value={now.toLocaleString('fr-FR')} />
+            {!customer && !credit && (
+              <input
+                className="client-name"
+                value={clientName}
+                maxLength={80}
+                onChange={(e) => setClientName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && scanRef.current?.focus()}
+                placeholder="Nom du client (facultatif)"
+                title="Imprimé sur le ticket et la facture"
+              />
+            )}
           </div>
 
           <div className="fiche-tabs">
@@ -471,9 +517,9 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                     onKeyDown={(e) => suggestions.onKeyDown(e, pickSuggestion)}
                     onBlur={suggestions.close}
                     autoComplete="off"
-                    placeholder="Taper le début du nom produit ou scanner (3*code)"
+                    placeholder="Taper le début du nom produit ou scanner (3*code) · F1 recherche"
                   />
-                  <SuggestionList s={suggestions} onPick={pickSuggestion} query={suggestQuery} />
+                  <SaleRowList s={suggestions} onPick={pickSuggestion} />
                 </div>
                 <label>Grille tarif.</label>
                 <select value={level} disabled title="Le tarif suit la fiche du client (Client › Tarif) : détail pour le client comptoir">
@@ -546,7 +592,9 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                                 </span>
                               )}
                             </td>
-                            <td className="r">{lineQty(l)}</td>
+                            <td className="r">
+                              <QtyCell line={l} onChange={(q) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: q } : x)))} />
+                            </td>
                             {withDiscount && <td className="r">{l.discount ? amount(l.discount) : ''}</td>}
                             <td className={l.packId ? 'pack-unit' : ''}>{l.packId ? l.packs.find((p) => p.id === l.packId)?.name : l.unitName}</td>
                             <td className="r">{amount(l.packPrice ?? l.unitPrice)}</td>
@@ -720,6 +768,9 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
 
       <div className="shortcuts">
         <span>
+          <kbd>F1</kbd> Rechercher
+        </span>
+        <span>
           <kbd>Suppr</kbd> Enlever
         </span>
         <span>
@@ -757,7 +808,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       {dialog === 'pay' && (
         <PaymentDialog
           total={totals.totalTtc}
-          needsSupervisor={totals.totalDiscount > 0 && user.role === 'cashier'}
+          needsSupervisor={totals.totalDiscount > 0 && !has(user, 'discount')}
           allowCredit={Boolean(customer)}
           onClose={() => setDialog(null)}
           onPaid={async (payments, supervisorPin) => {
@@ -790,7 +841,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       {dialog === 'expense' && (
         <ExpenseDialog
           atRegister
-          needsSupervisor={user.role === 'cashier'}
+          needsSupervisor={!has(user, 'cashout')}
           onClose={() => setDialog(null)}
           onSaved={(e) => {
             setDialog(null);
@@ -810,22 +861,54 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
         />
       )}
       {dialog === 'search' && (
-        <Modal title="Choisir l'article" onClose={() => setDialog(null)}>
-          <div className="pick-list">
-            {searchResults.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => {
-                  setDialog(null);
-                  addArticle(a);
-                }}
-              >
-                <span>{a.name}</span>
-                <span>{fcfa(a.store_price)}</span>
-              </button>
-            ))}
-          </div>
-        </Modal>
+        <SaleSearchDialog
+          initialQuery={searchQuery}
+          customerId={customer?.id ?? null}
+          canCreate={canCreate}
+          onClose={() => setDialog(null)}
+          onPick={(row) => askQty(row)}
+          onCreateArticle={(name) => {
+            setCreating({ article: null, name });
+            setDialog('create');
+          }}
+          onCreateLevel={async (articleId, where) => {
+            try {
+              const article = await call('catalogue.get', articleId);
+              if (article.unit !== 'piece') return toast.error('Les conditionnements ne valent que pour les articles vendus à la pièce');
+              if (article.packs.length >= 3) return toast.error(`${article.name} a déjà 4 conditionnements`);
+              setCreating({ article, addLevel: where });
+              setDialog('create');
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        />
+      )}
+      {dialog === 'qty' && picked && (
+        <QtyPrompt
+          row={picked.row}
+          initial={picked.initial}
+          onClose={() => setDialog(null)}
+          inCart={lines.filter((l) => l.articleId === picked.row.article_id).reduce((t, l) => t + l.qty, 0)}
+          canPrice={has(user, 'price')}
+          onDone={(q, price) => {
+            setDialog(null);
+            void addRow(picked.row, q, price);
+          }}
+        />
+      )}
+      {dialog === 'create' && creating && (
+        <ArticleForm
+          article={creating.article}
+          initialName={creating.name}
+          addLevel={creating.addLevel}
+          canSetStorePrice={false}
+          onClose={() => openSearch(searchQuery)}
+          onSaved={(a) => {
+            setCreating(null);
+            openSearch(creating.article ? searchQuery : a.name);
+          }}
+        />
       )}
       {dialog === 'weight' && weightFor && (
         <WeightDialog
@@ -854,7 +937,8 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
           onClose={() => setDialog(null)}
           onDiscount={() => setDialog('discount')}
           onDone={(q, packId) => {
-            setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, qty: q, packId } : l)));
+            // Le prix saisi valait pour l'ancien conditionnement : on revient au tarif si l'on en change.
+            setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, qty: q, packId, price: packId === l.packId ? l.price : undefined } : l)));
             setDialog(null);
           }}
         />
@@ -863,7 +947,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
       {dialog === 'return' && <ReturnDialog onClose={() => setDialog(null)} />}
       {(dialog === 'cashIn' || dialog === 'cashOut') && (
-        <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={user.role === 'cashier'} onClose={() => setDialog(null)} />
+        <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={!has(user, 'cashout')} onClose={() => setDialog(null)} />
       )}
       {dialog === 'close' && (
         <CloseDialog
@@ -876,6 +960,42 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Quantité modifiable directement dans la grille : nombre de conditionnements
+ * (2 PALETTE), de pièces ou de kg. Validée par Entrée ou en quittant la case.
+ */
+function QtyCell({ line, onChange }: { line: PosLine; onChange: (qtyMilli: number) => void }) {
+  const pack = line.packId ? line.packs.find((p) => p.id === line.packId) : undefined;
+  const shown = String((pack ? line.qty / pack.units : line.qty / 1000)).replace('.', ',');
+  const [value, setValue] = useState(shown);
+  useEffect(() => setValue(shown), [shown]);
+  if (line.fixedAmount !== undefined) return <>{lineQty(line)}</>;
+  const commit = () => {
+    const n = parseQty(value);
+    // Conditionnement ou pièce : nombre entier ; sinon on revient à la valeur affichée.
+    if (n === null || ((pack || line.unit === 'piece') && n % 1000 !== 0)) return setValue(shown);
+    const q = pack ? (n / 1000) * pack.units : n;
+    if (q !== line.qty) onChange(q);
+  };
+  return (
+    <input
+      className="cell-qty"
+      inputMode="decimal"
+      value={value}
+      onClick={(e) => e.stopPropagation()}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === 'Escape') setValue(shown);
+      }}
+    />
   );
 }
 

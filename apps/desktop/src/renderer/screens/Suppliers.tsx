@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 
@@ -42,7 +42,7 @@ function SupplierList({ user }: { user: User }) {
   const [inactive, setInactive] = useState(false);
   const list = useLoad(() => call('suppliers.list', { search: search || undefined, includeInactive: inactive }), [search, inactive]);
   const [open, setOpen] = useState<Supplier | 'new' | null>(null);
-  const canEdit = user.role === 'admin' || user.role === 'manager' || user.role === 'stock';
+  const canEdit = has(user, 'purchase_orders');
   return (
     <>
       <div className="filters">

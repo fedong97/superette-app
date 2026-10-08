@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has } from '../ui';
 import { Shelving } from './Controls';
-import { type PackDraft, PackGrid, newPackKey } from './packs';
+import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -12,7 +12,7 @@ export type ArticlesView = 'list' | 'new' | 'search' | 'shelving';
 
 export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesView }) {
   const [tab, setTab] = useState<'list' | 'shelving'>(view === 'shelving' ? 'shelving' : 'list');
-  const canEdit = user.role === 'admin' || user.role === 'manager' || user.role === 'stock';
+  const canEdit = has(user, 'articles');
   return (
     <div className="page">
       <header className="page-head">
@@ -41,7 +41,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
     <>
       <div className="filters">
         <input className="search" autoFocus={focusSearch} placeholder="Rechercher (nom, code, code-barres, marque)" value={search} onChange={(e) => setSearch(e.target.value)} />
-        {(user.role === 'admin' || user.role === 'manager') && (
+        {has(user, 'import') && (
           <button onClick={() => setImporting(true)}>Importer (CSV)</button>
         )}
         <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
@@ -99,7 +99,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
       {editing && (
         <ArticleForm
           article={editing === 'new' ? null : editing}
-          canSetStorePrice={user.role === 'admin' || user.role === 'manager'}
+          canSetStorePrice={has(user, 'store_price')}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -119,7 +119,26 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
   );
 }
 
-function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article: Article | null; canSetStorePrice: boolean; onClose: () => void; onSaved: () => void }) {
+/**
+ * Fiche article (« Ajouter/Paramétrer une marchandise » de KONTROL). Depuis la
+ * caisse, `addLevel` ouvre la fiche avec un conditionnement à compléter :
+ * plus grand (nouveau conditionnement d'achat) ou plus petit.
+ */
+export function ArticleForm({
+  article,
+  canSetStorePrice,
+  onClose,
+  onSaved,
+  initialName,
+  addLevel,
+}: {
+  article: Article | null;
+  canSetStorePrice: boolean;
+  onClose: () => void;
+  onSaved: (article: Article) => void;
+  initialName?: string;
+  addLevel?: 'top' | 'bottom';
+}) {
   const toast = useToast();
   const rates = useLoad(() => call('admin.vatRates'));
   const departments = useLoad(() => call('catalogue.departments'));
@@ -127,13 +146,12 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
   const milli = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v / 1000));
   const [f, setF] = useState({
     code: article?.code ?? '',
-    name: article?.name ?? '',
+    name: article?.name ?? initialName?.toUpperCase() ?? '',
+    otherRef: article?.other_ref ?? '',
     familyId: article?.family_id ?? '',
     brand: article?.brand ?? '',
     unit: article?.unit ?? ('piece' as Article['unit']),
     vatRateId: article?.vat_rate_id ?? '',
-    purchasePrice: String(article?.purchase_price ?? ''),
-    salePrice: String(article?.sale_price ?? ''),
     perishable: article?.perishable === 1,
     plu: article?.plu ?? '',
     quickKey: article?.quick_key === 1,
@@ -146,48 +164,71 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
   const [barcodes, setBarcodes] = useState(
     article?.barcodes.filter((b) => !packCodes.has(b.code)).map((b) => ({ code: b.code, pack: String(b.pack_qty / 1000) })) ?? [],
   );
-  const str = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
-  const [packs, setPacks] = useState<PackDraft[]>(
-    article?.packs.map((p) => ({
-      key: newPackKey(),
-      name: p.name,
-      contains: String(p.contains),
-      sale: String(p.sale_price),
-      wholesale: str(p.wholesale_price),
-      superWholesale: str(p.super_wholesale_price),
-      barcode: p.barcode ?? '',
-    })) ?? [],
-  );
-  const [purchaseIndex, setPurchaseIndex] = useState(article?.packs.findIndex((p) => p.is_purchase) ?? -1);
-  const [tariff, setTariff] = useState({ unitName: article?.unit_name ?? '', wholesale: str(article?.wholesale_price), superWholesale: str(article?.super_wholesale_price) });
+  const [initial] = useState(() => {
+    const { levels, buy } = levelsFromArticle(article);
+    const used = levels.filter((l) => l.enabled).length;
+    if (addLevel === 'bottom' && used < MAX_LEVELS) levels[used] = { ...levels[used]!, enabled: true };
+    // Nouveau conditionnement d'achat plus grand : les anciens blocs descendent, leurs diviseurs sont à refaire.
+    if (addLevel === 'top' && used < MAX_LEVELS) {
+      levels.splice(MAX_LEVELS - 1, 1);
+      levels.unshift(emptyLevel(true));
+      const ratio = levels.slice(1).map((l) => Number(l.divisor) || 1);
+      for (const l of levels.slice(1)) if (l.enabled) l.divisor = '';
+      return { levels, buy: { purchase: '', cost: '' }, previous: { name: levels[1]!.name, buy, ratio } };
+    }
+    return { levels, buy, previous: null };
+  });
+  const [levels, setLevels] = useState(initial.levels);
+  const [buy, setBuy] = useState(initial.buy);
+  const previous = initial.previous;
+  /**
+   * Nouveau conditionnement d'achat au-dessus de l'ancien : dès qu'on dit combien
+   * il en contient, ses prix d'achat et de revient et les diviseurs des plus
+   * petits s'en déduisent (une PALETTE de 4 CARTONS de 12 : BOUTEILLE 48).
+   */
+  const onLevels = (next: typeof levels) => {
+    const d = Math.floor(Number(next[1]?.divisor) || 0);
+    if (previous && d >= 2 && d !== Math.floor(Number(levels[1]?.divisor) || 0)) {
+      const p = parseAmount(previous.buy.purchase);
+      const c = parseAmount(previous.buy.cost);
+      if (p !== null) setBuy({ purchase: String(p * d), cost: c === null ? '' : String(c * d) });
+      const sale = parseAmount(next[1]!.sale);
+      next = next.map((l, i) =>
+        i === 0 && sale !== null && (!l.sale || l.auto) ? { ...l, sale: String(sale * d), auto: true } : i > 1 && l.enabled ? { ...l, divisor: String(previous.ratio[i - 1]! * d) } : l,
+      );
+    }
+    setLevels(next);
+  };
   const [newDept, setNewDept] = useState('');
   const [storePrice, setStorePrice] = useState(article && article.store_price !== article.sale_price ? String(article.store_price) : '');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value });
   const vatId = f.vatRateId || rates.data?.[0]?.id || '';
   const rate = rates.data?.find((r) => r.id === vatId)?.rate_bp ?? 0;
-  const sale = parseAmount(f.salePrice);
-  const buy = parseAmount(f.purchasePrice);
-  const ht = sale ? splitTtc(sale, rate).ht : 0;
+  const piece = f.unit === 'piece';
+  const lastOn = piece ? levels.reduce((last, l, i) => (i === 0 || l.enabled ? i : last), 0) : 0;
+  const unitName = piece ? levels[lastOn]!.name.trim() || 'pièce' : f.unit === 'kg' ? 'kg' : 'litre';
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sale === null || buy === null) return toast.error('Prix invalides');
     const opt = (v: string) => (v.trim() ? parseQty(v) : null);
-    const price = (v: string) => (v.trim() ? parseAmount(v) : null);
-    const piece = f.unit === 'piece';
+    const lv = levelsToInput(levels, buy, piece);
+    if (typeof lv === 'string') return toast.error(lv);
     try {
       const saved = await call(
         'catalogue.save',
         {
           code: f.code || undefined,
           name: f.name,
+          otherRef: f.otherRef || null,
           familyId: f.familyId || null,
           brand: f.brand || null,
           unit: f.unit,
           vatRateId: vatId,
-          purchasePrice: buy,
-          salePrice: sale,
+          purchasePrice: lv.purchasePrice,
+          packPurchasePrice: lv.packPurchasePrice,
+          packCostPrice: lv.packCostPrice,
+          salePrice: lv.salePrice,
           perishable: f.perishable,
           plu: f.plu || null,
           quickKey: f.quickKey,
@@ -196,20 +237,10 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
           maxQty: opt(f.maxQty),
           active: f.active,
           barcodes: barcodes.filter((b) => b.code.trim()).map((b) => ({ code: b.code, packQty: parseQty(b.pack) ?? 1000 })),
-          unitName: piece ? tariff.unitName.trim() || null : null,
-          wholesalePrice: price(tariff.wholesale),
-          superWholesalePrice: price(tariff.superWholesale),
-          packs: piece
-            ? packs.map((p, i) => ({
-                name: p.name,
-                contains: Math.floor(Number(p.contains) || 0),
-                salePrice: parseAmount(p.sale) ?? 0,
-                wholesalePrice: price(p.wholesale),
-                superWholesalePrice: price(p.superWholesale),
-                barcode: p.barcode.trim() || null,
-                purchase: i === purchaseIndex,
-              }))
-            : [],
+          unitName: lv.unitName,
+          wholesalePrice: lv.wholesalePrice,
+          superWholesalePrice: lv.superWholesalePrice,
+          packs: lv.packs,
         },
         article?.id,
       );
@@ -219,7 +250,7 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
         if (sp !== current) await call('catalogue.setStorePrice', saved.id, sp);
       }
       toast.ok('Article enregistré');
-      onSaved();
+      onSaved(saved);
     } catch (err) {
       toast.error(err);
     }
@@ -232,11 +263,11 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
           <Field label="Désignation">
             <input autoFocus value={f.name} onChange={set('name')} required />
           </Field>
-          <Field label="Marque">
-            <input value={f.brand} onChange={set('brand')} />
-          </Field>
           <Field label="Code article" hint="Laisser vide pour numérotation automatique">
             <input value={f.code} onChange={set('code')} />
+          </Field>
+          <Field label="Autre réf." hint="Référence fournisseur, ancien code : cherchée en caisse">
+            <input value={f.otherRef} onChange={set('otherRef')} />
           </Field>
           <Field label="Rayon / famille">
             <select value={f.familyId} onChange={set('familyId')}>
@@ -251,6 +282,41 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
                 </optgroup>
               ))}
             </select>
+          </Field>
+          <Field label="Unité de vente">
+            <select value={f.unit} onChange={set('unit')}>
+              <option value="piece">Pièce</option>
+              <option value="kg">Kilogramme</option>
+              <option value="litre">Litre</option>
+            </select>
+          </Field>
+          <Field label="TVA">
+            <select value={vatId} onChange={set('vatRateId')}>
+              {(rates.data ?? []).map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <h3>Conditionnements et prix</h3>
+        <p className="muted small">
+          {piece
+            ? "Ligne 1 : le conditionnement d'achat (PALETTE, CASIER, CARTON) avec ses prix d'achat et de revient. Lignes 2 à 4 : les conditionnements de vente, du plus grand au plus petit, avec leur diviseur par rapport au conditionnement d'achat (une palette de 24 canettes : CANETTE, diviseur 24). Leur achat et leur revient se calculent ; leurs prix de vente se modifient."
+            : 'Article vendu au poids ou au volume : prix au ' + unitName + '.'}
+        </p>
+        {previous && (
+          <p className="warn-text small">
+            Nouveau conditionnement d'achat au-dessus de {previous.name} (acheté jusqu'ici {fcfa(parseAmount(previous.buy.purchase) ?? 0)}) : donnez son nom, puis le diviseur de{' '}
+            {previous.name}. Les prix d'achat et les autres diviseurs se recalculent.
+          </p>
+        )}
+        <LevelGrid levels={levels} buy={buy} rate={rate} piece={piece} unitLabel={unitName.toUpperCase()} onLevels={onLevels} onBuy={setBuy} />
+        <h3>Autres informations</h3>
+        <div className="grid3">
+          <Field label="Marque">
+            <input value={f.brand} onChange={set('brand')} />
           </Field>
           <Field label="Nouveau rayon" hint="Crée le rayon et une famille du même nom">
             <div className="inline">
@@ -274,40 +340,8 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
               </button>
             </div>
           </Field>
-          <Field label="Unité de vente">
-            <select value={f.unit} onChange={set('unit')}>
-              <option value="piece">Pièce</option>
-              <option value="kg">Kilogramme</option>
-              <option value="litre">Litre</option>
-            </select>
-          </Field>
-          <Field label="TVA">
-            <select value={vatId} onChange={set('vatRateId')}>
-              {(rates.data ?? []).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {f.unit !== 'piece' && (
-            <>
-              <Field label="Prix d'achat HT (FCFA)">
-                <input inputMode="numeric" value={f.purchasePrice} onChange={set('purchasePrice')} />
-              </Field>
-              <Field
-                label="Prix de vente TTC (FCFA)"
-                hint={sale ? `HT ${fcfa(ht)}${buy ? ` · marge ${fcfa(ht - buy)} (${ht ? Math.round(((ht - buy) / ht) * 100) : 0} %)` : ''}` : undefined}
-              >
-                <input inputMode="numeric" value={f.salePrice} onChange={set('salePrice')} required />
-              </Field>
-              <Field label="Prix de gros TTC" hint="Vide = prix de vente">
-                <input inputMode="numeric" value={tariff.wholesale} onChange={(e) => setTariff({ ...tariff, wholesale: e.target.value })} />
-              </Field>
-            </>
-          )}
           {canSetStorePrice && article && (
-            <Field label="Prix propre à ce magasin" hint="Vide = prix national">
+            <Field label={`Prix magasin (${unitName.toLowerCase()})`} hint="Vide = prix national">
               <input inputMode="numeric" value={storePrice} onChange={(e) => setStorePrice(e.target.value)} />
             </Field>
           )}
@@ -335,30 +369,7 @@ function ArticleForm({ article, canSetStorePrice, onClose, onSaved }: { article:
             <input type="checkbox" checked={f.active} onChange={set('active')} /> Actif
           </label>
         </div>
-        {f.unit === 'piece' && (
-          <>
-            <h3>Conditionnements et prix</h3>
-            <p className="muted small">
-              Du conditionnement d'achat (carton, palette) à l'unité vendue au détail. « Contient » donne le nombre du niveau suivant : un carton
-              contient 10 paquets, un paquet 10 ampoules. Le prix de gros s'applique aux clients au tarif gros.
-            </p>
-            <PackGrid
-              packs={packs}
-              base={{ unitName: tariff.unitName, purchase: f.purchasePrice, sale: f.salePrice, wholesale: tariff.wholesale, superWholesale: tariff.superWholesale }}
-              purchaseIndex={purchaseIndex}
-              rate={rate}
-              onPacks={setPacks}
-              onBase={(patch) => {
-                if (patch.purchase !== undefined || patch.sale !== undefined)
-                  setF((cur) => ({ ...cur, ...(patch.purchase !== undefined ? { purchasePrice: patch.purchase } : {}), ...(patch.sale !== undefined ? { salePrice: patch.sale } : {}) }));
-                const { purchase: _p, sale: _s, ...rest } = patch;
-                if (Object.keys(rest).length) setTariff((cur) => ({ ...cur, ...rest }));
-              }}
-              onPurchaseIndex={setPurchaseIndex}
-            />
-          </>
-        )}
-        <h3>{f.unit === 'piece' && packs.length ? `Codes-barres de l'unité (${tariff.unitName.trim() || 'pièce'})` : 'Codes-barres'}</h3>
+        <h3>{piece && lastOn > 0 ? `Codes-barres de l'unité de détail (${unitName})` : 'Codes-barres'}</h3>
         <table className="list compact">
           <tbody>
             {barcodes.map((b, i) => (

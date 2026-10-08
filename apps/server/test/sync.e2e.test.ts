@@ -272,6 +272,8 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
       ['Pack', 6000, 4_500],
     ]);
     expect(onPc2.unit_name).toBe('Bouteille');
+    // Un produit épuisé ne se vend pas : le PC 2 reçoit d'abord un pack.
+    pc2.stock.receive(ctx2, { warehouseId: pc2.admin.salesWarehouse(ctx2.storeId).id, lines: [{ articleId: jus.id, qty: 12_000, unitCost: 500 }] });
     const sale = pc2.pos.completeSale(ctx2, { lines: [{ articleId: jus.id, qty: 12_000, packId: onPc2.packs[1]!.id }], payments: [{ method: 'CASH', amount: 9_000 }] });
     await syncOnce(pc2);
     await syncOnce(pc1);

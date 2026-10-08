@@ -1,9 +1,9 @@
 import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
 import { PendingReceipts, PurchasesByProduct } from './Controls';
-import { PackUnitSelect, packChoices, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
+import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -43,7 +43,7 @@ const deliveryNote = (n: string) => (/^b\.?l\b/i.test(n.trim()) ? n.trim() : `BL
 
 export function Purchases({ user, initialTab = 'orders' }: { user: User; initialTab?: PurchasesTab }) {
   const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
-  const buying = ['admin', 'manager', 'stock'].includes(user.role);
+  const buying = has(user, 'purchase_orders');
   const [tab, setTab] = useState<PurchasesTab>(initialTab === 'new-order' ? 'orders' : initialTab);
   const tabs: [PurchasesTab, string][] = [
     ['orders', 'Bons de commande'],
@@ -211,9 +211,10 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
     const unitCost = ref?.unit_cost || a.purchase_price || 0;
     const baseQty = ref?.pack_qty ?? purchaseUnits(a);
     const units = unitsFor(baseQty, packChoices(a), purchaseUnits(a));
+    const cost = ref?.unit_cost ? String(Math.round((unitCost * units) / 1000)) : packCostText(a, units);
     setLines([
       ...lines,
-      { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost: unitCost ? String(Math.round((unitCost * units) / 1000)) : '', packUnits: units },
+      { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units },
     ]);
   };
 
@@ -481,7 +482,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
           const units = purchaseUnits(a);
           setLines([
             ...lines,
-            { orderLineId: null, articleId: a.id, name: a.name, unit: a.unit, perishable: a.perishable === 1, ordered: 0, already: 0, qty: '1', cost: a.purchase_price ? String(Math.round((a.purchase_price * units) / 1000)) : '', packUnits: units, lot: '', expiry: '' },
+            { orderLineId: null, articleId: a.id, name: a.name, unit: a.unit, perishable: a.perishable === 1, ordered: 0, already: 0, qty: '1', cost: packCostText(a, units), packUnits: units, lot: '', expiry: '' },
           ]);
         }}
       />
@@ -547,7 +548,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
                 .map((l) => {
                   const b = toBase(l.qty, l.cost, l.packUnits);
                   if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
-                  return { orderLineId: l.orderLineId, articleId: l.articleId, qty: b.qty, unitCost: b.unitCost, lotNumber: l.lot || null, expiry: l.expiry || null };
+                  return { orderLineId: l.orderLineId, articleId: l.articleId, qty: b.qty, unitCost: b.unitCost, packCost: parseAmount(l.cost) ?? undefined, packUnits: l.packUnits, lotNumber: l.lot || null, expiry: l.expiry || null };
                 });
               const r = await call('purchases.receiveOrder', id, { deliveryNote: note || undefined, lines: input });
               toast.ok(`Réception ${r.number} enregistrée, stock mis à jour`);

@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { TVA_CAMEROUN_NORMAL } from '@superette/core';
+import { EDITABLE_ROLES, PERMISSIONS, type Permission, TVA_CAMEROUN_NORMAL, roleRights } from '@superette/core';
 import { AppError, Base, hashPin, newId, verifyPin } from './util';
 
 export type Role = 'admin' | 'manager' | 'cashier' | 'stock' | 'accountant';
@@ -284,6 +284,46 @@ export class AdminService extends Base {
   }
 
   /** Validation superviseur (annulation, retour, remise) par le code d'un gérant. */
+  // --- Droits par rôle --------------------------------------------------------
+
+  private savedRights(role: Role): Partial<Record<Permission, boolean>> | null {
+    const raw = this.db.prepare('SELECT rights FROM role_rights WHERE id = ?').pluck().get(role) as string | undefined;
+    return raw ? (JSON.parse(raw) as Partial<Record<Permission, boolean>>) : null;
+  }
+
+  /** Droits effectifs d'un rôle (tous pour l'administrateur). */
+  rights(role: Role): Permission[] {
+    return roleRights(role, this.savedRights(role));
+  }
+
+  hasRight(user: Pick<User, 'role'>, permission: Permission): boolean {
+    return this.rights(user.role).includes(permission);
+  }
+
+  /** Tableau des droits : chaque rôle réglable et ses droits cochés. */
+  rightsMatrix(): { role: Role; label: string; rights: Permission[] }[] {
+    return EDITABLE_ROLES.map((role) => ({ role, label: ROLE_LABELS[role], rights: this.rights(role) }));
+  }
+
+  /** Enregistre les droits d'un rôle (l'administrateur garde toujours tous les droits). */
+  saveRights(userId: string, role: Role, rights: Permission[]): Permission[] {
+    if (role === 'admin') throw new AppError("L'administrateur a toujours tous les droits", 'INVALID');
+    if (!(EDITABLE_ROLES as Role[]).includes(role)) throw new AppError('Rôle inconnu', 'INVALID');
+    const unknown = rights.find((r) => !(r in PERMISSIONS));
+    if (unknown) throw new AppError(`Droit inconnu : ${unknown}`, 'INVALID');
+    return this.tx(() => {
+      const map = Object.fromEntries((Object.keys(PERMISSIONS) as Permission[]).map((k) => [k, rights.includes(k)]));
+      const row = { id: role, rights: JSON.stringify(map), updated_at: this.now() };
+      this.db
+        .prepare('INSERT INTO role_rights (id, rights, updated_at) VALUES (@id, @rights, @updated_at) ON CONFLICT(id) DO UPDATE SET rights = excluded.rights, updated_at = excluded.updated_at')
+        .run(row);
+      this.enqueue(null, 'role_rights', role, 'upsert', row);
+      this.audit(userId, 'admin.rights', 'role', role, { rights });
+      return this.rights(role);
+    });
+  }
+
+  /** Code d'un administrateur ou d'un gérant pour valider une action. */
   authorizeSupervisor(pin: string): User {
     const rows = this.db
       .prepare("SELECT id, pin_hash FROM users WHERE active = 1 AND role IN ('admin', 'manager')")

@@ -15,6 +15,8 @@ import {
   requiresReference,
   settle,
   splitTtc,
+  formatFcfa,
+  levelCost,
   tariffPrice,
 } from '@superette/core';
 import type { AdminService } from './admin';
@@ -51,6 +53,8 @@ export interface SaleLineInput {
   discount?: Fcfa;
   /** Conditionnement vendu (carton, paquet) : la quantité en est un multiple. */
   packId?: string | null;
+  /** Prix TTC saisi à la caisse pour l'unité ou le conditionnement vendu ; jamais sous le revient. */
+  price?: Fcfa | null;
 }
 
 export type PricedLine = PromotedLine<CartLine & { barcode: string | null; packId: string | null; packName: string | null }>;
@@ -78,6 +82,10 @@ export interface SaleSearchRow {
   price: Fcfa;
   /** Dernier prix de vente de ce conditionnement (à ce client s'il est choisi). */
   last_price: Fcfa | null;
+  /** Coût de revient du conditionnement : plancher du prix saisi. */
+  cost: Fcfa;
+  /** Stock insuffisant pour en vendre un seul : la ligne est « Épuisé » et ne se vend pas. */
+  out_of_stock: boolean;
 }
 
 export interface SaleInput {
@@ -91,6 +99,8 @@ export interface SaleInput {
   creditAuthorizedBy?: string | null;
   /** Devis ou proforma facturé : ses prix garantis valent accord de remise. */
   quoteId?: string | null;
+  /** Nom donné par un client comptoir (sans fiche client), imprimé sur le ticket et la facture. */
+  clientName?: string | null;
 }
 
 export interface Sale {
@@ -268,6 +278,14 @@ export class PosService extends Base {
       const pack = l.packId ? article.packs.find((p) => p.id === l.packId) : undefined;
       if (l.packId && !pack) throw new AppError(`Conditionnement inconnu pour ${article.name}`, 'INVALID');
       if (pack && l.qty % pack.units !== 0) throw new AppError(`${article.name} : la quantité doit être un nombre entier de ${pack.name}`, 'INVALID');
+      const price = l.price ?? null;
+      if (price !== null) {
+        if (!Number.isSafeInteger(price) || price <= 0) throw new AppError(`Prix invalide : ${article.name}`, 'INVALID');
+        const floor = levelCost(article, pack?.units ?? 1000);
+        if (price < floor) {
+          throw new AppError(`${article.name} : le prix ne peut pas descendre sous le coût de revient (${formatFcfa(floor)} ${pack ? `par ${pack.name.toLowerCase()}` : 'par unité'})`, 'BELOW_COST');
+        }
+      }
       const line: CartLine & { barcode: string | null; packId: string | null; packName: string | null } = {
         articleId: article.id,
         label: article.name,
@@ -281,10 +299,12 @@ export class PosService extends Base {
         packName: pack?.name ?? null,
         ...(pack
           ? {
-              packPrice: tariffPrice({ retail: pack.sale_price, wholesale: pack.wholesale_price, superWholesale: pack.super_wholesale_price }, level),
+              packPrice: price ?? tariffPrice({ retail: pack.sale_price, wholesale: pack.wholesale_price, superWholesale: pack.super_wholesale_price }, level),
               packUnits: pack.units,
             }
           : {}),
+        ...(price !== null && !pack ? { unitPrice: price } : {}),
+        ...(price !== null ? { priceSet: true } : {}),
       };
       if (lineTotal(line) < 0) throw new AppError(`Remise supérieure au prix : ${article.name}`, 'INVALID');
       return line;
@@ -294,8 +314,7 @@ export class PosService extends Base {
 
   /**
    * Recherche en caisse, une ligne par conditionnement, du plus grand au plus
-   * petit. Sans `includeEmpty`, seules les lignes dont le stock permet d'en
-   * vendre au moins un apparaissent.
+   * petit. Les lignes épuisées sont listées et marquées (sauf `includeEmpty: false`).
    */
   searchForSale(storeId: string, query: string, opts: { customerId?: string | null; includeEmpty?: boolean; limit?: number } = {}): SaleSearchRow[] {
     const articles = this.catalogue.suggestArticles(query, storeId, 50);
@@ -334,6 +353,8 @@ export class PosService extends Base {
           pack_id: p.id,
           pack_name: p.name,
           units: p.units,
+          cost: levelCost(a, p.units),
+          out_of_stock: qty < p.units,
           price: tariffPrice({ retail: p.sale_price, wholesale: p.wholesale_price, superWholesale: p.super_wholesale_price }, level),
           last_price: last.get(`${a.id}|${p.name}`) ?? null,
         });
@@ -343,12 +364,32 @@ export class PosService extends Base {
         pack_id: null,
         pack_name: a.unit_name ?? unitLabel[a.unit],
         units: 1000,
+        cost: levelCost(a, 1000),
+        out_of_stock: a.unit === 'piece' ? qty < 1000 : qty <= 0,
         price: tariffPrice({ retail: a.store_price, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price }, level),
         last_price: last.get(`${a.id}|`) ?? null,
       });
     }
-    const shown = opts.includeEmpty ? rows : rows.filter((r) => r.stock >= (r.unit === 'piece' ? r.units : 1));
+    const shown = opts.includeEmpty === false ? rows.filter((r) => !r.out_of_stock) : rows;
     return shown.slice(0, opts.limit ?? 60);
+  }
+
+  /** Un produit épuisé ne se vend pas : le stock du dépôt de vente doit couvrir le ticket. */
+  private assertInStock(storeId: string, lines: { articleId: string; label: string; qty: Milli }[]): void {
+    const warehouse = this.admin.salesWarehouse(storeId);
+    const wanted = new Map<string, { label: string; qty: Milli }>();
+    for (const l of lines) {
+      const w = wanted.get(l.articleId);
+      wanted.set(l.articleId, { label: l.label, qty: (w?.qty ?? 0) + l.qty });
+    }
+    const get = this.db.prepare('SELECT a.unit, a.unit_name, COALESCE(s.qty, 0) AS qty FROM articles a LEFT JOIN stock s ON s.article_id = a.id AND s.warehouse_id = ? WHERE a.id = ?');
+    for (const [articleId, w] of wanted) {
+      const a = get.get(warehouse.id, articleId) as { unit: string; unit_name: string | null; qty: Milli };
+      if (w.qty <= a.qty) continue;
+      const unit = a.unit === 'piece' ? (a.unit_name ?? 'pièce').toLowerCase() : a.unit === 'kg' ? 'kg' : 'L';
+      const left = a.qty <= 0 ? 'épuisé' : `il reste ${String(a.qty / 1000).replace('.', ',')} ${unit}`;
+      throw new AppError(`Stock insuffisant pour ${w.label} : ${left}`, 'OUT_OF_STOCK');
+    }
   }
 
   completeSale(ctx: Context, input: SaleInput): Sale {
@@ -364,8 +405,9 @@ export class PosService extends Base {
     if (totals.totalDiscount > 0 && !quote) {
       const user = this.admin.getUser(ctx.userId);
       const authorizer = input.discountAuthorizedBy ? this.admin.getUser(input.discountAuthorizedBy) : null;
-      const allowed = (u: { role: string } | null) => u !== null && (u.role === 'admin' || u.role === 'manager');
-      if (!allowed(user) && !allowed(authorizer)) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
+      // Droit « remise sans code » du vendeur, ou code d'un gérant.
+      const supervisor = authorizer !== null && (authorizer.role === 'admin' || authorizer.role === 'manager');
+      if (!this.admin.hasRight(user, 'discount') && !supervisor) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
     }
     for (const p of input.payments) {
       if (!(p.method in PAYMENT_METHODS)) throw new AppError(`Moyen de paiement inconnu : ${p.method}`, 'INVALID');
@@ -373,6 +415,7 @@ export class PosService extends Base {
         throw new AppError(`Référence de transaction obligatoire pour ${PAYMENT_METHODS[p.method]}`, 'REFERENCE_REQUIRED');
       }
     }
+    this.assertInStock(ctx.storeId, lines);
     const settlement = settle(totals.totalTtc, input.payments);
     if (!settlement.complete) throw new AppError('Le ticket n’est pas entièrement réglé', 'UNPAID');
     const onCredit = input.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0);
@@ -392,8 +435,8 @@ export class PosService extends Base {
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht,
-             total_tva, total_discount, total_promo, price_level, change_given, customer_id, due_date, created_at)
-           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             total_tva, total_discount, total_promo, price_level, change_given, customer_id, client_name, due_date, created_at)
+           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           saleId,
@@ -410,6 +453,7 @@ export class PosService extends Base {
           level,
           settlement.change,
           customer?.id ?? null,
+          customer ? null : input.clientName?.trim().slice(0, 80) || null,
           due,
           now,
         );
@@ -436,6 +480,12 @@ export class PosService extends Base {
       if (totals.totalDiscount > 0) {
         this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: totals.totalDiscount, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
       }
+      const changed = lines.filter((l) => l.priceSet);
+      if (changed.length) {
+        this.audit(ctx.userId, 'sale.price_set', 'sale', saleId, {
+          lines: changed.map((l) => ({ article: l.label, pack: l.packName, price: l.packPrice ?? l.unitPrice })),
+        });
+      }
       if (input.quoteId) this.quotes.markAccepted(ctx, input.quoteId, saleId);
       const sale = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', sale);
@@ -446,7 +496,7 @@ export class PosService extends Base {
   getSale(id: string): Sale {
     const sale = this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name, c.name AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
+        `SELECT s.*, u.name AS user_name, COALESCE(c.name, s.client_name) AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
          LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?`,
       )
       .get(id) as Omit<Sale, 'lines' | 'payments'> | undefined;
@@ -471,7 +521,7 @@ export class PosService extends Base {
   listSales(opts: { sessionId?: string; storeId?: string; date?: string; customerId?: string; limit?: number }): Omit<Sale, 'lines' | 'payments'>[] {
     return this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name, c.name AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
+        `SELECT s.*, u.name AS user_name, COALESCE(c.name, s.client_name) AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
          LEFT JOIN customers c ON c.id = s.customer_id
          WHERE (@sessionId IS NULL OR s.session_id = @sessionId)
            AND (@storeId IS NULL OR s.store_id = @storeId)

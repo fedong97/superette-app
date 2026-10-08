@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { Permission } from '@superette/core';
 import { type Result, call } from './api';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
@@ -32,34 +33,26 @@ interface Win {
   nonce: number;
 }
 
-const ALL: Role[] = ['admin', 'manager', 'cashier', 'stock', 'accountant'];
-const POS: Role[] = ['admin', 'manager', 'cashier'];
-const STOCK: Role[] = ['admin', 'manager', 'stock'];
-const MANAGE: Role[] = ['admin', 'manager'];
-const ACCOUNTING: Role[] = ['admin', 'manager', 'accountant'];
-const BUY: Role[] = ['admin', 'manager', 'stock'];
-const QUOTES: Role[] = ['admin', 'manager', 'cashier', 'accountant'];
-const PURCHASING: Role[] = ['admin', 'manager', 'stock', 'accountant'];
-const CUSTOMERS: Role[] = ['admin', 'manager', 'cashier', 'accountant'];
 
-const WINDOWS: Record<WinKind, { label: string; roles: Role[] }> = {
-  cash1: { label: 'Fiche de facturation 1', roles: POS },
-  cash2: { label: 'Fiche de facturation 2', roles: POS },
-  credit: { label: 'Vente à crédit', roles: POS },
-  sales: { label: 'Mes factures', roles: ACCOUNTING },
-  articles: { label: 'Produits', roles: STOCK },
-  stock: { label: 'Stock', roles: STOCK },
-  purchases: { label: 'Achats', roles: PURCHASING },
-  suppliers: { label: 'Fournisseurs', roles: PURCHASING },
-  customers: { label: 'Clients', roles: CUSTOMERS },
-  expenses: { label: 'Dépenses', roles: ACCOUNTING },
-  quotes: { label: 'Devis et proformas', roles: QUOTES },
-  promotions: { label: 'Promotions', roles: MANAGE },
-  labels: { label: 'Étiquettes', roles: STOCK },
-  reports: { label: 'Rapports de ventes', roles: ACCOUNTING },
-  accounting: { label: 'Comptabilité', roles: ACCOUNTING },
-  dashboard: { label: 'Tableau de bord', roles: MANAGE },
-  admin: { label: 'Administration', roles: MANAGE },
+
+const WINDOWS: Record<WinKind, { label: string; perm: Permission }> = {
+  cash1: { label: 'Fiche de facturation 1', perm: 'cash' },
+  cash2: { label: 'Fiche de facturation 2', perm: 'cash' },
+  credit: { label: 'Vente à crédit', perm: 'credit' },
+  sales: { label: 'Mes factures', perm: 'sales' },
+  articles: { label: 'Produits', perm: 'articles' },
+  stock: { label: 'Stock', perm: 'stock' },
+  purchases: { label: 'Achats', perm: 'purchases' },
+  suppliers: { label: 'Fournisseurs', perm: 'suppliers' },
+  customers: { label: 'Clients', perm: 'customers' },
+  expenses: { label: 'Dépenses', perm: 'expenses' },
+  quotes: { label: 'Devis et proformas', perm: 'quotes' },
+  promotions: { label: 'Promotions', perm: 'promotions' },
+  labels: { label: 'Étiquettes', perm: 'labels' },
+  reports: { label: 'Rapports de ventes', perm: 'reports' },
+  accounting: { label: 'Comptabilité', perm: 'accounting' },
+  dashboard: { label: 'Tableau de bord', perm: 'dashboard' },
+  admin: { label: 'Administration', perm: 'admin' },
 };
 
 interface MenuItem {
@@ -70,7 +63,10 @@ interface MenuItem {
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
   soon?: boolean;
-  roles?: Role[];
+  /** Droit nécessaire en plus de celui de la fenêtre (Administration › Droits). */
+  perm?: Permission;
+  /** Réservé au rôle Administrateur. */
+  adminOnly?: boolean;
 }
 
 const SEP: MenuItem = { label: '', sep: true };
@@ -101,39 +97,39 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Tickets et factures annulés', open: ['sales', 'cancelled'] },
       SEP,
       { label: 'Devis et factures proforma', open: ['quotes'] },
-      { label: 'Factures cumulées par client', open: ['reports', 'customer'], roles: ACCOUNTING },
+      { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'] },
       SEP,
-      { label: 'Promotions', open: ['promotions'], roles: MANAGE },
-      { label: 'Situation des ventes', open: ['reports', 'department'], roles: ACCOUNTING },
-      { label: 'Évolution périodique', open: ['reports', 'evolution'], roles: ACCOUNTING },
+      { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
+      { label: 'Situation des ventes', open: ['reports', 'department'], perm: 'reports' },
+      { label: 'Évolution périodique', open: ['reports', 'evolution'], perm: 'reports' },
       { label: 'Tableau de bord', open: ['dashboard'] },
     ],
   ],
   [
     'Achats',
     [
-      { label: 'Saisir un nouvel achat (bon de commande)', open: ['purchases', 'new-order'], roles: BUY },
-      { label: 'Saisir une facture à partir des BL', open: ['purchases', 'invoices'], roles: ACCOUNTING },
-      { label: 'Registre des achats', open: ['purchases', 'invoices'], roles: ACCOUNTING },
+      { label: 'Saisir un nouvel achat (bon de commande)', open: ['purchases', 'new-order'], perm: 'purchase_orders' },
+      { label: 'Saisir une facture à partir des BL', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
+      { label: 'Registre des achats', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
       { label: 'Registre des achats par produits', open: ['purchases', 'byproduct'] },
       SEP,
       { label: 'Registre des réceptions', open: ['purchases', 'receptions'] },
       { label: 'Saisir une nouvelle réception (sans commande)', open: ['stock', 'receive'] },
       SEP,
       { label: 'Bons de commande', open: ['purchases', 'orders'] },
-      { label: 'Proposition de commande', open: ['purchases', 'reorder'], roles: BUY },
-      { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'purchase_orders' },
+      { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Marchandises non encore reçues', open: ['purchases', 'pending'] },
-      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_invoices' },
     ],
   ],
   ['Fabrication', [{ label: 'Recettes et ordres de fabrication', soon: true }]],
   [
     'Trésorerie',
     [
-      { label: 'Opérations (journaux de trésorerie)', open: ['accounting', 'journals'], roles: ACCOUNTING },
+      { label: 'Opérations (journaux de trésorerie)', open: ['accounting', 'journals'], perm: 'accounting' },
       { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },
       { label: 'Extrait de compte (grand livre)', open: ['accounting', 'ledger'] },
       { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'] },
@@ -142,7 +138,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Rechercher dans les caisses', open: ['sales', 'find'] },
       SEP,
       { label: 'Registre de caisse (Z)', open: ['sales', 'z'] },
-      { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], roles: ACCOUNTING },
+      { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], perm: 'accounting' },
     ],
   ],
   [
@@ -154,7 +150,7 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Péremptions', open: ['stock', 'expiry'] },
       { label: 'Étiquettes de rayon', open: ['labels'] },
-      { label: 'Promotions', open: ['promotions'], roles: MANAGE },
+      { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Articles par dépôt', open: ['stock', 'warehouses'] },
       { label: 'Rayonnage des articles', open: ['articles', 'shelving'] },
@@ -163,11 +159,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
       SEP,
-      { label: 'Inventaires', open: ['stock', 'inventory'], roles: MANAGE },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: 'inventory' },
       { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'] },
       SEP,
       { label: 'Stocks critiques', open: ['stock', 'critical'] },
-      { label: 'Proposition de commande', open: ['purchases', 'reorder'], roles: BUY },
+      { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'purchase_orders' },
     ],
   ],
   [
@@ -176,22 +172,22 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Liste des fournisseurs', open: ['suppliers', 'list'] },
       SEP,
       { label: 'Consulter un extrait de compte', open: ['suppliers', 'statement'] },
-      { label: 'Situation des fournisseurs', open: ['suppliers', 'situation'], roles: ACCOUNTING },
+      { label: 'Situation des fournisseurs', open: ['suppliers', 'situation'], perm: 'purchase_invoices' },
       { label: 'Les comptes dont le solde a bougé récemment', open: ['suppliers', 'recent'] },
       SEP,
-      { label: 'Factures et avoirs fournisseurs', open: ['purchases', 'invoices'], roles: ACCOUNTING },
-      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], roles: ACCOUNTING },
+      { label: 'Factures et avoirs fournisseurs', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_invoices' },
     ],
   ],
   [
     'Client',
     [
       { label: 'Liste', open: ['customers', 'list'] },
-      { label: 'Contrôle des échéances', open: ['customers', 'receivables'], roles: ACCOUNTING },
-      { label: "Contrôle des plafonds d'autorisation", open: ['customers', 'limits'], roles: ACCOUNTING },
+      { label: 'Contrôle des échéances', open: ['customers', 'receivables'], perm: 'receivables' },
+      { label: "Contrôle des plafonds d'autorisation", open: ['customers', 'limits'], perm: 'receivables' },
       SEP,
       { label: 'Consulter un extrait de compte', open: ['customers', 'statement'] },
-      { label: 'Situation des clients', open: ['customers', 'receivables'], roles: ACCOUNTING },
+      { label: 'Situation des clients', open: ['customers', 'receivables'], perm: 'receivables' },
       { label: 'Les comptes dont le solde a bougé récemment', open: ['customers', 'recent'] },
       SEP,
       { label: 'Règlements reçus', open: ['customers', 'payments'] },
@@ -218,7 +214,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'État du stock', open: ['stock', 'state'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
       { label: 'Pertes et casse', open: ['stock', 'loss'] },
-      { label: 'Inventaire', open: ['stock', 'inventory'], roles: MANAGE },
+      { label: 'Inventaire', open: ['stock', 'inventory'], perm: 'inventory' },
       { label: 'Péremptions', open: ['stock', 'expiry'] },
       { label: 'Étiquettes de rayon', open: ['labels'] },
     ],
@@ -238,10 +234,11 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Administration',
     [
-      { label: 'Magasins', open: ['admin', 'stores'], roles: ['admin'] },
+      { label: 'Magasins', open: ['admin', 'stores'], adminOnly: true },
       { label: 'Caisses', open: ['admin', 'registers'] },
       { label: 'Dépôts', open: ['admin', 'warehouses'] },
       { label: 'Utilisateurs', open: ['admin', 'users'] },
+      { label: 'Droits par rôle', open: ['admin', 'rights'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'] },
       { label: 'Serveur central', open: ['admin', 'server'] },
@@ -299,8 +296,9 @@ export function App() {
 
 function Workspace({ state, user, refresh }: { state: AppState; user: User; refresh: () => void }) {
   const toast = useToast();
-  const can = (roles: Role[]) => roles.includes(user.role);
-  const first: WinKind = can(POS) ? 'cash1' : can(STOCK) ? 'stock' : 'sales';
+  const can = (perm: Permission) => user.rights.includes(perm);
+  const canWin = (kind: WinKind) => can(WINDOWS[kind].perm);
+  const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
   const [wins, setWins] = useState<Win[]>([{ kind: first, nonce: 0 }]);
   const [active, setActive] = useState<WinKind>(first);
   const [menu, setMenu] = useState<string | null>(null);
@@ -330,7 +328,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   }, [menu]);
 
   const open = (kind: WinKind, tab?: string) => {
-    if (!can(WINDOWS[kind].roles)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
+    if (!canWin(kind)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
     setWins((ws) => {
       const existing = ws.find((w) => w.kind === kind);
       if (!existing) return [...ws, { kind, tab, nonce: 0 }];
@@ -349,7 +347,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
   const visibleItems = (items: MenuItem[]) =>
     items
-      .filter((i) => !i.roles || can(i.roles))
+      .filter((i) => (!i.perm || can(i.perm)) && (!i.adminOnly || user.role === 'admin'))
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
 
   const run = async (item: MenuItem) => {
@@ -395,7 +393,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   i.sep ? (
                     <hr key={`sep-${n}`} />
                   ) : (
-                    <button key={i.label} disabled={i.soon || (i.open && !can(WINDOWS[i.open[0]].roles))} onClick={() => void run(i)}>
+                    <button key={i.label} disabled={i.soon || (i.open && !canWin(i.open[0]))} onClick={() => void run(i)}>
                       {i.label}
                       {i.soon && <small>bientôt</small>}
                     </button>
@@ -416,7 +414,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             <button
               key={q.label}
               className={`${isActive ? 'active' : isOpen ? 'open' : ''} ${q.credit ? 'credit' : ''}`}
-              disabled={q.soon || (q.open && !can(WINDOWS[q.open[0]].roles))}
+              disabled={q.soon || (q.open && !canWin(q.open[0]))}
               title={q.soon ? 'Module à venir' : undefined}
               onClick={() => q.open && open(...q.open)}
             >
@@ -468,7 +466,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
         {backupLate.data && (
-          <button className="warn" disabled={!can(WINDOWS.admin.roles)} onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
+          <button className="warn" disabled={!canWin('admin')} onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
           </button>
         )}

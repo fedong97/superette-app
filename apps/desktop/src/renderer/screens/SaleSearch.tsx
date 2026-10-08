@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatFcfa } from '@superette/core';
 import { type Result, call } from '../api';
-import { Field, Modal, fcfa, parseQty, qty, useToast } from '../ui';
+import { Field, Modal, fcfa, parseAmount, parseQty, qty, useToast } from '../ui';
 
 export type SaleRow = Result<'pos.search'>[number];
 
@@ -78,7 +78,7 @@ export function SaleRowList({ s, onPick }: { s: ReturnType<typeof useSaleRows>; 
           key={rowKey(r)}
           role="option"
           aria-selected={i === s.active}
-          className={i === s.active ? 'active' : ''}
+          className={`${i === s.active ? 'active' : ''} ${r.out_of_stock ? 'out' : ''}`}
           // mousedown : choisir avant que le champ perde le focus.
           onMouseDown={(e) => {
             e.preventDefault();
@@ -89,7 +89,7 @@ export function SaleRowList({ s, onPick }: { s: ReturnType<typeof useSaleRows>; 
           <span className="muted">{r.code}</span>
           <span className="suggest-name">{r.name}</span>
           <span className="cond">{r.pack_name}</span>
-          <span className="r muted">{stockIn(r)}</span>
+          <span className="r muted">{r.out_of_stock ? <span className="tag danger epuise">Épuisé</span> : stockIn(r)}</span>
           <span className="suggest-price">{amount(r.price)}</span>
         </button>
       ))}
@@ -121,7 +121,7 @@ export function SaleSearchDialog({
 }) {
   const toast = useToast();
   const [q, setQ] = useState(initialQuery);
-  const [withEmpty, setWithEmpty] = useState(false);
+  const [hideEmpty, setHideEmpty] = useState(false);
   const [rows, setRows] = useState<SaleRow[]>([]);
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLTableSectionElement>(null);
@@ -132,7 +132,7 @@ export function SaleSearchDialog({
     }
     let live = true;
     const t = setTimeout(() => {
-      call('pos.search', q, { customerId, includeEmpty: withEmpty })
+      call('pos.search', q, { customerId, includeEmpty: !hideEmpty })
         .then((r) => {
           if (!live) return;
           setRows(r);
@@ -144,7 +144,7 @@ export function SaleSearchDialog({
       live = false;
       clearTimeout(t);
     };
-  }, [q, withEmpty, customerId]);
+  }, [q, hideEmpty, customerId]);
   useEffect(() => {
     listRef.current?.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' });
   }, [active]);
@@ -170,7 +170,7 @@ export function SaleSearchDialog({
           }}
         />
         <label className="inline">
-          <input type="checkbox" checked={withEmpty} onChange={(e) => setWithEmpty(e.target.checked)} /> Afficher aussi les lignes sans stock
+          <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} /> Masquer les lignes épuisées
         </label>
       </div>
       <div className="sale-search">
@@ -189,11 +189,11 @@ export function SaleSearchDialog({
           </thead>
           <tbody ref={listRef}>
             {rows.map((r, i) => (
-              <tr key={rowKey(r)} className={`clickable ${i === active ? 'sel' : ''} ${r.stock < r.units ? 'inactive' : ''}`} onClick={() => setActive(i)} onDoubleClick={() => onPick(r)}>
+              <tr key={rowKey(r)} className={`clickable ${i === active ? 'sel' : ''} ${r.out_of_stock ? 'inactive' : ''}`} onClick={() => setActive(i)} onDoubleClick={() => onPick(r)}>
                 <td>{r.code}</td>
                 <td className="muted">{r.other_ref ?? ''}</td>
                 <td>{r.name}</td>
-                <td className="r">{stockIn(r)}</td>
+                <td className="r">{r.out_of_stock ? <span className="tag danger epuise">Épuisé</span> : stockIn(r)}</td>
                 <td className="cond">{r.pack_name}</td>
                 <td className="muted">{r.warehouse.toUpperCase()}</td>
                 <td className="r b">{amount(r.price)}</td>
@@ -203,7 +203,7 @@ export function SaleSearchDialog({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="muted">
-                  {q.trim() ? (withEmpty ? 'Aucun article ne correspond.' : 'Rien en stock. Cochez « Afficher aussi les lignes sans stock ».') : 'Tapez le début du nom.'}
+                  {q.trim() ? (hideEmpty ? 'Rien en stock. Décochez « Masquer les lignes épuisées ».' : 'Aucun article ne correspond.') : 'Tapez le début du nom.'}
                 </td>
               </tr>
             )}
@@ -235,40 +235,84 @@ export function SaleSearchDialog({
   );
 }
 
-/** Quantité demandée dès qu'on choisit une ligne, avant de l'ajouter à la fiche. */
-export function QtyPrompt({ row, initial, onClose, onDone }: { row: SaleRow; initial?: string; onClose: () => void; onDone: (qtyMilli: number) => void }) {
+/**
+ * Choix d'une ligne : la quantité est demandée tout de suite, et le prix peut
+ * être changé (jamais sous le coût de revient du conditionnement). Un produit
+ * épuisé, ou une quantité que le stock ne couvre pas, ne s'ajoute pas.
+ */
+export function QtyPrompt({
+  row,
+  initial,
+  inCart,
+  canPrice,
+  onClose,
+  onDone,
+}: {
+  row: SaleRow;
+  initial?: string;
+  /** Quantité de l'article déjà sur la fiche (unités de détail). */
+  inCart: number;
+  canPrice: boolean;
+  onClose: () => void;
+  onDone: (qtyMilli: number, price: number | null) => void;
+}) {
   const piece = row.unit === 'piece';
   const [value, setValue] = useState(initial ?? (piece ? '1' : ''));
+  const [priceText, setPriceText] = useState(String(row.price));
   const n = parseQty(value);
+  const price = parseAmount(priceText);
   // À la pièce : un nombre entier de conditionnements. Au poids : la quantité saisie.
-  const valid = n !== null && (!piece || n % 1000 === 0);
-  const total = valid ? Math.round((row.price * n!) / 1000) : null;
-  const short = valid && (n! / 1000) * row.units > row.stock;
+  const qtyOk = n !== null && (!piece || n % 1000 === 0);
+  const wanted = qtyOk ? (piece ? (n! / 1000) * row.units : n!) : 0;
+  const left = row.stock - inCart;
+  const short = qtyOk && wanted > left;
+  const belowCost = price !== null && price < row.cost;
+  const priceOk = price !== null && price > 0 && !belowCost;
+  const valid = qtyOk && priceOk && !short && !row.out_of_stock;
+  const total = qtyOk && priceOk ? Math.round((price! * n!) / 1000) : null;
   return (
     <Modal title={row.name} onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (valid) onDone(piece ? (n! / 1000) * row.units : n!);
+          if (valid) onDone(wanted, price === row.price ? null : price);
         }}
       >
         <p className="qty-prompt-head">
           <span className="cond">{row.pack_name}</span> à <b>{fcfa(row.price)}</b>
           <span className="muted"> · stock {stockIn(row)}</span>
+          {row.out_of_stock && <span className="tag danger epuise">Épuisé</span>}
         </p>
-        <Field label={`Quantité (${row.pack_name.toLowerCase()})`}>
-          <input autoFocus inputMode="decimal" value={value} onFocus={(e) => e.target.select()} onChange={(e) => setValue(e.target.value)} />
-        </Field>
-        {n !== null && !valid && <p className="danger-text">Nombre entier de {row.pack_name.toLowerCase()} uniquement</p>}
-        {short && <p className="warn-text">Le stock affiché ne couvre pas cette quantité.</p>}
-        {total !== null && <p className="big-total">{fcfa(total)}</p>}
+        {row.out_of_stock ? (
+          <p className="danger-text">Stock épuisé : ce {row.pack_name.toLowerCase()} ne peut pas être vendu.</p>
+        ) : (
+          <div className="grid2">
+            <Field label={`Quantité (${row.pack_name.toLowerCase()})`}>
+              <input autoFocus inputMode="decimal" value={value} onFocus={(e) => e.target.select()} onChange={(e) => setValue(e.target.value)} />
+            </Field>
+            <Field label="Prix TTC" hint={canPrice ? `Pas moins de ${fcfa(row.cost)} (coût de revient)` : 'Prix du tarif'}>
+              <input inputMode="numeric" value={priceText} disabled={!canPrice} onFocus={(e) => e.target.select()} onChange={(e) => setPriceText(e.target.value)} />
+            </Field>
+          </div>
+        )}
+        {n !== null && !qtyOk && <p className="danger-text">Nombre entier de {row.pack_name.toLowerCase()} uniquement</p>}
+        {short && !row.out_of_stock && (
+          <p className="danger-text">
+            Stock insuffisant : il reste {piece && row.units > 1000 ? `${Math.max(0, Math.floor(left / row.units))} ${row.pack_name.toLowerCase()}` : stockIn({ ...row, stock: Math.max(0, left) })}
+            {inCart > 0 ? ' en plus de ce qui est déjà sur la fiche' : ''}.
+          </p>
+        )}
+        {belowCost && <p className="danger-text">Prix inférieur au coût de revient ({fcfa(row.cost)}).</p>}
+        {total !== null && !row.out_of_stock && <p className="big-total">{fcfa(total)}</p>}
         <div className="actions">
           <button type="button" className="ghost" onClick={onClose}>
-            Annuler
+            {row.out_of_stock ? 'Fermer' : 'Annuler'}
           </button>
-          <button type="submit" className="primary" disabled={!valid}>
-            Ajouter <kbd>Entrée</kbd>
-          </button>
+          {!row.out_of_stock && (
+            <button type="submit" className="primary" disabled={!valid}>
+              Ajouter <kbd>Entrée</kbd>
+            </button>
+          )}
         </div>
       </form>
     </Modal>

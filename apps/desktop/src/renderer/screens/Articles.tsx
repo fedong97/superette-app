@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has } from '../ui';
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 
@@ -12,7 +12,7 @@ export type ArticlesView = 'list' | 'new' | 'search' | 'shelving';
 
 export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesView }) {
   const [tab, setTab] = useState<'list' | 'shelving'>(view === 'shelving' ? 'shelving' : 'list');
-  const canEdit = user.role === 'admin' || user.role === 'manager' || user.role === 'stock';
+  const canEdit = has(user, 'articles');
   return (
     <div className="page">
       <header className="page-head">
@@ -41,7 +41,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
     <>
       <div className="filters">
         <input className="search" autoFocus={focusSearch} placeholder="Rechercher (nom, code, code-barres, marque)" value={search} onChange={(e) => setSearch(e.target.value)} />
-        {(user.role === 'admin' || user.role === 'manager') && (
+        {has(user, 'import') && (
           <button onClick={() => setImporting(true)}>Importer (CSV)</button>
         )}
         <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
@@ -99,7 +99,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
       {editing && (
         <ArticleForm
           article={editing === 'new' ? null : editing}
-          canSetStorePrice={user.role === 'admin' || user.role === 'manager'}
+          canSetStorePrice={has(user, 'store_price')}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

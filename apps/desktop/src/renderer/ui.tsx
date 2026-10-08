@@ -1,3 +1,4 @@
+import type { Permission } from '@superette/core';
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { formatFcfa, formatQty } from '@superette/core';
 
@@ -161,3 +162,6 @@ export function downloadText(filename: string, content: string, mime = 'text/csv
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/** Droit de l'utilisateur connecté (Administration › Droits). */
+export const has = (user: { rights: readonly string[] }, right: Permission) => user.rights.includes(right);

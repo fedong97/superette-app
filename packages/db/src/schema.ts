@@ -871,4 +871,20 @@ UPDATE articles SET
 CREATE INDEX articles_other_ref ON articles(other_ref);
 `,
   },
+  {
+    version: 16,
+    name: 'client comptoir et droits',
+    sql: `
+-- Nom donné par un client comptoir (sans fiche client).
+ALTER TABLE sales ADD COLUMN client_name TEXT;
+
+-- Droits de chaque rôle (id = rôle), réglés par l'administrateur, qui a tous les droits.
+-- rights : objet JSON { droit: true/false } ; un droit absent prend sa valeur par défaut.
+CREATE TABLE role_rights (
+  id TEXT PRIMARY KEY,
+  rights TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+  },
 ];

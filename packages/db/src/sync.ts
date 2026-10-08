@@ -53,6 +53,7 @@ const TABLES: Record<string, string> = {
   dsf_disclosure: 'dsf_disclosures',
   promotion: 'promotions',
   charge_plan: 'charge_plans',
+  role_rights: 'role_rights',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */

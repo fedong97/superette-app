@@ -1,7 +1,7 @@
 import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
 import { PendingReceipts, PurchasesByProduct } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
@@ -43,7 +43,7 @@ const deliveryNote = (n: string) => (/^b\.?l\b/i.test(n.trim()) ? n.trim() : `BL
 
 export function Purchases({ user, initialTab = 'orders' }: { user: User; initialTab?: PurchasesTab }) {
   const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
-  const buying = ['admin', 'manager', 'stock'].includes(user.role);
+  const buying = has(user, 'purchase_orders');
   const [tab, setTab] = useState<PurchasesTab>(initialTab === 'new-order' ? 'orders' : initialTab);
   const tabs: [PurchasesTab, string][] = [
     ['orders', 'Bons de commande'],

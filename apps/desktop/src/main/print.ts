@@ -284,7 +284,9 @@ export function createPrinter(s: Services): Printer {
                   .filter(Boolean)
                   .map((v) => esc(v!))
                   .join('<br>')}`
-              : '<b>Client comptoir</b>'
+              : sale.customer_name
+                ? `<b>${esc(sale.customer_name)}</b><br>Client comptoir`
+                : '<b>Client comptoir</b>'
           }</div>
         </div>
         <h1>${title} ${esc(sale.number)}</h1>

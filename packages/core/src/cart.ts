@@ -21,6 +21,8 @@ export interface CartLine {
   packUnits?: Milli;
   /** Économie due à une promotion, en FCFA TTC (n'exige pas l'accord d'un gérant). */
   promo?: Fcfa;
+  /** Prix saisi à la caisse (jamais sous le revient) : il remplace le tarif et exclut les promotions. */
+  priceSet?: boolean;
 }
 
 export interface VatBreakdown {

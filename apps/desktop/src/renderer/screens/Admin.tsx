@@ -1,4 +1,4 @@
-import { CODEPAGES, type Codepage } from '@superette/core';
+import { CODEPAGES, type Codepage, PERMISSIONS, PERMISSION_KEYS, type Permission } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
@@ -7,7 +7,7 @@ import { Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'settings' | 'backups' | 'server' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'settings' | 'backups' | 'server' | 'audit';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -16,6 +16,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['registers', 'Caisses'],
     ['warehouses', 'Dépôts'],
     ['users', 'Utilisateurs'],
+    ['rights', 'Droits par rôle'],
     ['settings', 'Paramètres'],
     ['backups', 'Sauvegardes'],
     ['server', 'Serveur central'],
@@ -31,6 +32,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'registers' && <Registers isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'warehouses' && <Warehouses />}
       {tab === 'users' && <Users currentRole={user.role} />}
+      {tab === 'rights' && <Rights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'settings' && <Settings />}
       {tab === 'backups' && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
@@ -888,5 +890,86 @@ function RestoreDialog({ backup, onClose }: { backup: BackupInfo; onClose: () =>
         </button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Droits par rôle : l'administrateur coche, pour chaque rôle, les fenêtres et
+ * les actions permises. L'administrateur a toujours tous les droits.
+ */
+function Rights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const matrix = useLoad(() => call('admin.rights'), []);
+  const [draft, setDraft] = useState<Record<string, Permission[]> | null>(null);
+  useEffect(() => {
+    if (matrix.data) setDraft(Object.fromEntries(matrix.data.map((r) => [r.role, r.rights])));
+  }, [matrix.data]);
+  if (!matrix.data || !draft) return null;
+  const changed = matrix.data.filter((r) => [...r.rights].sort().join() !== [...(draft[r.role] ?? [])].sort().join());
+  const toggle = (role: string, perm: Permission, on: boolean) =>
+    setDraft({ ...draft, [role]: on ? [...(draft[role] ?? []), perm] : (draft[role] ?? []).filter((p) => p !== perm) });
+  const groups = [...new Set(PERMISSION_KEYS.map((k) => PERMISSIONS[k].group))];
+  return (
+    <>
+      <p className="muted">
+        Cochez ce que chaque rôle peut ouvrir et faire. L'administrateur a toujours tous les droits. Un changement vaut pour tous les utilisateurs du rôle, à leur
+        prochaine connexion.
+      </p>
+      <table className="list compact rights">
+        <thead>
+          <tr>
+            <th>Droit</th>
+            <th className="c">Administrateur</th>
+            {matrix.data.map((r) => (
+              <th key={r.role} className="c">
+                {r.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        {groups.map((g) => (
+          <tbody key={g}>
+            <tr className="group">
+              <th colSpan={matrix.data!.length + 2}>{g}</th>
+            </tr>
+            {PERMISSION_KEYS.filter((k) => PERMISSIONS[k].group === g).map((k) => (
+              <tr key={k}>
+                <td>{PERMISSIONS[k].label}</td>
+                <td className="c">
+                  <input type="checkbox" checked disabled />
+                </td>
+                {matrix.data!.map((r) => (
+                  <td key={r.role} className="c">
+                    <input type="checkbox" disabled={!isAdmin} checked={draft[r.role]?.includes(k) ?? false} onChange={(e) => toggle(r.role, k, e.target.checked)} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
+      <div className="actions">
+        {!isAdmin && <span className="muted">Seul l'administrateur modifie les droits.</span>}
+        <button className="ghost" disabled={!changed.length} onClick={() => setDraft(Object.fromEntries(matrix.data!.map((r) => [r.role, r.rights])))}>
+          Annuler les changements
+        </button>
+        <button
+          className="primary"
+          disabled={!isAdmin || !changed.length}
+          onClick={async () => {
+            try {
+              for (const r of changed) await call('admin.saveRights', r.role, draft[r.role] ?? []);
+              toast.ok(`Droits enregistrés (${changed.map((r) => r.label).join(', ')})`);
+              matrix.reload();
+              onChanged();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          Enregistrer
+        </button>
+      </div>
+    </>
   );
 }

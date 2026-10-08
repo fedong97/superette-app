@@ -1,7 +1,7 @@
 import { type CartLine, computeTotals, lineTotal } from '@superette/core';
 import { useState } from 'react';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker } from './pickers';
 
@@ -265,7 +265,7 @@ function QuoteEditor({ user, quote, onClose, onSaved }: { user: User; quote: Quo
         <Field label="Conditions, remarques">
           <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Livraison comprise, paiement à 30 jours…" />
         </Field>
-        {user.role === 'cashier' && totals.totalDiscount > 0 && <p className="muted">Les remises demandent le code du gérant.</p>}
+        {!has(user, 'discount') && totals.totalDiscount > 0 && <p className="muted">Les remises demandent le code du gérant.</p>}
         <div className="actions">
           <button type="button" onClick={onClose}>
             Annuler

@@ -98,13 +98,13 @@ describe('fiche article à la KONTROL', () => {
       ],
       payments: [{ method: 'CASH', amount: 26_000 }],
     });
-    // Il reste 4 canettes : la palette ne s'affiche plus, sauf « lignes sans stock ».
+    // Il reste 4 canettes : la palette reste listée mais marquée épuisée, sauf si on masque les épuisés.
     const after = s.pos.searchForSale(ctx.storeId, 'mutzig');
-    expect(after.map((r) => [r.pack_name, r.stock, r.last_price])).toEqual([['CANETTE', 4_000, 1_000]]);
-    expect(s.pos.searchForSale(ctx.storeId, 'mutzig', { includeEmpty: true }).map((r) => [r.pack_name, r.last_price])).toEqual([
-      ['PALETTE', 24_000],
-      ['CANETTE', 1_000],
+    expect(after.map((r) => [r.pack_name, r.stock, r.last_price, r.out_of_stock])).toEqual([
+      ['PALETTE', 4_000, 24_000, true],
+      ['CANETTE', 4_000, 1_000, false],
     ]);
+    expect(s.pos.searchForSale(ctx.storeId, 'mutzig', { includeEmpty: false }).map((r) => r.pack_name)).toEqual(['CANETTE']);
 
     // Client au tarif de gros : prix de gros, et pas encore de dernier prix pour lui.
     const pro = s.customers.saveCustomer(ctx.userId, { name: 'Bar Le Relais', priceLevel: 'wholesale' });

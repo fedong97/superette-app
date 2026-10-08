@@ -361,7 +361,7 @@ tr.group-start td { border-top: 2px solid var(--line); }
 
 /* Recherche en caisse : une ligne par conditionnement (KONTROL) */
 .sale-rows { min-width: 720px; }
-.sale-rows button { grid-template-columns: 80px minmax(0, 1fr) 120px 60px 90px; align-items: center; }
+.sale-rows button { grid-template-columns: 80px minmax(0, 1fr) 120px 70px 90px; align-items: center; }
 .sale-rows .cond, .sale-search .cond, .qty-prompt-head .cond { font-weight: 600; color: #1d3f72; }
 .sale-search { max-height: 55vh; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
 .sale-search tr.sel td { background: #dbe7f7; }
@@ -373,3 +373,12 @@ tr.group-start td { border-top: 2px solid var(--line); }
 .modal.wide:has(table.levels) { width: min(1200px, 97vw); }
 table.list.compact.levels td { padding: 3px 5px; }
 table.list.compact.levels th { padding: 6px 5px; }
+
+/* Droits par rôle */
+table.rights th.c, table.rights td.c { text-align: center; width: 120px; }
+table.rights td.c input { width: auto; }
+table.rights tr.group th { background: var(--bg); color: var(--ink); text-align: left; padding-top: 10px; }
+.tag.epuise { background: var(--danger-soft); color: var(--danger); font-weight: 600; margin-left: 6px; }
+.sale-rows button.out { color: var(--muted); }
+.sale-rows button.out .cond { color: var(--muted); }
+.fiche-head input.client-name { grid-row: 2; grid-column: 3; }

@@ -107,6 +107,16 @@ export function containsFromDivisors(levels: readonly { name: string; divisor: n
   return out;
 }
 
+/**
+ * Coût de revient d'un conditionnement (la canette d'une palette à 17 000 de
+ * revient : 708). Plancher du prix saisi à la caisse.
+ */
+export function levelCost(a: { purchase_price: Fcfa; pack_cost_price: Fcfa | null; packs: readonly { units: Milli }[] }, units: Milli): Fcfa {
+  const top = a.packs[0]?.units ?? 1000;
+  const packCost = a.pack_cost_price ?? Math.round((a.purchase_price * top) / 1000);
+  return Math.round((packCost * units) / top);
+}
+
 /** Part d'un prix du conditionnement d'achat revenant à un conditionnement plus petit : 17 000 / 24 = 708. */
 export function dividePrice(price: Fcfa, divisor: number): Fcfa {
   return Math.round(price / divisor);

@@ -4,7 +4,7 @@ import { type Result, call } from '../api';
 import { StockByWarehouse } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
-import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
+import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -16,7 +16,7 @@ const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', su
 export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
   // Les stocks critiques sont l'état du stock filtré sur les ruptures et alertes.
   const [tab, setTab] = useState<Tab>(initialTab === 'critical' ? 'state' : initialTab);
-  const canInventory = user.role === 'admin' || user.role === 'manager';
+  const canInventory = has(user, 'inventory');
   const tabs: [Tab, string][] = [
     ['state', 'État du stock'],
     ['warehouses', 'Articles par dépôt'],

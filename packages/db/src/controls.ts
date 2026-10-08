@@ -136,7 +136,7 @@ export class ControlService extends Base {
     const amount = search && /^-?\d[\d\s]*$/.test(search) ? Number(search.replace(/\s/g, '')) : null;
     const rows = this.db
       .prepare(
-        `SELECT s.id, s.number, s.kind, s.status, s.created_at, r.name AS register_name, u.name AS user_name, c.name AS customer_name,
+        `SELECT s.id, s.number, s.kind, s.status, s.created_at, r.name AS register_name, u.name AS user_name, COALESCE(c.name, s.client_name) AS customer_name,
                 s.total_ttc, s.total_discount, s.total_promo, o.number AS original_number, s.cancel_reason,
                 (SELECT group_concat(DISTINCT p.method) FROM sale_payments p WHERE p.sale_id = s.id) AS methods
          FROM sales s JOIN registers r ON r.id = s.register_id JOIN users u ON u.id = s.user_id
@@ -145,7 +145,7 @@ export class ControlService extends Base {
            AND (@kind IS NULL OR s.kind = @kind) AND (@status IS NULL OR s.status = @status)
            AND (@register IS NULL OR s.register_id = @register) AND (@user IS NULL OR s.user_id = @user)
            AND (@customer IS NULL OR s.customer_id = @customer)
-           AND (@search IS NULL OR s.number LIKE @like OR c.name LIKE @like OR s.total_ttc = @amount OR -s.total_ttc = @amount)
+           AND (@search IS NULL OR s.number LIKE @like OR c.name LIKE @like OR s.client_name LIKE @like OR s.total_ttc = @amount OR -s.total_ttc = @amount)
          ORDER BY s.created_at DESC LIMIT @limit`,
       )
       .all({

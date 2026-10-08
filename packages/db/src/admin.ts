@@ -2,12 +2,14 @@ import { randomInt } from 'node:crypto';
 import { EDITABLE_ROLES, PERMISSIONS, type Permission, TVA_CAMEROUN_NORMAL, roleRights } from '@superette/core';
 import { AppError, Base, hashPin, newId, verifyPin } from './util';
 
-export type Role = 'admin' | 'manager' | 'cashier' | 'stock' | 'accountant';
+export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
 
 export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrateur',
   manager: 'Gérant',
   cashier: 'Caissier',
+  seller: 'Vendeur',
+  buyer: "Responsable d'achat (appro)",
   stock: 'Magasinier',
   accountant: 'Comptable',
 };
@@ -29,6 +31,19 @@ export interface Store {
   phone: string | null;
   taxpayer_number: string | null;
   active: number;
+  /** Assujetti à la TVA (régime réel) ; sinon les ventes se font sans TVA. */
+  vat_enabled: number;
+  /** Vente permise sans stock : le stock passe en négatif et se régularise à la réception. */
+  ignore_stock: number;
+  /** Écart de clôture (FCFA) au-delà duquel motif et code du gérant sont demandés. */
+  cash_gap_threshold: number;
+}
+
+/** Options du magasin réglées par le gérant ou l'administrateur. */
+export interface StoreOptions {
+  vatEnabled?: boolean;
+  ignoreStock?: boolean;
+  cashGapThreshold?: number;
 }
 
 export interface Register {
@@ -58,6 +73,8 @@ export interface BootstrapInput {
   adminName: string;
   adminLogin: string;
   adminPin: string;
+  /** Magasin assujetti à la TVA (oui si absent, comme avant cette option). */
+  vatEnabled?: boolean;
 }
 
 /**
@@ -91,6 +108,7 @@ export class AdminService extends Base {
         .run(adminId, input.adminName.trim(), input.adminLogin.trim().toLowerCase(), hashPin(input.adminPin), 'admin', now);
       this.enqueue(null, 'user', adminId, 'upsert', this.getUser(adminId));
       const store = this.createStore(adminId, input);
+      if (input.vatEnabled === false) this.setStoreOptions(adminId, store.id, { vatEnabled: false });
       const register = this.listRegisters(store.id)[0]!;
       this.activateRegister(register.activation_code);
       return { store, register: this.getRegister(register.id), admin: this.getUser(adminId) };
@@ -149,6 +167,27 @@ export class AdminService extends Base {
       .run(next.name, next.address, next.phone, next.taxpayer_number, next.active, id);
     this.enqueue({ storeId: id, registerId: null }, 'store', id, 'upsert', next);
     this.audit(userId, 'store.update', 'store', id, patch);
+    return this.getStore(id);
+  }
+
+  /**
+   * TVA, vente sans stock et seuil d'écart de caisse. Changer la TVA ne vaut que
+   * pour les ventes et achats suivants : les pièces passées gardent la leur.
+   */
+  setStoreOptions(userId: string, id: string, options: StoreOptions): Store {
+    const current = this.getStore(id);
+    const threshold = options.cashGapThreshold ?? current.cash_gap_threshold;
+    if (!Number.isSafeInteger(threshold) || threshold < 0) throw new AppError("Seuil d'écart invalide", 'INVALID');
+    const next = {
+      vat_enabled: options.vatEnabled === undefined ? current.vat_enabled : options.vatEnabled ? 1 : 0,
+      ignore_stock: options.ignoreStock === undefined ? current.ignore_stock : options.ignoreStock ? 1 : 0,
+      cash_gap_threshold: threshold,
+    };
+    this.tx(() => {
+      this.db.prepare('UPDATE stores SET vat_enabled = ?, ignore_stock = ?, cash_gap_threshold = ? WHERE id = ?').run(next.vat_enabled, next.ignore_stock, next.cash_gap_threshold, id);
+      this.enqueue({ storeId: id, registerId: null }, 'store', id, 'upsert', this.getStore(id));
+      this.audit(userId, 'store.options', 'store', id, options);
+    });
     return this.getStore(id);
   }
 

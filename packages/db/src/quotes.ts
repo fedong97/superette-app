@@ -85,13 +85,14 @@ export class QuoteService extends Base {
       customerName = c;
     }
     if (!customerName) throw new AppError('Indiquez le client', 'CUSTOMER_REQUIRED');
+    const vatEnabled = this.admin.getStore(ctx.storeId).vat_enabled === 1;
     const lines: (CartLine & { unit: string })[] = input.lines.map((l) => {
       if (!Number.isSafeInteger(l.qty) || l.qty <= 0) throw new AppError('Quantité invalide', 'INVALID');
       const discount = l.discount ?? 0;
       if (!Number.isSafeInteger(discount) || discount < 0) throw new AppError('Remise invalide', 'INVALID');
       const a = this.catalogue.getArticle(l.articleId, ctx.storeId);
       if (!a.active) throw new AppError(`Article inactif : ${a.name}`, 'INACTIVE');
-      const line = { articleId: a.id, label: a.name, unitPrice: a.store_price, qty: l.qty, vatRate: a.vat_rate_bp, discount, unit: a.unit };
+      const line = { articleId: a.id, label: a.name, unitPrice: a.store_price, qty: l.qty, vatRate: vatEnabled ? a.vat_rate_bp : 0, discount, unit: a.unit };
       if (lineTotal(line) <= 0) throw new AppError(`Remise supérieure au prix : ${a.name}`, 'INVALID');
       return line;
     });

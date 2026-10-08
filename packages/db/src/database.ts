@@ -25,13 +25,21 @@ export function migrate(db: Db): void {
   );
   for (const m of MIGRATIONS) {
     if (applied.has(m.version)) continue;
-    db.transaction(() => {
-      db.exec(m.sql);
-      db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)').run(
-        m.version,
-        m.name,
-        new Date().toISOString(),
-      );
-    })();
+    // Reconstruire une table que d'autres citent : la vérification des clés
+    // étrangères est suspendue (elle ne se change pas dans une transaction).
+    const fk = m.rebuild ? (db.pragma('foreign_keys', { simple: true }) as number) : 0;
+    if (fk) db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(m.sql);
+        db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)').run(
+          m.version,
+          m.name,
+          new Date().toISOString(),
+        );
+      })();
+    } finally {
+      if (fk) db.pragma('foreign_keys = ON');
+    }
   }
 }

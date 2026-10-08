@@ -25,6 +25,7 @@ import type { CustomerService } from './customers';
 import type { PromotionService } from './promotions';
 import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
+import type { TreasuryService } from './treasury';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
 
@@ -42,6 +43,28 @@ export interface CashSession {
   difference: Fcfa | null;
   z_number: number | null;
   status: 'open' | 'closed';
+  closed_by: string | null;
+  closed_by_name?: string | null;
+  /** Fond laissé dans le tiroir à la clôture précédente (null : première journée ou ancienne version). */
+  carried_float: Fcfa | null;
+  /** Premier comptage saisi à la clôture, avant que l'attendu soit montré. */
+  first_counted: Fcfa | null;
+  /** Fond laissé dans le tiroir pour la journée suivante. */
+  float_left: Fcfa | null;
+  /** Espèces versées à la caisse centrale à la clôture. */
+  deposit: Fcfa | null;
+  gap_reason: string | null;
+  gap_approved_by: string | null;
+}
+
+/** Clôture : fond laissé dans le tiroir, le reste est versé à la caisse centrale. */
+export interface CloseOptions {
+  /** Fond laissé pour le lendemain ; tout ce qui est compté au-delà va à la centrale. Absent : rien n'est versé. */
+  floatLeft?: Fcfa;
+  /** Motif d'un écart au-delà du seuil du magasin. */
+  gapReason?: string | null;
+  /** Gérant qui valide un écart au-delà du seuil. */
+  gapApprovedBy?: string | null;
 }
 
 /** Ligne envoyée par l'écran de caisse : le prix est relu en base, jamais pris de l'écran. */
@@ -180,6 +203,7 @@ export class PosService extends Base {
     private readonly customers: CustomerService,
     private readonly quotes: QuoteService,
     private readonly promotions: PromotionService,
+    private readonly treasury: TreasuryService,
   ) {
     super(db, clock);
   }
@@ -204,41 +228,99 @@ export class PosService extends Base {
 
   getSession(id: string): CashSession {
     const s = this.db
-      .prepare('SELECT s.*, u.name AS user_name FROM cash_sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?')
+      .prepare(
+        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
+         LEFT JOIN users c ON c.id = s.closed_by WHERE s.id = ?`,
+      )
       .get(id) as CashSession | undefined;
     if (!s) throw new AppError('Session de caisse introuvable', 'NOT_FOUND');
     return s;
   }
 
+  /** Jour local (AAAA-MM-JJ) d'un horodatage, comme `today()`. */
+  private localDay(iso: string): string {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  /** Caisse ouverte : sans elle, aucune vente ni opération d'espèces. */
   private requireOpenSession(ctx: Context): CashSession {
     const session = this.currentSession(this.requireRegister(ctx));
-    if (!session) throw new AppError("La caisse n'est pas ouverte", 'SESSION_CLOSED');
+    if (!session) throw new AppError("La caisse n'est pas ouverte : ouvrez-la dans Trésorerie › Opérations de trésorerie", 'SESSION_CLOSED');
     return session;
   }
 
+  /** Journée ouverte un jour précédent et pas encore clôturée (signalée à l'écran). */
+  isStale(session: Pick<CashSession, 'opened_at'>): boolean {
+    return this.localDay(session.opened_at) < this.today();
+  }
+
+  /** Dernière journée clôturée de la caisse. */
+  lastClosedSession(registerId: string): CashSession | null {
+    const id = this.db
+      .prepare("SELECT id FROM cash_sessions WHERE register_id = ? AND status = 'closed' ORDER BY closed_at DESC LIMIT 1")
+      .pluck()
+      .get(registerId) as string | undefined;
+    return id ? this.getSession(id) : null;
+  }
+
+  /**
+   * Fond trouvé dans le tiroir à l'ouverture : celui laissé à la dernière
+   * clôture. Null si aucune clôture ne l'a noté (première journée, ancienne version).
+   */
+  carriedFloat(registerId: string): Fcfa | null {
+    return this.lastClosedSession(registerId)?.float_left ?? null;
+  }
+
+  /**
+   * Ouverture de la journée avec son fond de caisse. Le fond reprend celui
+   * laissé la veille ; un complément est pris dans la caisse centrale, un
+   * excédent lui est rendu, chacun tracé dans le livre de la centrale.
+   */
   openSession(ctx: Context, openingFloat: Fcfa): CashSession {
     const registerId = this.requireRegister(ctx);
     if (!Number.isSafeInteger(openingFloat) || openingFloat < 0) throw new AppError('Fond de caisse invalide', 'INVALID');
-    if (this.currentSession(registerId)) throw new AppError('La caisse est déjà ouverte', 'SESSION_OPEN');
+    const open = this.currentSession(registerId);
+    if (open) {
+      throw new AppError(this.isStale(open) ? 'La journée précédente n’est pas clôturée : fermez d’abord la caisse' : 'La caisse est déjà ouverte', 'SESSION_OPEN');
+    }
+    const carried = this.carriedFloat(registerId);
+    const register = this.admin.getRegister(registerId);
     const id = newId();
     this.tx(() => {
       this.db
         .prepare(
-          `INSERT INTO cash_sessions (id, store_id, register_id, user_id, opened_at, opening_float, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+          `INSERT INTO cash_sessions (id, store_id, register_id, user_id, opened_at, opening_float, carried_float, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
         )
-        .run(id, ctx.storeId, registerId, ctx.userId, this.now(), openingFloat);
+        .run(id, ctx.storeId, registerId, ctx.userId, this.now(), openingFloat, carried);
+      if (carried !== null && openingFloat !== carried) {
+        const delta = openingFloat - carried;
+        this.treasury.insertMovement(ctx, {
+          kind: delta > 0 ? 'FLOAT' : 'DEPOSIT',
+          nature: 'register',
+          amount: Math.abs(delta),
+          label: delta > 0 ? `Complément du fond de ${register.name}` : `Fond excédentaire de ${register.name} rendu à la centrale`,
+          registerId,
+          sessionId: id,
+        });
+      }
       this.enqueue(ctx, 'cash_session', id, 'upsert', this.getSession(id));
-      this.audit(ctx.userId, 'cash.open', 'cash_session', id, { openingFloat });
+      this.audit(ctx.userId, 'cash.open', 'cash_session', id, { openingFloat, carried });
     });
     return this.getSession(id);
   }
 
-  /** Apport (IN) ou prélèvement (OUT) d'espèces en cours de journée. */
+  /**
+   * Apport (IN) ou prélèvement (OUT) d'espèces en cours de journée : l'apport
+   * vient de la caisse centrale, le prélèvement y est versé.
+   */
   cashOperation(ctx: Context, type: 'IN' | 'OUT', amount: Fcfa, reason: string): void {
     const session = this.requireOpenSession(ctx);
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     if (!reason.trim()) throw new AppError('Le motif est obligatoire', 'INVALID');
+    const register = this.admin.getRegister(session.register_id);
     this.tx(() => {
       const id = newId();
       const row = { id, session_id: session.id, type, amount, reason: reason.trim(), user_id: ctx.userId, at: this.now() };
@@ -246,6 +328,15 @@ export class PosService extends Base {
         .prepare('INSERT INTO cash_operations (id, session_id, type, amount, reason, user_id, at) VALUES (@id, @session_id, @type, @amount, @reason, @user_id, @at)')
         .run(row);
       this.enqueue(ctx, 'cash_operation', id, 'upsert', row);
+      this.treasury.insertMovement(ctx, {
+        kind: type === 'IN' ? 'FLOAT' : 'DEPOSIT',
+        nature: 'register',
+        amount,
+        label: `${type === 'IN' ? 'Apport à' : 'Prélèvement de'} ${register.name} : ${reason.trim()}`,
+        registerId: session.register_id,
+        sessionId: session.id,
+        cashOperationId: id,
+      });
       this.audit(ctx.userId, type === 'IN' ? 'cash.in' : 'cash.out', 'cash_session', session.id, { amount, reason });
     });
   }
@@ -267,6 +358,8 @@ export class PosService extends Base {
    * promotions ne valent qu'au détail.
    */
   priceLines(storeId: string, input: SaleLineInput[], level: PriceLevel = 'retail'): PricedLine[] {
+    // Magasin non assujetti (régime simplifié) : aucune TVA sur ses ventes.
+    const vat = this.admin.getStore(storeId).vat_enabled === 1;
     const lines = input.map((l) => {
       if (!Number.isSafeInteger(l.qty) || l.qty === 0) throw new AppError('Quantité invalide', 'INVALID');
       const article = this.catalogue.getArticle(l.articleId, storeId);
@@ -291,7 +384,7 @@ export class PosService extends Base {
         label: article.name,
         unitPrice: tariffPrice({ retail: article.store_price, wholesale: article.wholesale_price, superWholesale: article.super_wholesale_price }, level),
         qty: l.qty,
-        vatRate: article.vat_rate_bp,
+        vatRate: vat ? article.vat_rate_bp : 0,
         discount,
         fixedAmount,
         barcode: l.barcode ?? null,
@@ -374,9 +467,15 @@ export class PosService extends Base {
     return shown.slice(0, opts.limit ?? 60);
   }
 
-  /** Un produit épuisé ne se vend pas : le stock du dépôt de vente doit couvrir le ticket. */
-  private assertInStock(storeId: string, lines: { articleId: string; label: string; qty: Milli }[]): void {
+  /**
+   * Un produit épuisé ne se vend pas : le stock du dépôt de vente doit couvrir
+   * le ticket. Avec « Ignorer la gestion des stocks », la vente passe et renvoie
+   * les lignes vendues sans stock, que la prochaine réception régularise.
+   */
+  private assertInStock(storeId: string, lines: { articleId: string; label: string; qty: Milli }[]): { label: string; qty: Milli; stock: Milli }[] {
     const warehouse = this.admin.salesWarehouse(storeId);
+    const ignore = this.admin.getStore(storeId).ignore_stock === 1;
+    const short: { label: string; qty: Milli; stock: Milli }[] = [];
     const wanted = new Map<string, { label: string; qty: Milli }>();
     for (const l of lines) {
       const w = wanted.get(l.articleId);
@@ -386,10 +485,15 @@ export class PosService extends Base {
     for (const [articleId, w] of wanted) {
       const a = get.get(warehouse.id, articleId) as { unit: string; unit_name: string | null; qty: Milli };
       if (w.qty <= a.qty) continue;
+      if (ignore) {
+        short.push({ label: w.label, qty: w.qty, stock: a.qty });
+        continue;
+      }
       const unit = a.unit === 'piece' ? (a.unit_name ?? 'pièce').toLowerCase() : a.unit === 'kg' ? 'kg' : 'L';
       const left = a.qty <= 0 ? 'épuisé' : `il reste ${String(a.qty / 1000).replace('.', ',')} ${unit}`;
       throw new AppError(`Stock insuffisant pour ${w.label} : ${left}`, 'OUT_OF_STOCK');
     }
+    return short;
   }
 
   completeSale(ctx: Context, input: SaleInput): Sale {
@@ -415,7 +519,7 @@ export class PosService extends Base {
         throw new AppError(`Référence de transaction obligatoire pour ${PAYMENT_METHODS[p.method]}`, 'REFERENCE_REQUIRED');
       }
     }
-    this.assertInStock(ctx.storeId, lines);
+    const withoutStock = this.assertInStock(ctx.storeId, lines);
     const settlement = settle(totals.totalTtc, input.payments);
     if (!settlement.complete) throw new AppError('Le ticket n’est pas entièrement réglé', 'UNPAID');
     const onCredit = input.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0);
@@ -486,6 +590,7 @@ export class PosService extends Base {
           lines: changed.map((l) => ({ article: l.label, pack: l.packName, price: l.packPrice ?? l.unitPrice })),
         });
       }
+      if (withoutStock.length) this.audit(ctx.userId, 'sale.without_stock', 'sale', saleId, { number, lines: withoutStock });
       if (input.quoteId) this.quotes.markAccepted(ctx, input.quoteId, saleId);
       const sale = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', sale);
@@ -768,32 +873,88 @@ export class PosService extends Base {
     };
   }
 
-  /** Clôture Z : comptage par coupure, écart affiché, session fermée. */
-  closeSession(ctx: Context, counted: DenominationCount): ZReport {
+  /**
+   * Comptage à l'aveugle : le premier total saisi est gardé avant que
+   * l'attendu soit montré. Renvoie l'écart et s'il faut un motif et le code du gérant.
+   */
+  countPreview(ctx: Context, counted: DenominationCount): { expected: Fcfa; counted: Fcfa; difference: Fcfa; threshold: Fcfa; needsApproval: boolean } {
+    const session = this.requireOpenSession(ctx);
+    const result = closingDifference(this.zReport(session.id).cash, counted);
+    if (session.first_counted === null) {
+      this.db.prepare('UPDATE cash_sessions SET first_counted = ? WHERE id = ?').run(result.counted, session.id);
+    }
+    this.audit(ctx.userId, 'cash.count', 'cash_session', session.id, result);
+    const threshold = this.admin.getStore(session.store_id).cash_gap_threshold;
+    return { ...result, threshold, needsApproval: Math.abs(result.difference) > threshold };
+  }
+
+  /**
+   * Clôture Z : comptage par coupure, écart, fond laissé pour le lendemain et
+   * versement du reste à la caisse centrale. Un écart au-delà du seuil du
+   * magasin exige un motif et la validation d'un gérant.
+   */
+  closeSession(ctx: Context, counted: DenominationCount, opts: CloseOptions = {}): ZReport {
     const session = this.requireOpenSession(ctx);
     const before = this.zReport(session.id);
     const result = closingDifference(before.cash, counted);
+    const floatLeft = opts.floatLeft ?? result.counted;
+    if (!Number.isSafeInteger(floatLeft) || floatLeft < 0) throw new AppError('Fond laissé invalide', 'INVALID');
+    if (floatLeft > result.counted) throw new AppError('Le fond laissé dépasse les espèces comptées', 'INVALID');
+    const deposit = result.counted - floatLeft;
+    const threshold = this.admin.getStore(session.store_id).cash_gap_threshold;
+    const gapReason = opts.gapReason?.trim() || null;
+    if (Math.abs(result.difference) > threshold) {
+      if (!gapReason) throw new AppError("Écart au-delà du seuil : indiquez le motif de l'écart", 'GAP_REASON_REQUIRED');
+      if (!opts.gapApprovedBy) throw new AppError("Écart au-delà du seuil : la validation d'un gérant est nécessaire", 'SUPERVISOR_REQUIRED');
+    }
+    const register = this.admin.getRegister(session.register_id);
     this.tx(() => {
       const zNumber = this.nextCounter(`z:${session.register_id}`);
       this.db
         .prepare(
           `UPDATE cash_sessions SET status = 'closed', closed_at = ?, closed_by = ?, counted_detail = ?, expected_cash = ?,
-             counted_cash = ?, difference = ?, z_number = ? WHERE id = ?`,
+             counted_cash = ?, difference = ?, z_number = ?, first_counted = COALESCE(first_counted, ?), float_left = ?, deposit = ?,
+             gap_reason = ?, gap_approved_by = ? WHERE id = ?`,
         )
-        .run(this.now(), ctx.userId, JSON.stringify(counted), result.expected, result.counted, result.difference, zNumber, session.id);
+        .run(
+          this.now(),
+          ctx.userId,
+          JSON.stringify(counted),
+          result.expected,
+          result.counted,
+          result.difference,
+          zNumber,
+          result.counted,
+          floatLeft,
+          deposit,
+          gapReason,
+          opts.gapApprovedBy ?? null,
+          session.id,
+        );
+      if (deposit > 0) {
+        this.treasury.insertMovement(ctx, {
+          kind: 'DEPOSIT',
+          nature: 'register',
+          amount: deposit,
+          label: `Recette de ${register.name}, Z${zNumber}`,
+          registerId: session.register_id,
+          sessionId: session.id,
+        });
+      }
       this.db.prepare('DELETE FROM held_tickets WHERE register_id = ?').run(session.register_id);
       this.enqueue(ctx, 'cash_session', session.id, 'upsert', this.getSession(session.id));
-      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, ...result });
+      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, ...result, floatLeft, deposit, gapReason, gapApprovedBy: opts.gapApprovedBy ?? null });
     });
     return this.zReport(session.id);
   }
 
-  listSessions(storeId: string, limit = 60): CashSession[] {
+  listSessions(storeId: string, limit = 60, registerId?: string | null): CashSession[] {
     return this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.store_id = ? ORDER BY s.opened_at DESC LIMIT ?`,
+        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
+         LEFT JOIN users c ON c.id = s.closed_by
+         WHERE s.store_id = ? AND (? IS NULL OR s.register_id = ?) ORDER BY s.opened_at DESC LIMIT ?`,
       )
-      .all(storeId, limit) as CashSession[];
+      .all(storeId, registerId ?? null, registerId ?? null, limit) as CashSession[];
   }
 }

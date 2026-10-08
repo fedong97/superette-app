@@ -54,10 +54,11 @@ const TABLES: Record<string, string> = {
   promotion: 'promotions',
   charge_plan: 'charge_plans',
   role_rights: 'role_rights',
+  central_cash_movement: 'central_cash_movements',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
-const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment']);
+const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement']);
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
 const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> = {

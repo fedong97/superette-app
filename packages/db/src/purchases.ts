@@ -604,6 +604,10 @@ export class PurchaseService extends Base {
       .pluck()
       .get(supplier.id, kind, supplierNumber) as string | undefined;
     if (duplicate) throw new AppError(`Cette facture fournisseur est déjà saisie (${duplicate})`, 'DUPLICATE');
+    // Magasin non assujetti : la TVA du fournisseur n'est pas récupérable, elle fait partie du coût d'achat.
+    const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
+    const totalHt = vatEnabled ? input.totalHt : input.totalHt + input.totalTva;
+    const totalTva = vatEnabled ? input.totalTva : 0;
     return this.tx(() => {
       const id = newId();
       const row = {
@@ -615,9 +619,9 @@ export class PurchaseService extends Base {
         supplier_number: supplierNumber,
         invoice_date: input.invoiceDate,
         due_date: input.dueDate || dueDate(input.invoiceDate, supplier.payment_terms_days),
-        total_ht: input.totalHt,
-        total_tva: input.totalTva,
-        total_ttc: input.totalHt + input.totalTva,
+        total_ht: totalHt,
+        total_tva: totalTva,
+        total_ttc: totalHt + totalTva,
         received_ht: this.invoicePreview(receptionIds).total_ht,
         notes: input.notes?.trim() || null,
         user_id: ctx.userId,
@@ -690,10 +694,11 @@ export class PurchaseService extends Base {
       const id = newId();
       this.db
         .prepare(
-          `INSERT INTO supplier_payments (id, invoice_id, supplier_id, store_id, method, amount, reference, paid_at, user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO supplier_payments (id, invoice_id, supplier_id, store_id, method, amount, reference, paid_at, user_id, from_central)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, invoice.id, invoice.supplier_id, ctx.storeId, input.method, input.amount, input.reference?.trim() || null, input.paidAt ?? this.now(), ctx.userId);
+        // Espèces payées au bureau : elles sortent de la caisse centrale.
+        .run(id, invoice.id, invoice.supplier_id, ctx.storeId, input.method, input.amount, input.reference?.trim() || null, input.paidAt ?? this.now(), ctx.userId, input.method === 'CASH' ? 1 : 0);
       this.enqueue(ctx, 'supplier_payment', id, 'upsert', {});
       this.audit(ctx.userId, 'supplier.payment', 'supplier_invoice', invoice.id, { amount: input.amount, method: input.method });
       return this.getInvoice(invoice.id);

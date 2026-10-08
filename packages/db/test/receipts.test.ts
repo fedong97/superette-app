@@ -73,12 +73,17 @@ describe('tickets de caisse', () => {
   it('rapport Z et page de test', () => {
     sell();
     const session = s.pos.currentSession(ctx.registerId!)!;
-    s.pos.closeSession(ctx, { 10000: 3, 500: 1 });
+    // Écart de 5 100 au-delà du seuil (500) : motif et gérant obligatoires.
+    expect(() => s.pos.closeSession(ctx, { 10000: 3, 500: 1 })).toThrow(/motif/);
+    s.pos.closeSession(ctx, { 10000: 3, 500: 1 }, { floatLeft: 10_000, gapReason: 'Recomptage demandé', gapApprovedBy: ctx.userId });
     const z = receiptToText(s.receipts.zReport(session.id), 48);
     expect(z).toContain('RAPPORT Z N° 1');
     expect(z).toMatch(/Ventes espèces\s+5 400/);
     expect(z).toMatch(/Théorique\s+25 400/);
     expect(z).toMatch(/Écart\s+5 100/);
+    expect(z).toContain("Motif de l'écart : Recomptage demandé");
+    expect(z).toMatch(/Versé à la caisse centrale\s+20 500/);
+    expect(z).toMatch(/Fond laissé dans le tiroir\s+10 000/);
     const test = receiptToText(s.receipts.testPage(32), 32);
     expect(test).toContain('12345678901234567890123456789012');
     expect(test).toContain('Accents : é è ê à â ç ù û ô î');

@@ -87,7 +87,7 @@ describe('droits par rôle', () => {
     s.admin.saveRights(ctx.userId, 'cashier', ['cash', 'discount']);
     expect(s.admin.rights('cashier')).toEqual(['cash', 'discount']);
     expect(s.admin.hasRight(cashier, 'price')).toBe(false);
-    expect(s.admin.rightsMatrix().map((r) => r.role)).toEqual(['manager', 'cashier', 'stock', 'accountant']);
+    expect(s.admin.rightsMatrix().map((r) => r.role)).toEqual(['manager', 'cashier', 'seller', 'buyer', 'stock', 'accountant']);
     expect(() => s.admin.saveRights(ctx.userId, 'admin', [])).toThrow(/tous les droits/);
     expect(() => s.admin.saveRights(ctx.userId, 'cashier', ['voler' as never])).toThrow(/Droit inconnu/);
     // Les droits voyagent vers les autres postes.

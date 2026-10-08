@@ -21,7 +21,9 @@ export const ACCOUNT_ROLES = {
   vat_credit: 'Crédit de TVA',
   customers: 'Clients',
   suppliers: 'Fournisseurs',
-  cash: 'Caisse',
+  cash: 'Caisse (caisses de vente)',
+  central_cash: 'Caisse centrale',
+  owner: "Compte de l'exploitant",
   bank: 'Banque (virements, chèques)',
   card: 'Cartes bancaires',
   mtn: 'MTN Mobile Money',
@@ -110,7 +112,9 @@ export class AccountingService extends Base {
     if (!input.label.trim()) throw new AppError('Le libellé du compte est obligatoire', 'INVALID');
     if (input.role && !(input.role in ACCOUNT_ROLES)) throw new AppError('Rôle de compte inconnu', 'INVALID');
     const current = this.db.prepare('SELECT role FROM accounts WHERE id = ?').pluck().get(id) as AccountRole | null | undefined;
-    if (current && (input.role ?? null) !== current) {
+    // Rôle non précisé : le compte garde le sien.
+    const role = input.role === undefined ? (current ?? null) : input.role;
+    if (current && role !== current) {
       throw new AppError(`Ce compte sert aux écritures « ${ACCOUNT_ROLES[current]} » : désignez d'abord un autre compte pour cet usage`, 'INVALID');
     }
     if (current && input.active === false) throw new AppError('Un compte utilisé par les écritures automatiques ne peut pas être désactivé', 'INVALID');
@@ -129,9 +133,9 @@ export class AccountingService extends Base {
           `INSERT INTO accounts (id, label, role, active, updated_at) VALUES (@id, @label, @role, @active, @now)
            ON CONFLICT(id) DO UPDATE SET label = @label, role = @role, active = @active, updated_at = @now`,
         )
-        .run({ id, label: input.label.trim(), role: input.role ?? null, active: input.active === false ? 0 : 1, now });
+        .run({ id, label: input.label.trim(), role, active: input.active === false ? 0 : 1, now });
       this.enqueue(null, 'account', id, 'upsert', {});
-      this.audit(userId, 'account.save', 'account', id, { label: input.label, role: input.role ?? null });
+      this.audit(userId, 'account.save', 'account', id, { label: input.label, role });
       return this.db.prepare('SELECT id, label, role, active FROM accounts WHERE id = ?').get(id) as Account;
     });
   }
@@ -143,6 +147,7 @@ export class AccountingService extends Base {
     const all = [
       ...this.salesEntries(storeId, r, opts),
       ...this.cashEntries(storeId, r, opts),
+      ...this.centralEntries(storeId, r, opts),
       ...this.customerPaymentEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
@@ -193,7 +198,7 @@ export class AccountingService extends Base {
       .prepare(
         `SELECT o.id, o.type, o.amount, o.reason, date(o.at, 'localtime') AS d, g.name AS register
          FROM cash_operations o JOIN cash_sessions cs ON cs.id = o.session_id JOIN registers g ON g.id = cs.register_id
-         WHERE cs.store_id = ?`,
+         WHERE cs.store_id = ? AND NOT EXISTS (SELECT 1 FROM central_cash_movements m WHERE m.cash_operation_id = o.id)`,
       )
       .all(storeId) as { id: string; type: 'IN' | 'OUT'; amount: number; reason: string; d: string; register: string }[];
     const closings = this.db
@@ -230,13 +235,37 @@ export class AccountingService extends Base {
     return out;
   }
 
+  /**
+   * Caisse centrale : versements des caisses et fonds remis (virements de fonds
+   * par le 585, comme le veut le SYSCOHADA), apports et sorties au bureau.
+   */
+  private centralEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.number, m.kind, m.nature, m.amount, m.label, date(m.at, 'localtime') AS d FROM central_cash_movements m WHERE m.store_id = ? ORDER BY m.at`,
+      )
+      .all(storeId) as { number: string; kind: 'DEPOSIT' | 'FLOAT' | 'IN' | 'OUT'; nature: string; amount: number; label: string; d: string }[];
+    return rows
+      .filter((m) => inRange(m.d, opts.from, opts.to))
+      .map((m) => {
+        // Sens de la centrale : + elle reçoit, - elle donne. La contrepartie dépend de la nature.
+        const sign = m.kind === 'DEPOSIT' || m.kind === 'IN' ? 1 : -1;
+        const other = m.nature === 'register' ? r.cash : m.nature === 'bank' ? r.bank : m.nature === 'owner' ? r.owner : r.transfer;
+        const viaTransfer = m.nature === 'register' || m.nature === 'bank';
+        const lines = viaTransfer
+          ? [side(r.central_cash, sign * m.amount, m.label), side(r.transfer, -sign * m.amount, m.label), side(r.transfer, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)]
+          : [side(r.central_cash, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)];
+        return { journal: m.nature === 'bank' ? ('BQ' as const) : ('CA' as const), date: m.d, ref: m.number, label: m.label, source: 'auto' as const, lines };
+      });
+  }
+
   private customerPaymentEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT p.number, p.method, p.amount, p.reference, date(p.paid_at, 'localtime') AS d, c.code, c.name
+        `SELECT p.number, p.method, p.amount, p.reference, p.from_central, date(p.paid_at, 'localtime') AS d, c.code, c.name
          FROM customer_payments p JOIN customers c ON c.id = p.customer_id WHERE p.store_id = ?`,
       )
-      .all(storeId) as { number: string; method: string; amount: number; reference: string | null; d: string; code: string; name: string }[];
+      .all(storeId) as { number: string; method: string; amount: number; reference: string | null; from_central: number; d: string; code: string; name: string }[];
     return rows
       .filter((p) => inRange(p.d, opts.from, opts.to))
       .map((p) => {
@@ -247,7 +276,7 @@ export class AccountingService extends Base {
           ref: p.number,
           label,
           source: 'auto' as const,
-          lines: [side(r[METHOD_ROLE[p.method] ?? 'bank'], p.amount, label), side(r.customers, -p.amount, label, { code: p.code, name: p.name })],
+          lines: [side(p.from_central ? r.central_cash : r[METHOD_ROLE[p.method] ?? 'bank'], p.amount, label), side(r.customers, -p.amount, label, { code: p.code, name: p.name })],
         };
       });
   }
@@ -282,11 +311,11 @@ export class AccountingService extends Base {
   private supplierPaymentEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT p.method, p.amount, p.reference, date(p.paid_at, 'localtime') AS d, i.number, i.kind, f.code, f.name
+        `SELECT p.method, p.amount, p.reference, p.from_central, date(p.paid_at, 'localtime') AS d, i.number, i.kind, f.code, f.name
          FROM supplier_payments p JOIN supplier_invoices i ON i.id = p.invoice_id JOIN suppliers f ON f.id = p.supplier_id
          WHERE p.store_id = ?`,
       )
-      .all(storeId) as { method: string; amount: number; reference: string | null; d: string; number: string; kind: string; code: string; name: string }[];
+      .all(storeId) as { method: string; amount: number; reference: string | null; from_central: number; d: string; number: string; kind: string; code: string; name: string }[];
     return rows
       .filter((p) => inRange(p.d, opts.from, opts.to))
       .map((p) => {
@@ -299,7 +328,7 @@ export class AccountingService extends Base {
           ref: p.number,
           label,
           source: 'auto' as const,
-          lines: [side(r.suppliers, sign * p.amount, label, { code: p.code, name: p.name }), side(r[METHOD_ROLE[p.method] ?? 'bank'], -sign * p.amount, label)],
+          lines: [side(r.suppliers, sign * p.amount, label, { code: p.code, name: p.name }), side(p.from_central ? r.central_cash : r[METHOD_ROLE[p.method] ?? 'bank'], -sign * p.amount, label)],
         };
       });
   }
@@ -308,7 +337,7 @@ export class AccountingService extends Base {
   private expenseEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT e.number, e.expense_date AS d, e.label, e.beneficiary, e.amount, e.vat, e.method, e.reference, e.account_id
+        `SELECT e.number, e.expense_date AS d, e.label, e.beneficiary, e.amount, e.vat, e.method, e.reference, e.account_id, e.from_central
          FROM expenses e WHERE e.store_id = @storeId AND e.status = 'active'
          AND (@from IS NULL OR e.expense_date >= @from) AND (@to IS NULL OR e.expense_date <= @to)`,
       )
@@ -322,6 +351,7 @@ export class AccountingService extends Base {
       method: string;
       reference: string | null;
       account_id: string;
+      from_central: number;
     }[];
     return rows.map((e) => {
       const label = `${e.label}${e.beneficiary ? `, ${e.beneficiary}` : ''}${e.reference ? ` (${e.reference})` : ''}`;
@@ -331,7 +361,7 @@ export class AccountingService extends Base {
         ref: e.number,
         label,
         source: 'auto' as const,
-        lines: [side(e.account_id, e.amount - e.vat, label), side(r.vat_deductible, e.vat, label), side(r[METHOD_ROLE[e.method] ?? 'bank'], -e.amount, label)].filter(
+        lines: [side(e.account_id, e.amount - e.vat, label), side(r.vat_deductible, e.vat, label), side(e.from_central ? r.central_cash : r[METHOD_ROLE[e.method] ?? 'bank'], -e.amount, label)].filter(
           (l) => l.debit || l.credit,
         ),
       };
@@ -446,7 +476,7 @@ export class AccountingService extends Base {
   /** Soldes de trésorerie (caisse, banque, mobile money) à une date. */
   treasury(storeId: string, to?: string) {
     const r = this.roles();
-    const accounts = (['cash', 'bank', 'card', 'mtn', 'orange', 'transfer'] as AccountRole[]).map((role) => r[role]);
+    const accounts = (['cash', 'central_cash', 'bank', 'card', 'mtn', 'orange', 'transfer'] as AccountRole[]).map((role) => r[role]);
     const tb = this.trialBalance(storeId, { to });
     return accounts.map((id) => {
       const row = tb.rows.find((x) => x.account === id);

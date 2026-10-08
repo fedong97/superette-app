@@ -276,6 +276,8 @@ export class StockService extends Base {
            VALUES (@id, @number, @store_id, @warehouse_id, @supplier_id, @order_id, @delivery_note, @invoice_id, @user_id, @received_at)`,
         )
         .run(reception);
+      // Magasin non assujetti : le coût saisi est le prix payé, sans TVA récupérable.
+      const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
       const insertLine = this.db.prepare(
         `INSERT INTO reception_lines (id, reception_id, line_no, article_id, order_line_id, qty, unit_cost, vat_rate_bp, lot_id, lot_number, expiry)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -290,6 +292,8 @@ export class StockService extends Base {
         if (article.perishable && !line.expiry) {
           throw new AppError(`Date limite obligatoire pour « ${article.name} » (article périssable)`, 'EXPIRY_REQUIRED');
         }
+        // Stock négatif (vendu sans stock) : la réception en couvre d'abord le manque.
+        const before = (this.db.prepare('SELECT qty FROM stock WHERE article_id = ? AND warehouse_id = ?').pluck().get(line.articleId, input.warehouseId) as Milli | undefined) ?? 0;
         const lotId = newId();
         this.insertLot(ctx, {
           id: lotId,
@@ -311,6 +315,7 @@ export class StockService extends Base {
           refType: 'reception',
           refId: receptionId,
         });
+        if (before < 0) this.regularize(ctx, line.articleId, input.warehouseId, lotId, Math.min(line.qty, -before), receptionId);
         insertLine.run(
           newId(),
           receptionId,
@@ -319,7 +324,7 @@ export class StockService extends Base {
           line.orderLineId ?? null,
           line.qty,
           line.unitCost,
-          article.rate_bp,
+          vatEnabled ? article.rate_bp : 0,
           lotId,
           line.lotNumber ?? null,
           line.expiry ?? null,
@@ -331,6 +336,20 @@ export class StockService extends Base {
       this.audit(ctx.userId, 'stock.receive', 'reception', receptionId, { number, reference: input.reference, lines: input.lines.length });
       return { id: receptionId, number };
     });
+  }
+
+  /**
+   * Régularisation des ventes faites sans stock (« Ignorer la gestion des
+   * stocks ») : la quantité vendue sans lot est imputée au lot qui vient
+   * d'arriver. Deux mouvements de même quantité, l'un sur le lot, l'autre sans
+   * lot : le stock ne bouge pas, le lot reçu baisse de ce qui était déjà vendu.
+   */
+  private regularize(ctx: Context, articleId: string, warehouseId: string, lotId: string, qty: Milli, receptionId: string): void {
+    this.db.prepare('UPDATE lots SET qty = qty - ? WHERE id = ?').run(qty, lotId);
+    const base = { type: 'REGULARIZATION' as const, articleId, warehouseId, reason: 'Ventes faites sans stock', refType: 'reception', refId: receptionId };
+    this.applyMovement(ctx, { ...base, qty: -qty, lotId });
+    this.applyMovement(ctx, { ...base, qty, lotId: null });
+    this.audit(ctx.userId, 'stock.regularize', 'article', articleId, { qty, receptionId });
   }
 
   /**

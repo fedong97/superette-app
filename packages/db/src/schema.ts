@@ -852,4 +852,23 @@ ALTER TABLE expenses ADD COLUMN plan_period TEXT;
 CREATE INDEX expenses_plan ON expenses(plan_id, plan_period);
 `,
   },
+  {
+    version: 15,
+    name: 'fiche KONTROL',
+    sql: `
+-- Fiche article à la KONTROL : le conditionnement d'achat vient en tête (le plus
+-- grand), avec son prix d'achat et son prix de revient exacts ; ceux des
+-- conditionnements de vente s'en déduisent par le diviseur.
+ALTER TABLE articles ADD COLUMN other_ref TEXT;
+ALTER TABLE articles ADD COLUMN pack_purchase_price INTEGER;
+ALTER TABLE articles ADD COLUMN pack_cost_price INTEGER;
+
+-- Le conditionnement d'achat est désormais toujours le plus grand.
+UPDATE article_packs SET is_purchase = CASE WHEN position = 1 THEN 1 ELSE 0 END;
+UPDATE articles SET
+  pack_purchase_price = purchase_price * COALESCE((SELECT units FROM article_packs p WHERE p.article_id = articles.id AND p.position = 1), 1000) / 1000,
+  pack_cost_price = purchase_price * COALESCE((SELECT units FROM article_packs p WHERE p.article_id = articles.id AND p.position = 1), 1000) / 1000;
+CREATE INDEX articles_other_ref ON articles(other_ref);
+`,
+  },
 ];

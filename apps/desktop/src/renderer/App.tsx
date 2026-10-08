@@ -149,7 +149,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Produit',
     [
       { label: 'Liste des produits', open: ['articles', 'list'] },
-      { label: 'Ajout rapide', open: ['articles', 'new'] },
+      { label: 'Ajouter / paramétrer une marchandise', open: ['articles', 'new'] },
       { label: 'Recherche', open: ['articles', 'search'] },
       SEP,
       { label: 'Péremptions', open: ['stock', 'expiry'] },

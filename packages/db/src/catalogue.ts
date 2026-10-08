@@ -42,6 +42,12 @@ export interface Article {
   unit_name: string | null;
   wholesale_price: Fcfa | null;
   super_wholesale_price: Fcfa | null;
+  /** Autre référence (référence fournisseur, ancien code) : cherchée en caisse. */
+  other_ref: string | null;
+  /** Prix d'achat HT du conditionnement d'achat (la palette), exact. */
+  pack_purchase_price: Fcfa | null;
+  /** Prix de revient du conditionnement d'achat (achat + transport, manutention). */
+  pack_cost_price: Fcfa | null;
   barcodes: { code: string; pack_qty: Milli }[];
   /** Conditionnements, du plus grand au plus petit (carton, paquet). */
   packs: ArticlePack[];
@@ -59,7 +65,7 @@ export interface ArticlePack {
   wholesale_price: Fcfa | null;
   super_wholesale_price: Fcfa | null;
   barcode: string | null;
-  /** Conditionnement dans lequel on achète l'article. */
+  /** Conditionnement dans lequel on achète l'article : toujours le premier (le plus grand). */
   is_purchase: number;
 }
 
@@ -70,6 +76,7 @@ export interface PackInput {
   wholesalePrice?: Fcfa | null;
   superWholesalePrice?: Fcfa | null;
   barcode?: string | null;
+  /** Ignoré : le conditionnement d'achat est toujours le premier. */
   purchase?: boolean;
 }
 
@@ -95,6 +102,14 @@ export interface ArticleInput {
   superWholesalePrice?: Fcfa | null;
   /** Conditionnements du plus grand au plus petit ; absent = inchangés. */
   packs?: PackInput[];
+  otherRef?: string | null;
+  /**
+   * Prix d'achat HT du conditionnement d'achat (le premier, ou l'unité s'il n'y
+   * en a pas) : remplace `purchasePrice`, qui en est déduit par unité.
+   */
+  packPurchasePrice?: Fcfa;
+  /** Prix de revient du conditionnement d'achat ; absent = garde l'écart avec l'achat. */
+  packCostPrice?: Fcfa;
 }
 
 /** Résultat d'un scan en caisse. */
@@ -179,7 +194,7 @@ export class CatalogueService extends Base {
     const rows = this.db
       .prepare(
         `${ARTICLE_SELECT}
-         WHERE (a.name LIKE @q OR a.code LIKE @q OR a.brand LIKE @q
+         WHERE (a.name LIKE @q OR a.code LIKE @q OR a.brand LIKE @q OR a.other_ref LIKE @q
                 OR a.id IN (SELECT article_id FROM barcodes WHERE code LIKE @q))
            AND (@all = 1 OR a.active = 1)
            AND (@familyId IS NULL OR a.family_id = @familyId)
@@ -210,7 +225,7 @@ export class CatalogueService extends Base {
         params[`w${i}`] = `%${w}%`;
         params[`p${i}`] = `${w}%`;
         // Codes et codes-barres : par le début seulement, sinon « 1 » ramènerait tout le catalogue.
-        return `(fold(a.name) LIKE @w${i} OR fold(COALESCE(a.brand, '')) LIKE @w${i} OR fold(a.code) LIKE @p${i}
+        return `(fold(a.name) LIKE @w${i} OR fold(COALESCE(a.brand, '')) LIKE @w${i} OR fold(a.code) LIKE @p${i} OR fold(COALESCE(a.other_ref, '')) LIKE @p${i}
                  OR a.id IN (SELECT article_id FROM barcodes WHERE code LIKE @p${i}))`;
       })
       .join(' AND ');
@@ -241,6 +256,8 @@ export class CatalogueService extends Base {
     for (const [label, v] of [
       ['Prix de vente', input.salePrice],
       ["Prix d'achat", input.purchasePrice],
+      ["Prix d'achat du conditionnement", input.packPurchasePrice ?? 0],
+      ['Prix de revient', input.packCostPrice ?? 0],
     ] as const) {
       if (!Number.isSafeInteger(v) || v < 0) throw new AppError(`${label} invalide`, 'INVALID');
     }
@@ -275,6 +292,17 @@ export class CatalogueService extends Base {
       const now = this.now();
       const articleId = id ?? newId();
       const existing = id ? this.getArticle(id) : null;
+      if (existing && packs) this.assertSameStockUnit(existing, input.unitName === undefined ? existing.unit_name : input.unitName, packs);
+      // Prix d'achat et de revient tenus au conditionnement d'achat, l'unité en est déduite.
+      const purchaseUnits = packs ? (units[0] ?? 1000) : (existing?.packs[0]?.units ?? 1000);
+      const sameBasis = existing !== null && existing.purchase_price === input.purchasePrice && (existing.packs[0]?.units ?? 1000) === purchaseUnits;
+      const packPurchase =
+        input.packPurchasePrice ??
+        (sameBasis && existing.pack_purchase_price !== null ? existing.pack_purchase_price : Math.round((input.purchasePrice * purchaseUnits) / 1000));
+      const packCost =
+        input.packCostPrice ??
+        (existing?.pack_cost_price != null && existing.pack_purchase_price !== null ? Math.max(0, existing.pack_cost_price + packPurchase - existing.pack_purchase_price) : packPurchase);
+      const purchasePrice = input.packPurchasePrice !== undefined ? Math.round((packPurchase * 1000) / purchaseUnits) : input.purchasePrice;
       const params = {
         id: articleId,
         code: input.code?.trim() || existing?.code || this.nextArticleCode(),
@@ -283,7 +311,7 @@ export class CatalogueService extends Base {
         brand: input.brand ?? null,
         unit: input.unit,
         vat_rate_id: input.vatRateId,
-        purchase_price: input.purchasePrice,
+        purchase_price: purchasePrice,
         sale_price: input.salePrice,
         perishable: input.perishable ? 1 : 0,
         plu: input.plu?.trim() ? input.plu.trim().padStart(5, '0') : null,
@@ -295,6 +323,9 @@ export class CatalogueService extends Base {
         unit_name: input.unitName === undefined ? (existing?.unit_name ?? null) : input.unitName?.trim() || null,
         wholesale_price: input.wholesalePrice === undefined ? (existing?.wholesale_price ?? null) : input.wholesalePrice,
         super_wholesale_price: input.superWholesalePrice === undefined ? (existing?.super_wholesale_price ?? null) : input.superWholesalePrice,
+        other_ref: input.otherRef === undefined ? (existing?.other_ref ?? null) : input.otherRef?.trim() || null,
+        pack_purchase_price: packPurchase,
+        pack_cost_price: packCost,
         now,
       };
       try {
@@ -305,16 +336,19 @@ export class CatalogueService extends Base {
                  vat_rate_id=@vat_rate_id, purchase_price=@purchase_price, sale_price=@sale_price,
                  perishable=@perishable, plu=@plu, quick_key=@quick_key, min_qty=@min_qty, alert_qty=@alert_qty,
                  max_qty=@max_qty, active=@active, unit_name=@unit_name, wholesale_price=@wholesale_price,
-                 super_wholesale_price=@super_wholesale_price, updated_at=@now WHERE id=@id`,
+                 super_wholesale_price=@super_wholesale_price, other_ref=@other_ref, pack_purchase_price=@pack_purchase_price,
+                 pack_cost_price=@pack_cost_price, updated_at=@now WHERE id=@id`,
             )
             .run(params);
         } else {
           this.db
             .prepare(
               `INSERT INTO articles (id, code, name, family_id, brand, unit, vat_rate_id, purchase_price, sale_price,
-                 perishable, plu, quick_key, min_qty, alert_qty, max_qty, active, unit_name, wholesale_price, super_wholesale_price, created_at, updated_at)
+                 perishable, plu, quick_key, min_qty, alert_qty, max_qty, active, unit_name, wholesale_price, super_wholesale_price,
+                 other_ref, pack_purchase_price, pack_cost_price, created_at, updated_at)
                VALUES (@id, @code, @name, @family_id, @brand, @unit, @vat_rate_id, @purchase_price, @sale_price,
-                 @perishable, @plu, @quick_key, @min_qty, @alert_qty, @max_qty, @active, @unit_name, @wholesale_price, @super_wholesale_price, @now, @now)`,
+                 @perishable, @plu, @quick_key, @min_qty, @alert_qty, @max_qty, @active, @unit_name, @wholesale_price, @super_wholesale_price,
+                 @other_ref, @pack_purchase_price, @pack_cost_price, @now, @now)`,
             )
             .run(params);
         }
@@ -327,9 +361,9 @@ export class CatalogueService extends Base {
             `INSERT INTO article_packs (id, article_id, position, name, contains, units, sale_price, wholesale_price, super_wholesale_price, barcode, is_purchase)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           );
-          const purchase = packs.findIndex((p) => p.purchase);
+          // Comme sur KONTROL, on achète dans le plus grand conditionnement.
           packs.forEach((p, i) =>
-            insertPack.run(newId(), articleId, i + 1, p.name, p.contains, units[i], p.salePrice, p.wholesalePrice ?? null, p.superWholesalePrice ?? null, p.barcode, i === purchase ? 1 : 0),
+            insertPack.run(newId(), articleId, i + 1, p.name, p.contains, units[i], p.salePrice, p.wholesalePrice ?? null, p.superWholesalePrice ?? null, p.barcode, i === 0 ? 1 : 0),
           );
         }
       } catch (e) {
@@ -349,6 +383,26 @@ export class CatalogueService extends Base {
       this.audit(userId, existing ? 'article.update' : 'article.create', 'article', articleId);
       return article;
     });
+  }
+
+  /**
+   * Le stock et l'historique sont comptés dans l'unité de détail : une fois
+   * l'article mouvementé, elle ne change plus (la CANETTE ne devient pas un
+   * conditionnement, la PALETTE ne devient pas l'unité).
+   */
+  private assertSameStockUnit(existing: Article, unitName: string | null | undefined, packs: { name: string }[]): void {
+    const key = (v: string | null | undefined) => (v ?? '').trim().toLowerCase();
+    const oldUnit = key(existing.unit_name);
+    const becomesPack = oldUnit !== '' && packs.some((p) => key(p.name) === oldUnit);
+    const packBecomesUnit = key(unitName) !== oldUnit && existing.packs.some((p) => key(p.name) === key(unitName));
+    if (!becomesPack && !packBecomesUnit) return;
+    const moved = this.db.prepare('SELECT 1 FROM stock_movements WHERE article_id = ? LIMIT 1').get(existing.id);
+    if (moved) {
+      throw new AppError(
+        `Le stock de « ${existing.name} » est compté en ${existing.unit_name ?? 'pièce'} depuis ses premiers mouvements : cette unité ne peut plus changer. Créez un nouvel article pour vendre dans une unité plus petite.`,
+        'STOCK_UNIT_LOCKED',
+      );
+    }
   }
 
   /** Prix propre à un magasin (null pour revenir au prix national). */

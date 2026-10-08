@@ -280,6 +280,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (type === 'OUT' && user!.role === 'cashier') supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
+    'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean }) => s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),

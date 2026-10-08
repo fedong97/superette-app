@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType, describeInPacks } from '@superette/core';
 import { type Result, call } from '../api';
 import { StockByWarehouse } from './Controls';
-import { PackUnitSelect, packChoices, purchaseUnits, switchUnits, toBase } from './packs';
+import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast } from '../ui';
 
@@ -145,7 +145,7 @@ function Reception() {
       <ArticlePicker
         onPick={(a) => {
           const units = purchaseUnits(a);
-          setLines([...lines, { article: a, qty: '1', cost: a.purchase_price ? String(Math.round((a.purchase_price * units) / 1000)) : '', packUnits: units, lot: '', expiry: '' }]);
+          setLines([...lines, { article: a, qty: '1', cost: packCostText(a, units), packUnits: units, lot: '', expiry: '' }]);
         }}
       />
       {lines.length > 0 && (
@@ -210,7 +210,7 @@ function Reception() {
                 lines: lines.map((l) => {
                   const b = toBase(l.qty, l.cost, l.packUnits);
                   if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou coût invalide : ${l.article.name}`);
-                  return { articleId: l.article.id, qty: b.qty, unitCost: b.unitCost, lotNumber: l.lot || null, expiry: l.expiry || null };
+                  return { articleId: l.article.id, qty: b.qty, unitCost: b.unitCost, packCost: parseAmount(l.cost) ?? undefined, packUnits: l.packUnits, lotNumber: l.lot || null, expiry: l.expiry || null };
                 }),
               });
               toast.ok('Réception enregistrée');

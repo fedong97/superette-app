@@ -1,205 +1,287 @@
-import { packUnits, splitTtc } from '@superette/core';
+import { containsFromDivisors, dividePrice, splitTtc } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { call } from '../api';
 import { fcfa, parseAmount, parseQty } from '../ui';
 
-/** Conditionnement en cours de saisie dans la fiche article (du plus grand au plus petit). */
-export interface PackDraft {
+/**
+ * Fiche article à la KONTROL. Bloc 1 : le conditionnement d'achat (PALETTE)
+ * avec ses prix d'achat, de revient et de vente. Blocs 2 à 4 : les
+ * conditionnements de vente, du plus grand au plus petit, chacun avec son
+ * diviseur par rapport au conditionnement d'achat (CANETTE : 24). Leur achat
+ * et leur revient s'en déduisent (17 000 / 24 = 708), leurs prix de vente se
+ * saisissent. Le dernier bloc coché est l'unité de détail : le stock est
+ * compté ainsi.
+ */
+export interface LevelDraft {
   key: number;
+  enabled: boolean;
   name: string;
-  contains: string;
+  divisor: string;
   sale: string;
   wholesale: string;
   superWholesale: string;
   barcode: string;
+  /** Prix de vente proposé (vente du conditionnement d'achat / diviseur), pas encore retouché. */
+  auto?: boolean;
 }
 
-/** Unité de détail : l'article lui-même. */
-export interface BaseDraft {
-  unitName: string;
+/** Prix d'achat et de revient du conditionnement d'achat. */
+export interface BuyDraft {
   purchase: string;
-  sale: string;
-  wholesale: string;
-  superWholesale: string;
+  cost: string;
 }
+
+export const MAX_LEVELS = 4;
 
 let keySeq = 0;
-export const newPackKey = () => ++keySeq;
-
-/** « 100 ampoules », « 1 ampoule », « 24 jus ». */
-const plural = (word: string, n: number) => (n > 1 && !/[sxz]$/.test(word) ? `${word}s` : word);
-
+const newKey = () => ++keySeq;
+const str = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
 const num = (v: string) => (v.trim() ? parseAmount(v) : null);
 
-/** Unités de détail de chaque conditionnement saisi (0 si un « contient » est invalide). */
-export function draftUnits(packs: PackDraft[]): number[] {
-  return packUnits(packs.map((p) => ({ name: p.name, contains: Math.max(0, Math.floor(Number(p.contains) || 0)) })));
+export const emptyLevel = (enabled = false): LevelDraft => ({ key: newKey(), enabled, name: '', divisor: '', sale: '', wholesale: '', superWholesale: '', barcode: '' });
+
+interface ArticleLevels {
+  unit: string;
+  unit_name: string | null;
+  purchase_price: number;
+  sale_price: number;
+  wholesale_price: number | null;
+  super_wholesale_price: number | null;
+  pack_purchase_price: number | null;
+  pack_cost_price: number | null;
+  packs: readonly { name: string; units: number; sale_price: number; wholesale_price: number | null; super_wholesale_price: number | null; barcode: string | null }[];
+}
+
+/** Blocs de la fiche à partir de l'article enregistré (conditionnements puis unité). */
+export function levelsFromArticle(a: ArticleLevels | null): { levels: LevelDraft[]; buy: BuyDraft } {
+  if (!a) return { levels: [emptyLevel(true), emptyLevel(), emptyLevel(), emptyLevel()], buy: { purchase: '', cost: '' } };
+  const top = a.packs[0]?.units ?? 1000;
+  const levels: LevelDraft[] = [
+    ...a.packs.map((p) => ({
+      key: newKey(),
+      enabled: true,
+      name: p.name,
+      divisor: String(Math.round(top / p.units)),
+      sale: String(p.sale_price),
+      wholesale: str(p.wholesale_price),
+      superWholesale: str(p.super_wholesale_price),
+      barcode: p.barcode ?? '',
+    })),
+    {
+      key: newKey(),
+      enabled: true,
+      name: a.unit_name ?? '',
+      divisor: String(top / 1000),
+      sale: String(a.sale_price),
+      wholesale: str(a.wholesale_price),
+      superWholesale: str(a.super_wholesale_price),
+      barcode: '',
+    },
+  ];
+  while (levels.length < MAX_LEVELS) levels.push(emptyLevel());
+  const purchase = a.pack_purchase_price ?? Math.round((a.purchase_price * top) / 1000);
+  return { levels, buy: { purchase: String(purchase), cost: String(a.pack_cost_price ?? purchase) } };
+}
+
+export interface LevelsInput {
+  unitName: string | null;
+  salePrice: number;
+  wholesalePrice: number | null;
+  superWholesalePrice: number | null;
+  packPurchasePrice: number;
+  packCostPrice: number;
+  purchasePrice: number;
+  packs: { name: string; contains: number; salePrice: number; wholesalePrice: number | null; superWholesalePrice: number | null; barcode: string | null }[];
+}
+
+/** Blocs saisis vers la fiche enregistrée ; renvoie le message d'erreur s'il y en a un. */
+export function levelsToInput(levels: LevelDraft[], buy: BuyDraft, piece: boolean): LevelsInput | string {
+  const used = piece ? levels.filter((l, i) => i === 0 || l.enabled) : levels.slice(0, 1);
+  const divisors = used.map((l, i) => (i === 0 ? 1 : Math.floor(Number(l.divisor.replace(/\s/g, '')) || 0)));
+  const contains = containsFromDivisors(used.map((l, i) => ({ name: l.name, divisor: divisors[i]! })));
+  if (typeof contains === 'string') return contains;
+  const purchase = num(buy.purchase);
+  const cost = buy.cost.trim() ? num(buy.cost) : purchase;
+  if (purchase === null) return "Prix d'achat du conditionnement d'achat invalide";
+  if (cost === null) return 'Prix de revient invalide';
+  const prices = [] as { sale: number; wholesale: number | null; superWholesale: number | null }[];
+  for (const l of used) {
+    const name = l.name.trim() || (piece ? 'sans nom' : 'article');
+    if (piece && !l.name.trim()) return 'Donnez un nom à chaque conditionnement coché (PALETTE, CASIER, CANETTE…)';
+    const sale = num(l.sale);
+    if (!sale) return `Prix de vente de « ${name} » invalide`;
+    const wholesale = num(l.wholesale);
+    const superWholesale = num(l.superWholesale);
+    if ((l.wholesale.trim() && !wholesale) || (l.superWholesale.trim() && !superWholesale)) return `Prix de gros de « ${name} » invalide`;
+    prices.push({ sale, wholesale, superWholesale });
+  }
+  const last = used.length - 1;
+  return {
+    unitName: piece ? used[last]!.name.trim() : null,
+    salePrice: prices[last]!.sale,
+    wholesalePrice: prices[last]!.wholesale,
+    superWholesalePrice: prices[last]!.superWholesale,
+    packPurchasePrice: purchase,
+    packCostPrice: cost,
+    purchasePrice: dividePrice(purchase, divisors[last]!),
+    packs: used.slice(0, last).map((l, i) => ({
+      name: l.name.trim(),
+      contains: contains[i]!,
+      salePrice: prices[i]!.sale,
+      wholesalePrice: prices[i]!.wholesale,
+      superWholesalePrice: prices[i]!.superWholesale,
+      barcode: l.barcode.trim() || null,
+    })),
+  };
 }
 
 /**
- * Grille des conditionnements sur le modèle de KONTROL : une colonne par niveau,
- * du conditionnement d'achat (carton, palette) à l'unité de détail, avec pour
- * chacun ce qu'il contient, son coût d'achat, ses prix détail / gros / super gros
- * et son code-barres. On ajoute en plus : le prix ramené à l'unité, la marge, et
- * une alerte quand le carton revient plus cher que les unités vendues séparément.
+ * Grille des conditionnements : une ligne par bloc, comme sur la fiche KONTROL.
+ * En plus de KONTROL : la marge sur le revient, et une alerte quand un grand
+ * conditionnement revient plus cher que les petits vendus séparément.
  */
-export function PackGrid({
-  packs,
-  base,
-  purchaseIndex,
+export function LevelGrid({
+  levels,
+  buy,
   rate,
-  onPacks,
-  onBase,
-  onPurchaseIndex,
+  piece,
+  unitLabel,
+  onLevels,
+  onBuy,
 }: {
-  packs: PackDraft[];
-  base: BaseDraft;
-  /** Niveau acheté au fournisseur : index du conditionnement, ou -1 pour l'unité de détail. */
-  purchaseIndex: number;
+  levels: LevelDraft[];
+  buy: BuyDraft;
   rate: number;
-  onPacks: (packs: PackDraft[]) => void;
-  onBase: (patch: Partial<BaseDraft>) => void;
-  onPurchaseIndex: (i: number) => void;
+  /** Article vendu à la pièce : sinon (kg, litre) un seul bloc. */
+  piece: boolean;
+  unitLabel: string;
+  onLevels: (levels: LevelDraft[]) => void;
+  onBuy: (buy: BuyDraft) => void;
 }) {
-  const units = draftUnits(packs);
-  const unitName = base.unitName.trim() || 'Pièce';
-  const unitBuy = num(base.purchase) ?? 0;
-  const unitSale = num(base.sale) ?? 0;
-  const setPack = (i: number, patch: Partial<PackDraft>) => onPacks(packs.map((p, j) => (j === i ? { ...p, ...patch } : p)));
-  const addBigger = () => {
-    const top = packs[0];
-    const contains = 10;
-    const topUnits = top ? units[0]! : 1000;
-    onPacks([{ key: newPackKey(), name: packs.length === 0 ? 'Carton' : packs.length === 1 ? 'Palette' : 'Lot', contains: String(contains), sale: unitSale ? String(Math.round((unitSale * topUnits * contains) / 1000)) : '', wholesale: '', superWholesale: '', barcode: '' }, ...packs]);
-    if (purchaseIndex >= 0) onPurchaseIndex(purchaseIndex + 1);
+  const shown = piece ? levels : levels.slice(0, 1);
+  const set = (i: number, patch: Partial<LevelDraft>) => onLevels(levels.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const purchase = num(buy.purchase);
+  const cost = buy.cost.trim() ? num(buy.cost) : purchase;
+  const lastOn = piece ? shown.reduce((last, l, i) => (i === 0 || l.enabled ? i : last), 0) : 0;
+  const divisorOf = (i: number) => (i === 0 ? 1 : Math.floor(Number(levels[i]!.divisor) || 0));
+  // Prix de vente ramené à l'unité de détail, pour repérer un grand conditionnement plus cher que le détail.
+  const lastDiv = divisorOf(lastOn);
+  const lastSale = num(levels[lastOn]!.sale);
+  const toggle = (i: number, on: boolean) => {
+    // Décocher un bloc décoche aussi les plus petits.
+    if (!on) return onLevels(levels.map((l, j) => (j >= i ? { ...l, enabled: false } : l)));
+    // On coche dans l'ordre : un bloc ne s'active que si le précédent l'est.
+    if (i > 1 && !levels[i - 1]!.enabled) return;
+    set(i, { enabled: true, ...suggest(levels[i]!, levels[i]!.divisor) });
   };
-  const addSmaller = () => {
-    // Niveau intercalé juste au-dessus de l'unité : le dernier conditionnement en contient alors plusieurs.
-    const last = packs.length - 1;
-    onPacks([
-      ...packs.slice(0, last),
-      { ...packs[last]!, contains: '' },
-      { key: newPackKey(), name: 'Paquet', contains: '', sale: '', wholesale: '', superWholesale: '', barcode: '' },
-    ]);
+  // Prix de vente proposé tant qu'il n'a pas été retouché : vente du bloc 1 / diviseur.
+  const suggest = (l: LevelDraft, divisor: string): Partial<LevelDraft> => {
+    const sale = num(levels[0]!.sale);
+    const div = Math.floor(Number(divisor) || 0);
+    if (!sale || div < 2 || (l.sale && !l.auto)) return {};
+    return { sale: String(dividePrice(sale, div)), auto: true };
   };
-  const remove = (i: number) => {
-    // Le niveau au-dessus garde le même nombre d'unités : il contient désormais directement le niveau suivant.
-    const next = packs.map((p) => ({ ...p }));
-    if (i > 0) next[i - 1]!.contains = String((Number(next[i - 1]!.contains) || 0) * (Number(packs[i]!.contains) || 0));
-    next.splice(i, 1);
-    onPacks(next);
-    if (purchaseIndex === i) onPurchaseIndex(-1);
-    else if (purchaseIndex > i) onPurchaseIndex(purchaseIndex - 1);
-  };
-  const levelName = (i: number) => (i < packs.length ? packs[i]!.name.trim() || `niveau ${i + 1}` : unitName);
-
-  const facts = (sale: number | null, levelUnits: number) => {
-    if (!sale) return null;
-    const perUnit = Math.round((sale * 1000) / levelUnits);
-    const cost = Math.round((unitBuy * levelUnits) / 1000);
-    const ht = splitTtc(sale, rate).ht;
-    const margin = ht > 0 && cost > 0 ? Math.round(((ht - cost) / ht) * 100) : null;
-    const saving = levelUnits > 1000 && unitSale ? Math.round((1 - perUnit / unitSale) * 100) : null;
-    return (
-      <div className="pack-facts">
-        {levelUnits > 1000 && (
-          <span>
-            {fcfa(perUnit)} / {unitName.toLowerCase()}
-            {saving !== null && saving > 0 && <span className="ok"> (−{saving} %)</span>}
-          </span>
-        )}
-        {margin !== null && <span className={margin < 0 ? 'neg' : ''}>Marge {margin} %</span>}
-        {levelUnits > 1000 && unitSale > 0 && perUnit > unitSale && <span className="neg">Plus cher qu'à l'unité</span>}
-        {margin !== null && margin < 0 && <span className="neg">Vendu à perte</span>}
-      </div>
-    );
-  };
-
-  const priceRows = (v: { sale: string; wholesale: string; superWholesale: string }, set: (patch: Partial<typeof v>) => void, levelUnits: number) => (
-    <>
-      <label>
-        <span>Vente TTC</span>
-        <input inputMode="numeric" value={v.sale} onChange={(e) => set({ sale: e.target.value })} required />
-      </label>
-      <label>
-        <span>Gros</span>
-        <input inputMode="numeric" value={v.wholesale} placeholder={v.sale} onChange={(e) => set({ wholesale: e.target.value })} />
-      </label>
-      <label>
-        <span>Super gros</span>
-        <input inputMode="numeric" value={v.superWholesale} placeholder={v.wholesale || v.sale} onChange={(e) => set({ superWholesale: e.target.value })} />
-      </label>
-      {facts(num(v.sale), levelUnits)}
-    </>
-  );
-
-  const buyRow = (levelUnits: number) => (
-    <label>
-      <span>Achat HT</span>
-      <input
-        inputMode="numeric"
-        value={levelUnits === 1000 ? base.purchase : unitBuy ? String(Math.round((unitBuy * levelUnits) / 1000)) : ''}
-        onChange={(e) => {
-          const v = num(e.target.value);
-          onBase({ purchase: levelUnits === 1000 ? e.target.value : v === null ? '' : String(Math.round((v * 1000) / levelUnits)) });
-        }}
-      />
-    </label>
-  );
-
-  const purchaseMark = (i: number) => (
-    <label className="pack-buy" title="Conditionnement dans lequel le fournisseur livre">
-      <input type="radio" name="purchase-level" checked={purchaseIndex === i} onChange={() => onPurchaseIndex(i)} /> Achat
-    </label>
-  );
-
   return (
-    <div className="packs">
-      <button type="button" className="pack-add" onClick={addBigger} disabled={packs.length >= 3} title="Ajouter un conditionnement plus grand (carton, palette)">
-        + Plus grand
-      </button>
-      {packs.map((p, i) => (
-        <div key={p.key} className={`pack ${purchaseIndex === i ? 'buy' : ''}`}>
-          <div className="pack-head">
-            <span className="pack-num">{i + 1}</span>
-            <input value={p.name} onChange={(e) => setPack(i, { name: e.target.value })} placeholder="Carton" required />
-            <button type="button" className="ghost" onClick={() => remove(i)} title="Retirer ce conditionnement">
-              ✕
-            </button>
-          </div>
-          {purchaseMark(i)}
-          <label>
-            <span>Contient</span>
-            <span className="inline">
-              <input inputMode="numeric" className="contains" value={p.contains} onChange={(e) => setPack(i, { contains: e.target.value })} required />
-              <small>{levelName(i + 1)}</small>
-            </span>
-          </label>
-          <div className="pack-units muted">{units[i] ? `= ${units[i]! / 1000} ${plural(unitName.toLowerCase(), units[i]! / 1000)}` : 'Indiquez le contenu'}</div>
-          {units[i] ? buyRow(units[i]!) : null}
-          {priceRows(p, (patch) => setPack(i, patch), units[i] || 1000)}
-          <label>
-            <span>Code-barres</span>
-            <input value={p.barcode} onChange={(e) => setPack(i, { barcode: e.target.value })} placeholder="Scanner" />
-          </label>
-        </div>
-      ))}
-      <div className={`pack base ${purchaseIndex === -1 ? 'buy' : ''}`}>
-        <div className="pack-head">
-          <span className="pack-num">{packs.length + 1}</span>
-          <input value={base.unitName} onChange={(e) => onBase({ unitName: e.target.value })} placeholder="Pièce" />
-        </div>
-        {purchaseMark(-1)}
-        <div className="pack-units muted">Unité de détail : le stock est compté ainsi</div>
-        {buyRow(1000)}
-        {priceRows(base, onBase, 1000)}
-        {packs.length > 0 && packs.length < 3 && (
-          <button type="button" className="ghost" onClick={addSmaller} title="Intercaler un niveau (paquet, pack) entre le dernier conditionnement et l'unité">
-            + Intercaler un niveau
-          </button>
-        )}
-      </div>
-    </div>
+    <table className="list compact levels">
+      <thead>
+        <tr>
+          <th className="n">N°</th>
+          <th>Conditionnement</th>
+          <th className="r">Diviseur</th>
+          <th className="r">Achat HT</th>
+          <th className="r">Revient</th>
+          <th className="r">Vente TTC</th>
+          <th className="r">Gros</th>
+          <th className="r">Sup. gros</th>
+          <th>Code-barres</th>
+          <th className="r">Marge</th>
+        </tr>
+      </thead>
+      <tbody>
+        {shown.map((l, i) => {
+          const on = i === 0 || l.enabled;
+          const div = divisorOf(i);
+          const sale = num(l.sale);
+          const levelCost = cost !== null && div > 0 ? dividePrice(cost, div) : null;
+          const ht = sale ? splitTtc(sale, rate).ht : 0;
+          const margin = ht > 0 && levelCost ? Math.round(((ht - levelCost) / ht) * 100) : null;
+          const dearer = on && i < lastOn && sale && lastSale && div > 0 && lastDiv > div && sale > lastSale * (lastDiv / div);
+          return (
+            <tr key={l.key} className={`${i === 0 ? 'buy' : ''} ${on ? '' : 'off'}`}>
+              <td className="n">
+                {i === 0 ? (
+                  <span className="pack-num" title="Conditionnement d'achat">1</span>
+                ) : (
+                  <label className="inline" title="Activer ce conditionnement de vente">
+                    <input type="checkbox" checked={l.enabled} disabled={!l.enabled && i > 1 && !levels[i - 1]!.enabled} onChange={(e) => toggle(i, e.target.checked)} />
+                    {i + 1}
+                  </label>
+                )}
+              </td>
+              <td>
+                {piece ? (
+                  <input
+                    className="level-name"
+                    value={l.name}
+                    disabled={!on}
+                    onChange={(e) => set(i, { name: e.target.value.toUpperCase() })}
+                    placeholder={i === 0 ? 'PALETTE, CARTON…' : 'CANETTE, PIÈCE…'}
+                  />
+                ) : (
+                  <b>{unitLabel}</b>
+                )}
+                {i === 0 && <small className="muted block">Conditionnement d'achat</small>}
+                {piece && on && i === lastOn && <small className="muted block">Le stock est compté en {(l.name.trim() || 'unité').toLowerCase()}</small>}
+              </td>
+              <td className="r">
+                {i === 0 ? (
+                  '1'
+                ) : (
+                  <input className="qty" inputMode="numeric" value={l.divisor} disabled={!on} onChange={(e) => set(i, { divisor: e.target.value, ...suggest(l, e.target.value) })} />
+                )}
+              </td>
+              <td className="r">
+                {i === 0 ? (
+                  <input className="amount" inputMode="numeric" value={buy.purchase} onChange={(e) => onBuy({ ...buy, purchase: e.target.value })} />
+                ) : (
+                  <span className="muted">{on && purchase !== null && div > 0 ? fcfa(dividePrice(purchase, div)) : ''}</span>
+                )}
+              </td>
+              <td className="r">
+                {i === 0 ? (
+                  <input className="amount" inputMode="numeric" value={buy.cost} placeholder={buy.purchase} onChange={(e) => onBuy({ ...buy, cost: e.target.value })} />
+                ) : (
+                  <span className="muted">{on && levelCost !== null ? fcfa(levelCost) : ''}</span>
+                )}
+              </td>
+              {(['sale', 'wholesale', 'superWholesale'] as const).map((k) => (
+                <td key={k} className="r">
+                  <input
+                    className="amount"
+                    inputMode="numeric"
+                    value={l[k]}
+                    disabled={!on}
+                    placeholder={k === 'wholesale' ? l.sale : k === 'superWholesale' ? l.wholesale || l.sale : ''}
+                    onChange={(e) => set(i, { [k]: e.target.value, ...(k === 'sale' ? { auto: false } : {}) })}
+                  />
+                </td>
+              ))}
+              <td>
+                {piece && on && i < lastOn ? (
+                  <input className="barcode" value={l.barcode} onChange={(e) => set(i, { barcode: e.target.value })} placeholder="Scanner" />
+                ) : (
+                  <small className="muted">{on ? 'voir plus bas' : ''}</small>
+                )}
+              </td>
+              <td className={`r ${margin !== null && margin < 0 ? 'neg' : ''}`}>
+                {on && margin !== null ? `${margin} %` : ''}
+                {dearer && <small className="neg block">Plus cher qu'au détail</small>}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
@@ -223,9 +305,15 @@ export function packChoices(a: WithPacks): PackChoice[] {
   return [...a.packs.map((p) => ({ name: p.name, units: p.units })), { name: a.unit_name || 'Pièce', units: 1000 }];
 }
 
-/** Conditionnement d'achat de l'article (le carton, la palette), sinon l'unité. */
+/** Conditionnement d'achat de l'article : le plus grand (la palette), sinon l'unité. */
 export function purchaseUnits(a: WithPacks): number {
-  return a.packs.find((p) => p.is_purchase)?.units ?? 1000;
+  return a.packs[0]?.units ?? 1000;
+}
+
+/** Dernier prix d'achat d'un conditionnement : exact pour le conditionnement d'achat (17 000 la palette). */
+export function packCostText(a: WithPacks & { purchase_price: number; pack_purchase_price: number | null }, units: number): string {
+  if (units === purchaseUnits(a) && a.pack_purchase_price) return String(a.pack_purchase_price);
+  return a.purchase_price ? String(Math.round((a.purchase_price * units) / 1000)) : '';
 }
 
 /** Conditionnement d'affichage d'une quantité déjà saisie : le préféré s'il tombe juste, sinon le plus grand qui tombe juste. */

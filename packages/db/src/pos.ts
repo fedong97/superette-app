@@ -55,6 +55,31 @@ export interface SaleLineInput {
 
 export type PricedLine = PromotedLine<CartLine & { barcode: string | null; packId: string | null; packName: string | null }>;
 
+/**
+ * Ligne de la recherche « Rechercher/Facturer des marchandises » : un article
+ * apparaît une fois par conditionnement (PALETTE, puis CANETTE), avec son prix
+ * au tarif du client.
+ */
+export interface SaleSearchRow {
+  article_id: string;
+  code: string;
+  other_ref: string | null;
+  name: string;
+  unit: 'piece' | 'kg' | 'litre';
+  /** Conditionnement (null = unité de détail). */
+  pack_id: string | null;
+  pack_name: string;
+  /** Unités de détail contenues (millièmes). */
+  units: Milli;
+  /** Stock du dépôt de vente, en unités de détail. */
+  stock: Milli;
+  warehouse: string;
+  /** PV TTC au tarif du client. */
+  price: Fcfa;
+  /** Dernier prix de vente de ce conditionnement (à ce client s'il est choisi). */
+  last_price: Fcfa | null;
+}
+
 export interface SaleInput {
   lines: SaleLineInput[];
   payments: Payment[];
@@ -265,6 +290,65 @@ export class PosService extends Base {
       return line;
     });
     return applyPromotions(lines, level === 'retail' ? this.promotions.activeRules(storeId) : []);
+  }
+
+  /**
+   * Recherche en caisse, une ligne par conditionnement, du plus grand au plus
+   * petit. Sans `includeEmpty`, seules les lignes dont le stock permet d'en
+   * vendre au moins un apparaissent.
+   */
+  searchForSale(storeId: string, query: string, opts: { customerId?: string | null; includeEmpty?: boolean; limit?: number } = {}): SaleSearchRow[] {
+    const articles = this.catalogue.suggestArticles(query, storeId, 50);
+    if (articles.length === 0) return [];
+    const level = opts.customerId ? this.customers.getCustomer(opts.customerId).price_level : 'retail';
+    const warehouse = this.admin.salesWarehouse(storeId);
+    const ids = articles.map((a) => a.id);
+    const marks = ids.map(() => '?').join(',');
+    const stock = new Map(
+      (this.db.prepare(`SELECT article_id, qty FROM stock WHERE warehouse_id = ? AND article_id IN (${marks})`).all(warehouse.id, ...ids) as { article_id: string; qty: Milli }[]).map(
+        (r) => [r.article_id, r.qty],
+      ),
+    );
+    // Dernier prix : la ligne la plus récente pour chaque article et conditionnement (MAX ramène sa ligne).
+    const last = new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT l.article_id, COALESCE(l.pack_name, '') AS pack, COALESCE(l.pack_price, l.unit_price) AS price, MAX(s.created_at) AS at
+             FROM sale_lines l JOIN sales s ON s.id = l.sale_id
+             WHERE s.store_id = ? AND s.kind = 'sale' AND s.status = 'completed' AND l.article_id IN (${marks})
+               AND (? IS NULL OR s.customer_id = ?)
+             GROUP BY l.article_id, COALESCE(l.pack_name, '')`,
+          )
+          .all(storeId, ...ids, opts.customerId ?? null, opts.customerId ?? null) as { article_id: string; pack: string; price: Fcfa }[]
+      ).map((r) => [`${r.article_id}|${r.pack}`, r.price]),
+    );
+    const unitLabel = { piece: 'Pièce', kg: 'Kg', litre: 'Litre' } as const;
+    const rows: SaleSearchRow[] = [];
+    for (const a of articles) {
+      const qty = stock.get(a.id) ?? 0;
+      const base = { article_id: a.id, code: a.code, other_ref: a.other_ref, name: a.name, unit: a.unit, stock: qty, warehouse: warehouse.name };
+      for (const p of a.packs) {
+        rows.push({
+          ...base,
+          pack_id: p.id,
+          pack_name: p.name,
+          units: p.units,
+          price: tariffPrice({ retail: p.sale_price, wholesale: p.wholesale_price, superWholesale: p.super_wholesale_price }, level),
+          last_price: last.get(`${a.id}|${p.name}`) ?? null,
+        });
+      }
+      rows.push({
+        ...base,
+        pack_id: null,
+        pack_name: a.unit_name ?? unitLabel[a.unit],
+        units: 1000,
+        price: tariffPrice({ retail: a.store_price, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price }, level),
+        last_price: last.get(`${a.id}|`) ?? null,
+      });
+    }
+    const shown = opts.includeEmpty ? rows : rows.filter((r) => r.stock >= (r.unit === 'piece' ? r.units : 1));
+    return shown.slice(0, opts.limit ?? 60);
   }
 
   completeSale(ctx: Context, input: SaleInput): Sale {

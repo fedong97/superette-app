@@ -33,7 +33,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'warehouses' && <Warehouses />}
       {tab === 'users' && <Users currentRole={user.role} />}
       {tab === 'rights' && <Rights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
-      {tab === 'settings' && <Settings />}
+      {tab === 'settings' && <Settings user={user} onChanged={onChanged} />}
       {tab === 'backups' && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && <Audit />}
@@ -371,7 +371,90 @@ function Users({ currentRole }: { currentRole: Role }) {
   );
 }
 
-function Settings() {
+/**
+ * Réglages du magasin : TVA (administrateur seulement, elle change les prix
+ * HT et la comptabilité), vente sans stock (droit « ignore_stock », le gérant
+ * par défaut) et seuil d'écart de caisse à faire valider.
+ */
+function StoreOptionsPanel({ user, onChanged }: { user: User; onChanged: () => void }) {
+  const toast = useToast();
+  const state = useLoad(() => call('app.state'));
+  const [threshold, setThreshold] = useState<string | null>(null);
+  const store = state.data?.station?.store;
+  if (!store) return null;
+  const isAdmin = user.role === 'admin';
+  const canStock = user.rights.includes('ignore_stock');
+  const save = async (options: { vatEnabled?: boolean; ignoreStock?: boolean; cashGapThreshold?: number }, message: string) => {
+    try {
+      await call('admin.storeOptions', options);
+      toast.ok(message);
+      state.reload();
+      onChanged();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+  return (
+    <>
+      <h3>Magasin : {store.name}</h3>
+      <label className="check">
+        <input
+          type="checkbox"
+          disabled={!isAdmin}
+          checked={store.vat_enabled === 1}
+          onChange={(e) => {
+            const on = e.target.checked;
+            if (
+              !confirm(
+                on
+                  ? 'Activer la TVA ? Les prochaines ventes, factures, achats et dépenses porteront la TVA (19,25 % par défaut). Les pièces déjà enregistrées ne changent pas.'
+                  : 'Désactiver la TVA (régime simplifié) ? Les prochaines pièces seront sans TVA et porteront « TVA non applicable ». Les pièces déjà enregistrées ne changent pas.',
+              )
+            )
+              return;
+            void save({ vatEnabled: on }, on ? 'TVA activée' : 'TVA désactivée');
+          }}
+        />{' '}
+        Magasin assujetti à la TVA (régime du réel)
+      </label>
+      <p className="muted">{isAdmin ? 'Ne s’applique qu’aux nouvelles pièces.' : 'Seul un administrateur peut changer ce réglage.'}</p>
+      <label className="check">
+        <input
+          type="checkbox"
+          disabled={!canStock}
+          checked={store.ignore_stock === 1}
+          onChange={(e) =>
+            void save({ ignoreStock: e.target.checked }, e.target.checked ? 'Vente sans stock autorisée' : 'Gestion des stocks rétablie')
+          }
+        />{' '}
+        Ignorer la gestion des stocks (vendre même si le stock en machine est épuisé)
+      </label>
+      <p className="muted">
+        À cocher quand la marchandise est arrivée mais pas encore saisie. Le stock passe en négatif et la prochaine réception le régularise
+        automatiquement. Pensez à décocher une fois les réceptions saisies.
+      </p>
+      <div className="grid2">
+        <Field label="Écart de caisse toléré (FCFA)" hint="Au-delà, la clôture demande un motif et la validation du gérant">
+          <input
+            inputMode="numeric"
+            disabled={!isAdmin}
+            value={threshold ?? String(store.cash_gap_threshold)}
+            onChange={(e) => setThreshold(e.target.value)}
+            onBlur={() => {
+              if (threshold === null) return;
+              const n = Number(threshold.replace(/\s/g, ''));
+              if (!Number.isInteger(n) || n < 0) return toast.error('Montant invalide');
+              if (n !== store.cash_gap_threshold) void save({ cashGapThreshold: n }, 'Seuil d’écart enregistré');
+              setThreshold(null);
+            }}
+          />
+        </Field>
+      </div>
+    </>
+  );
+}
+
+function Settings({ user, onChanged }: { user: User; onChanged: () => void }) {
   const toast = useToast();
   const settings = useLoad(() => call('admin.settings'));
   const printers = useLoad(() => call('admin.printers'));
@@ -382,6 +465,7 @@ function Settings() {
   const mode = v('printer.mode', 'driver');
   return (
     <div className="narrow">
+      <StoreOptionsPanel user={user} onChanged={onChanged} />
       <h3>Imprimante ticket et tiroir-caisse</h3>
       <div className="grid2">
         <Field label="Mode d'impression" hint="ESC/POS : plus rapide, accents gérés, coupe du papier et tiroir">

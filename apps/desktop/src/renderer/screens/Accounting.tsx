@@ -711,8 +711,12 @@ function VatReturn() {
   const inst = useLoad(() => call('tax.instalment', month), [month]);
   const v = vat.data;
   const i = inst.data;
+  const app = useLoad(() => call('app.state'));
   return (
     <>
+      {app.data?.station?.store.vat_enabled === 0 && (
+        <p className="tre-warning">Magasin au régime simplifié : les nouvelles pièces sont sans TVA. Ce tableau ne reprend que les pièces faites quand la TVA était active.</p>
+      )}
       <div className="filters">
         <label className="inline">
           Mois <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />

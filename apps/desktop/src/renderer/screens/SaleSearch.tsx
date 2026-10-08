@@ -245,6 +245,7 @@ export function QtyPrompt({
   initial,
   inCart,
   canPrice,
+  ignoreStock = false,
   onClose,
   onDone,
 }: {
@@ -253,6 +254,8 @@ export function QtyPrompt({
   /** Quantité de l'article déjà sur la fiche (unités de détail). */
   inCart: number;
   canPrice: boolean;
+  /** « Ignorer la gestion des stocks » : le manque est signalé mais n'empêche pas la vente. */
+  ignoreStock?: boolean;
   onClose: () => void;
   onDone: (qtyMilli: number, price: number | null) => void;
 }) {
@@ -266,9 +269,12 @@ export function QtyPrompt({
   const wanted = qtyOk ? (piece ? (n! / 1000) * row.units : n!) : 0;
   const left = row.stock - inCart;
   const short = qtyOk && wanted > left;
+  // Stock ignoré : on vend quand même, la prochaine réception régularise.
+  const out = row.out_of_stock && !ignoreStock;
+  const blocked = short && !ignoreStock;
   const belowCost = price !== null && price < row.cost;
   const priceOk = price !== null && price > 0 && !belowCost;
-  const valid = qtyOk && priceOk && !short && !row.out_of_stock;
+  const valid = qtyOk && priceOk && !blocked && !out;
   const total = qtyOk && priceOk ? Math.round((price! * n!) / 1000) : null;
   return (
     <Modal title={row.name} onClose={onClose}>
@@ -283,7 +289,7 @@ export function QtyPrompt({
           <span className="muted"> · stock {stockIn(row)}</span>
           {row.out_of_stock && <span className="tag danger epuise">Épuisé</span>}
         </p>
-        {row.out_of_stock ? (
+        {out ? (
           <p className="danger-text">Stock épuisé : ce {row.pack_name.toLowerCase()} ne peut pas être vendu.</p>
         ) : (
           <div className="grid2">
@@ -296,19 +302,22 @@ export function QtyPrompt({
           </div>
         )}
         {n !== null && !qtyOk && <p className="danger-text">Nombre entier de {row.pack_name.toLowerCase()} uniquement</p>}
-        {short && !row.out_of_stock && (
+        {short && ignoreStock && (
+          <p className="warn-text">Stock insuffisant en machine : la vente passe et sera régularisée à la prochaine réception.</p>
+        )}
+        {blocked && !out && (
           <p className="danger-text">
             Stock insuffisant : il reste {piece && row.units > 1000 ? `${Math.max(0, Math.floor(left / row.units))} ${row.pack_name.toLowerCase()}` : stockIn({ ...row, stock: Math.max(0, left) })}
             {inCart > 0 ? ' en plus de ce qui est déjà sur la fiche' : ''}.
           </p>
         )}
         {belowCost && <p className="danger-text">Prix inférieur au coût de revient ({fcfa(row.cost)}).</p>}
-        {total !== null && !row.out_of_stock && <p className="big-total">{fcfa(total)}</p>}
+        {total !== null && !out && <p className="big-total">{fcfa(total)}</p>}
         <div className="actions">
           <button type="button" className="ghost" onClick={onClose}>
-            {row.out_of_stock ? 'Fermer' : 'Annuler'}
+            {out ? 'Fermer' : 'Annuler'}
           </button>
-          {!row.out_of_stock && (
+          {!out && (
             <button type="submit" className="primary" disabled={!valid}>
               Ajouter <kbd>Entrée</kbd>
             </button>

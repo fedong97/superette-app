@@ -141,6 +141,8 @@ export function ArticleForm({
 }) {
   const toast = useToast();
   const rates = useLoad(() => call('admin.vatRates'));
+  const app = useLoad(() => call('app.state'));
+  const noVat = app.data?.station?.store.vat_enabled === 0;
   const departments = useLoad(() => call('catalogue.departments'));
   const history = useLoad(() => (article ? call('catalogue.priceHistory', article.id) : Promise.resolve([])));
   const milli = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v / 1000));
@@ -290,7 +292,7 @@ export function ArticleForm({
               <option value="litre">Litre</option>
             </select>
           </Field>
-          <Field label="TVA">
+          <Field label="TVA" hint={noVat ? 'Magasin sans TVA : taux gardé pour le jour où la TVA sera activée' : undefined}>
             <select value={vatId} onChange={set('vatRateId')}>
               {(rates.data ?? []).map((r) => (
                 <option key={r.id} value={r.id}>

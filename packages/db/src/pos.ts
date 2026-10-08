@@ -57,6 +57,18 @@ export interface CashSession {
   gap_approved_by: string | null;
 }
 
+/** Ligne d'entrée ou de sortie d'espèces d'une journée de caisse. */
+export interface CashJournalRow {
+  at: string;
+  amount: Fcfa;
+  nature: string;
+  label: string;
+  party: string | null;
+  user_name: string | null;
+  /** Versement de clôture : après le comptage, il ne compte pas dans l'attendu. */
+  closing?: boolean;
+}
+
 /** Clôture : fond laissé dans le tiroir, le reste est versé à la caisse centrale. */
 export interface CloseOptions {
   /** Fond laissé pour le lendemain ; tout ce qui est compté au-delà va à la centrale. Absent : rien n'est versé. */
@@ -946,6 +958,61 @@ export class PosService extends Base {
       this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, ...result, floatLeft, deposit, gapReason, gapApprovedBy: opts.gapApprovedBy ?? null });
     });
     return this.zReport(session.id);
+  }
+
+  /**
+   * Entrées et sorties d'espèces d'une journée, ligne par ligne (comme les
+   * « Opérations de trésorerie » de KONTROL) : ventes et règlements encaissés,
+   * apports ; remboursements, prélèvements, dépenses et versement de clôture.
+   */
+  cashJournal(sessionId: string): { entries: CashJournalRow[]; exits: CashJournalRow[]; creditSales: Fcfa } {
+    const sales = this.db
+      .prepare(
+        `SELECT s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name,
+                SUM(p.amount) - s.change_given AS amount
+         FROM sales s JOIN sale_payments p ON p.sale_id = s.id AND p.method = 'CASH' JOIN users u ON u.id = s.user_id
+         LEFT JOIN customers c ON c.id = s.customer_id
+         WHERE s.session_id = ? AND s.status = 'completed' GROUP BY s.id ORDER BY s.created_at`,
+      )
+      .all(sessionId) as { at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; amount: number }[];
+    const receipts = this.db
+      .prepare(
+        `SELECT p.paid_at AS at, p.number, c.name AS party, u.name AS user_name, p.amount FROM customer_payments p
+         JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.user_id
+         WHERE p.session_id = ? AND p.method = 'CASH' ORDER BY p.paid_at`,
+      )
+      .all(sessionId) as { at: string; number: string; party: string; user_name: string | null; amount: number }[];
+    const ops = this.db
+      .prepare('SELECT o.at, o.type, o.amount, o.reason, u.name AS user_name FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
+      .all(sessionId) as { at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null }[];
+    const expenses = this.db
+      .prepare(
+        `SELECT e.created_at AS at, e.number, e.label, e.beneficiary, e.amount, u.name AS user_name FROM expenses e LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.created_at`,
+      )
+      .all(sessionId) as { at: string; number: string; label: string; beneficiary: string | null; amount: number; user_name: string | null }[];
+    const closing = this.db
+      .prepare("SELECT at, number, amount, label FROM central_cash_movements WHERE session_id = ? AND kind = 'DEPOSIT' AND cash_operation_id IS NULL ORDER BY at")
+      .all(sessionId) as { at: string; number: string; amount: number; label: string }[];
+    const credit = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(p.amount), 0) FROM sale_payments p JOIN sales s ON s.id = p.sale_id
+         WHERE s.session_id = ? AND s.status = 'completed' AND p.method = 'CUSTOMER_CREDIT'`,
+      )
+      .pluck()
+      .get(sessionId) as number;
+    const entries: CashJournalRow[] = [
+      ...sales.filter((x) => x.amount > 0).map((x) => ({ at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name })),
+      ...receipts.map((x) => ({ at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name })),
+      ...ops.filter((x) => x.type === 'IN').map((x) => ({ at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name })),
+    ].sort((a, b) => a.at.localeCompare(b.at));
+    const exits: CashJournalRow[] = [
+      ...sales.filter((x) => x.amount < 0).map((x) => ({ at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name })),
+      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name })),
+      ...expenses.map((x) => ({ at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name })),
+      ...closing.map((x) => ({ at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, closing: true })),
+    ].sort((a, b) => a.at.localeCompare(b.at));
+    return { entries, exits, creditSales: credit };
   }
 
   listSessions(storeId: string, limit = 60, registerId?: string | null): CashSession[] {

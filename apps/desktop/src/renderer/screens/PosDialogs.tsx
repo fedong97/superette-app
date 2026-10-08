@@ -342,7 +342,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
 export function CashOpDialog({ type, needsSupervisor, onClose }: { type: 'IN' | 'OUT'; needsSupervisor: boolean; onClose: () => void }) {
   const toast = useToast();
   const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState(type === 'OUT' ? 'Mise au coffre' : 'Complément de fond');
+  const [reason, setReason] = useState(type === 'OUT' ? 'Versement à la caisse centrale' : 'Complément de fond');
   const [askPin, setAskPin] = useState(false);
   const submit = async (pin?: string) => {
     try {
@@ -361,6 +361,9 @@ export function CashOpDialog({ type, needsSupervisor, onClose }: { type: 'IN' | 
       <Field label="Motif">
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </Field>
+      <p className="muted">
+        {type === 'OUT' ? 'Les espèces prélevées entrent dans la caisse centrale.' : 'Les espèces apportées sortent de la caisse centrale.'}
+      </p>
       <div className="actions">
         <button className="primary" disabled={!parseAmount(amount)} onClick={() => (type === 'OUT' && needsSupervisor ? setAskPin(true) : submit())}>
           Enregistrer
@@ -375,57 +378,6 @@ export function CashOpDialog({ type, needsSupervisor, onClose }: { type: 'IN' | 
             void submit(pin);
           }}
         />
-      )}
-    </Modal>
-  );
-}
-
-/** Clôture Z : comptage par coupure, écart avec le théorique. */
-export function CloseDialog({ sessionId, onClose, onClosed }: { sessionId: string; onClose: () => void; onClosed: () => void }) {
-  const toast = useToast();
-  const [count, setCount] = useState<Record<number, number>>({});
-  const [report, setReport] = useState<Result<'pos.close'> | null>(null);
-  const counted = countedTotal(count);
-  return (
-    <Modal title={report ? `Rapport Z n° ${report.session.z_number}` : 'Clôture de caisse'} onClose={report ? onClosed : onClose} wide>
-      {!report ? (
-        <>
-          <p>Comptez les espèces du tiroir par coupure. Le montant théorique s'affichera après validation.</p>
-          <div className="denoms">
-            {DENOMINATIONS_FCFA.map((d) => (
-              <label key={d}>
-                <span>{fcfa(d)}</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={count[d] ?? ''}
-                  onChange={(e) => setCount({ ...count, [d]: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                />
-                <small>{fcfa(d * (count[d] ?? 0))}</small>
-              </label>
-            ))}
-          </div>
-          <div className="actions">
-            <span className="big-total">{fcfa(counted)}</span>
-            <button
-              className="danger"
-              onClick={async () => {
-                if (!confirm(`Clôturer la caisse avec ${fcfa(counted)} comptés ?`)) return;
-                try {
-                  const z = await call('pos.close', count);
-                  setReport(z);
-                  call('pos.printZ', sessionId).catch(toast.error);
-                } catch (e) {
-                  toast.error(e);
-                }
-              }}
-            >
-              Clôturer et imprimer le Z
-            </button>
-          </div>
-        </>
-      ) : (
-        <ZView z={report} />
       )}
     </Modal>
   );
@@ -487,12 +439,19 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
               </tr>
             )}
             <tr><td>Compté</td><td className="r">{z.counted === null ? '—' : fcfa(z.counted)}</td></tr>
+            {z.session.deposit !== null && <tr><td>Versé à la caisse centrale</td><td className="r">{fcfa(z.session.deposit)}</td></tr>}
+            {z.session.float_left !== null && <tr><td>Fond laissé dans le tiroir</td><td className="r">{fcfa(z.session.float_left)}</td></tr>}
           </tbody>
         </table>
         <table className="list">
           <caption>TVA</caption>
           <tbody>
-            {z.vat.map((v) => (
+            {!z.vat.some((v) => v.rate > 0) && (
+              <tr>
+                <td colSpan={2}>TVA non applicable</td>
+              </tr>
+            )}
+            {z.vat.filter((v) => v.rate > 0).map((v) => (
               <tr key={v.rate}>
                 <td>
                   {formatRate(v.rate)} sur {fcfa(v.ht)} HT

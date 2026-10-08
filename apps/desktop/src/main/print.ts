@@ -214,6 +214,53 @@ export function createPrinter(s: Services): Printer {
       await printReceipt(s.receipts.zReport(sessionId), false);
     },
 
+    async centralVoucher(movementId) {
+      await printReceipt(s.receipts.centralVoucher(movementId), false, true);
+    },
+
+    async sessionReport(sessionId) {
+      const z = s.pos.zReport(sessionId);
+      const se = z.session;
+      const store = s.admin.getStore(se.store_id);
+      const journal = s.pos.cashJournal(sessionId);
+      const sales = s.pos.listSales({ sessionId, limit: 5000 }).reverse();
+      const cashRows = (rows: typeof journal.entries) =>
+        rows.map((r) => `<tr><td>${dateFr(r.at).slice(-5)}</td><td>${esc(r.nature)}</td><td>${esc(r.label)}</td><td>${esc(r.party ?? '')}</td><td class="r">${money(r.amount)}</td></tr>`).join('');
+      const sum = (rows: typeof journal.entries) => rows.filter((r) => !r.closing).reduce((t, r) => t + r.amount, 0);
+      const saleRows = sales
+        .map(
+          (x) => `<tr${x.status === 'cancelled' ? ' class="muted"' : ''}><td>${esc(x.number)}</td><td>${dateFr(x.created_at).slice(-5)}</td><td>${esc(x.user_name)}</td>
+            <td>${esc(x.customer_name ?? '')}</td><td>${x.kind === 'return' ? 'Retour' : x.status === 'cancelled' ? `Annulé : ${esc(x.cancel_reason ?? '')}` : 'Vente'}</td>
+            <td class="r">${x.total_discount ? money(x.total_discount) : ''}</td><td class="r">${money(x.total_ttc)}</td></tr>`,
+        )
+        .join('');
+      const row = (label: string, v: number | null, bold = false) => `<tr${bold ? ' class="total"' : ''}><td>${label}</td><td class="r">${v === null ? '' : money(v)}</td></tr>`;
+      await printA4(`${a4Head(store)}
+        <h1>Rapport de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
+        <p>Ouverture le ${dateFr(se.opened_at)} par ${esc(se.user_name)}${se.closed_at ? ` · clôture le ${dateFr(se.closed_at)}${se.closed_by_name ? ` par ${esc(se.closed_by_name)}` : ''}` : ''}</p>
+        <div style="display:flex;gap:16px"><table class="totals" style="width:50%;margin:0">
+          ${row('Fond à l’ouverture', z.cash.openingFloat)}${se.carried_float !== null ? row('dont fond laissé la veille', se.carried_float) : ''}
+          ${row('Ventes en espèces', z.cash.cashSales)}${row('Règlements clients en espèces', z.cash.customerReceipts)}${row('Apports', z.cash.cashIn)}
+          ${row('Remboursements', -z.cash.cashRefunds)}${row('Prélèvements versés à la centrale', -z.cash.cashOut)}${row('Dépenses payées', -z.cash.expenses)}
+          ${row('Attendu à la clôture', z.cash.expected, true)}${row('Relevé à la clôture', z.counted)}${se.first_counted !== null && se.first_counted !== z.counted ? row('Premier comptage', se.first_counted) : ''}
+          ${row('Différentiel', z.difference, true)}${se.deposit !== null ? row('Versé à la caisse centrale', se.deposit) + row('Fond laissé dans le tiroir', se.float_left) : ''}
+        </table><table class="totals" style="width:50%;margin:0">
+          ${row('Tickets', null)}<tr><td colspan="2">${z.ticketCount} ventes, ${z.cancelled.count} annulés</td></tr>
+          ${row('Chiffre d’affaires net TTC', z.netTtc, true)}${row('Remises', z.discounts)}${row('Promotions', z.promotions)}${row('Ventes à crédit', journal.creditSales)}
+          ${z.byMethod.map((m) => row(esc(m.label), m.amount)).join('')}
+        </table></div>
+        ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b></p>` : ''}
+        <h3>Entrées d'espèces</h3>
+        <table><thead><tr><th>Heure</th><th>Nature</th><th>Pièce / motif</th><th>Tiers</th><th class="r">Montant</th></tr></thead>
+        <tbody>${cashRows(journal.entries)}<tr class="total"><td colspan="4">Total des entrées</td><td class="r">${money(sum(journal.entries))}</td></tr></tbody></table>
+        <h3>Sorties d'espèces</h3>
+        <table><thead><tr><th>Heure</th><th>Nature</th><th>Pièce / motif</th><th>Bénéficiaire</th><th class="r">Montant</th></tr></thead>
+        <tbody>${cashRows(journal.exits)}<tr class="total"><td colspan="4">Total des sorties (hors versement de clôture)</td><td class="r">${money(sum(journal.exits))}</td></tr></tbody></table>
+        <h3>Historique des ventes (${sales.length})</h3>
+        <table><thead><tr><th>Ticket</th><th>Heure</th><th>Vendeur</th><th>Client</th><th>Type</th><th class="r">Remise</th><th class="r">Montant</th></tr></thead><tbody>${saleRows}</tbody></table>
+        <div class="sign"><span>Le caissier : ……………………</span><span>Le gérant : ……………………</span></div>`);
+    },
+
     async openDrawer() {
       await sendRaw(config(), drawerKick());
     },
@@ -254,13 +301,15 @@ export function createPrinter(s: Services): Printer {
       const sale = s.pos.getSale(saleId);
       const store = s.admin.getStore(sale.store_id);
       const c = sale.customer_id ? s.customers.getCustomer(sale.customer_id) : null;
+      // Magasin non assujetti : ni colonne ni total de TVA, la mention « TVA non applicable ».
+      const noVat = store.vat_enabled !== 1 && sale.lines.every((l) => l.vat_rate_bp === 0);
       const rows = sale.lines
         .map((l) => {
           const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
           const pack = l.pack_name && l.pack_units && l.pack_price !== null;
           const q = pack ? `${Math.abs(l.qty) / l.pack_units!} ${esc(l.pack_name!)}` : formatQty(Math.abs(l.qty), l.unit);
           return `<tr><td>${esc(l.label)}</td><td class="r">${q}</td><td class="r">${money(pack ? l.pack_price! : l.unit_price)}</td>
-            <td class="r">${l.discount ? money(l.discount) : ''}</td><td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td><td class="r">${money(l.total_ttc)}</td></tr>`;
+            <td class="r">${l.discount ? money(l.discount) : ''}</td>${noVat ? '' : `<td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td>`}<td class="r">${money(l.total_ttc)}</td></tr>`;
         })
         .join('');
       const byRate = new Map<number, number>();
@@ -291,10 +340,11 @@ export function createPrinter(s: Services): Printer {
         </div>
         <h1>${title} ${esc(sale.number)}</h1>
         <div>Date : ${dayFr(sale.created_at)}${sale.due_date ? ` · Échéance : ${dayFr(sale.due_date)}` : ''} · Vendeur : ${esc(sale.user_name)}</div>
-        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">PU TTC</th><th class="r">Remise</th><th class="r">TVA</th><th class="r">Total HT</th><th class="r">Total TTC</th></tr></thead>
+        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">${noVat ? 'Prix unitaire' : 'PU TTC'}</th><th class="r">Remise</th>${noVat ? '' : '<th class="r">TVA</th><th class="r">Total HT</th>'}<th class="r">${noVat ? 'Total' : 'Total TTC'}</th></tr></thead>
         <tbody>${rows}</tbody></table>
-        <table class="totals"><tr><td>Total HT</td><td class="r">${money(sale.total_ht)}</td></tr>${vat}
-          <tr class="total"><td>Total TTC (FCFA)</td><td class="r">${money(sale.total_ttc)}</td></tr>${pays}</table>
+        <table class="totals">${noVat ? '' : `<tr><td>Total HT</td><td class="r">${money(sale.total_ht)}</td></tr>${vat}`}
+          <tr class="total"><td>${noVat ? 'Total (FCFA)' : 'Total TTC (FCFA)'}</td><td class="r">${money(sale.total_ttc)}</td></tr>${pays}</table>
+        ${noVat ? '<p class="muted">TVA non applicable.</p>' : ''}
         <div class="sign"><div>Le client</div><div>Pour ${esc(store.name)}</div></div>`);
     },
 
@@ -302,11 +352,12 @@ export function createPrinter(s: Services): Printer {
       const q = s.quotes.get(quoteId);
       const store = s.admin.getStore(q.store_id);
       const c = q.customer_id ? s.customers.getCustomer(q.customer_id) : null;
+      const noVat = store.vat_enabled !== 1 && q.lines.every((l) => l.vat_rate_bp === 0);
       const rows = q.lines
         .map((l) => {
           const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
           return `<tr><td>${esc(l.label)}</td><td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_price)}</td>
-            <td class="r">${l.discount ? money(l.discount) : ''}</td><td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td><td class="r">${money(l.total_ttc)}</td></tr>`;
+            <td class="r">${l.discount ? money(l.discount) : ''}</td>${noVat ? '' : `<td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td>`}<td class="r">${money(l.total_ttc)}</td></tr>`;
         })
         .join('');
       const byRate = new Map<number, number>();
@@ -330,11 +381,11 @@ export function createPrinter(s: Services): Printer {
         </div>
         <h1>${title} ${esc(q.number)}${q.state === 'cancelled' ? ' (annulé)' : ''}</h1>
         <div>Date : ${dayFr(q.quote_date)} · Valable jusqu'au ${dayFr(q.valid_until)}${q.user_name ? ` · Établi par ${esc(q.user_name)}` : ''}</div>
-        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">PU TTC</th><th class="r">Remise</th><th class="r">TVA</th><th class="r">Total HT</th><th class="r">Total TTC</th></tr></thead>
+        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">${noVat ? 'Prix unitaire' : 'PU TTC'}</th><th class="r">Remise</th>${noVat ? '' : '<th class="r">TVA</th><th class="r">Total HT</th>'}<th class="r">${noVat ? 'Total' : 'Total TTC'}</th></tr></thead>
         <tbody>${rows}</tbody></table>
-        <table class="totals"><tr><td>Total HT</td><td class="r">${money(q.total_ht)}</td></tr>${vat}
-          <tr class="total"><td>Net à payer TTC (FCFA)</td><td class="r">${money(q.total_ttc)}</td></tr></table>
-        <p>Arrêté${q.kind === 'proforma' ? 'e la présente facture proforma' : ' le présent devis'} à la somme de <b>${esc(words)} francs CFA</b> toutes taxes comprises.</p>
+        <table class="totals">${noVat ? '' : `<tr><td>Total HT</td><td class="r">${money(q.total_ht)}</td></tr>${vat}`}
+          <tr class="total"><td>${noVat ? 'Net à payer (FCFA)' : 'Net à payer TTC (FCFA)'}</td><td class="r">${money(q.total_ttc)}</td></tr></table>
+        <p>Arrêté${q.kind === 'proforma' ? 'e la présente facture proforma' : ' le présent devis'} à la somme de <b>${esc(words)} francs CFA</b>${noVat ? ' (TVA non applicable)' : ' toutes taxes comprises'}.</p>
         ${q.notes ? `<p>${esc(q.notes)}</p>` : ''}
         <p class="muted">Prix garantis jusqu'au ${dayFr(q.valid_until)} dans la limite des stocks disponibles. Ce document n'est pas une facture définitive.</p>
         <div class="sign"><div>Bon pour accord, le client<br><br>Date et signature</div><div>Pour ${esc(store.name)}</div></div>`);

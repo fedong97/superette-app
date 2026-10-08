@@ -185,7 +185,8 @@ function Day({ journey, sessions, onSession }: { journey: Journey; sessions: Res
   const [view, setView] = useState<'cash' | 'sales' | 'z'>('cash');
   const sum = (rows: CashRow[]) => rows.filter((r) => !r.closing).reduce((t, r) => t + r.amount, 0);
   const diffClass = z.difference === null ? '' : z.difference < 0 ? 'neg' : z.difference > 0 ? 'pos' : '';
-  const deposits = journey.movements.filter((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
+  // Bons de la journée : remise ou retour de fond à l'ouverture, versement de la recette à la clôture.
+  const vouchers = journey.movements.filter((m) => !m.cash_operation_id);
   return (
     <div className="tre-day">
       <div className="tre-head">
@@ -211,9 +212,9 @@ function Day({ journey, sessions, onSession }: { journey: Journey; sessions: Res
         <div className="tre-print">
           <button onClick={() => call('pos.printZ', se.id).catch(toast.error)}>Imprimer le Z</button>
           <button onClick={() => call('treasury.printReport', se.id).catch(toast.error)}>Rapport de clôture (A4)</button>
-          {deposits.map((m) => (
+          {vouchers.map((m) => (
             <button key={m.id} onClick={() => call('treasury.printVoucher', m.id).catch(toast.error)}>
-              Bon de versement {m.number}
+              {m.kind === 'FLOAT' ? 'Bon de remise de fond' : 'Bon de versement'} {m.number}
             </button>
           ))}
         </div>
@@ -456,8 +457,11 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
           e.preventDefault();
           if (value === null) return toast.error('Montant invalide');
           try {
-            await call('treasury.open', value, canOpen ? undefined : pin);
+            const opened = await call('treasury.open', value, canOpen ? undefined : pin);
             toast.ok(`${register.name} ouverte avec un fond de ${fcfa(value)}`);
+            // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
+            const voucher = (await call('treasury.session', opened.id)).movements.find((m) => !m.cash_operation_id);
+            if (voucher) call('treasury.printVoucher', voucher.id).catch(toast.error);
             onDone();
           } catch (err) {
             toast.error(err);

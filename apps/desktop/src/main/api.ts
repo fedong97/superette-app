@@ -372,7 +372,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Caisses du magasin, leur état, et la journée de la caisse de ce poste. */
     'treasury.state': () => {
       const c = ctx(TREASURY);
-      const registers = s.admin.listRegisters(c.storeId).filter((r) => r.active).map((r) => {
+      // Le code d'activation d'une caisse reste réservé à l'administration.
+      const registers = s.admin.listRegisters(c.storeId).filter((r) => r.active).map(({ activation_code: _, ...r }) => {
         const open = s.pos.currentSession(r.id);
         return { ...r, isThisStation: r.id === c.registerId, session: open, stale: open ? s.pos.isStale(open) : false, carriedFloat: s.pos.carriedFloat(r.id) };
       });

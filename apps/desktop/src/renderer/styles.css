@@ -416,3 +416,10 @@ table.rights tr.group th { background: var(--bg); color: var(--ink); text-align:
 label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; font-weight: 600; }
 .closed-register { max-width: 520px; display: flex; flex-direction: column; gap: 10px; }
 .closed-register .row { display: flex; gap: 10px; }
+/* Écran 1366 × 768 : la journée tient sans faire défiler la page. */
+.page.treasury { padding-top: 12px; gap: 8px; }
+.treasury .page-head { margin-bottom: 0; }
+.treasury .tabs { margin-bottom: 4px; }
+.tre-day { gap: 8px; }
+.tre-day .tre-scroll:not(.tall) { max-height: 190px; }
+.tre-foot > div { padding: 6px 12px; }

@@ -24,7 +24,7 @@ const BUYING: UserRole[] = ['manager', 'stock', 'buyer', 'accountant'];
 export const PERMISSIONS = {
   cash: { label: 'Facturation au comptant (caisse)', group: 'Fenêtres', roles: POS },
   credit: { label: 'Vente à crédit', group: 'Fenêtres', roles: POS },
-  sales: { label: 'Factures et registre des ventes', group: 'Fenêtres', roles: ACCOUNTING },
+  sales: { label: 'Voir tout le registre des factures (sinon ses 3 dernières factures)', group: 'Fenêtres', roles: ACCOUNTING },
   reports: { label: 'Rapports de ventes', group: 'Fenêtres', roles: ACCOUNTING },
   articles: { label: 'Produits (fiches et prix)', group: 'Fenêtres', roles: STOCK },
   stock: { label: 'Stock (réceptions, pertes, transferts)', group: 'Fenêtres', roles: STOCK },
@@ -42,6 +42,7 @@ export const PERMISSIONS = {
   price: { label: 'Modifier le prix à la saisie (jamais sous le revient)', group: 'Caisse', roles: POS },
   discount: { label: 'Accorder une remise sans le code du gérant', group: 'Caisse', roles: MANAGE },
   cashout: { label: 'Prélèvement et dépense en caisse sans le code du gérant', group: 'Caisse', roles: MANAGE },
+  cash_amounts: { label: 'Voir les montants de la caisse (attendu, entrées, ventes, journées)', group: 'Caisse', roles: ACCOUNTING },
   cash_open: { label: 'Ouvrir une caisse et valider un écart de clôture sans le code du gérant', group: 'Caisse', roles: MANAGE },
   central_cash: { label: 'Caisse centrale : apports, dépôts en banque, sorties', group: 'Gestion', roles: MANAGE },
   ignore_stock: { label: 'Activer « Ignorer la gestion des stocks » (vente sans stock)', group: 'Gestion', roles: MANAGE },

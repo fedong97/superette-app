@@ -75,6 +75,13 @@ export class Base {
       .run(newId(), userId, action, entity ?? null, entityId ?? null, details === undefined ? null : JSON.stringify(details), this.now());
   }
 
+  /** Porte un compteur au moins à `value` (numéros déjà attribués sur un autre PC). */
+  protected raiseCounter(name: string, value: number): void {
+    this.db
+      .prepare('INSERT INTO counters (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = MAX(value, excluded.value)')
+      .run(name, value);
+  }
+
   protected nextCounter(name: string): number {
     const row = this.db
       .prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT(name) DO UPDATE SET value = value + 1 RETURNING value')

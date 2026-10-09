@@ -95,6 +95,8 @@ export interface Printer {
  */
 export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVersion: string, system: SystemHooks) {
   let user: User | null = null;
+  /** Caisse choisie par un gérant ou l'administrateur qui n'a pas de caisse attribuée. */
+  let chosenRegisterId: string | null = null;
 
   /** Droits réglés par rôle (Administration › Droits) : il suffit d'un des droits demandés. */
   const can = (u: User, need: readonly Permission[]) => need.some((p) => s.admin.hasRight(u, p));
@@ -109,13 +111,34 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (u.role !== 'admin') throw new AppError("Réservé à l'administrateur", 'FORBIDDEN');
     return u;
   };
+  /**
+   * Caisse de travail : celle attribuée à l'utilisateur, quel que soit le PC.
+   * Sans caisse attribuée, seuls le gérant et l'administrateur vendent, sur la
+   * caisse qu'ils ont choisie ou, à défaut, celle de ce PC.
+   */
+  const workRegister = (u: User, storeId: string, station: NonNullable<ReturnType<typeof s.admin.station>>) => {
+    const assigned = s.admin.getUser(u.id).register_id;
+    const usable = (id: string | null) => {
+      if (!id) return null;
+      const r = s.admin.getRegister(id);
+      return r.active && r.store_id === storeId ? r : null;
+    };
+    if (assigned) return usable(assigned);
+    if (!isSupervisor(u)) return null;
+    return usable(chosenRegisterId) ?? usable(station.register?.id ?? null);
+  };
   const ctx = (need?: readonly Permission[]): Context => {
     const u = requireUser(need);
     const station = s.admin.station();
     if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
-    return { storeId: station.store.id, registerId: station.register?.id ?? null, userId: u.id };
+    return { storeId: station.store.id, registerId: workRegister(u, station.store.id, station)?.id ?? null, userId: u.id };
   };
   const supervisor = (pin: string) => s.admin.authorizeSupervisor(pin);
+  /** L'écran agit sur la caisse qu'il affiche : refus si la caisse de travail a changé entre-temps. */
+  const sameRegister = (c: Context, registerId?: string): Context => {
+    if (registerId && registerId !== c.registerId) throw new AppError("Vous ne travaillez plus sur cette caisse : rouvrez l'écran", 'REGISTER_CHANGED');
+    return c;
+  };
 
   const ADMIN: Permission[] = ['admin'];
   const ACCOUNTING: Permission[] = ['sales', 'reports', 'expenses', 'accounting', 'purchase_invoices', 'receivables'];
@@ -137,6 +160,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       station: s.admin.station(),
       /** Utilisateur connecté et ses droits : menus et boutons s'y règlent. */
       user: user ? { ...user, rights: s.admin.rights(user.role) } : null,
+      /** Caisse sur laquelle l'utilisateur connecté vend (attribuée, ou choisie par le gérant). */
+      register: (() => {
+        const station = s.admin.station();
+        return user && station ? workRegister(user, station.store.id, station) : null;
+      })(),
+      /** Le gérant ou l'administrateur sans caisse attribuée peut choisir sa caisse. */
+      canChooseRegister: Boolean(user && isSupervisor(user) && !s.admin.getUser(user.id).register_id),
     }),
     'setup.bootstrap': (input: BootstrapInput) => {
       const result = s.admin.bootstrap(input);
@@ -146,10 +176,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
     /** Nouveau PC : rejoint un magasin existant via le serveur central (avant toute connexion). */
     'setup.join': (url: string, activationCode: string) => sync.join(url, activationCode),
-    'auth.login': (login: string, pin: string) => (user = s.admin.login(login, pin)),
+    'auth.login': (login: string, pin: string) => {
+      chosenRegisterId = null;
+      return (user = s.admin.login(login, pin));
+    },
     'auth.logout': () => {
       user = null;
+      chosenRegisterId = null;
     },
+    /** Gérant ou administrateur sans caisse attribuée : caisse sur laquelle il travaille. */
+    'pos.chooseRegister': (registerId: string | null) => {
+      const u = requireUser();
+      if (!isSupervisor(u) || s.admin.getUser(u.id).register_id) throw new AppError('Votre caisse est fixée par l’administrateur', 'FORBIDDEN');
+      if (registerId) {
+        const r = s.admin.getRegister(registerId);
+        if (!r.active || r.store_id !== ctx().storeId) throw new AppError('Caisse indisponible', 'INVALID');
+      }
+      chosenRegisterId = registerId;
+      return ctx().registerId;
+    },
+    'pos.registers': () => s.admin.listRegisters(ctx().storeId).filter((r) => r.active).map(({ activation_code: _, ...r }) => r),
     'auth.checkSupervisor': (pin: string) => {
       const sup = supervisor(pin);
       return { id: sup.id, name: sup.name };
@@ -173,12 +219,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'admin.registers': (storeId: string) => (requireUser(ADMIN), s.admin.listRegisters(storeId)),
     'admin.createRegister': (storeId: string, name?: string) => s.admin.createRegister(requireAdmin().id, storeId, name),
+    'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean }) => s.admin.updateRegister(requireAdmin().id, id, patch),
     'admin.warehouses': () => s.admin.listWarehouses(ctx().storeId),
     'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(ADMIN).storeId, name, kind),
     'admin.users': () => (requireUser(ADMIN), s.admin.listUsers()),
-    'admin.createUser': (input: { name: string; login: string; pin: string; role: Role; storeId: string | null }) =>
+    'admin.createUser': (input: { name: string; login: string; pin: string; role: Role; storeId: string | null; registerId?: string | null }) =>
       s.admin.createUser(requireUser(ADMIN).id, input),
-    'admin.updateUser': (id: string, patch: { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }) =>
+    'admin.updateUser': (id: string, patch: { name?: string; role?: Role; storeId?: string | null; registerId?: string | null; active?: boolean; pin?: string }) =>
       s.admin.updateUser(requireUser(ADMIN).id, id, patch),
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
     'admin.settings': () => {
@@ -380,6 +427,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return {
         registers,
         canOpen: can(user!, ['cash_open']),
+        canChooseRegister: isSupervisor(user!) && !s.admin.getUser(user!.id).register_id,
         canCentral: can(user!, ['central_cash']),
         centralBalance: can(user!, ['central_cash', 'accounting']) ? s.treasury.balance(c.storeId) : null,
         gapThreshold: s.admin.getStore(c.storeId).cash_gap_threshold,
@@ -399,14 +447,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       };
     },
     /** Ouverture : gérant, ou code d'un gérant. */
-    'treasury.open': (openingFloat: Fcfa, supervisorPin?: string) => {
-      const c = ctx(TREASURY);
+    'treasury.open': (openingFloat: Fcfa, supervisorPin?: string, registerId?: string) => {
+      const c = sameRegister(ctx(TREASURY), registerId);
       if (!can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
       return s.pos.openSession(c, openingFloat);
     },
-    'treasury.countPreview': (counted: DenominationCount) => s.pos.countPreview(ctx(TREASURY), counted),
-    'treasury.close': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string }) => {
-      const c = ctx(TREASURY);
+    'treasury.countPreview': (counted: DenominationCount, registerId?: string) => s.pos.countPreview(sameRegister(ctx(TREASURY), registerId), counted),
+    'treasury.close': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
+      const c = sameRegister(ctx(TREASURY), opts.registerId);
       const approvedBy = can(user!, ['cash_open']) ? user!.id : opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
       return s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
     },

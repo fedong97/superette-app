@@ -121,6 +121,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 **Pilotage et administration**
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
 - Export CSV des ventes.
+- Caisses attribuées aux utilisateurs : l'administrateur crée, renomme et désactive autant de caisses qu'il veut (Administration › Caisses) et attribue une caisse à chaque utilisateur (Administration › Utilisateurs). Le caissier ou le vendeur vend sur sa caisse depuis n'importe quel PC du magasin ; sans caisse attribuée il ne peut pas vendre. Le gérant et l'administrateur sans caisse choisissent la leur au moment de vendre (barre d'état ou Trésorerie). La numérotation des tickets et des Z reprend après les numéros reçus des autres PC. À la mise à jour, chaque caissier garde la caisse de sa dernière vente.
 - Magasins, caisses (code d'activation), dépôts, utilisateurs et rôles (administrateur, gérant, caissier, vendeur, responsable d'achat (appro), magasinier, comptable), paramètres, journal d'audit.
 - Droits par rôle (Administration › Droits par rôle) : l'administrateur coche pour le gérant, le caissier, le vendeur, le responsable d'achat, le magasinier et le comptable les fenêtres qu'ils ouvrent et les actions de caisse et de gestion qu'ils font (changer un prix, remise sans code, sortie de caisse, inventaire, import…). L'administrateur garde tous les droits. Les réglages partent au serveur central et valent sur tous les PC.
 

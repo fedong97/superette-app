@@ -358,8 +358,16 @@ export class PosService extends Base {
   private nextTicketNumber(ctx: Context): string {
     const store = this.admin.getStore(ctx.storeId);
     const register = this.admin.getRegister(this.requireRegister(ctx));
+    // La caisse suit l'utilisateur d'un PC à l'autre : la suite reprend après le plus
+    // grand numéro connu pour cette caisse (ventes reçues des autres PC comprises).
+    const prefix = `${store.code}-${register.number}-`;
+    const known = this.db
+      .prepare('SELECT MAX(CAST(substr(number, ?) AS INTEGER)) FROM sales WHERE register_id = ? AND number LIKE ?')
+      .pluck()
+      .get(prefix.length + 1, register.id, `${prefix}%`) as number | null;
+    if (known) this.raiseCounter(`ticket:${register.id}`, known);
     const seq = this.nextCounter(`ticket:${register.id}`);
-    return `${store.code}-${register.number}-${String(seq).padStart(6, '0')}`;
+    return `${prefix}${String(seq).padStart(6, '0')}`;
   }
 
   /** Recalcule les lignes à partir des prix en base (prix magasin, étiquettes balance). */
@@ -921,6 +929,8 @@ export class PosService extends Base {
     }
     const register = this.admin.getRegister(session.register_id);
     this.tx(() => {
+      const lastZ = this.db.prepare('SELECT MAX(z_number) FROM cash_sessions WHERE register_id = ?').pluck().get(session.register_id) as number | null;
+      if (lastZ) this.raiseCounter(`z:${session.register_id}`, lastZ);
       const zNumber = this.nextCounter(`z:${session.register_id}`);
       this.db
         .prepare(

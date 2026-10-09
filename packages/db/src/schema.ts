@@ -957,4 +957,17 @@ UPDATE accounts SET role = 'central_cash' WHERE id = '5712' AND role IS NULL AND
 UPDATE accounts SET role = 'owner' WHERE id = '104' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'owner');
 `,
   },
+  {
+    version: 18,
+    name: 'caisse attribuée à chaque utilisateur',
+    sql: `
+-- Caisse de travail de l'utilisateur : ses ventes et sa journée de caisse s'y font, quel que soit le PC.
+ALTER TABLE users ADD COLUMN register_id TEXT REFERENCES registers(id);
+-- Caissiers déjà en place : on leur attribue la caisse de leur dernière vente, pour qu'ils continuent de vendre après la mise à jour.
+UPDATE users SET register_id = (
+  SELECT s.register_id FROM sales s JOIN registers r ON r.id = s.register_id
+  WHERE s.user_id = users.id AND r.active = 1 ORDER BY s.created_at DESC LIMIT 1
+) WHERE role IN ('cashier', 'seller');
+`,
+  },
 ];

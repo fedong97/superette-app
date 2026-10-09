@@ -423,3 +423,6 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; 
 .tre-day { gap: 8px; }
 .tre-day .tre-scroll:not(.tall) { max-height: 190px; }
 .tre-foot > div { padding: 6px 12px; }
+.statusbar button.link.reg { margin-left: 0; }
+.register-choice { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.register-choice button { padding: 14px; font-size: 15px; }

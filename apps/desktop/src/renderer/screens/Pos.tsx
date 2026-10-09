@@ -92,10 +92,15 @@ const amount = (v: number) => formatFcfa(v, false);
  * et rendu, boutons d'action à droite et raccourcis clavier en bas.
  * Plusieurs fiches peuvent être ouvertes en même temps (V. cash 1, V. cash 2).
  */
-export function Pos({ user, hasRegister, vatEnabled = true, ignoreStock = false, active, title, onClose, onListing, onTreasury, mode = 'cash' }: {
+export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onListing, onTreasury, mode = 'cash' }: {
   mode?: 'cash' | 'credit';
   user: User;
   hasRegister: boolean;
+  /** Caisse de travail : la journée affichée se recharge quand elle change. */
+  registerId?: string | null;
+  /** Gérant ou administrateur sans caisse attribuée : il choisit la caisse sur laquelle il vend. */
+  canChooseRegister?: boolean;
+  onRegisterChosen?: () => void;
   /** Magasin assujetti à la TVA (sinon « Taxes ? » est masqué). */
   vatEnabled?: boolean;
   /** « Ignorer la gestion des stocks » : on vend même si le stock affiché est épuisé. */
@@ -156,7 +161,7 @@ export function Pos({ user, hasRegister, vatEnabled = true, ignoreStock = false,
       session.reload();
       promoRules.reload();
     }
-  }, [active]);
+  }, [active, registerId]);
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
@@ -421,7 +426,18 @@ export function Pos({ user, hasRegister, vatEnabled = true, ignoreStock = false,
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (!hasRegister) return <Empty>Ce poste n'est pas activé comme caisse. Activez-le depuis Administration › Caisses.</Empty>;
+  if (!hasRegister)
+    return canChooseRegister ? (
+      <div className="center-page">
+        <div className="card closed-register">
+          <h2>Sur quelle caisse vendez-vous ?</h2>
+          <p>Aucune caisse ne vous est attribuée : choisissez celle de ce comptoir.</p>
+          <RegisterChooser current={null} onChosen={() => onRegisterChosen?.()} />
+        </div>
+      </div>
+    ) : (
+      <Empty>Aucune caisse ne vous est attribuée. Demandez à l'administrateur de vous en attribuer une dans Administration › Utilisateurs.</Empty>
+    );
   if (!session.data) return session.data === null ? <ClosedRegister canOpen={has(user, 'treasury')} onTreasury={onTreasury} onReload={session.reload} /> : null;
   const stale = localDay(session.data.opened_at) !== localDay(now.toISOString());
 
@@ -1087,6 +1103,31 @@ function VaryDialog({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Choix de la caisse par un gérant ou l'administrateur sans caisse attribuée. */
+export function RegisterChooser({ current, onChosen }: { current: string | null; onChosen: () => void }) {
+  const toast = useToast();
+  const registers = useLoad(() => call('pos.registers'), []);
+  return (
+    <div className="register-choice">
+      {(registers.data ?? []).map((r) => (
+        <button
+          key={r.id}
+          className={r.id === current ? 'primary' : ''}
+          onClick={() =>
+            call('pos.chooseRegister', r.id).then(() => {
+              toast.ok(`Vous vendez sur ${r.name}`);
+              onChosen();
+            }, toast.error)
+          }
+        >
+          {String(r.number).padStart(2, '0')} · {r.name}
+        </button>
+      ))}
+      {registers.data && !registers.data.length && <p className="muted">Aucune caisse active : créez-en une dans Administration › Caisses.</p>}
+    </div>
   );
 }
 

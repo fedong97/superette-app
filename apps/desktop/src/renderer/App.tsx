@@ -8,7 +8,7 @@ import { Customers, type CustomersTab } from './screens/Customers';
 import { Dashboard } from './screens/Dashboard';
 import { Expenses, type ExpensesTab } from './screens/Expenses';
 import { Login } from './screens/Login';
-import { Pos } from './screens/Pos';
+import { Pos, RegisterChooser } from './screens/Pos';
 import { Labels } from './screens/Labels';
 import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
@@ -310,6 +310,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [wins, setWins] = useState<Win[]>([{ kind: first, nonce: 0 }]);
   const [active, setActive] = useState<WinKind>(first);
   const [menu, setMenu] = useState<string | null>(null);
+  const [chooseRegister, setChooseRegister] = useState(false);
   const [help, setHelp] = useState<'shortcuts' | 'about' | null>(null);
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
@@ -326,7 +327,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
-    document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.station?.register?.name ?? 'poste de gestion'}, utilisateur ${user.name}`;
+    document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
     if (!menu) return;
@@ -441,7 +442,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               <Pos
                 user={user}
                 mode={w.kind === 'credit' ? 'credit' : 'cash'}
-                hasRegister={Boolean(state.station?.register)}
+                hasRegister={Boolean(state.register)}
+                registerId={state.register?.id ?? null}
+                canChooseRegister={state.canChooseRegister}
+                onRegisterChosen={refresh}
                 vatEnabled={state.station?.store.vat_enabled !== 0}
                 ignoreStock={state.station?.store.ignore_stock === 1}
                 active={w.kind === active}
@@ -463,7 +467,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
-            {w.kind === 'treasury' && <Treasury user={user} initialTab={w.tab as TreasuryTab | undefined} />}
+            {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={refresh} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>
@@ -472,7 +476,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       <footer className="statusbar">
         <span>Superette Gestion v{state.version}</span>
         <span>Magasin : {state.station?.store.name}</span>
-        <span>{state.station?.register?.name ?? 'Poste de gestion'}</span>
+        {state.canChooseRegister ? (
+          <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
+            {state.register?.name ?? 'Sans caisse'} · changer
+          </button>
+        ) : (
+          <span>{state.register?.name ?? 'Sans caisse'}</span>
+        )}
         <span>
           Utilisateur : {user.name} ({ROLE_LABELS[user.role]})
         </span>
@@ -491,6 +501,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Changer d'utilisateur
         </button>
       </footer>
+      {chooseRegister && (
+        <Modal title="Choisir ma caisse" onClose={() => setChooseRegister(false)}>
+          <RegisterChooser
+            current={state.register?.id ?? null}
+            onChosen={() => {
+              setChooseRegister(false);
+              refresh();
+            }}
+          />
+        </Modal>
+      )}
       {help === 'shortcuts' && (
         <Modal title="Raccourcis clavier" onClose={() => setHelp(null)}>
           <table className="list compact">

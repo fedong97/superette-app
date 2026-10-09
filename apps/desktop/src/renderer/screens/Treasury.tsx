@@ -23,9 +23,20 @@ const dayTime = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: '2
  * son fond, entrées et sorties d'espèces, clôture avec comptage à l'aveugle et
  * versement à la caisse centrale, historique des journées et livre de la centrale.
  */
-export function Treasury({ user, initialTab = 'day', onChanged }: { user: User; initialTab?: TreasuryTab; onChanged?: () => void }) {
+export function Treasury({
+  user,
+  registerId = null,
+  initialTab = 'day',
+  onChanged,
+}: {
+  user: User;
+  /** Caisse de travail de l'utilisateur : l'écran suit quand le gérant en change. */
+  registerId?: string | null;
+  initialTab?: TreasuryTab;
+  onChanged?: () => void;
+}) {
   const toast = useToast();
-  const state = useLoad(() => call('treasury.state'), []);
+  const state = useLoad(() => call('treasury.state'), [registerId]);
   const canCentral = user.rights.includes('central_cash') || user.rights.includes('accounting');
   const [selected, setSelected] = useState<string | null>(initialTab === 'central' && canCentral ? CENTRAL : null);
   const [tab, setTab] = useState<Exclude<TreasuryTab, 'central'>>(initialTab === 'history' ? 'history' : 'day');
@@ -41,6 +52,10 @@ export function Treasury({ user, initialTab = 'day', onChanged }: { user: User; 
   const journey = useLoad(() => (shownId && !central ? call('treasury.session', shownId) : Promise.resolve(null)), [shownId, central]);
 
   useEffect(() => setSessionId(null), [register?.id]);
+  // Le gérant vient de changer de caisse : on affiche la nouvelle.
+  useEffect(() => {
+    if (selected !== CENTRAL) setSelected(null);
+  }, [registerId]);
   const reload = () => {
     state.reload();
     history.reload();
@@ -64,7 +79,7 @@ export function Treasury({ user, initialTab = 'day', onChanged }: { user: User; 
             {registers.map((r) => (
               <option key={r.id} value={r.id}>
                 {String(r.number).padStart(2, '0')} · {r.name}
-                {r.isThisStation ? ' (ce poste)' : ''}
+                {r.isThisStation ? ' (ma caisse)' : ''}
               </option>
             ))}
             {canCentral && <option value={CENTRAL}>99 · Caisse centrale</option>}
@@ -93,8 +108,19 @@ export function Treasury({ user, initialTab = 'day', onChanged }: { user: User; 
               Ouvrir la caisse…
             </button>
           )
+        ) : state.data.canChooseRegister && register ? (
+          <button
+            onClick={() =>
+              call('pos.chooseRegister', register.id).then(() => {
+                toast.ok(`Vous travaillez sur ${register.name}`);
+                reload();
+              }, toast.error)
+            }
+          >
+            Travailler sur cette caisse
+          </button>
         ) : (
-          <span className="muted">Cette caisse s'ouvre et se ferme sur son poste.</span>
+          <span className="muted">Seuls les utilisateurs de cette caisse l'ouvrent et la ferment.</span>
         )}
       </div>
       {!central && register?.stale && open && (
@@ -457,7 +483,7 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
           e.preventDefault();
           if (value === null) return toast.error('Montant invalide');
           try {
-            const opened = await call('treasury.open', value, canOpen ? undefined : pin);
+            const opened = await call('treasury.open', value, canOpen ? undefined : pin, register.id);
             toast.ok(`${register.name} ouverte avec un fond de ${fcfa(value)}`);
             // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
             const voucher = (await call('treasury.session', opened.id)).movements.find((m) => !m.cash_operation_id);
@@ -557,7 +583,7 @@ function CloseDialog({
               className="primary"
               onClick={async () => {
                 try {
-                  const p = await call('treasury.countPreview', count);
+                  const p = await call('treasury.countPreview', count, session.register_id);
                   setPreview(p);
                   setFloatText(String(Math.min(session.opening_float, p.counted)));
                 } catch (e) {
@@ -575,7 +601,7 @@ function CloseDialog({
             e.preventDefault();
             if (floatLeft === null) return toast.error('Fond invalide');
             try {
-              const z = await call('treasury.close', count, { floatLeft, gapReason: reason, supervisorPin: pin || undefined });
+              const z = await call('treasury.close', count, { floatLeft, gapReason: reason, supervisorPin: pin || undefined, registerId: session.register_id });
               setDone(z);
               call('pos.printZ', z.session.id).catch(toast.error);
               const dep = (await call('treasury.session', z.session.id)).movements.find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);

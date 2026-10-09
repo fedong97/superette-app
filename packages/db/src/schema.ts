@@ -970,4 +970,13 @@ UPDATE users SET register_id = (
 ) WHERE role IN ('cashier', 'seller');
 `,
   },
+  {
+    version: 19,
+    name: 'écart de clôture justifié après coup par le gérant',
+    sql: `
+-- Le caissier clôture sans code du gérant ; le gérant justifie l'écart ensuite, depuis son compte.
+ALTER TABLE cash_sessions ADD COLUMN gap_justified_at TEXT;
+UPDATE cash_sessions SET gap_justified_at = closed_at WHERE gap_reason IS NOT NULL;
+`,
+  },
 ];

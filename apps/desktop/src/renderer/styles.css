@@ -400,6 +400,10 @@ table.rights tr.group th { background: var(--bg); color: var(--ink); text-align:
 .tre-print { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .tre-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tre-panes.single { grid-template-columns: minmax(0, 760px); }
+.tre-gap { display: flex; align-items: center; gap: 12px; }
+.tre-gaps { border: 1px solid var(--danger); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+.tre-gaps h3 { color: var(--danger); margin: 0 0 6px; }
+td .tag { margin-left: 6px; }
 .tre-pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; min-width: 0; }
 .tre-pane h3 { margin: 0 0 6px; font-size: 14px; color: var(--brand); }
 .tre-scroll { max-height: 300px; overflow: auto; }
@@ -427,3 +431,4 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; 
 .statusbar button.link.reg { margin-left: 0; }
 .register-choice { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
 .register-choice button { padding: 14px; font-size: 15px; }
+.tre-day p .link { margin-left: 8px; }

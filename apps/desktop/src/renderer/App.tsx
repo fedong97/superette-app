@@ -69,6 +69,8 @@ interface MenuItem {
   perm?: Permission;
   /** Réservé au rôle Administrateur. */
   adminOnly?: boolean;
+  /** Compteur affiché à côté du libellé. */
+  badge?: 'gaps';
 }
 
 const SEP: MenuItem = { label: '', sep: true };
@@ -132,7 +134,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Trésorerie',
     [
       { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
-      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_amounts' },
+      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_amounts', badge: 'gaps' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
       SEP,
       { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
@@ -318,12 +320,14 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
   const chargesLate = useLoad(() => call('charges.late'), []);
+  const gaps = useLoad(() => call('treasury.pendingGaps'), []);
 
   useEffect(() => {
     const t = setInterval(() => {
       sync.reload();
       backupLate.reload();
       chargesLate.reload();
+      gaps.reload();
     }, 15000);
     return () => clearInterval(t);
   }, []);
@@ -393,6 +397,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 e.stopPropagation();
                 setMenu(menu === name ? null : name);
                 chargesLate.reload();
+                gaps.reload();
               }}
               onMouseEnter={() => menu && setMenu(name)}
             >
@@ -406,6 +411,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   ) : (
                     <button key={i.label} disabled={i.soon || (i.open && !canWin(i.open[0]))} onClick={() => void run(i)}>
                       {i.label}
+                      {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
                       {i.soon && <small>bientôt</small>}
                     </button>
                   ),
@@ -469,7 +475,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
-            {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={refresh} />}
+            {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>
@@ -497,6 +503,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         {Boolean(chargesLate.data?.count) && (
           <button className="warn" onClick={() => open('expenses', 'schedule')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
             {chargesLate.data!.count} charge(s) en retard
+          </button>
+        )}
+        {Boolean(gaps.data?.length) && (
+          <button className="warn" onClick={() => open('treasury', 'history')} title="Clôtures dont l'écart attend votre motif">
+            {gaps.data!.length} écart(s) de caisse à justifier
           </button>
         )}
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>

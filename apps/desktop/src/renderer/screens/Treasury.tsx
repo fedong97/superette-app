@@ -61,7 +61,19 @@ function FullTreasury({
   const shownId = sessionId ?? register?.session?.id ?? history.data?.[0]?.id ?? null;
   const journey = useLoad(() => (shownId && !central ? call('treasury.session', shownId) : Promise.resolve(null)), [shownId, central]);
 
-  useEffect(() => setSessionId(null), [register?.id]);
+  // Écarts à justifier, toutes caisses : un clic ouvre la journée sur sa caisse.
+  const gaps = useLoad(() => call('treasury.pendingGaps'), []);
+  const [jump, setJump] = useState<string | null>(null);
+  useEffect(() => {
+    setSessionId(jump);
+    setJump(null);
+  }, [register?.id]);
+  const openGap = (g: { id: string; register_id: string }) => {
+    setTab('day');
+    if (g.register_id === register?.id) return setSessionId(g.id);
+    setJump(g.id);
+    setSelected(g.register_id);
+  };
   // Le gérant vient de changer de caisse : on affiche la nouvelle.
   useEffect(() => {
     if (selected !== CENTRAL) setSelected(null);
@@ -70,6 +82,7 @@ function FullTreasury({
     state.reload();
     history.reload();
     journey.reload();
+    gaps.reload();
     onChanged?.();
   };
 
@@ -157,13 +170,38 @@ function FullTreasury({
                 journey={journey.data}
                 sessions={history.data ?? []}
                 onSession={setSessionId}
+                threshold={state.data.gapThreshold}
+                canJustify={user.rights.includes('cash_open')}
+                onJustified={reload}
               />
             ) : (
               <Empty>Aucune journée pour cette caisse. {here ? 'Ouvrez la caisse pour commencer la journée.' : ''}</Empty>
             ))}
+          {tab === 'history' && Boolean(gaps.data?.length) && (
+            <section className="tre-gaps">
+              <h3>Écarts à justifier</h3>
+              <table className="list compact">
+                <tbody>
+                  {gaps.data!.map((g) => (
+                    <tr key={g.id} className="clickable" onClick={() => openGap(g)}>
+                      <td>{registers.find((r) => r.id === g.register_id)?.name ?? ''}</td>
+                      <td>Z{g.z_number}</td>
+                      <td>{g.closed_at ? dateTime(g.closed_at) : ''}</td>
+                      <td>{g.closed_by_name ?? g.user_name}</td>
+                      <td className={`r ${(g.difference ?? 0) < 0 ? 'neg' : 'pos'}`}>{fcfa(g.difference ?? 0)}</td>
+                      <td>
+                        <button className="link">Ouvrir la journée</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
           {tab === 'history' && (
             <History
               sessions={history.data ?? []}
+              threshold={state.data.gapThreshold}
               onOpen={(id) => {
                 setSessionId(id);
                 setTab('day');
@@ -214,8 +252,27 @@ function FullTreasury({
 }
 
 /** Journée de caisse : en-tête, entrées et sorties d'espèces, puis attendu, relevé et différentiel ; ventes de la journée. */
-function Day({ journey, sessions, onSession }: { journey: Journey; sessions: Result<'treasury.sessions'>; onSession: (id: string) => void }) {
+/** Écart d'une journée clôturée au-delà du seuil, sans motif du gérant. */
+const gapPending = (x: { status: string; difference: number | null; gap_reason: string | null }, threshold: number) =>
+  x.status === 'closed' && x.difference !== null && !x.gap_reason && Math.abs(x.difference) > threshold;
+
+function Day({
+  journey,
+  sessions,
+  onSession,
+  threshold,
+  canJustify,
+  onJustified,
+}: {
+  journey: Journey;
+  sessions: Result<'treasury.sessions'>;
+  onSession: (id: string) => void;
+  threshold: number;
+  canJustify: boolean;
+  onJustified: () => void;
+}) {
   const toast = useToast();
+  const [justifying, setJustifying] = useState(false);
   const { z, cash, sales } = journey;
   const se = z.session;
   const [view, setView] = useState<'cash' | 'sales' | 'z'>('cash');
@@ -300,7 +357,38 @@ function Day({ journey, sessions, onSession }: { journey: Journey; sessions: Res
           </div>
         )}
       </div>
-      {se.gap_reason && <p className="muted">Motif de l'écart : {se.gap_reason}</p>}
+      {gapPending(se, threshold) && (
+        <p className="danger-text tre-gap">
+          Écart à justifier : {fcfa(se.difference ?? 0)} à la clôture de {se.closed_by_name ?? se.user_name}.
+          {canJustify && (
+            <button className="danger" onClick={() => setJustifying(true)}>
+              Justifier l'écart…
+            </button>
+          )}
+        </p>
+      )}
+      {se.gap_reason && (
+        <p className="muted">
+          Motif de l'écart : {se.gap_reason}
+          {se.gap_approved_by_name && ` · justifié par ${se.gap_approved_by_name}${se.gap_justified_at ? ` le ${dateTime(se.gap_justified_at)}` : ''}`}
+          {canJustify && (
+            <button className="link" onClick={() => setJustifying(true)}>
+              Modifier
+            </button>
+          )}
+        </p>
+      )}
+      {justifying && (
+        <JustifyGapDialog
+          session={se}
+          difference={z.difference ?? 0}
+          onClose={() => setJustifying(false)}
+          onDone={() => {
+            setJustifying(false);
+            onJustified();
+          }}
+        />
+      )}
       {se.first_counted !== null && se.counted_cash !== null && se.first_counted !== se.counted_cash && (
         <p className="warn-text">Premier comptage : {fcfa(se.first_counted)} (recompté ensuite).</p>
       )}
@@ -415,7 +503,58 @@ function SalesList({ sales }: { sales: Journey['sales'] }) {
   );
 }
 
-function History({ sessions, onOpen }: { sessions: Result<'treasury.sessions'>; onOpen: (id: string) => void }) {
+/** Le gérant a interpellé le caissier : il saisit le motif de l'écart. */
+function JustifyGapDialog({ session, difference, onClose, onDone }: { session: Journey['z']['session']; difference: number; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [reason, setReason] = useState(session.gap_reason ?? '');
+  return (
+    <Modal title="Justifier l'écart de caisse" onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await call('treasury.justifyGap', session.id, reason);
+            toast.ok('Écart justifié');
+            onDone();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <div className="kpis">
+          <div>
+            <small>Attendu</small>
+            <strong>{fcfa(session.expected_cash ?? 0)}</strong>
+          </div>
+          <div>
+            <small>Relevé</small>
+            <strong>{fcfa(session.counted_cash ?? 0)}</strong>
+          </div>
+          <div className={difference < 0 ? 'neg' : 'pos'}>
+            <small>Écart</small>
+            <strong>{fcfa(difference)}</strong>
+          </div>
+        </div>
+        <p className="muted">
+          Clôture du {session.closed_at ? dateTime(session.closed_at) : ''} par {session.closed_by_name ?? session.user_name}.
+        </p>
+        <Field label="Motif de l'écart">
+          <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Erreur de monnaie, billet manquant, vente non saisie…" />
+        </Field>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!reason.trim()}>
+            Enregistrer le motif
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function History({ sessions, threshold, onOpen }: { sessions: Result<'treasury.sessions'>; threshold: number; onOpen: (id: string) => void }) {
   return (
     <table className="list">
       <thead>
@@ -443,7 +582,11 @@ function History({ sessions, onOpen }: { sessions: Result<'treasury.sessions'>; 
             <td className="r">{fcfa(x.opening_float)}</td>
             <td className="r">{x.expected_cash === null ? '' : fcfa(x.expected_cash)}</td>
             <td className="r">{x.counted_cash === null ? '' : fcfa(x.counted_cash)}</td>
-            <td className={`r ${x.difference ? (x.difference < 0 ? 'neg' : 'pos') : ''}`}>{x.difference === null ? '' : fcfa(x.difference)}</td>
+            <td className={`r ${x.difference ? (x.difference < 0 ? 'neg' : 'pos') : ''}`}>
+              {x.difference === null ? '' : fcfa(x.difference)}
+              {gapPending(x, threshold) && <span className="tag rupture">Écart à justifier</span>}
+              {x.gap_reason && Math.abs(x.difference ?? 0) > threshold && <span className="tag normal" title={x.gap_reason}>Justifié</span>}
+            </td>
             <td className="r">{x.deposit === null ? '' : fcfa(x.deposit)}</td>
           </tr>
         ))}
@@ -556,7 +699,6 @@ function CloseDialog({
   const [preview, setPreview] = useState<Result<'treasury.countPreview'> | null>(null);
   const [floatText, setFloatText] = useState('');
   const [reason, setReason] = useState('');
-  const [pin, setPin] = useState('');
   const [done, setDone] = useState<Result<'treasury.close'> | null>(null);
   const counted = countedTotal(count);
   const floatLeft = parseAmount(floatText || '0');
@@ -610,7 +752,7 @@ function CloseDialog({
             e.preventDefault();
             if (floatLeft === null) return toast.error('Fond invalide');
             try {
-              const z = await call('treasury.close', count, { floatLeft, gapReason: reason, supervisorPin: pin || undefined, registerId: session.register_id });
+              const z = await call('treasury.close', count, { floatLeft, gapReason: reason, registerId: session.register_id });
               setDone(z);
               call('pos.printZ', z.session.id).catch(toast.error);
               const dep = (await call('treasury.session', z.session.id)).movements.find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
@@ -636,17 +778,13 @@ function CloseDialog({
           </div>
           {preview.needsApproval && (
             <>
-              <p className="danger-text">Écart supérieur à {fcfa(preview.threshold)} : indiquez le motif{canApprove ? '' : ' et faites valider par le gérant'}.</p>
-              <div className="grid2">
-                <Field label="Motif de l'écart">
+              {canApprove ? (
+                <Field label="Motif de l'écart (facultatif)" hint={`Écart supérieur à ${fcfa(preview.threshold)}. Sans motif, la journée reste « écart à justifier ».`}>
                   <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
                 </Field>
-                {!canApprove && (
-                  <Field label="Code du gérant">
-                    <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
-                  </Field>
-                )}
-              </div>
+              ) : (
+                <p className="danger-text">Écart supérieur à {fcfa(preview.threshold)} : le gérant le justifiera depuis son compte.</p>
+              )}
             </>
           )}
           <div className="grid2">
@@ -664,7 +802,7 @@ function CloseDialog({
             <button
               type="submit"
               className="danger"
-              disabled={deposit === null || deposit < 0 || (preview.needsApproval && (!reason.trim() || (!canApprove && !pin)))}
+              disabled={deposit === null || deposit < 0}
             >
               Clôturer, verser et imprimer
             </button>
@@ -796,22 +934,18 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
 
 /**
  * Clôture par le caissier, sans attendu ni écart : il compte, laisse le fond et
- * verse le reste. Si l'écart dépasse le seuil, le gérant vient valider avec son
- * code ; lui seul voit l'écart et en saisit le motif. Seul le bon de versement s'imprime.
+ * verse le reste. La caisse se ferme sur son comptage, sans code du gérant ;
+ * le gérant justifie ensuite un éventuel écart depuis son compte. Seul le bon de versement s'imprime.
  */
 function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNullable<RegisterRow['session']>; user: User; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [count, setCount] = useState<Record<number, number>>({});
   const [checked, setChecked] = useState<Result<'treasury.blindCount'> | null>(null);
-  const [pin, setPin] = useState('');
-  const [approval, setApproval] = useState<Result<'treasury.countPreview'> | null>(null);
-  const [reason, setReason] = useState('');
   const [floatText, setFloatText] = useState('');
   const [done, setDone] = useState<Result<'treasury.closeBlind'> | null>(null);
   const counted = countedTotal(count);
   const floatLeft = parseAmount(floatText || '0');
   const deposit = checked && floatLeft !== null ? checked.counted - floatLeft : null;
-  const blocked = Boolean(checked?.needsApproval && !approval);
 
   if (done) {
     return (
@@ -841,13 +975,6 @@ function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNull
     );
   }
 
-  const recount = () => {
-    setChecked(null);
-    setApproval(null);
-    setPin('');
-    setReason('');
-  };
-
   return (
     <Modal title="Fermer la caisse" onClose={onClose} wide>
       {!checked ? (
@@ -872,42 +999,13 @@ function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNull
             </button>
           </div>
         </>
-      ) : blocked ? (
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            try {
-              setApproval(await call('treasury.countPreview', count, session.register_id, pin));
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        >
-          <p className="danger-text">Le comptage ne correspond pas à la caisse. Recomptez, ou appelez le gérant pour valider la clôture.</p>
-          <Field label="Code du gérant">
-            <input autoFocus type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
-          </Field>
-          <div className="actions">
-            <button type="button" className="ghost" onClick={recount}>
-              Recompter
-            </button>
-            <button type="submit" className="primary" disabled={!pin}>
-              Valider (gérant)
-            </button>
-          </div>
-        </form>
       ) : (
         <form
           onSubmit={async (e) => {
             e.preventDefault();
             if (floatLeft === null) return toast.error('Fond invalide');
             try {
-              const r = await call('treasury.closeBlind', count, {
-                floatLeft,
-                gapReason: approval ? reason : null,
-                supervisorPin: approval ? pin : undefined,
-                registerId: session.register_id,
-              });
+              const r = await call('treasury.closeBlind', count, { floatLeft, registerId: session.register_id });
               setDone(r);
               if (r.voucherId) call('treasury.printVoucher', r.voucherId).catch(toast.error);
             } catch (err) {
@@ -915,41 +1013,22 @@ function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNull
             }
           }}
         >
-          {approval && (
-            <>
-              <p className="muted">Réservé au gérant :</p>
-              <div className="kpis">
-                <div>
-                  <small>Attendu</small>
-                  <strong>{fcfa(approval.expected)}</strong>
-                </div>
-                <div>
-                  <small>Relevé</small>
-                  <strong>{fcfa(approval.counted)}</strong>
-                </div>
-                <div className={approval.difference < 0 ? 'neg' : approval.difference > 0 ? 'pos' : ''}>
-                  <small>Différentiel</small>
-                  <strong>{fcfa(approval.difference)}</strong>
-                </div>
-              </div>
-              <Field label="Motif de l'écart (saisi par le gérant)">
-                <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
-              </Field>
-            </>
-          )}
+          <p>
+            Espèces comptées : <b>{fcfa(checked.counted)}</b>
+          </p>
           <div className="grid2">
             <Field label="Fond laissé dans le tiroir pour demain" hint={`Fond de ce matin : ${fcfa(session.opening_float)}`}>
-              <input inputMode="numeric" value={floatText} onChange={(e) => setFloatText(e.target.value)} />
+              <input autoFocus inputMode="numeric" value={floatText} onChange={(e) => setFloatText(e.target.value)} />
             </Field>
             <Field label="Versé à la caisse centrale">
               <input readOnly className="r" value={deposit === null || deposit < 0 ? '—' : fcfa(deposit)} />
             </Field>
           </div>
           <div className="actions">
-            <button type="button" className="ghost" onClick={recount}>
+            <button type="button" className="ghost" onClick={() => setChecked(null)}>
               Recompter
             </button>
-            <button type="submit" className="danger" disabled={deposit === null || deposit < 0 || Boolean(approval && !reason.trim())}>
+            <button type="submit" className="danger" disabled={deposit === null || deposit < 0}>
               Clôturer et verser
             </button>
           </div>

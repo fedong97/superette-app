@@ -523,20 +523,31 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.close': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
       requireAmounts();
-      const approvedBy = can(user!, ['cash_open']) ? user!.id : opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
+      // Sans code du gérant : un motif saisi par un gérant à la clôture vaut justification, sinon l'écart reste à justifier.
+      const approvedBy = can(user!, ['cash_open']) ? user!.id : null;
       return s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
     },
     /**
      * Clôture par le caissier sans le droit des montants : ni Z ni attendu en
-     * retour, seulement son bon de versement. Un écart au-delà du seuil est
-     * toujours validé par le gérant, qui saisit son code et le motif.
+     * retour, seulement son bon de versement. Le comptage est enregistré tel
+     * quel ; le gérant justifie un éventuel écart ensuite, depuis son compte.
      */
-    'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
+    'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
-      const approvedBy = opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
-      const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy }).session;
+      const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft }).session;
       const voucher = s.treasury.sessionMovements(se.id).find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
       return { sessionId: se.id, counted: se.counted_cash ?? 0, floatLeft: se.float_left ?? 0, deposit: se.deposit ?? 0, voucherId: voucher?.id ?? null, voucherNumber: voucher?.number ?? null };
+    },
+    /** Écarts de clôture qui attendent le motif du gérant. */
+    'treasury.pendingGaps': () => {
+      const u = requireUser();
+      if (!can(u, AMOUNTS) || !can(u, ['cash_open'])) return [];
+      return s.pos.pendingGaps(ctx().storeId);
+    },
+    'treasury.justifyGap': (sessionId: string, reason: string) => {
+      const c = ctx(AMOUNTS);
+      if (!can(user!, ['cash_open'])) throw new AppError("Seul le gérant justifie un écart de caisse", 'FORBIDDEN');
+      return s.pos.justifyGap(c, sessionId, reason);
     },
     'treasury.central': (opts?: { from?: string; to?: string }) => {
       const c = ctx(['central_cash', 'accounting']);
@@ -597,9 +608,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Au bureau : gérant ou comptable. À la caisse (espèces du tiroir) : un caissier a besoin du code d'un gérant. */
     'expenses.record': (input: Omit<ExpenseInput, 'authorizedBy'> & { supervisorPin?: string }) => {
       const { supervisorPin, ...rest } = input;
-      const c = ctx(input.atRegister ? POS : ACCOUNTING);
-      const authorizedBy = input.atRegister && !can(user!, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
-      return s.expenses.record(c, { ...rest, authorizedBy });
+      const u = requireUser();
+      // Le caissier ou le vendeur n'a pas la main sur la caisse centrale : ses dépenses en espèces sortent de sa caisse.
+      const atRegister = Boolean(input.atRegister) || (input.method === 'CASH' && !can(u, ['central_cash']) && can(u, POS));
+      const c = ctx(atRegister ? POS : ACCOUNTING);
+      const authorizedBy = atRegister && !can(u, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
+      return s.expenses.record(c, { ...rest, atRegister, date: atRegister ? null : rest.date, authorizedBy });
     },
     'expenses.cancel': (id: string, reason: string, supervisorPin?: string) => {
       const c = ctx([...POS, 'customers', 'quotes']);

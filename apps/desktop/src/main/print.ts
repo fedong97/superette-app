@@ -249,7 +249,7 @@ export function createPrinter(s: Services): Printer {
           ${row('Chiffre d’affaires net TTC', z.netTtc, true)}${row('Remises', z.discounts)}${row('Promotions', z.promotions)}${row('Ventes à crédit', journal.creditSales)}
           ${z.byMethod.map((m) => row(esc(m.label), m.amount)).join('')}
         </table></div>
-        ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b></p>` : ''}
+        ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b>${se.gap_approved_by_name ? `, justifié par ${esc(se.gap_approved_by_name)}` : ''}</p>` : s.pos.gapPending(se) ? '<p><b>Écart à justifier par le gérant.</b></p>' : ''}
         <h3>Entrées d'espèces</h3>
         <table><thead><tr><th>Heure</th><th>Nature</th><th>Pièce / motif</th><th>Tiers</th><th class="r">Montant</th></tr></thead>
         <tbody>${cashRows(journal.entries)}<tr class="total"><td colspan="4">Total des entrées</td><td class="r">${money(sum(journal.entries))}</td></tr></tbody></table>

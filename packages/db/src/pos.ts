@@ -54,7 +54,10 @@ export interface CashSession {
   /** Espèces versées à la caisse centrale à la clôture. */
   deposit: Fcfa | null;
   gap_reason: string | null;
+  /** Gérant qui a justifié l'écart, à la clôture ou après coup. */
   gap_approved_by: string | null;
+  gap_approved_by_name?: string | null;
+  gap_justified_at: string | null;
 }
 
 /** Ligne d'entrée ou de sortie d'espèces d'une journée de caisse. */
@@ -243,8 +246,8 @@ export class PosService extends Base {
   getSession(id: string): CashSession {
     const s = this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
-         LEFT JOIN users c ON c.id = s.closed_by WHERE s.id = ?`,
+        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name, g.name AS gap_approved_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
+         LEFT JOIN users c ON c.id = s.closed_by LEFT JOIN users g ON g.id = s.gap_approved_by WHERE s.id = ?`,
       )
       .get(id) as CashSession | undefined;
     if (!s) throw new AppError('Session de caisse introuvable', 'NOT_FOUND');
@@ -925,11 +928,10 @@ export class PosService extends Base {
     if (floatLeft > result.counted) throw new AppError('Le fond laissé dépasse les espèces comptées', 'INVALID');
     const deposit = result.counted - floatLeft;
     const threshold = this.admin.getStore(session.store_id).cash_gap_threshold;
-    const gapReason = opts.gapReason?.trim() || null;
-    if (Math.abs(result.difference) > threshold) {
-      if (!gapReason) throw new AppError("Écart au-delà du seuil : indiquez le motif de l'écart", 'GAP_REASON_REQUIRED');
-      if (!opts.gapApprovedBy) throw new AppError("Écart au-delà du seuil : la validation d'un gérant est nécessaire", 'SUPERVISOR_REQUIRED');
-    }
+    // La caisse se ferme sur le comptage saisi : un écart au-delà du seuil reste « à justifier »
+    // jusqu'à ce que le gérant en donne le motif (justifyGap), à la clôture ou après coup.
+    const gapReason = Math.abs(result.difference) > threshold && opts.gapApprovedBy ? opts.gapReason?.trim() || null : null;
+    const gapApprovedBy = gapReason ? opts.gapApprovedBy! : null;
     const register = this.admin.getRegister(session.register_id);
     this.tx(() => {
       const lastZ = this.db.prepare('SELECT MAX(z_number) FROM cash_sessions WHERE register_id = ?').pluck().get(session.register_id) as number | null;
@@ -939,7 +941,7 @@ export class PosService extends Base {
         .prepare(
           `UPDATE cash_sessions SET status = 'closed', closed_at = ?, closed_by = ?, counted_detail = ?, expected_cash = ?,
              counted_cash = ?, difference = ?, z_number = ?, first_counted = COALESCE(first_counted, ?), float_left = ?, deposit = ?,
-             gap_reason = ?, gap_approved_by = ? WHERE id = ?`,
+             gap_reason = ?, gap_approved_by = ?, gap_justified_at = ? WHERE id = ?`,
         )
         .run(
           this.now(),
@@ -953,7 +955,8 @@ export class PosService extends Base {
           floatLeft,
           deposit,
           gapReason,
-          opts.gapApprovedBy ?? null,
+          gapApprovedBy,
+          gapReason ? this.now() : null,
           session.id,
         );
       if (deposit > 0) {
@@ -968,7 +971,7 @@ export class PosService extends Base {
       }
       this.db.prepare('DELETE FROM held_tickets WHERE register_id = ?').run(session.register_id);
       this.enqueue(ctx, 'cash_session', session.id, 'upsert', this.getSession(session.id));
-      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, ...result, floatLeft, deposit, gapReason, gapApprovedBy: opts.gapApprovedBy ?? null });
+      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, ...result, floatLeft, deposit, gapReason, gapApprovedBy });
     });
     return this.zReport(session.id);
   }
@@ -1028,11 +1031,42 @@ export class PosService extends Base {
     return { entries, exits, creditSales: credit };
   }
 
-  listSessions(storeId: string, limit = 60, registerId?: string | null): CashSession[] {
+  /** Écart au-delà du seuil, pas encore justifié par un gérant. */
+  gapPending(session: Pick<CashSession, 'status' | 'difference' | 'gap_reason' | 'store_id'>): boolean {
+    if (session.status !== 'closed' || session.difference === null || session.gap_reason) return false;
+    return Math.abs(session.difference) > this.admin.getStore(session.store_id).cash_gap_threshold;
+  }
+
+  /** Journées clôturées dont l'écart attend le motif du gérant. */
+  pendingGaps(storeId: string): CashSession[] {
+    const threshold = this.admin.getStore(storeId).cash_gap_threshold;
     return this.db
       .prepare(
         `SELECT s.*, u.name AS user_name, c.name AS closed_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
          LEFT JOIN users c ON c.id = s.closed_by
+         WHERE s.store_id = ? AND s.status = 'closed' AND s.gap_reason IS NULL AND ABS(s.difference) > ? ORDER BY s.closed_at DESC`,
+      )
+      .all(storeId, threshold) as CashSession[];
+  }
+
+  /** Le gérant, après avoir interpellé le caissier, donne le motif de l'écart d'une journée clôturée. */
+  justifyGap(ctx: Context, sessionId: string, reason: string): CashSession {
+    const session = this.getSession(sessionId);
+    if (session.status !== 'closed') throw new AppError("La caisse n'est pas encore clôturée", 'INVALID');
+    if (!reason.trim()) throw new AppError("Indiquez le motif de l'écart", 'INVALID');
+    this.tx(() => {
+      this.db.prepare('UPDATE cash_sessions SET gap_reason = ?, gap_approved_by = ?, gap_justified_at = ? WHERE id = ?').run(reason.trim(), ctx.userId, this.now(), sessionId);
+      this.enqueue(ctx, 'cash_session', sessionId, 'upsert', this.getSession(sessionId));
+      this.audit(ctx.userId, 'cash.gap_justified', 'cash_session', sessionId, { difference: session.difference, reason: reason.trim(), previous: session.gap_reason });
+    });
+    return this.getSession(sessionId);
+  }
+
+  listSessions(storeId: string, limit = 60, registerId?: string | null): CashSession[] {
+    return this.db
+      .prepare(
+        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name, g.name AS gap_approved_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
+         LEFT JOIN users c ON c.id = s.closed_by LEFT JOIN users g ON g.id = s.gap_approved_by
          WHERE s.store_id = ? AND (? IS NULL OR s.register_id = ?) ORDER BY s.opened_at DESC LIMIT ?`,
       )
       .all(storeId, registerId ?? null, registerId ?? null, limit) as CashSession[];

@@ -399,6 +399,7 @@ table.rights tr.group th { background: var(--bg); color: var(--ink); text-align:
 .tre-head input[readonly] { background: #f6f7f9; }
 .tre-print { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .tre-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tre-panes.single { grid-template-columns: minmax(0, 760px); }
 .tre-pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; min-width: 0; }
 .tre-pane h3 { margin: 0 0 6px; font-size: 14px; color: var(--brand); }
 .tre-scroll { max-height: 300px; overflow: auto; }

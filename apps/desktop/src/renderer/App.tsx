@@ -90,7 +90,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Vente',
     [
       { label: 'Nouvelle fiche de facturation', open: ['cash1'] },
-      { label: 'Ouvrir une facture', action: 'openInvoice' },
+      { label: 'Ouvrir une facture', action: 'openInvoice', perm: 'sales' },
       { label: 'Facture à crédit (client en compte)', open: ['credit'] },
       { label: 'Mes dernières factures', open: ['sales', 'tickets'] },
       { label: 'Registre des ventes', open: ['sales', 'register'] },
@@ -132,7 +132,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Trésorerie',
     [
       { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
-      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'treasury' },
+      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_amounts' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
       SEP,
       { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
@@ -143,7 +143,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Règlements clients reçus', open: ['customers', 'payments'] },
       { label: 'Rechercher dans les caisses', open: ['sales', 'find'] },
       SEP,
-      { label: 'Registre de caisse (Z)', open: ['sales', 'z'] },
+      { label: 'Registre de caisse (Z)', open: ['sales', 'z'], perm: 'cash_amounts' },
       { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], perm: 'accounting' },
     ],
   ],
@@ -305,7 +305,8 @@ export function App() {
 function Workspace({ state, user, refresh }: { state: AppState; user: User; refresh: () => void }) {
   const toast = useToast();
   const can = (perm: Permission) => user.rights.includes(perm);
-  const canWin = (kind: WinKind) => can(WINDOWS[kind].perm);
+  // Sans tout le registre, le caissier garde « Mes factures » pour ses trois dernières.
+  const canWin = (kind: WinKind) => can(WINDOWS[kind].perm) || (kind === 'sales' && (can('cash') || can('credit')));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
   const [wins, setWins] = useState<Win[]>([{ kind: first, nonce: 0 }]);
   const [active, setActive] = useState<WinKind>(first);
@@ -357,6 +358,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const visibleItems = (items: MenuItem[]) =>
     items
       .filter((i) => (!i.perm || can(i.perm)) && (!i.adminOnly || user.role === 'admin'))
+      .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
 
   const run = async (item: MenuItem) => {
@@ -457,7 +459,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             )}
             {w.kind === 'articles' && <Articles user={user} view={w.tab as ArticlesView | undefined} />}
             {w.kind === 'stock' && <Stock user={user} initialTab={w.tab as StockTab | undefined} />}
-            {w.kind === 'sales' && <Sales initialTab={w.tab as SalesTab | undefined} />}
+            {w.kind === 'sales' && <Sales initialTab={w.tab as SalesTab | undefined} rights={user.rights} />}
             {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
             {w.kind === 'suppliers' && <Suppliers user={user} initialTab={w.tab as SuppliersTab | undefined} />}
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}

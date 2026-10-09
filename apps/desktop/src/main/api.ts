@@ -147,6 +147,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const POS: Permission[] = ['cash', 'credit'];
   const TREASURY: Permission[] = ['treasury'];
   const SALES: Permission[] = ['sales', 'reports', 'receivables'];
+  /** Montants de la caisse : attendu, entrées, ventes de la journée, historique des journées et Z. */
+  const AMOUNTS: Permission[] = ['cash_amounts'];
+  const requireAmounts = () => requireUser(AMOUNTS);
+  /**
+   * Sans le droit « Voir tout le registre des factures », le caissier ne revoit
+   * que ses trois dernières factures, pour les réimprimer.
+   */
+  const OWN_RECENT = 3;
+  const ownRecent = (u: User) => s.pos.listSales({ storeId: ctx().storeId, userId: u.id, limit: OWN_RECENT });
+  const requireSaleAccess = (saleId: string) => {
+    const u = requireUser();
+    if (can(u, ['sales', 'cash_amounts']) || ownRecent(u).some((x) => x.id === saleId)) return u;
+    throw new AppError('Vous ne pouvez revoir que vos trois dernières factures', 'FORBIDDEN');
+  };
   const SUPPLIERS: Permission[] = ['purchases', 'suppliers', 'purchase_invoices'];
   const CUSTOMERS: Permission[] = ['customers', 'receivables'];
   /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
@@ -395,25 +409,28 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.return': (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) =>
       s.pos.returnSale(ctx(POS), { ...input, supervisorId: supervisor(input.supervisorPin).id }),
     'pos.findSale': (number: string) => (requireUser(), s.pos.findSaleByNumber(number)),
-    'pos.sale': (id: string) => (requireUser(), s.pos.getSale(id)),
-    'pos.sales': (opts: { sessionId?: string; date?: string }) => s.pos.listSales({ ...opts, storeId: ctx().storeId }),
+    'pos.sale': (id: string) => (requireSaleAccess(id), s.pos.getSale(id)),
+    'pos.sales': (opts: { sessionId?: string; date?: string }) => {
+      const c = ctx();
+      return can(user!, ['sales']) ? s.pos.listSales({ ...opts, storeId: c.storeId }) : ownRecent(user!);
+    },
     'pos.hold': (label: string, lines: SaleLineInput[]) => s.pos.holdTicket(ctx(POS), label, lines),
     'pos.held': () => {
       const c = ctx();
       return c.registerId ? s.pos.listHeld(c.registerId) : [];
     },
     'pos.resume': (id: string) => (requireUser(POS), s.pos.resumeHeld(id)),
-    'pos.zReport': (sessionId: string) => (requireUser(), s.pos.zReport(sessionId)),
-    'pos.sessions': () => s.pos.listSessions(ctx(SALES).storeId),
+    'pos.zReport': (sessionId: string) => (requireAmounts(), s.pos.zReport(sessionId)),
+    'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(SALES).storeId)),
     'pos.printTicket': (saleId: string, opts?: { newSale?: boolean }) =>
-      printer.ticket(saleId, { newSale: Boolean(opts?.newSale && requireUser(POS)) }),
+      printer.ticket(saleId, { newSale: Boolean(requireSaleAccess(saleId) && opts?.newSale && requireUser(POS)) }),
     /** Ouverture du tiroir sans encaissement : tracée dans le journal d'audit. */
     'pos.openDrawer': async () => {
       const c = ctx(POS);
       await printer.openDrawer();
       s.receipts.drawerOpened(c);
     },
-    'pos.printZ': (sessionId: string) => printer.zReport(sessionId),
+    'pos.printZ': (sessionId: string) => (requireAmounts(), printer.zReport(sessionId)),
 
     // --- Trésorerie : journées de caisse et caisse centrale -------------------------
     /** Caisses du magasin, leur état, et la journée de la caisse de ce poste. */
@@ -431,12 +448,49 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         canCentral: can(user!, ['central_cash']),
         centralBalance: can(user!, ['central_cash', 'accounting']) ? s.treasury.balance(c.storeId) : null,
         gapThreshold: s.admin.getStore(c.storeId).cash_gap_threshold,
+        canSeeAmounts: can(user!, AMOUNTS),
       };
     },
-    'treasury.sessions': (registerId?: string | null) => s.pos.listSessions(ctx(TREASURY).storeId, 120, registerId ?? null),
+    'treasury.sessions': (registerId?: string | null) => {
+      const c = ctx(TREASURY);
+      requireAmounts();
+      return s.pos.listSessions(c.storeId, 120, registerId ?? null);
+    },
+    /**
+     * Journée vue par le caissier sans le droit des montants : état de sa caisse,
+     * les sorties d'espèces qu'il a faites lui-même et les bons à signer.
+     */
+    'treasury.myDay': () => {
+      const c = ctx(TREASURY);
+      const u = user!;
+      const last = c.registerId ? s.pos.listSessions(c.storeId, 1, c.registerId)[0] : undefined;
+      if (!last) return null;
+      const closed = last.status === 'closed';
+      return {
+        session: {
+          id: last.id,
+          register_id: last.register_id,
+          status: last.status,
+          opened_at: last.opened_at,
+          user_name: last.user_name,
+          opening_float: last.opening_float,
+          closed_at: last.closed_at,
+          closed_by_name: last.closed_by_name ?? null,
+          float_left: closed ? last.float_left : null,
+          deposit: closed ? last.deposit : null,
+        },
+        stale: !closed && s.pos.isStale(last),
+        exits: s.pos.cashJournal(last.id).exits.filter((r) => !r.closing && r.user_id === u.id),
+        vouchers: s.treasury
+          .sessionMovements(last.id)
+          .filter((m) => !m.cash_operation_id)
+          .map((m) => ({ id: m.id, kind: m.kind, number: m.number })),
+      };
+    },
     /** Journée détaillée : Z, entrées et sorties d'espèces, ventes, mouvements de la centrale. */
     'treasury.session': (sessionId: string) => {
       requireUser(TREASURY);
+      requireAmounts();
       const z = s.pos.zReport(sessionId);
       return {
         z,
@@ -450,13 +504,39 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.open': (openingFloat: Fcfa, supervisorPin?: string, registerId?: string) => {
       const c = sameRegister(ctx(TREASURY), registerId);
       if (!can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
-      return s.pos.openSession(c, openingFloat);
+      const session = s.pos.openSession(c, openingFloat);
+      // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
+      const voucher = s.treasury.sessionMovements(session.id).find((m) => !m.cash_operation_id);
+      return { ...session, voucherId: voucher?.id ?? null };
     },
-    'treasury.countPreview': (counted: DenominationCount, registerId?: string) => s.pos.countPreview(sameRegister(ctx(TREASURY), registerId), counted),
+    /** Attendu et écart : avec le droit des montants, ou sur le code du gérant venu valider l'écart. */
+    'treasury.countPreview': (counted: DenominationCount, registerId?: string, supervisorPin?: string) => {
+      const c = sameRegister(ctx(TREASURY), registerId);
+      if (!can(user!, AMOUNTS)) supervisor(supervisorPin ?? '');
+      return s.pos.countPreview(c, counted);
+    },
+    /** Comptage à l'aveugle du caissier : il apprend seulement s'il faut appeler le gérant. */
+    'treasury.blindCount': (counted: DenominationCount, registerId?: string) => {
+      const p = s.pos.countPreview(sameRegister(ctx(TREASURY), registerId), counted);
+      return { counted: p.counted, needsApproval: p.needsApproval };
+    },
     'treasury.close': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
+      requireAmounts();
       const approvedBy = can(user!, ['cash_open']) ? user!.id : opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
       return s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
+    },
+    /**
+     * Clôture par le caissier sans le droit des montants : ni Z ni attendu en
+     * retour, seulement son bon de versement. Un écart au-delà du seuil est
+     * toujours validé par le gérant, qui saisit son code et le motif.
+     */
+    'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
+      const c = sameRegister(ctx(TREASURY), opts.registerId);
+      const approvedBy = opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
+      const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy }).session;
+      const voucher = s.treasury.sessionMovements(se.id).find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
+      return { sessionId: se.id, counted: se.counted_cash ?? 0, floatLeft: se.float_left ?? 0, deposit: se.deposit ?? 0, voucherId: voucher?.id ?? null, voucherNumber: voucher?.number ?? null };
     },
     'treasury.central': (opts?: { from?: string; to?: string }) => {
       const c = ctx(['central_cash', 'accounting']);
@@ -464,8 +544,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'treasury.record': (input: { kind: 'IN' | 'OUT'; nature: CentralNature; amount: Fcfa; label?: string | null }) => s.treasury.record(ctx(['central_cash']), input),
     'treasury.printVoucher': (movementId: string) => (requireUser([...TREASURY, 'central_cash']), printer.centralVoucher(movementId)),
-    'treasury.printReport': (sessionId: string) => (requireUser(TREASURY), printer.sessionReport(sessionId)),
-    'pos.printInvoice': (saleId: string) => (requireUser(), printer.invoice(saleId)),
+    'treasury.printReport': (sessionId: string) => (requireAmounts(), printer.sessionReport(sessionId)),
+    'pos.printInvoice': (saleId: string) => (requireSaleAccess(saleId), printer.invoice(saleId)),
 
     // --- Clients et crédit ----------------------------------------------------
     'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean }) => s.customers.listCustomers(ctx().storeId, opts),

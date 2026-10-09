@@ -65,6 +65,8 @@ export interface CashJournalRow {
   label: string;
   party: string | null;
   user_name: string | null;
+  /** Auteur de l'opération (null pour le versement de clôture). */
+  user_id: string | null;
   /** Versement de clôture : après le comptage, il ne compte pas dans l'attendu. */
   closing?: boolean;
 }
@@ -643,7 +645,7 @@ export class PosService extends Base {
     return id ? this.getSale(id) : null;
   }
 
-  listSales(opts: { sessionId?: string; storeId?: string; date?: string; customerId?: string; limit?: number }): Omit<Sale, 'lines' | 'payments'>[] {
+  listSales(opts: { sessionId?: string; storeId?: string; date?: string; customerId?: string; userId?: string; limit?: number }): Omit<Sale, 'lines' | 'payments'>[] {
     return this.db
       .prepare(
         `SELECT s.*, u.name AS user_name, COALESCE(c.name, s.client_name) AS customer_name FROM sales s JOIN users u ON u.id = s.user_id
@@ -652,9 +654,10 @@ export class PosService extends Base {
            AND (@storeId IS NULL OR s.store_id = @storeId)
            AND (@date IS NULL OR date(s.created_at, 'localtime') = @date)
            AND (@customerId IS NULL OR s.customer_id = @customerId)
-         ORDER BY s.created_at DESC LIMIT @limit`,
+           AND (@userId IS NULL OR s.user_id = @userId)
+         ORDER BY s.created_at DESC, s.number DESC LIMIT @limit`,
       )
-      .all({ sessionId: opts.sessionId ?? null, storeId: opts.storeId ?? null, date: opts.date ?? null, customerId: opts.customerId ?? null, limit: opts.limit ?? 500 }) as never;
+      .all({ sessionId: opts.sessionId ?? null, storeId: opts.storeId ?? null, date: opts.date ?? null, customerId: opts.customerId ?? null, userId: opts.userId ?? null, limit: opts.limit ?? 500 }) as never;
   }
 
   /**
@@ -978,29 +981,29 @@ export class PosService extends Base {
   cashJournal(sessionId: string): { entries: CashJournalRow[]; exits: CashJournalRow[]; creditSales: Fcfa } {
     const sales = this.db
       .prepare(
-        `SELECT s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name,
+        `SELECT s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name, s.user_id,
                 SUM(p.amount) - s.change_given AS amount
          FROM sales s JOIN sale_payments p ON p.sale_id = s.id AND p.method = 'CASH' JOIN users u ON u.id = s.user_id
          LEFT JOIN customers c ON c.id = s.customer_id
          WHERE s.session_id = ? AND s.status = 'completed' GROUP BY s.id ORDER BY s.created_at`,
       )
-      .all(sessionId) as { at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; amount: number }[];
+      .all(sessionId) as { at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; user_id: string; amount: number }[];
     const receipts = this.db
       .prepare(
-        `SELECT p.paid_at AS at, p.number, c.name AS party, u.name AS user_name, p.amount FROM customer_payments p
+        `SELECT p.paid_at AS at, p.number, c.name AS party, u.name AS user_name, p.user_id, p.amount FROM customer_payments p
          JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.user_id
          WHERE p.session_id = ? AND p.method = 'CASH' ORDER BY p.paid_at`,
       )
-      .all(sessionId) as { at: string; number: string; party: string; user_name: string | null; amount: number }[];
+      .all(sessionId) as { at: string; number: string; party: string; user_name: string | null; user_id: string | null; amount: number }[];
     const ops = this.db
-      .prepare('SELECT o.at, o.type, o.amount, o.reason, u.name AS user_name FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
-      .all(sessionId) as { at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null }[];
+      .prepare('SELECT o.at, o.type, o.amount, o.reason, u.name AS user_name, o.user_id FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
+      .all(sessionId) as { at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null; user_id: string | null }[];
     const expenses = this.db
       .prepare(
-        `SELECT e.created_at AS at, e.number, e.label, e.beneficiary, e.amount, u.name AS user_name FROM expenses e LEFT JOIN users u ON u.id = e.user_id
+        `SELECT e.created_at AS at, e.number, e.label, e.beneficiary, e.amount, u.name AS user_name, e.user_id FROM expenses e LEFT JOIN users u ON u.id = e.user_id
          WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.created_at`,
       )
-      .all(sessionId) as { at: string; number: string; label: string; beneficiary: string | null; amount: number; user_name: string | null }[];
+      .all(sessionId) as { at: string; number: string; label: string; beneficiary: string | null; amount: number; user_name: string | null; user_id: string | null }[];
     const closing = this.db
       .prepare("SELECT at, number, amount, label FROM central_cash_movements WHERE session_id = ? AND kind = 'DEPOSIT' AND cash_operation_id IS NULL ORDER BY at")
       .all(sessionId) as { at: string; number: string; amount: number; label: string }[];
@@ -1012,15 +1015,15 @@ export class PosService extends Base {
       .pluck()
       .get(sessionId) as number;
     const entries: CashJournalRow[] = [
-      ...sales.filter((x) => x.amount > 0).map((x) => ({ at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name })),
-      ...receipts.map((x) => ({ at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name })),
-      ...ops.filter((x) => x.type === 'IN').map((x) => ({ at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name })),
+      ...sales.filter((x) => x.amount > 0).map((x) => ({ at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...receipts.map((x) => ({ at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...ops.filter((x) => x.type === 'IN').map((x) => ({ at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
     ].sort((a, b) => a.at.localeCompare(b.at));
     const exits: CashJournalRow[] = [
-      ...sales.filter((x) => x.amount < 0).map((x) => ({ at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name })),
-      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name })),
-      ...expenses.map((x) => ({ at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name })),
-      ...closing.map((x) => ({ at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, closing: true })),
+      ...sales.filter((x) => x.amount < 0).map((x) => ({ at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
+      ...expenses.map((x) => ({ at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name, user_id: x.user_id })),
+      ...closing.map((x) => ({ at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, user_id: null, closing: true })),
     ].sort((a, b) => a.at.localeCompare(b.at));
     return { entries, exits, creditSales: credit };
   }

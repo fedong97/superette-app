@@ -18,23 +18,33 @@ const CENTRAL = 'central';
 const time = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const dayTime = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
-/**
- * Opérations de trésorerie, comme dans KONTROL : ouverture de la journée avec
- * son fond, entrées et sorties d'espèces, clôture avec comptage à l'aveugle et
- * versement à la caisse centrale, historique des journées et livre de la centrale.
- */
-export function Treasury({
-  user,
-  registerId = null,
-  initialTab = 'day',
-  onChanged,
-}: {
+interface TreasuryProps {
   user: User;
   /** Caisse de travail de l'utilisateur : l'écran suit quand le gérant en change. */
   registerId?: string | null;
   initialTab?: TreasuryTab;
   onChanged?: () => void;
-}) {
+}
+
+/**
+ * Sans le droit « Voir les montants de la caisse », le caissier ou le vendeur
+ * ouvre et ferme sa caisse sans voir ni ventes, ni attendu, ni journées.
+ */
+export function Treasury(props: TreasuryProps) {
+  return props.user.rights.includes('cash_amounts') ? <FullTreasury {...props} /> : <CashierTreasury {...props} />;
+}
+
+/**
+ * Opérations de trésorerie, comme dans KONTROL : ouverture de la journée avec
+ * son fond, entrées et sorties d'espèces, clôture avec comptage à l'aveugle et
+ * versement à la caisse centrale, historique des journées et livre de la centrale.
+ */
+function FullTreasury({
+  user,
+  registerId = null,
+  initialTab = 'day',
+  onChanged,
+}: TreasuryProps) {
   const toast = useToast();
   const state = useLoad(() => call('treasury.state'), [registerId]);
   const canCentral = user.rights.includes('central_cash') || user.rights.includes('accounting');
@@ -486,8 +496,7 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
             const opened = await call('treasury.open', value, canOpen ? undefined : pin, register.id);
             toast.ok(`${register.name} ouverte avec un fond de ${fcfa(value)}`);
             // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
-            const voucher = (await call('treasury.session', opened.id)).movements.find((m) => !m.cash_operation_id);
-            if (voucher) call('treasury.printVoucher', voucher.id).catch(toast.error);
+            if (opened.voucherId) call('treasury.printVoucher', opened.voucherId).catch(toast.error);
             onDone();
           } catch (err) {
             toast.error(err);
@@ -658,6 +667,290 @@ function CloseDialog({
               disabled={deposit === null || deposit < 0 || (preview.needsApproval && (!reason.trim() || (!canApprove && !pin)))}
             >
               Clôturer, verser et imprimer
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * Trésorerie du caissier ou du vendeur : il ouvre et ferme sa caisse, voit les
+ * sorties d'espèces qu'il a faites lui-même et ses bons ; rien sur les ventes ni l'attendu.
+ */
+function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) {
+  const toast = useToast();
+  const state = useLoad(() => call('treasury.state'), [registerId]);
+  const day = useLoad(() => call('treasury.myDay'), [registerId]);
+  const [dialog, setDialog] = useState<'open' | 'close' | null>(null);
+  const reload = () => {
+    state.reload();
+    day.reload();
+    onChanged?.();
+  };
+
+  if (!state.data) return null;
+  const register = state.data.registers.find((r) => r.isThisStation);
+  const open = register?.session ?? null;
+  const d = day.data && day.data.session.register_id === register?.id ? day.data : null;
+  const exits = d?.exits ?? [];
+
+  return (
+    <div className="page treasury">
+      <header className="page-head">
+        <h1>Opérations de trésorerie</h1>
+      </header>
+      {!register ? (
+        <Empty>Aucune caisse ne vous est attribuée. Demandez à l'administrateur de vous en attribuer une.</Empty>
+      ) : (
+        <>
+          <div className="tre-bar">
+            <label>
+              Ma caisse
+              <input readOnly value={`${String(register.number).padStart(2, '0')} · ${register.name}`} />
+            </label>
+            <strong className={`tre-state ${open ? 'open' : 'closed'}`}>{open ? (register.stale ? 'Ouverte (journée non clôturée)' : 'Ouverte.') : 'Fermée.'}</strong>
+            <span className="spacer" />
+            {open ? (
+              <button className="danger" onClick={() => setDialog('close')}>
+                Fermer la caisse…
+              </button>
+            ) : (
+              <button className="primary" onClick={() => setDialog('open')}>
+                Ouvrir la caisse…
+              </button>
+            )}
+          </div>
+          {register.stale && open && (
+            <p className="warn-text tre-warning">
+              La journée du {new Date(open.opened_at).toLocaleDateString('fr-FR')} n'a pas été clôturée. Fermez la caisse avant d'ouvrir la journée d'aujourd'hui.
+            </p>
+          )}
+          {d ? (
+            <div className="tre-day">
+              <div className="tre-head">
+                <Field label="Ouverture le">
+                  <input readOnly value={`${dateTime(d.session.opened_at)} · ${d.session.user_name}`} />
+                </Field>
+                <Field label="Clôture le">
+                  <input readOnly value={d.session.closed_at ? `${dateTime(d.session.closed_at)} · ${d.session.closed_by_name ?? ''}` : ''} />
+                </Field>
+                <Field label="Fond de caisse à l'ouverture">
+                  <input readOnly className="r tre-amount" value={fcfa(d.session.opening_float)} />
+                </Field>
+                <div className="tre-print">
+                  {d.vouchers.map((m) => (
+                    <button key={m.id} onClick={() => call('treasury.printVoucher', m.id).catch(toast.error)}>
+                      {m.kind === 'FLOAT' ? 'Bon de remise de fond' : 'Bon de versement'} {m.number}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="tre-panes single">
+                <CashPane title="Mes sorties de caisse" rows={exits} party="Bénéficiaire" total={exits.reduce((t, r) => t + r.amount, 0)} />
+              </div>
+              {d.session.deposit !== null && (
+                <div className="tre-foot">
+                  <div>
+                    <small>Versé à la caisse centrale</small>
+                    <strong className="tre-amount">{fcfa(d.session.deposit)}</strong>
+                  </div>
+                  <div>
+                    <small>Fond laissé dans le tiroir</small>
+                    <strong className="tre-amount">{fcfa(d.session.float_left ?? 0)}</strong>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Empty>Aucune journée pour votre caisse. Ouvrez la caisse pour commencer la journée.</Empty>
+          )}
+        </>
+      )}
+      {dialog === 'open' && register && (
+        <OpenDialog
+          register={register}
+          canOpen={state.data.canOpen}
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            reload();
+          }}
+        />
+      )}
+      {dialog === 'close' && open && (
+        <BlindCloseDialog
+          session={open}
+          user={user}
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Clôture par le caissier, sans attendu ni écart : il compte, laisse le fond et
+ * verse le reste. Si l'écart dépasse le seuil, le gérant vient valider avec son
+ * code ; lui seul voit l'écart et en saisit le motif. Seul le bon de versement s'imprime.
+ */
+function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNullable<RegisterRow['session']>; user: User; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [count, setCount] = useState<Record<number, number>>({});
+  const [checked, setChecked] = useState<Result<'treasury.blindCount'> | null>(null);
+  const [pin, setPin] = useState('');
+  const [approval, setApproval] = useState<Result<'treasury.countPreview'> | null>(null);
+  const [reason, setReason] = useState('');
+  const [floatText, setFloatText] = useState('');
+  const [done, setDone] = useState<Result<'treasury.closeBlind'> | null>(null);
+  const counted = countedTotal(count);
+  const floatLeft = parseAmount(floatText || '0');
+  const deposit = checked && floatLeft !== null ? checked.counted - floatLeft : null;
+  const blocked = Boolean(checked?.needsApproval && !approval);
+
+  if (done) {
+    return (
+      <Modal title="Caisse fermée" onClose={onDone} wide>
+        <p>Merci {user.name}. Remettez la recette à la caisse centrale avec le bon de versement.</p>
+        <div className="kpis">
+          <div>
+            <small>Espèces comptées</small>
+            <strong>{fcfa(done.counted)}</strong>
+          </div>
+          <div>
+            <small>Fond laissé dans le tiroir</small>
+            <strong>{fcfa(done.floatLeft)}</strong>
+          </div>
+          <div>
+            <small>Versé à la caisse centrale</small>
+            <strong>{fcfa(done.deposit)}</strong>
+          </div>
+        </div>
+        <div className="actions">
+          {done.voucherId && <button onClick={() => call('treasury.printVoucher', done.voucherId!).catch(toast.error)}>Réimprimer le bon {done.voucherNumber}</button>}
+          <button className="primary" onClick={onDone}>
+            Terminer
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  const recount = () => {
+    setChecked(null);
+    setApproval(null);
+    setPin('');
+    setReason('');
+  };
+
+  return (
+    <Modal title="Fermer la caisse" onClose={onClose} wide>
+      {!checked ? (
+        <>
+          <p>Comptez les espèces du tiroir par coupure.</p>
+          <Denominations count={count} onChange={setCount} />
+          <div className="actions">
+            <span className="big-total">{fcfa(counted)}</span>
+            <button
+              className="primary"
+              onClick={async () => {
+                try {
+                  const c = await call('treasury.blindCount', count, session.register_id);
+                  setChecked(c);
+                  setFloatText(String(Math.min(session.opening_float, c.counted)));
+                } catch (e) {
+                  toast.error(e);
+                }
+              }}
+            >
+              Valider le comptage
+            </button>
+          </div>
+        </>
+      ) : blocked ? (
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              setApproval(await call('treasury.countPreview', count, session.register_id, pin));
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          <p className="danger-text">Le comptage ne correspond pas à la caisse. Recomptez, ou appelez le gérant pour valider la clôture.</p>
+          <Field label="Code du gérant">
+            <input autoFocus type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+          </Field>
+          <div className="actions">
+            <button type="button" className="ghost" onClick={recount}>
+              Recompter
+            </button>
+            <button type="submit" className="primary" disabled={!pin}>
+              Valider (gérant)
+            </button>
+          </div>
+        </form>
+      ) : (
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (floatLeft === null) return toast.error('Fond invalide');
+            try {
+              const r = await call('treasury.closeBlind', count, {
+                floatLeft,
+                gapReason: approval ? reason : null,
+                supervisorPin: approval ? pin : undefined,
+                registerId: session.register_id,
+              });
+              setDone(r);
+              if (r.voucherId) call('treasury.printVoucher', r.voucherId).catch(toast.error);
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          {approval && (
+            <>
+              <p className="muted">Réservé au gérant :</p>
+              <div className="kpis">
+                <div>
+                  <small>Attendu</small>
+                  <strong>{fcfa(approval.expected)}</strong>
+                </div>
+                <div>
+                  <small>Relevé</small>
+                  <strong>{fcfa(approval.counted)}</strong>
+                </div>
+                <div className={approval.difference < 0 ? 'neg' : approval.difference > 0 ? 'pos' : ''}>
+                  <small>Différentiel</small>
+                  <strong>{fcfa(approval.difference)}</strong>
+                </div>
+              </div>
+              <Field label="Motif de l'écart (saisi par le gérant)">
+                <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
+              </Field>
+            </>
+          )}
+          <div className="grid2">
+            <Field label="Fond laissé dans le tiroir pour demain" hint={`Fond de ce matin : ${fcfa(session.opening_float)}`}>
+              <input inputMode="numeric" value={floatText} onChange={(e) => setFloatText(e.target.value)} />
+            </Field>
+            <Field label="Versé à la caisse centrale">
+              <input readOnly className="r" value={deposit === null || deposit < 0 ? '—' : fcfa(deposit)} />
+            </Field>
+          </div>
+          <div className="actions">
+            <button type="button" className="ghost" onClick={recount}>
+              Recompter
+            </button>
+            <button type="submit" className="danger" disabled={deposit === null || deposit < 0 || Boolean(approval && !reason.trim())}>
+              Clôturer et verser
             </button>
           </div>
         </form>

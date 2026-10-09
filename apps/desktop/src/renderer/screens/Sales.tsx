@@ -8,10 +8,20 @@ import { ZView } from './PosDialogs';
 export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export';
 type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
 
-export function Sales({ initialTab = 'tickets' }: { initialTab?: SalesTab }) {
+/**
+ * `rights` : sans « Voir tout le registre des factures », l'écran ne montre que
+ * les trois dernières factures de l'utilisateur, pour les réimprimer.
+ */
+export function Sales({ initialTab = 'tickets', rights }: { initialTab?: SalesTab; rights: string[] }) {
+  return rights.includes('sales') ? <AllSales initialTab={initialTab} amounts={rights.includes('cash_amounts')} /> : <MyLastInvoices />;
+}
+
+function AllSales({ initialTab, amounts }: { initialTab: SalesTab; amounts: boolean }) {
   // Retours, annulés et recherche s'ouvrent sur le registre, déjà filtré.
   const preset: RegisterPreset = initialTab === 'returns' ? 'returns' : initialTab === 'cancelled' ? 'cancelled' : 'all';
-  const [tab, setTab] = useState<ShownTab>(initialTab === 'returns' || initialTab === 'cancelled' || initialTab === 'find' ? 'register' : initialTab);
+  const [tab, setTab] = useState<ShownTab>(
+    initialTab === 'returns' || initialTab === 'cancelled' || initialTab === 'find' ? 'register' : initialTab === 'z' && !amounts ? 'tickets' : initialTab,
+  );
   return (
     <div className="page">
       <header className="page-head">
@@ -25,7 +35,7 @@ export function Sales({ initialTab = 'tickets' }: { initialTab?: SalesTab }) {
           ['register', 'Registre des ventes'],
           ['alerts', 'Alertes sur les ventes'],
           ['cashops', 'Opérations de caisse'],
-          ['z', 'Clôtures Z'],
+          ...(amounts ? ([['z', 'Clôtures Z']] as [ShownTab, string][]) : []),
           ['export', 'Export comptable'],
         ]}
       />
@@ -75,6 +85,53 @@ function Tickets() {
       </table>
       {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
     </>
+  );
+}
+
+/** Les trois dernières factures du caissier, à réimprimer au besoin. */
+function MyLastInvoices() {
+  const toast = useToast();
+  const [open, setOpen] = useState<Result<'pos.sale'> | null>(null);
+  const sales = useLoad(() => call('pos.sales', {}));
+  return (
+    <div className="page">
+      <header className="page-head">
+        <h1>Mes dernières factures</h1>
+      </header>
+      <p className="muted">Vos trois dernières factures, à réimprimer si le client le demande.</p>
+      <table className="list">
+        <thead>
+          <tr>
+            <th>Ticket</th>
+            <th>Heure</th>
+            <th>Client</th>
+            <th>Type</th>
+            <th className="r">Total</th>
+            <th>État</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(sales.data ?? []).map((s) => (
+            <tr key={s.id} className="clickable" onClick={() => call('pos.sale', s.id).then(setOpen, toast.error)}>
+              <td>{s.number}</td>
+              <td>{dateTime(s.created_at)}</td>
+              <td>{s.customer_name ?? ''}</td>
+              <td>{s.kind === 'sale' ? 'Vente' : 'Retour'}</td>
+              <td className={`r ${s.total_ttc < 0 ? 'neg' : ''}`}>{fcfa(s.total_ttc)}</td>
+              <td>{s.status === 'cancelled' ? <span className="tag rupture">Annulé</span> : ''}</td>
+            </tr>
+          ))}
+          {sales.data && !sales.data.length && (
+            <tr>
+              <td colSpan={6} className="muted">
+                Aucune facture
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
+    </div>
   );
 }
 
@@ -190,7 +247,10 @@ export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClos
         </tbody>
       </table>
       <div className="actions">
-        <button onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>Réimprimer</button>
+        <button onClick={() => call('pos.printInvoice', sale.id).then(() => toast.ok('Facture imprimée'), toast.error)}>Facture A4</button>
+        <button className="primary" onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
+          Réimprimer le ticket
+        </button>
       </div>
     </Modal>
   );

@@ -4,6 +4,7 @@ import { CUSTOMER_PAYMENT_METHODS, type CustomerService } from './customers';
 import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
 import type { Db } from './database';
 import type { PosService } from './pos';
+import type { TreasuryService } from './treasury';
 import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
@@ -23,6 +24,7 @@ export class ReceiptService extends Base {
     private readonly pos: PosService,
     private readonly customers: CustomerService,
     private readonly expenses: ExpenseService,
+    private readonly treasury: TreasuryService,
   ) {
     super(db, clock);
   }
@@ -63,10 +65,16 @@ export class ReceiptService extends Base {
     if (sale.change_given) r.push({ t: 'row', left: 'Rendu monnaie', right: money(sale.change_given), bold: true });
     if (sale.due_date) r.push({ t: 'text', text: `À régler avant le ${dayFr(sale.due_date)}` });
     r.push({ t: 'rule' });
-    const byRate = new Map<number, number>();
-    for (const l of sale.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-    for (const [rate, ttc] of byRate) r.push({ t: 'row', left: `TVA ${formatRate(rate)} sur ${money(ttc)}`, right: money(splitTtc(ttc, rate).tva) });
-    r.push({ t: 'row', left: 'dont TVA', right: money(sale.total_tva) }, { t: 'rule' }, { t: 'text', text: footer, align: 'center' });
+    if (sale.lines.every((l) => l.vat_rate_bp === 0) && this.admin.getStore(sale.store_id).vat_enabled !== 1) {
+      // Magasin non assujetti (régime simplifié).
+      r.push({ t: 'text', text: 'TVA non applicable', align: 'center' });
+    } else {
+      const byRate = new Map<number, number>();
+      for (const l of sale.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
+      for (const [rate, ttc] of byRate) r.push({ t: 'row', left: `TVA ${formatRate(rate)} sur ${money(ttc)}`, right: money(splitTtc(ttc, rate).tva) });
+      r.push({ t: 'row', left: 'dont TVA', right: money(sale.total_tva) });
+    }
+    r.push({ t: 'rule' }, { t: 'text', text: footer, align: 'center' });
     return r;
   }
 
@@ -97,13 +105,49 @@ export class ReceiptService extends Base {
     );
     if (z.customerReceipts.length) r.push(title('Règlements clients (crédit)'), ...z.customerReceipts.map((m) => row(m.label, m.amount)), { t: 'rule' });
     if (z.expenses.length) r.push(title('Dépenses payées en caisse'), ...z.expenses.map((e) => row(`${e.number} ${e.label}`, e.amount)), { t: 'rule' });
-    r.push(title('TVA'), ...z.vat.map((v) => row(`${formatRate(v.rate)} HT ${money(v.ht)}`, v.tva)), { t: 'rule' });
+    if (z.vat.some((v) => v.rate > 0)) r.push(title('TVA'), ...z.vat.map((v) => row(`${formatRate(v.rate)} HT ${money(v.ht)}`, v.tva)), { t: 'rule' });
+    else r.push({ t: 'text', text: 'TVA non applicable' }, { t: 'rule' });
     r.push(title('Espèces'), row('Fond de caisse', z.cash.openingFloat), row('Ventes espèces', z.cash.cashSales));
     r.push(row('Remboursements', -z.cash.cashRefunds), row('Apports', z.cash.cashIn), row('Prélèvements', -z.cash.cashOut));
     if (z.cash.customerReceipts) r.push(row('Règlements clients', z.cash.customerReceipts));
     if (z.cash.expenses) r.push(row('Dépenses payées', -z.cash.expenses));
     r.push({ ...row('Théorique', z.cash.expected), bold: true });
     if (z.counted !== null) r.push(row('Compté', z.counted), { ...row('Écart', z.difference ?? 0), bold: true });
+    if (z.session.gap_reason) r.push({ t: 'text', text: `Motif de l'écart : ${z.session.gap_reason}` });
+    if (z.session.deposit !== null) r.push({ t: 'rule' }, row('Versé à la caisse centrale', z.session.deposit), row('Fond laissé dans le tiroir', z.session.float_left ?? 0));
+    return r;
+  }
+
+  /**
+   * Bon de versement à la caisse centrale (recette du jour, prélèvement) ou
+   * bon de remise de fond : à signer par celui qui remet et celui qui reçoit.
+   */
+  centralVoucher(movementId: string): Receipt {
+    const m = this.treasury.getMovement(movementId);
+    const titles = { DEPOSIT: 'BON DE VERSEMENT', FLOAT: 'BON DE REMISE DE FOND', IN: 'ENTRÉE EN CAISSE CENTRALE', OUT: 'SORTIE DE CAISSE CENTRALE' } as const;
+    const session = m.session_id ? this.pos.getSession(m.session_id) : null;
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: titles[m.kind], align: 'center', bold: true },
+      { t: 'text', text: m.number },
+      { t: 'text', text: [dateFr(m.at), m.user_name].filter(Boolean).join(' · ') },
+      { t: 'rule' },
+      { t: 'text', text: m.label, bold: true },
+    ];
+    if (m.register_name) r.push({ t: 'text', text: m.kind === 'FLOAT' ? `De : caisse centrale · À : ${m.register_name}` : `De : ${m.register_name} · À : caisse centrale` });
+    if (session?.z_number && m.kind === 'DEPOSIT' && !m.cash_operation_id) {
+      r.push({ t: 'row', left: `Espèces comptées (Z${session.z_number})`, right: money(session.counted_cash ?? 0) });
+      r.push({ t: 'row', left: 'Fond laissé dans le tiroir', right: money(session.float_left ?? 0) });
+    }
+    r.push(
+      { t: 'row', left: 'Montant FCFA', right: money(m.amount), bold: true },
+      { t: 'rule' },
+      { t: 'feed' },
+      { t: 'row', left: m.kind === 'FLOAT' ? 'Remis par' : 'Versé par', right: 'Reçu par' },
+      { t: 'feed' },
+      { t: 'feed' },
+      { t: 'row', left: '................', right: '................' },
+    );
     return r;
   }
 

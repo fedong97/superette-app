@@ -2,12 +2,14 @@ import { randomInt } from 'node:crypto';
 import { EDITABLE_ROLES, PERMISSIONS, type Permission, TVA_CAMEROUN_NORMAL, roleRights } from '@superette/core';
 import { AppError, Base, hashPin, newId, verifyPin } from './util';
 
-export type Role = 'admin' | 'manager' | 'cashier' | 'stock' | 'accountant';
+export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
 
 export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrateur',
   manager: 'Gérant',
   cashier: 'Caissier',
+  seller: 'Vendeur',
+  buyer: "Responsable d'achat (appro)",
   stock: 'Magasinier',
   accountant: 'Comptable',
 };
@@ -18,6 +20,8 @@ export interface User {
   login: string;
   role: Role;
   store_id: string | null;
+  /** Caisse attribuée : l'utilisateur y vend depuis n'importe quel PC. */
+  register_id: string | null;
   active: number;
 }
 
@@ -29,6 +33,19 @@ export interface Store {
   phone: string | null;
   taxpayer_number: string | null;
   active: number;
+  /** Assujetti à la TVA (régime réel) ; sinon les ventes se font sans TVA. */
+  vat_enabled: number;
+  /** Vente permise sans stock : le stock passe en négatif et se régularise à la réception. */
+  ignore_stock: number;
+  /** Écart de clôture (FCFA) au-delà duquel motif et code du gérant sont demandés. */
+  cash_gap_threshold: number;
+}
+
+/** Options du magasin réglées par le gérant ou l'administrateur. */
+export interface StoreOptions {
+  vatEnabled?: boolean;
+  ignoreStock?: boolean;
+  cashGapThreshold?: number;
 }
 
 export interface Register {
@@ -58,6 +75,8 @@ export interface BootstrapInput {
   adminName: string;
   adminLogin: string;
   adminPin: string;
+  /** Magasin assujetti à la TVA (oui si absent, comme avant cette option). */
+  vatEnabled?: boolean;
 }
 
 /**
@@ -91,6 +110,7 @@ export class AdminService extends Base {
         .run(adminId, input.adminName.trim(), input.adminLogin.trim().toLowerCase(), hashPin(input.adminPin), 'admin', now);
       this.enqueue(null, 'user', adminId, 'upsert', this.getUser(adminId));
       const store = this.createStore(adminId, input);
+      if (input.vatEnabled === false) this.setStoreOptions(adminId, store.id, { vatEnabled: false });
       const register = this.listRegisters(store.id)[0]!;
       this.activateRegister(register.activation_code);
       return { store, register: this.getRegister(register.id), admin: this.getUser(adminId) };
@@ -152,6 +172,27 @@ export class AdminService extends Base {
     return this.getStore(id);
   }
 
+  /**
+   * TVA, vente sans stock et seuil d'écart de caisse. Changer la TVA ne vaut que
+   * pour les ventes et achats suivants : les pièces passées gardent la leur.
+   */
+  setStoreOptions(userId: string, id: string, options: StoreOptions): Store {
+    const current = this.getStore(id);
+    const threshold = options.cashGapThreshold ?? current.cash_gap_threshold;
+    if (!Number.isSafeInteger(threshold) || threshold < 0) throw new AppError("Seuil d'écart invalide", 'INVALID');
+    const next = {
+      vat_enabled: options.vatEnabled === undefined ? current.vat_enabled : options.vatEnabled ? 1 : 0,
+      ignore_stock: options.ignoreStock === undefined ? current.ignore_stock : options.ignoreStock ? 1 : 0,
+      cash_gap_threshold: threshold,
+    };
+    this.tx(() => {
+      this.db.prepare('UPDATE stores SET vat_enabled = ?, ignore_stock = ?, cash_gap_threshold = ? WHERE id = ?').run(next.vat_enabled, next.ignore_stock, next.cash_gap_threshold, id);
+      this.enqueue({ storeId: id, registerId: null }, 'store', id, 'upsert', this.getStore(id));
+      this.audit(userId, 'store.options', 'store', id, options);
+    });
+    return this.getStore(id);
+  }
+
   // --- Dépôts ---------------------------------------------------------------
 
   createWarehouse(storeId: string, name: string, kind: Warehouse['kind'], salesDefault = false): Warehouse {
@@ -205,6 +246,29 @@ export class AdminService extends Base {
     return reg;
   }
 
+  /** Renomme ou désactive une caisse. Une caisse ouverte se clôture avant d'être désactivée. */
+  updateRegister(userId: string, id: string, patch: { name?: string; active?: boolean }): Register {
+    const current = this.getRegister(id);
+    const name = patch.name === undefined ? current.name : patch.name.trim();
+    if (!name) throw new AppError('Nom de caisse obligatoire', 'INVALID');
+    if (patch.active === false && current.active) {
+      const open = this.db.prepare("SELECT 1 FROM cash_sessions WHERE register_id = ? AND status = 'open'").get(id);
+      if (open) throw new AppError('Clôturez la caisse avant de la désactiver', 'SESSION_OPEN');
+    }
+    this.db.prepare('UPDATE registers SET name = ?, active = ? WHERE id = ?').run(name, patch.active === undefined ? current.active : patch.active ? 1 : 0, id);
+    const reg = this.getRegister(id);
+    this.enqueue({ storeId: reg.store_id, registerId: null }, 'register', id, 'upsert', reg);
+    this.audit(userId, 'register.update', 'register', id, patch);
+    return reg;
+  }
+
+  /** Utilisateurs à qui une caisse est attribuée. */
+  registerUsers(registerId: string): User[] {
+    return this.db
+      .prepare('SELECT id, name, login, role, store_id, register_id, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
+      .all(registerId) as User[];
+  }
+
   /** Active ce PC comme caisse à partir du code donné par l'administration. */
   activateRegister(code: string): Register {
     const reg = this.db
@@ -228,21 +292,25 @@ export class AdminService extends Base {
   // --- Utilisateurs ---------------------------------------------------------
 
   listUsers(): User[] {
-    return this.db.prepare('SELECT id, name, login, role, store_id, active FROM users ORDER BY name').all() as User[];
+    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, active FROM users ORDER BY name').all() as User[];
   }
 
   getUser(id: string): User {
-    const user = this.db.prepare('SELECT id, name, login, role, store_id, active FROM users WHERE id = ?').get(id) as User | undefined;
+    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, active FROM users WHERE id = ?').get(id) as User | undefined;
     if (!user) throw new AppError('Utilisateur introuvable', 'NOT_FOUND');
     return user;
   }
 
-  createUser(byUserId: string, input: { name: string; login: string; pin: string; role: Role; storeId: string | null }): User {
+  createUser(
+    byUserId: string,
+    input: { name: string; login: string; pin: string; role: Role; storeId: string | null; registerId?: string | null },
+  ): User {
     const id = newId();
+    const registerId = this.checkRegister(input.registerId ?? null);
     try {
       this.db
-        .prepare('INSERT INTO users (id, name, login, pin_hash, role, store_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(id, input.name.trim(), input.login.trim().toLowerCase(), hashPin(input.pin), input.role, input.storeId, this.now());
+        .prepare('INSERT INTO users (id, name, login, pin_hash, role, store_id, register_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, input.name.trim(), input.login.trim().toLowerCase(), hashPin(input.pin), input.role, input.storeId, registerId, this.now());
     } catch (e) {
       if (String(e).includes('UNIQUE')) throw new AppError('Identifiant déjà utilisé', 'DUPLICATE');
       throw e;
@@ -253,14 +321,19 @@ export class AdminService extends Base {
     return user;
   }
 
-  updateUser(byUserId: string, id: string, patch: { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }): User {
+  updateUser(
+    byUserId: string,
+    id: string,
+    patch: { name?: string; role?: Role; storeId?: string | null; registerId?: string | null; active?: boolean; pin?: string },
+  ): User {
     const current = this.getUser(id);
     this.db
-      .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, active = ? WHERE id = ?')
+      .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, active = ? WHERE id = ?')
       .run(
         patch.name ?? current.name,
         patch.role ?? current.role,
         patch.storeId === undefined ? current.store_id : patch.storeId,
+        patch.registerId === undefined ? current.register_id : this.checkRegister(patch.registerId),
         patch.active === undefined ? current.active : patch.active ? 1 : 0,
         id,
       );
@@ -269,6 +342,13 @@ export class AdminService extends Base {
     this.enqueue(null, 'user', id, 'upsert', user);
     this.audit(byUserId, 'user.update', 'user', id, { ...patch, pin: patch.pin ? '***' : undefined });
     return user;
+  }
+
+  /** Caisse attribuable : elle existe et n'est pas désactivée. */
+  private checkRegister(registerId: string | null): string | null {
+    if (!registerId) return null;
+    if (!this.getRegister(registerId).active) throw new AppError('Cette caisse est désactivée', 'INVALID');
+    return registerId;
   }
 
   login(login: string, pin: string): User {

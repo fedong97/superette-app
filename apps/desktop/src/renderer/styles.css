@@ -382,3 +382,47 @@ table.rights tr.group th { background: var(--bg); color: var(--ink); text-align:
 .sale-rows button.out { color: var(--muted); }
 .sale-rows button.out .cond { color: var(--muted); }
 .fiche-head input.client-name { grid-row: 2; grid-column: 3; }
+
+/* --- Opérations de trésorerie (ouverture, clôture, caisse centrale) --- */
+.treasury { display: flex; flex-direction: column; gap: 10px; }
+.tre-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.tre-bar label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.tre-bar select { min-width: 240px; }
+.tre-state { font-size: 15px; }
+.tre-state.open { color: var(--ok); }
+.tre-state.closed { color: var(--danger); }
+.spacer { flex: 1; }
+.tre-warning { background: var(--warn-soft); color: var(--warn); border: 1px solid #f5c48a; border-radius: 8px; padding: 8px 12px; margin: 0; }
+.tre-warning button.link { color: var(--warn); font-weight: 600; }
+.tre-day { display: flex; flex-direction: column; gap: 10px; }
+.tre-head { display: grid; grid-template-columns: 1.4fr 1.2fr 1.2fr 1fr; gap: 0 12px; align-items: end; }
+.tre-head input[readonly] { background: #f6f7f9; }
+.tre-print { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.tre-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tre-pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; min-width: 0; }
+.tre-pane h3 { margin: 0 0 6px; font-size: 14px; color: var(--brand); }
+.tre-scroll { max-height: 300px; overflow: auto; }
+.tre-scroll.tall { max-height: 460px; }
+.tre-sum { text-align: right; padding-top: 6px; border-top: 1px solid var(--line); margin-top: 6px; }
+.tre-sum b { font-size: 16px; margin-left: 8px; }
+.tre-foot { display: flex; gap: 12px; flex-wrap: wrap; }
+.tre-foot > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; display: flex; flex-direction: column; min-width: 150px; }
+.tre-foot small { color: var(--muted); }
+.tre-foot strong { font-size: 18px; }
+.tre-foot .neg strong { color: var(--danger); }
+.tre-foot .pos strong { color: var(--ok); }
+.tre-amount { font-variant-numeric: tabular-nums; }
+.tre-credit { color: #b42318; }
+label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; font-weight: 600; }
+.closed-register { max-width: 520px; display: flex; flex-direction: column; gap: 10px; }
+.closed-register .row { display: flex; gap: 10px; }
+/* Écran 1366 × 768 : la journée tient sans faire défiler la page. */
+.page.treasury { padding-top: 12px; gap: 8px; }
+.treasury .page-head { margin-bottom: 0; }
+.treasury .tabs { margin-bottom: 4px; }
+.tre-day { gap: 8px; }
+.tre-day .tre-scroll:not(.tall) { max-height: 190px; }
+.tre-foot > div { padding: 6px 12px; }
+.statusbar button.link.reg { margin-left: 0; }
+.register-choice { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.register-choice button { padding: 14px; font-size: 15px; }

@@ -9,7 +9,7 @@
  * - chaque écriture métier ajoute une ligne dans `outbox`, la file d'envoi
  *   vers le serveur central (synchronisation en phase 1, étape suivante).
  */
-export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
+export const MIGRATIONS: { version: number; name: string; sql: string; /** Reconstruit une table : clés étrangères suspendues le temps de la migration. */ rebuild?: boolean }[] = [
   {
     version: 1,
     name: 'socle caisse et stock',
@@ -885,6 +885,89 @@ CREATE TABLE role_rights (
   rights TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+`,
+  },
+  {
+    version: 17,
+    name: 'trésorerie des caisses, TVA facultative, rôles vendeur et appro',
+    rebuild: true,
+    sql: `
+-- Rôles Vendeur (seller) et Responsable d'achat (buyer) : la contrainte du rôle
+-- ne se modifie pas en SQLite, la table des utilisateurs est reconstruite.
+CREATE TABLE users_new (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  login TEXT NOT NULL UNIQUE,
+  pin_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'manager', 'cashier', 'seller', 'buyer', 'stock', 'accountant')),
+  store_id TEXT REFERENCES stores(id),
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+INSERT INTO users_new (id, name, login, pin_hash, role, store_id, active, created_at)
+  SELECT id, name, login, pin_hash, role, store_id, active, created_at FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;
+
+-- Options du magasin : assujetti à la TVA (les magasins existants le restent),
+-- vente sans stock autorisée (régularisée à la réception), seuil d'écart de caisse.
+ALTER TABLE stores ADD COLUMN vat_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE stores ADD COLUMN ignore_stock INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE stores ADD COLUMN cash_gap_threshold INTEGER NOT NULL DEFAULT 500;
+
+-- Journée de caisse : qui a ouvert, fond repris de la veille, premier comptage
+-- (comptage à l'aveugle), fond laissé dans le tiroir, versement à la centrale, motif d'écart.
+ALTER TABLE cash_sessions ADD COLUMN carried_float INTEGER;
+ALTER TABLE cash_sessions ADD COLUMN first_counted INTEGER;
+ALTER TABLE cash_sessions ADD COLUMN float_left INTEGER;
+ALTER TABLE cash_sessions ADD COLUMN deposit INTEGER;
+ALTER TABLE cash_sessions ADD COLUMN gap_reason TEXT;
+ALTER TABLE cash_sessions ADD COLUMN gap_approved_by TEXT;
+
+-- Caisse centrale du magasin : reçoit la recette des caisses, donne les fonds,
+-- dépose en banque. Les mouvements ne se modifient pas (une erreur se corrige
+-- par un mouvement inverse). Sens : + entre dans la centrale, - en sort.
+CREATE TABLE central_cash_movements (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  kind TEXT NOT NULL CHECK (kind IN ('DEPOSIT', 'FLOAT', 'IN', 'OUT')),
+  nature TEXT NOT NULL CHECK (nature IN ('register', 'bank', 'owner', 'other')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  register_id TEXT,
+  session_id TEXT,
+  cash_operation_id TEXT,
+  label TEXT NOT NULL,
+  user_id TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX central_cash_store ON central_cash_movements(store_id, at);
+CREATE INDEX central_cash_session ON central_cash_movements(session_id);
+
+-- Paiements en espèces faits au bureau : ils sortent de (ou entrent dans) la caisse centrale.
+ALTER TABLE expenses ADD COLUMN from_central INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE supplier_payments ADD COLUMN from_central INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE customer_payments ADD COLUMN from_central INTEGER NOT NULL DEFAULT 0;
+
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES
+  ('5712', 'Caisse centrale', 'central_cash'),
+  ('104', 'Compte de l''exploitant', 'owner');
+-- Comptes déjà créés à la main : ils prennent le rôle s'il est libre.
+UPDATE accounts SET role = 'central_cash' WHERE id = '5712' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'central_cash');
+UPDATE accounts SET role = 'owner' WHERE id = '104' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'owner');
+`,
+  },
+  {
+    version: 18,
+    name: 'caisse attribuée à chaque utilisateur',
+    sql: `
+-- Caisse de travail de l'utilisateur : ses ventes et sa journée de caisse s'y font, quel que soit le PC.
+ALTER TABLE users ADD COLUMN register_id TEXT REFERENCES registers(id);
+-- Caissiers déjà en place : on leur attribue la caisse de leur dernière vente, pour qu'ils continuent de vendre après la mise à jour.
+UPDATE users SET register_id = (
+  SELECT s.register_id FROM sales s JOIN registers r ON r.id = s.register_id
+  WHERE s.user_id = users.id AND r.active = 1 ORDER BY s.created_at DESC LIMIT 1
+) WHERE role IN ('cashier', 'seller');
 `,
   },
 ];

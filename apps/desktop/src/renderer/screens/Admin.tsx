@@ -33,7 +33,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'warehouses' && <Warehouses />}
       {tab === 'users' && <Users currentRole={user.role} />}
       {tab === 'rights' && <Rights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
-      {tab === 'settings' && <Settings />}
+      {tab === 'settings' && <Settings user={user} onChanged={onChanged} />}
       {tab === 'backups' && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && <Audit />}
@@ -136,7 +136,11 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
   const [storeId, setStoreId] = useState('');
   const sid = storeId || state.data?.station?.store.id || '';
   const registers = useLoad(() => (sid ? call('admin.registers', sid) : Promise.resolve([])), [sid]);
+  const users = useLoad(() => call('admin.users'));
   const [code, setCode] = useState('');
+  const [newName, setNewName] = useState('');
+  const [editing, setEditing] = useState<{ id: string; name: string; active: boolean } | null>(null);
+  const assigned = (id: string) => (users.data ?? []).filter((u) => u.register_id === id && u.active === 1).map((u) => u.name);
   return (
     <>
       <div className="filters">
@@ -147,49 +151,98 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             </option>
           ))}
         </select>
-        <span className="muted">Ce poste : {state.data?.station?.register?.name ?? 'non activé comme caisse'}</span>
+        <span className="muted">Ce PC : {state.data?.station?.register?.name ?? 'non activé comme caisse'}</span>
       </div>
+      <p className="muted">
+        Chaque utilisateur vend sur la caisse qui lui est attribuée (Administration › Utilisateurs), depuis n'importe quel PC du magasin. Le code
+        d'activation ne sert plus qu'à rattacher un nouveau PC au magasin.
+      </p>
       <table className="list">
         <thead>
           <tr>
             <th>N°</th>
             <th>Nom</th>
+            <th>Attribuée à</th>
             <th>Code d'activation</th>
-            <th>Activée le</th>
+            <th>État</th>
+            {isAdmin && <th></th>}
           </tr>
         </thead>
         <tbody>
           {(registers.data ?? []).map((r) => (
-            <tr key={r.id}>
+            <tr key={r.id} className={r.active ? '' : 'inactive'}>
               <td>{r.number}</td>
               <td>{r.name}</td>
+              <td>{assigned(r.id).join(', ') || <span className="muted">personne</span>}</td>
               <td>
                 <code>{r.activation_code}</code>
               </td>
-              <td>{r.activated_at ? dateTime(r.activated_at) : '—'}</td>
+              <td>{r.active ? 'Active' : 'Désactivée'}</td>
+              {isAdmin && (
+                <td>
+                  <button className="link" onClick={() => setEditing({ id: r.id, name: r.name, active: r.active === 1 })}>
+                    Modifier
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
-      <div className="actions">
-        {isAdmin && (
-          <button
-            className="primary"
-            onClick={async () => {
+      {isAdmin && (
+        <form
+          className="inline"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              const r = await call('admin.createRegister', sid, newName.trim() || undefined);
+              toast.ok(`${r.name} créée`);
+              setNewName('');
+              registers.reload();
+              onChanged();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nom (facultatif), ex. Caisse boissons" />
+          <button className="primary" type="submit">
+            Ajouter une caisse
+          </button>
+        </form>
+      )}
+      {editing && (
+        <Modal title="Modifier la caisse" onClose={() => setEditing(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
               try {
-                const r = await call('admin.createRegister', sid);
-                toast.ok(`${r.name} créée, code d'activation ${r.activation_code}`);
+                await call('admin.updateRegister', editing.id, { name: editing.name, active: editing.active });
+                toast.ok('Caisse enregistrée');
+                setEditing(null);
                 registers.reload();
+                onChanged();
               } catch (err) {
                 toast.error(err);
               }
             }}
           >
-            Ajouter une caisse
-          </button>
-        )}
-      </div>
-      <h3>Activer ce poste comme caisse</h3>
+            <Field label="Nom">
+              <input autoFocus value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+            </Field>
+            <label className="check">
+              <input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Caisse active
+            </label>
+            {!editing.active && <p className="warn-text">Les utilisateurs de cette caisse ne pourront plus vendre tant qu'on ne leur en attribue pas une autre.</p>}
+            <div className="actions">
+              <button type="submit" className="primary">
+                Enregistrer
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      <h3>Rattacher ce PC à une caisse (gérant sans caisse attribuée)</h3>
       <form
         className="inline"
         onSubmit={async (e) => {
@@ -271,7 +324,28 @@ function Users({ currentRole }: { currentRole: Role }) {
   const toast = useToast();
   const users = useLoad(() => call('admin.users'));
   const stores = useLoad(() => call('admin.stores'));
-  const [form, setForm] = useState<null | { id?: string; name: string; login: string; pin: string; role: Role; storeId: string; active: boolean }>(null);
+  // Caisses de tous les magasins : un utilisateur reçoit celle de son magasin.
+  const registers = useLoad(
+    () => (stores.data ? Promise.all(stores.data.map((st) => call('admin.registers', st.id))).then((l) => l.flat()) : Promise.resolve([])),
+    [stores.data],
+  );
+  const registerLabel = (id: string | null) => {
+    const r = id ? registers.data?.find((x) => x.id === id) : undefined;
+    if (!r) return '';
+    const st = (stores.data?.length ?? 0) > 1 ? stores.data?.find((x) => x.id === r.store_id) : undefined;
+    return `${st ? `${st.code} · ` : ''}${r.name}`;
+  };
+  const [form, setForm] = useState<null | {
+    id?: string;
+    name: string;
+    login: string;
+    pin: string;
+    role: Role;
+    storeId: string;
+    registerId: string;
+    active: boolean;
+  }>(null);
+  const sells = (role: Role) => role === 'cashier' || role === 'seller';
   const roles = (Object.keys(ROLE_LABELS) as Role[]).filter((r) => currentRole === 'admin' || r !== 'admin');
   return (
     <>
@@ -282,6 +356,7 @@ function Users({ currentRole }: { currentRole: Role }) {
             <th>Identifiant</th>
             <th>Rôle</th>
             <th>Magasin</th>
+            <th>Caisse</th>
             <th />
           </tr>
         </thead>
@@ -290,19 +365,25 @@ function Users({ currentRole }: { currentRole: Role }) {
             <tr
               key={u.id}
               className={`clickable ${u.active ? '' : 'inactive'}`}
-              onClick={() => setForm({ id: u.id, name: u.name, login: u.login, pin: '', role: u.role, storeId: u.store_id ?? '', active: u.active === 1 })}
+              onClick={() =>
+                setForm({ id: u.id, name: u.name, login: u.login, pin: '', role: u.role, storeId: u.store_id ?? '', registerId: u.register_id ?? '', active: u.active === 1 })
+              }
             >
               <td>{u.name}</td>
               <td>{u.login}</td>
               <td>{ROLE_LABELS[u.role]}</td>
               <td>{stores.data?.find((s) => s.id === u.store_id)?.name ?? 'Tous'}</td>
+              <td>
+                {registerLabel(u.register_id) ||
+                  (sells(u.role) ? <span className="tag alerte">aucune : ne peut pas vendre</span> : <span className="muted">—</span>)}
+              </td>
               <td>{!u.active && <span className="tag">désactivé</span>}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <div className="actions">
-        <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', active: true })}>
+        <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', active: true })}>
           Ajouter un utilisateur
         </button>
       </div>
@@ -313,9 +394,23 @@ function Users({ currentRole }: { currentRole: Role }) {
               e.preventDefault();
               try {
                 if (form.id) {
-                  await call('admin.updateUser', form.id, { name: form.name, role: form.role, storeId: form.storeId || null, active: form.active, pin: form.pin || undefined });
+                  await call('admin.updateUser', form.id, {
+                    name: form.name,
+                    role: form.role,
+                    storeId: form.storeId || null,
+                    registerId: form.registerId || null,
+                    active: form.active,
+                    pin: form.pin || undefined,
+                  });
                 } else {
-                  await call('admin.createUser', { name: form.name, login: form.login, pin: form.pin, role: form.role, storeId: form.storeId || null });
+                  await call('admin.createUser', {
+                    name: form.name,
+                    login: form.login,
+                    pin: form.pin,
+                    role: form.role,
+                    storeId: form.storeId || null,
+                    registerId: form.registerId || null,
+                  });
                 }
                 setForm(null);
                 users.reload();
@@ -353,6 +448,25 @@ function Users({ currentRole }: { currentRole: Role }) {
                   ))}
                 </select>
               </Field>
+              <Field
+                label="Caisse"
+                hint={
+                  sells(form.role)
+                    ? 'Il vend sur cette caisse depuis n’importe quel PC. Sans caisse, il ne peut pas vendre.'
+                    : 'Facultatif : sans caisse, le gérant choisit la sienne au moment de vendre.'
+                }
+              >
+                <select value={form.registerId} onChange={(e) => setForm({ ...form, registerId: e.target.value })}>
+                  <option value="">Aucune caisse</option>
+                  {(registers.data ?? [])
+                    .filter((r) => (r.active || r.id === form.registerId) && (!form.storeId || r.store_id === form.storeId))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {registerLabel(r.id)}
+                      </option>
+                    ))}
+                </select>
+              </Field>
               {form.id && (
                 <label className="inline">
                   <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Compte actif
@@ -371,7 +485,90 @@ function Users({ currentRole }: { currentRole: Role }) {
   );
 }
 
-function Settings() {
+/**
+ * Réglages du magasin : TVA (administrateur seulement, elle change les prix
+ * HT et la comptabilité), vente sans stock (droit « ignore_stock », le gérant
+ * par défaut) et seuil d'écart de caisse à faire valider.
+ */
+function StoreOptionsPanel({ user, onChanged }: { user: User; onChanged: () => void }) {
+  const toast = useToast();
+  const state = useLoad(() => call('app.state'));
+  const [threshold, setThreshold] = useState<string | null>(null);
+  const store = state.data?.station?.store;
+  if (!store) return null;
+  const isAdmin = user.role === 'admin';
+  const canStock = user.rights.includes('ignore_stock');
+  const save = async (options: { vatEnabled?: boolean; ignoreStock?: boolean; cashGapThreshold?: number }, message: string) => {
+    try {
+      await call('admin.storeOptions', options);
+      toast.ok(message);
+      state.reload();
+      onChanged();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+  return (
+    <>
+      <h3>Magasin : {store.name}</h3>
+      <label className="check">
+        <input
+          type="checkbox"
+          disabled={!isAdmin}
+          checked={store.vat_enabled === 1}
+          onChange={(e) => {
+            const on = e.target.checked;
+            if (
+              !confirm(
+                on
+                  ? 'Activer la TVA ? Les prochaines ventes, factures, achats et dépenses porteront la TVA (19,25 % par défaut). Les pièces déjà enregistrées ne changent pas.'
+                  : 'Désactiver la TVA (régime simplifié) ? Les prochaines pièces seront sans TVA et porteront « TVA non applicable ». Les pièces déjà enregistrées ne changent pas.',
+              )
+            )
+              return;
+            void save({ vatEnabled: on }, on ? 'TVA activée' : 'TVA désactivée');
+          }}
+        />{' '}
+        Magasin assujetti à la TVA (régime du réel)
+      </label>
+      <p className="muted">{isAdmin ? 'Ne s’applique qu’aux nouvelles pièces.' : 'Seul un administrateur peut changer ce réglage.'}</p>
+      <label className="check">
+        <input
+          type="checkbox"
+          disabled={!canStock}
+          checked={store.ignore_stock === 1}
+          onChange={(e) =>
+            void save({ ignoreStock: e.target.checked }, e.target.checked ? 'Vente sans stock autorisée' : 'Gestion des stocks rétablie')
+          }
+        />{' '}
+        Ignorer la gestion des stocks (vendre même si le stock en machine est épuisé)
+      </label>
+      <p className="muted">
+        À cocher quand la marchandise est arrivée mais pas encore saisie. Le stock passe en négatif et la prochaine réception le régularise
+        automatiquement. Pensez à décocher une fois les réceptions saisies.
+      </p>
+      <div className="grid2">
+        <Field label="Écart de caisse toléré (FCFA)" hint="Au-delà, la clôture demande un motif et la validation du gérant">
+          <input
+            inputMode="numeric"
+            disabled={!isAdmin}
+            value={threshold ?? String(store.cash_gap_threshold)}
+            onChange={(e) => setThreshold(e.target.value)}
+            onBlur={() => {
+              if (threshold === null) return;
+              const n = Number(threshold.replace(/\s/g, ''));
+              if (!Number.isInteger(n) || n < 0) return toast.error('Montant invalide');
+              if (n !== store.cash_gap_threshold) void save({ cashGapThreshold: n }, 'Seuil d’écart enregistré');
+              setThreshold(null);
+            }}
+          />
+        </Field>
+      </div>
+    </>
+  );
+}
+
+function Settings({ user, onChanged }: { user: User; onChanged: () => void }) {
   const toast = useToast();
   const settings = useLoad(() => call('admin.settings'));
   const printers = useLoad(() => call('admin.printers'));
@@ -382,6 +579,7 @@ function Settings() {
   const mode = v('printer.mode', 'driver');
   return (
     <div className="narrow">
+      <StoreOptionsPanel user={user} onChanged={onChanged} />
       <h3>Imprimante ticket et tiroir-caisse</h3>
       <div className="grid2">
         <Field label="Mode d'impression" hint="ESC/POS : plus rapide, accents gérés, coupe du papier et tiroir">

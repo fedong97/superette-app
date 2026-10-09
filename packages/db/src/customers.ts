@@ -335,8 +335,8 @@ export class CustomerService extends Base {
       const id = newId();
       this.db
         .prepare(
-          `INSERT INTO customer_payments (id, number, customer_id, store_id, register_id, session_id, method, amount, reference, notes, paid_at, user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO customer_payments (id, number, customer_id, store_id, register_id, session_id, method, amount, reference, notes, paid_at, user_id, from_central)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -351,6 +351,8 @@ export class CustomerService extends Base {
           input.notes?.trim() || null,
           this.now(),
           ctx.userId,
+          // Espèces reçues au bureau : elles entrent dans la caisse centrale.
+          input.method === 'CASH' && !input.sessionId ? 1 : 0,
         );
       this.enqueue(ctx, 'customer_payment', id, 'upsert', {});
       this.audit(ctx.userId, 'customer.payment', 'customer', input.customerId, { amount: input.amount, method: input.method });

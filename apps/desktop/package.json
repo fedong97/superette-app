@@ -1,7 +1,7 @@
 {
   "name": "@superette/desktop",
   "productName": "Superette Gestion",
-  "version": "0.22.0",
+  "version": "0.24.0",
   "private": true,
   "description": "Caisse et gestion de superette",
   "author": "Superette Gestion",

@@ -110,7 +110,9 @@ export class ExpenseService extends Base {
   record(ctx: Context, input: ExpenseInput): Expense {
     if (!(input.method in EXPENSE_PAYMENT_METHODS)) throw new AppError(`Mode de paiement inconnu : ${input.method}`, 'INVALID');
     if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new AppError('Montant invalide', 'INVALID');
-    const vat = input.vat ?? 0;
+    // Magasin non assujetti : la TVA payée n'est pas récupérable, elle reste dans la charge.
+    const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
+    const vat = vatEnabled ? (input.vat ?? 0) : 0;
     if (!Number.isSafeInteger(vat) || vat < 0 || vat >= input.amount) throw new AppError('La TVA doit être inférieure au montant payé', 'INVALID');
     if (!input.label.trim()) throw new AppError("Indiquez l'objet de la dépense", 'INVALID');
     if (input.method !== 'CASH' && !input.reference?.trim()) {
@@ -141,9 +143,9 @@ export class ExpenseService extends Base {
       this.db
         .prepare(
           `INSERT INTO expenses (id, number, store_id, category_id, account_id, expense_date, label, beneficiary, amount, vat, method, reference,
-             register_id, session_id, user_id, authorized_by, status, plan_id, plan_period, created_at, updated_at)
+             register_id, session_id, user_id, authorized_by, status, plan_id, plan_period, from_central, created_at, updated_at)
            VALUES (@id, @number, @store, @category, @account, @date, @label, @beneficiary, @amount, @vat, @method, @reference,
-             @register, @session, @user, @authorizedBy, 'active', @planId, @planPeriod, @now, @now)`,
+             @register, @session, @user, @authorizedBy, 'active', @planId, @planPeriod, @fromCentral, @now, @now)`,
         )
         .run({
           id,
@@ -164,6 +166,8 @@ export class ExpenseService extends Base {
           authorizedBy: input.authorizedBy ?? null,
           planId: input.planId || null,
           planPeriod: input.planId ? input.planPeriod : null,
+          // Espèces payées au bureau : elles sortent de la caisse centrale.
+          fromCentral: input.method === 'CASH' && !sessionId ? 1 : 0,
           now,
         });
       this.enqueue(ctx, 'expense', id, 'upsert', {});

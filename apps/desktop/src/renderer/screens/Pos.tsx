@@ -7,7 +7,7 @@ import { ExpenseDialog } from './Expenses';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, useSaleRows } from './SaleSearch';
-import { CancelDialog, CashOpDialog, CloseDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
+import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -92,14 +92,25 @@ const amount = (v: number) => formatFcfa(v, false);
  * et rendu, boutons d'action à droite et raccourcis clavier en bas.
  * Plusieurs fiches peuvent être ouvertes en même temps (V. cash 1, V. cash 2).
  */
-export function Pos({ user, hasRegister, active, title, onClose, onListing, mode = 'cash' }: {
+export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onListing, onTreasury, mode = 'cash' }: {
   mode?: 'cash' | 'credit';
   user: User;
   hasRegister: boolean;
+  /** Caisse de travail : la journée affichée se recharge quand elle change. */
+  registerId?: string | null;
+  /** Gérant ou administrateur sans caisse attribuée : il choisit la caisse sur laquelle il vend. */
+  canChooseRegister?: boolean;
+  onRegisterChosen?: () => void;
+  /** Magasin assujetti à la TVA (sinon « Taxes ? » est masqué). */
+  vatEnabled?: boolean;
+  /** « Ignorer la gestion des stocks » : on vend même si le stock affiché est épuisé. */
+  ignoreStock?: boolean;
   active: boolean;
   title: string;
   onClose: () => void;
   onListing: () => void;
+  /** Ouvre Trésorerie › Opérations de trésorerie (ouverture et clôture). */
+  onTreasury: () => void;
 }) {
   const toast = useToast();
   const session = useLoad(() => call('pos.session'), []);
@@ -150,7 +161,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       session.reload();
       promoRules.reload();
     }
-  }, [active]);
+  }, [active, registerId]);
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
@@ -415,8 +426,20 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (!hasRegister) return <Empty>Ce poste n'est pas activé comme caisse. Activez-le depuis Administration › Caisses.</Empty>;
-  if (!session.data) return session.data === null ? <OpenSession onOpened={session.reload} /> : null;
+  if (!hasRegister)
+    return canChooseRegister ? (
+      <div className="center-page">
+        <div className="card closed-register">
+          <h2>Sur quelle caisse vendez-vous ?</h2>
+          <p>Aucune caisse ne vous est attribuée : choisissez celle de ce comptoir.</p>
+          <RegisterChooser current={null} onChosen={() => onRegisterChosen?.()} />
+        </div>
+      </div>
+    ) : (
+      <Empty>Aucune caisse ne vous est attribuée. Demandez à l'administrateur de vous en attribuer une dans Administration › Utilisateurs.</Empty>
+    );
+  if (!session.data) return session.data === null ? <ClosedRegister canOpen={has(user, 'treasury')} onTreasury={onTreasury} onReload={session.reload} /> : null;
+  const stale = localDay(session.data.opened_at) !== localDay(now.toISOString());
 
   const sel = lines.find((l) => l.key === selected);
   const salesWarehouse = (warehouses.data ?? []).find((w) => w.is_sales_default) ?? warehouses.data?.[0];
@@ -442,6 +465,15 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                 : 'Livraison immédiate'}
         </div>
       </div>
+      {stale && (
+        <div className="tre-warning">
+          Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
+          <button className="link" onClick={onTreasury}>
+            Trésorerie
+          </button>{' '}
+          puis rouvrez la caisse.
+        </div>
+      )}
       <div className="fiche-body">
         <div className="fiche-main">
           <div className="fiche-head">
@@ -538,7 +570,10 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                   value=""
                   onChange={(e) => {
                     const v = e.target.value as Dialog | 'close';
-                    if (v === 'close' && lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+                    if (v === 'close') {
+                      if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+                      return onTreasury();
+                    }
                     setDialog(v);
                   }}
                 >
@@ -552,7 +587,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
                   <option value="custPay">Règlement client (crédit)</option>
                   <option value="quote">Facturer un devis / proforma</option>
                   <option value="expense">Dépense payée en caisse</option>
-                  <option value="close">Clôture de caisse (Z)</option>
+                  <option value="close">Clôture de caisse (Trésorerie)</option>
                 </select>
               </form>
 
@@ -690,11 +725,13 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
               <label>
                 <input type="checkbox" checked={showDiscount} onChange={(e) => setShowDiscount(e.target.checked)} /> Remise ?
               </label>
-              <label>
-                <input type="checkbox" checked={showTaxes} onChange={(e) => setShowTaxes(e.target.checked)} /> Taxes ?
-              </label>
+              {vatEnabled && (
+                <label>
+                  <input type="checkbox" checked={showTaxes} onChange={(e) => setShowTaxes(e.target.checked)} /> Taxes ?
+                </label>
+              )}
             </div>
-            {showTaxes ? (
+            {showTaxes && vatEnabled ? (
               <div className="taxes">
                 <div>HT {amount(totals.totalHt)}</div>
                 {totals.vat.filter((v) => v.tva > 0).map((v) => (
@@ -891,6 +928,7 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
           onClose={() => setDialog(null)}
           inCart={lines.filter((l) => l.articleId === picked.row.article_id).reduce((t, l) => t + l.qty, 0)}
           canPrice={has(user, 'price')}
+          ignoreStock={ignoreStock}
           onDone={(q, price) => {
             setDialog(null);
             void addRow(picked.row, q, price);
@@ -948,16 +986,6 @@ export function Pos({ user, hasRegister, active, title, onClose, onListing, mode
       {dialog === 'return' && <ReturnDialog onClose={() => setDialog(null)} />}
       {(dialog === 'cashIn' || dialog === 'cashOut') && (
         <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={!has(user, 'cashout')} onClose={() => setDialog(null)} />
-      )}
-      {dialog === 'close' && (
-        <CloseDialog
-          sessionId={session.data.id}
-          onClose={() => setDialog(null)}
-          onClosed={() => {
-            setDialog(null);
-            session.reload();
-          }}
-        />
       )}
     </div>
   );
@@ -1078,35 +1106,55 @@ function VaryDialog({
   );
 }
 
-function OpenSession({ onOpened }: { onOpened: () => void }) {
+/** Choix de la caisse par un gérant ou l'administrateur sans caisse attribuée. */
+export function RegisterChooser({ current, onChosen }: { current: string | null; onChosen: () => void }) {
   const toast = useToast();
-  const [amount, setAmount] = useState('');
+  const registers = useLoad(() => call('pos.registers'), []);
   return (
-    <div className="center-page">
-      <form
-        className="card"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const v = parseAmount(amount || '0');
-          if (v === null) return toast.error('Montant invalide');
-          try {
-            await call('pos.open', v);
-            onOpened();
-          } catch (err) {
-            toast.error(err);
+    <div className="register-choice">
+      {(registers.data ?? []).map((r) => (
+        <button
+          key={r.id}
+          className={r.id === current ? 'primary' : ''}
+          onClick={() =>
+            call('pos.chooseRegister', r.id).then(() => {
+              toast.ok(`Vous vendez sur ${r.name}`);
+              onChosen();
+            }, toast.error)
           }
-        }}
-      >
-        <h2>Ouverture de caisse</h2>
-        <Field label="Fond de caisse (FCFA)" hint="Espèces présentes dans le tiroir à l'ouverture">
-          <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
-        </Field>
-        <button className="primary big" type="submit">
-          Ouvrir la caisse
+        >
+          {String(r.number).padStart(2, '0')} · {r.name}
         </button>
-      </form>
+      ))}
+      {registers.data && !registers.data.length && <p className="muted">Aucune caisse active : créez-en une dans Administration › Caisses.</p>}
     </div>
   );
+}
+
+/** Caisse fermée : aucune vente avant l'ouverture dans Trésorerie. */
+function ClosedRegister({ canOpen, onTreasury, onReload }: { canOpen: boolean; onTreasury: () => void; onReload: () => void }) {
+  return (
+    <div className="center-page">
+      <div className="card closed-register">
+        <h2>La caisse est fermée</h2>
+        <p>Aucune vente n'est possible tant que la caisse n'est pas ouverte. L'ouverture se fait dans Trésorerie › Opérations de trésorerie, avec le comptage du fond de caisse.</p>
+        <div className="row">
+          {canOpen && (
+            <button className="primary big" onClick={onTreasury}>
+              Ouvrir la caisse dans Trésorerie
+            </button>
+          )}
+          <button onClick={onReload}>Actualiser</button>
+        </div>
+        {!canOpen && <p className="muted">Demandez au gérant d'ouvrir la caisse.</p>}
+      </div>
+    </div>
+  );
+}
+
+function localDay(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
 function WeightDialog({ article, onClose, onDone }: { article: Article; onClose: () => void; onDone: (qty: number) => void }) {

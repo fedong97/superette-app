@@ -61,12 +61,14 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
   const toast = useToast();
   const [f, setF] = useState({ storeCode: '', storeName: '', address: '', phone: '', taxpayerNumber: '', adminName: '', adminLogin: '', adminPin: '', pin2: '' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  /** Beaucoup de superettes sont au régime simplifié : pas de TVA tant qu'on ne la coche pas. */
+  const [vatEnabled, setVatEnabled] = useState(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (f.adminPin !== f.pin2) return toast.error('Les deux codes ne correspondent pas');
     try {
       const { pin2: _, ...input } = f;
-      await call('setup.bootstrap', input);
+      await call('setup.bootstrap', { ...input, vatEnabled });
       toast.ok('Magasin créé');
       onDone();
     } catch (err) {
@@ -96,6 +98,14 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
             <input value={f.taxpayerNumber} onChange={set('taxpayerNumber')} />
           </Field>
         </div>
+        <label className="check">
+          <input type="checkbox" checked={vatEnabled} onChange={(e) => setVatEnabled(e.target.checked)} /> Magasin assujetti à la TVA (régime du réel)
+        </label>
+        <p className="muted">
+          {vatEnabled
+            ? 'Les prix sont TTC : la TVA (19,25 %) est calculée et imprimée sur les tickets et les factures.'
+            : 'Régime simplifié : aucune TVA sur les ventes, les achats ni les dépenses. Les tickets portent « TVA non applicable ». Un administrateur pourra l’activer plus tard.'}
+        </p>
         <h3>Administrateur</h3>
         <div className="grid2">
           <Field label="Nom complet">

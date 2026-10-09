@@ -8,7 +8,7 @@ import { Customers, type CustomersTab } from './screens/Customers';
 import { Dashboard } from './screens/Dashboard';
 import { Expenses, type ExpensesTab } from './screens/Expenses';
 import { Login } from './screens/Login';
-import { Pos } from './screens/Pos';
+import { Pos, RegisterChooser } from './screens/Pos';
 import { Labels } from './screens/Labels';
 import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
@@ -18,6 +18,7 @@ import { SaleDetail, Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
+import { Treasury, type TreasuryTab } from './screens/Treasury';
 import { Field, Modal, ToastProvider, fcfa, useLoad, useToast } from './ui';
 
 type AppState = Result<'app.state'>;
@@ -25,7 +26,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'treasury' | 'dashboard' | 'admin';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -51,6 +52,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission }> = {
   labels: { label: 'Étiquettes', perm: 'labels' },
   reports: { label: 'Rapports de ventes', perm: 'reports' },
   accounting: { label: 'Comptabilité', perm: 'accounting' },
+  treasury: { label: 'Opérations de trésorerie', perm: 'treasury' },
   dashboard: { label: 'Tableau de bord', perm: 'dashboard' },
   admin: { label: 'Administration', perm: 'admin' },
 };
@@ -129,7 +131,11 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Trésorerie',
     [
-      { label: 'Opérations (journaux de trésorerie)', open: ['accounting', 'journals'], perm: 'accounting' },
+      { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
+      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'treasury' },
+      { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
+      SEP,
+      { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
       { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },
       { label: 'Extrait de compte (grand livre)', open: ['accounting', 'ledger'] },
       { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'] },
@@ -262,7 +268,7 @@ const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?
   { label: 'Devis', open: ['quotes'] },
   { label: 'Dépenses', open: ['expenses', 'list'] },
   { label: 'Achats', open: ['purchases', 'orders'] },
-  { label: 'Trésorerie', open: ['accounting', 'treasury'] },
+  { label: 'Trésorerie', open: ['treasury', 'day'] },
   { label: 'TABORD', open: ['dashboard'] },
 ];
 
@@ -270,6 +276,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrateur',
   manager: 'Gérant',
   cashier: 'Caissier',
+  seller: 'Vendeur',
+  buyer: "Responsable d'achat (appro)",
   stock: 'Magasinier',
   accountant: 'Comptable',
 };
@@ -302,6 +310,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [wins, setWins] = useState<Win[]>([{ kind: first, nonce: 0 }]);
   const [active, setActive] = useState<WinKind>(first);
   const [menu, setMenu] = useState<string | null>(null);
+  const [chooseRegister, setChooseRegister] = useState(false);
   const [help, setHelp] = useState<'shortcuts' | 'about' | null>(null);
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
@@ -318,7 +327,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
-    document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.station?.register?.name ?? 'poste de gestion'}, utilisateur ${user.name}`;
+    document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
     if (!menu) return;
@@ -433,11 +442,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               <Pos
                 user={user}
                 mode={w.kind === 'credit' ? 'credit' : 'cash'}
-                hasRegister={Boolean(state.station?.register)}
+                hasRegister={Boolean(state.register)}
+                registerId={state.register?.id ?? null}
+                canChooseRegister={state.canChooseRegister}
+                onRegisterChosen={refresh}
+                vatEnabled={state.station?.store.vat_enabled !== 0}
+                ignoreStock={state.station?.store.ignore_stock === 1}
                 active={w.kind === active}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
                 onListing={() => open('sales', 'tickets')}
+                onTreasury={() => open('treasury', 'day')}
               />
             )}
             {w.kind === 'articles' && <Articles user={user} view={w.tab as ArticlesView | undefined} />}
@@ -452,6 +467,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
+            {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={refresh} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>
@@ -460,7 +476,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       <footer className="statusbar">
         <span>Superette Gestion v{state.version}</span>
         <span>Magasin : {state.station?.store.name}</span>
-        <span>{state.station?.register?.name ?? 'Poste de gestion'}</span>
+        {state.canChooseRegister ? (
+          <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
+            {state.register?.name ?? 'Sans caisse'} · changer
+          </button>
+        ) : (
+          <span>{state.register?.name ?? 'Sans caisse'}</span>
+        )}
         <span>
           Utilisateur : {user.name} ({ROLE_LABELS[user.role]})
         </span>
@@ -479,6 +501,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Changer d'utilisateur
         </button>
       </footer>
+      {chooseRegister && (
+        <Modal title="Choisir ma caisse" onClose={() => setChooseRegister(false)}>
+          <RegisterChooser
+            current={state.register?.id ?? null}
+            onChosen={() => {
+              setChooseRegister(false);
+              refresh();
+            }}
+          />
+        </Modal>
+      )}
       {help === 'shortcuts' && (
         <Modal title="Raccourcis clavier" onClose={() => setHelp(null)}>
           <table className="list compact">

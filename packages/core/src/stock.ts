@@ -80,6 +80,7 @@ export const MOVEMENT_TYPES = {
   EXPIRY: 'Péremption',
   INTERNAL_USE: 'Consommation interne',
   INVENTORY_ADJUST: "Écart d'inventaire",
+  REGULARIZATION: 'Régularisation (vendu sans stock)',
 } as const;
 
 export type MovementType = keyof typeof MOVEMENT_TYPES;

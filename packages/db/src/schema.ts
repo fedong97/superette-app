@@ -979,4 +979,58 @@ ALTER TABLE cash_sessions ADD COLUMN gap_justified_at TEXT;
 UPDATE cash_sessions SET gap_justified_at = closed_at WHERE gap_reason IS NOT NULL;
 `,
   },
+  {
+    version: 20,
+    name: 'inventaires enregistrés (global ou partiel)',
+    sql: `
+-- Inventaire : la liste des produits est figée à l'ouverture, on saisit les quantités comptées
+-- au fil de l'eau, puis la clôture corrige le stock (mouvements « Inventaire n° X »).
+CREATE TABLE inventories (
+  id TEXT PRIMARY KEY,
+  number INTEGER NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  kind TEXT NOT NULL CHECK (kind IN ('global', 'partial')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'cancelled')),
+  label TEXT,
+  department_ids TEXT,
+  -- Date d'inventaire : aujourd'hui, ou une date passée (fin d'exercice) à laquelle le stock est arrêté.
+  inventory_date TEXT NOT NULL,
+  backdated INTEGER NOT NULL DEFAULT 0,
+  opened_at TEXT NOT NULL,
+  opened_by TEXT NOT NULL REFERENCES users(id),
+  closed_at TEXT,
+  closed_by TEXT REFERENCES users(id),
+  cancelled_at TEXT,
+  cancelled_by TEXT REFERENCES users(id),
+  counted_value INTEGER,
+  gap_value INTEGER
+);
+CREATE TABLE inventory_lines (
+  id TEXT PRIMARY KEY,
+  inventory_id TEXT NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  opening_qty INTEGER NOT NULL,
+  counted INTEGER,
+  counted_detail TEXT,
+  counted_at TEXT,
+  counted_by TEXT REFERENCES users(id),
+  -- À la clôture : stock attendu à l'heure du comptage, écart et coût unitaire retenus.
+  expected INTEGER,
+  difference INTEGER,
+  unit_cost INTEGER,
+  UNIQUE (inventory_id, article_id)
+);
+-- Historique des saisies : qui a compté quoi et quand.
+CREATE TABLE inventory_entries (
+  id TEXT PRIMARY KEY,
+  inventory_id TEXT NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  article_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  counted INTEGER,
+  at TEXT NOT NULL
+);
+CREATE INDEX inventory_entries_inventory ON inventory_entries(inventory_id, at);
+`,
+  },
 ];

@@ -40,7 +40,7 @@ function usePeriod(initial: 'today' | 'month' = 'month') {
 }
 
 /** Enregistre une feuille Excel produite à l'écran. */
-function saveXlsx(filename: string, sheet: XlsxSheet) {
+export function saveXlsx(filename: string, sheet: XlsxSheet) {
   const url = URL.createObjectURL(new Blob([new Uint8Array(xlsxWorkbook([sheet]))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   const a = document.createElement('a');
   a.href = url;

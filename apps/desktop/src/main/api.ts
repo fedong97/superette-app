@@ -44,6 +44,7 @@ import {
   type SupplierInput,
   type SupplierPaymentMethod,
   type CentralNature,
+  type InventoryInput,
   type StoreOptions,
   type User,
 } from '@superette/db';
@@ -86,6 +87,10 @@ export interface Printer {
   /** Planche d'étiquettes déjà mise en page ; false si l'utilisateur annule. */
   labels(html: string, format: LabelFormatId): Promise<boolean>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
+  /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
+  inventorySheet(inventoryId: string): Promise<void>;
+  /** Résultat d'un inventaire : écarts valorisés, totaux et signatures. */
+  inventoryResult(inventoryId: string): Promise<void>;
 }
 
 /**
@@ -146,6 +151,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const STOCK: Permission[] = ['articles', 'stock', 'labels'];
   const POS: Permission[] = ['cash', 'credit'];
   const TREASURY: Permission[] = ['treasury'];
+  const INVENTORY: Permission[] = ['inventory', 'inventory_count'];
   const SALES: Permission[] = ['sales', 'reports', 'receivables'];
   /** Montants de la caisse : attendu, entrées, ventes de la journée, historique des journées et Z. */
   const AMOUNTS: Permission[] = ['cash_amounts'];
@@ -307,6 +313,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.stock.recordLoss(ctx(STOCK), input),
     'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
       s.stock.transfer(ctx(STOCK), input),
+    // --- Inventaires enregistrés -------------------------------------------------
+    'inventories.list': () => s.inventories.list(ctx(INVENTORY).storeId),
+    'inventories.get': (id: string) => (requireUser(INVENTORY), s.inventories.get(id)),
+    'inventories.history': (id: string) => (requireUser(INVENTORY), s.inventories.history(id)),
+    'inventories.create': (input: InventoryInput) => s.inventories.create(ctx(['inventory']), input),
+    'inventories.addArticle': (id: string, articleId: string) => s.inventories.addArticle(ctx(INVENTORY), id, articleId),
+    'inventories.removeArticle': (id: string, articleId: string) => s.inventories.removeArticle(ctx(['inventory']), id, articleId),
+    'inventories.setCount': (id: string, articleId: string, counted: Milli | null, detail?: number[] | null) =>
+      s.inventories.setCount(ctx(INVENTORY), id, articleId, counted, detail),
+    'inventories.import': (id: string, rows: { code: string; qty: number }[]) => s.inventories.importCounts(ctx(INVENTORY), id, rows),
+    'inventories.close': (id: string) => s.inventories.close(ctx(['inventory']), id),
+    'inventories.cancel': (id: string) => s.inventories.cancel(ctx(['inventory']), id),
+    'inventories.printSheet': (id: string) => (requireUser(INVENTORY), printer.inventorySheet(id)),
+    'inventories.printResult': (id: string) => (requireUser(INVENTORY), printer.inventoryResult(id)),
     'stock.inventory': (input: { warehouseId: string; counts: { articleId: string; counted: Milli; countedAt: string }[] }) =>
       s.stock.applyInventory(ctx(['inventory']), input),
     'stock.printCountSheet': (warehouseId: string, departmentId?: string | null) => {

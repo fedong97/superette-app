@@ -49,7 +49,8 @@ export const PERMISSIONS = {
   purchase_orders: { label: 'Bons de commande et propositions de commande', group: 'Gestion', roles: STOCK },
   purchase_invoices: { label: 'Factures fournisseurs, échéancier et situation', group: 'Gestion', roles: [...ACCOUNTING, 'buyer'] },
   receivables: { label: 'Comptes clients : échéances et plafonds', group: 'Gestion', roles: ACCOUNTING },
-  inventory: { label: 'Inventaires', group: 'Gestion', roles: MANAGE },
+  inventory: { label: 'Inventaires : créer, clôturer (corrige le stock) et annuler', group: 'Gestion', roles: MANAGE },
+  inventory_count: { label: 'Inventaires : compter (saisir les quantités)', group: 'Gestion', roles: ['manager', 'stock'] },
   import: { label: 'Importer le catalogue (CSV)', group: 'Gestion', roles: MANAGE },
   store_price: { label: 'Prix propre au magasin', group: 'Gestion', roles: MANAGE },
 } satisfies Record<string, PermissionDef>;

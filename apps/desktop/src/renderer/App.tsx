@@ -66,7 +66,7 @@ interface MenuItem {
   /** Module pas encore développé : affiché grisé. */
   soon?: boolean;
   /** Droit nécessaire en plus de celui de la fenêtre (Administration › Droits). */
-  perm?: Permission;
+  perm?: Permission | Permission[];
   /** Réservé au rôle Administrateur. */
   adminOnly?: boolean;
   /** Compteur affiché à côté du libellé. */
@@ -167,7 +167,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
       SEP,
-      { label: 'Inventaires', open: ['stock', 'inventory'], perm: 'inventory' },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
       { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'] },
       SEP,
       { label: 'Stocks critiques', open: ['stock', 'critical'] },
@@ -222,7 +222,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'État du stock', open: ['stock', 'state'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
       { label: 'Pertes et casse', open: ['stock', 'loss'] },
-      { label: 'Inventaire', open: ['stock', 'inventory'], perm: 'inventory' },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
       { label: 'Péremptions', open: ['stock', 'expiry'] },
       { label: 'Étiquettes de rayon', open: ['labels'] },
     ],
@@ -361,7 +361,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
   const visibleItems = (items: MenuItem[]) =>
     items
-      .filter((i) => (!i.perm || can(i.perm)) && (!i.adminOnly || user.role === 'admin'))
+      .filter((i) => (!i.perm || [i.perm].flat().some(can)) && (!i.adminOnly || user.role === 'admin'))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
 

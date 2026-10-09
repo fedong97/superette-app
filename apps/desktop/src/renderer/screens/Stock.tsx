@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType, describeInPacks } from '@superette/core';
+import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType } from '@superette/core';
 import { type Result, call } from '../api';
 import { StockByWarehouse } from './Controls';
+import { Inventories } from './Inventories';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
@@ -16,14 +17,14 @@ const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', su
 export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
   // Les stocks critiques sont l'état du stock filtré sur les ruptures et alertes.
   const [tab, setTab] = useState<Tab>(initialTab === 'critical' ? 'state' : initialTab);
-  const canInventory = has(user, 'inventory');
+  const canInventory = has(user, 'inventory') || has(user, 'inventory_count');
   const tabs: [Tab, string][] = [
     ['state', 'État du stock'],
     ['warehouses', 'Articles par dépôt'],
     ['receive', 'Réception'],
     ['loss', 'Pertes et casse'],
     ['transfer', 'Transfert'],
-    ...(canInventory ? ([['inventory', 'Inventaire']] as [Tab, string][]) : []),
+    ...(canInventory ? ([['inventory', 'Inventaires']] as [Tab, string][]) : []),
     ['expiry', 'Péremptions'],
     ['moves', 'Mouvements'],
     ['adjustments', 'Ajustements'],
@@ -39,7 +40,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'receive' && <Reception />}
       {tab === 'loss' && <Loss />}
       {tab === 'transfer' && <Transfer />}
-      {tab === 'inventory' && <Inventory />}
+      {tab === 'inventory' && <Inventories user={user} />}
       {tab === 'expiry' && <Expiry />}
       {tab === 'moves' && <Moves />}
       {tab === 'adjustments' && <Moves adjustments />}
@@ -350,159 +351,6 @@ function Transfer() {
         </button>
       </div>
     </div>
-  );
-}
-
-/** Inventaire tournant : chaque comptage est horodaté, les ventes en cours sont prises en compte. */
-function Inventory() {
-  const toast = useToast();
-  const [warehouseId, setWarehouseId] = useState('');
-  // Une case par conditionnement (carton, paquet, unité) ; une seule pour un article sans conditionnement.
-  const [counts, setCounts] = useState<{ article: Article; parts: string[]; countedAt: string }[]>([]);
-  const [result, setResult] = useState<Result<'stock.inventory'> | null>(null);
-  const [names, setNames] = useState(new Map<string, Article>());
-  const [departmentId, setDepartmentId] = useState('');
-  const departments = useLoad(() => call('catalogue.departments'), []);
-  const levels = (a: Article) => {
-    const c = packChoices(a);
-    return c.length ? c : [{ name: a.unit === 'piece' ? a.unit_name || 'Pièce' : a.unit === 'kg' ? 'kg' : 'litres', units: 1000 }];
-  };
-  /** Quantité comptée en unités de détail (millièmes) ; null si une case est invalide ou tout est vide. */
-  const countedOf = (c: (typeof counts)[number]) => {
-    if (c.parts.every((p) => p.trim() === '')) return null;
-    let total = 0;
-    for (const [i, l] of levels(c.article).entries()) {
-      const v = (c.parts[i] ?? '').trim();
-      if (!v) continue;
-      const n = Number(v.replace(',', '.'));
-      if (!Number.isFinite(n) || n < 0) return null;
-      total += Math.round(n * l.units);
-    }
-    return total;
-  };
-  return (
-    <div>
-      <p className="muted">
-        Scannez et comptez rayon par rayon sans fermer le magasin : l'heure de chaque comptage est enregistrée et les ventes passées depuis sont déduites automatiquement.
-      </p>
-      <div className="grid3">
-        <WarehouseSelect value={warehouseId} onChange={setWarehouseId} />
-        <Field label="Feuille de comptage" hint="À imprimer avant de compter : une ligne par article, des cases par carton, paquet et unité">
-          <div className="inline">
-            <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
-              <option value="">Tous les rayons</option>
-              {(departments.data ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => call('stock.printCountSheet', warehouseId, departmentId || null).catch((e) => toast.error(e))}>Imprimer</button>
-          </div>
-        </Field>
-      </div>
-      <ArticlePicker
-        placeholder="Scanner l'article compté"
-        onPick={(a) => {
-          if (counts.some((c) => c.article.id === a.id)) return toast.error('Article déjà dans le comptage');
-          setCounts([{ article: a, parts: levels(a).map(() => ''), countedAt: new Date().toISOString() }, ...counts]);
-        }}
-      />
-      <table className="list">
-        <tbody>
-          {counts.map((c, i) => (
-            <tr key={c.article.id}>
-              <td>{c.article.name}</td>
-              <td className="count-parts">
-                {levels(c.article).map((l, k) => (
-                  <label key={l.name}>
-                    <input
-                      className="qty"
-                      autoFocus={i === 0 && k === 0}
-                      value={c.parts[k] ?? ''}
-                      placeholder="0"
-                      onChange={(e) =>
-                        setCounts(
-                          counts.map((x, j) => (j === i ? { ...x, parts: x.parts.map((p, m) => (m === k ? e.target.value : p)), countedAt: new Date().toISOString() } : x)),
-                        )
-                      }
-                    />{' '}
-                    {l.name}
-                  </label>
-                ))}
-              </td>
-              <td className="r">{countedOf(c) !== null && levels(c.article).length > 1 ? <strong>= {qty(countedOf(c)!, c.article.unit)}</strong> : ''}</td>
-              <td className="muted">compté à {new Date(c.countedAt).toLocaleTimeString('fr-FR')}</td>
-              <td>
-                <button className="ghost" onClick={() => setCounts(counts.filter((_, j) => j !== i))}>
-                  ✕
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="actions">
-        <button
-          className="primary"
-          disabled={!counts.length || counts.some((c) => countedOf(c) === null)}
-          onClick={async () => {
-            if (!confirm('Valider l’inventaire et corriger le stock ?')) return;
-            try {
-              const res = await call('stock.inventory', {
-                warehouseId,
-                counts: counts.map((c) => ({ articleId: c.article.id, counted: countedOf(c)!, countedAt: c.countedAt })),
-              });
-              setNames(new Map(counts.map((c) => [c.article.id, c.article])));
-              setResult(res);
-              setCounts([]);
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        >
-          Valider l'inventaire
-        </button>
-      </div>
-      {result && (
-        <>
-          <h3>Écarts constatés · {fcfa(result.totalValue)}</h3>
-          <table className="list">
-            <thead>
-              <tr>
-                <th>Article</th>
-                <th className="r">Théorique</th>
-                <th className="r">Compté</th>
-                <th className="r">Écart</th>
-                <th className="r">Valeur</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.lines.map((l) => (
-                <tr key={l.articleId}>
-                  <td>{names.get(l.articleId)?.name ?? l.articleId}</td>
-                  <td className="r">{inPacks(l.expected, names.get(l.articleId))}</td>
-                  <td className="r">{inPacks(l.counted, names.get(l.articleId))}</td>
-                  <td className={`r ${l.difference < 0 ? 'neg' : l.difference > 0 ? 'pos' : ''}`}>{qty(l.difference)}</td>
-                  <td className="r">{fcfa(l.value)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** « 235 » suivi de « 2 Carton 3 Paquet 5 Ampoule » quand l'article a des conditionnements. */
-function inPacks(q: number, a: Article | undefined) {
-  const text = a && a.packs.length ? describeInPacks(Math.max(0, q), a.packs, a.unit_name || 'Pièce') : '';
-  return (
-    <>
-      {qty(q, a?.unit)}
-      {text && <small className="muted block">{text}</small>}
-    </>
   );
 }
 

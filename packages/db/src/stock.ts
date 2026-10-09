@@ -69,6 +69,8 @@ interface MovementInput {
   reason?: string | null;
   refType?: string | null;
   refId?: string | null;
+  /** Date du mouvement, si ce n'est pas maintenant (inventaire arrêté à une date passée). */
+  at?: string;
 }
 
 export class StockService extends Base {
@@ -101,7 +103,7 @@ export class StockService extends Base {
       ref_type: m.refType ?? null,
       ref_id: m.refId ?? null,
       user_id: ctx.userId,
-      at: this.now(),
+      at: m.at ?? this.now(),
     };
     this.db
       .prepare(
@@ -481,19 +483,39 @@ export class StockService extends Base {
     });
   }
 
-  private restockAdjust(ctx: Context, articleId: string, warehouseId: string, qty: Milli, inventoryId: string): void {
+  private restockAdjust(ctx: Context, articleId: string, warehouseId: string, qty: Milli, inventoryId: string, reason = 'Inventaire', at?: string): void {
     const lotId = newId();
-    this.insertLot(ctx, { id: lotId, articleId, warehouseId, qty });
+    this.insertLot(ctx, { id: lotId, articleId, warehouseId, qty, receivedAt: at });
     this.applyMovement(ctx, {
       type: 'INVENTORY_ADJUST',
       articleId,
       warehouseId,
       qty,
       lotId,
-      reason: 'Inventaire',
+      reason,
       refType: 'inventory',
       refId: inventoryId,
+      at,
     });
+  }
+
+  /**
+   * Correction d'inventaire d'un article : entrée (lot sans date) ou sortie
+   * FEFO de l'écart constaté. À appeler dans une transaction.
+   */
+  adjustForInventory(ctx: Context, m: { articleId: string; warehouseId: string; difference: Milli; inventoryId: string; reason: string; at?: string }): void {
+    if (m.difference > 0) this.restockAdjust(ctx, m.articleId, m.warehouseId, m.difference, m.inventoryId, m.reason, m.at);
+    else if (m.difference < 0)
+      this.issue(ctx, {
+        type: 'INVENTORY_ADJUST',
+        articleId: m.articleId,
+        warehouseId: m.warehouseId,
+        qty: -m.difference,
+        reason: m.reason,
+        refType: 'inventory',
+        refId: m.inventoryId,
+        at: m.at,
+      });
   }
 
   /** État du stock d'un magasin (tous dépôts) ou d'un dépôt. */

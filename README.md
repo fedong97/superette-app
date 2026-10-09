@@ -30,7 +30,9 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Import du catalogue depuis Excel (CSV).
 - Dépôts par magasin (surface de vente, réserve, chambre froide), réceptions avec lot et date limite (obligatoire pour les périssables).
 - Valorisation au CMUP, sortie en FEFO, pertes (casse, vol, péremption, consommation interne) avec motif, transferts entre dépôts avec dates conservées.
-- Inventaire tournant sans fermer le magasin : chaque comptage est horodaté, les ventes passées depuis sont déduites.
+- Inventaires enregistrés (Stock › Inventaires), sans fermer le magasin : inventaire global (tous les produits du dépôt) ou partiel (des rayons, ou des produits ajoutés un par un). La liste des produits s'affiche dès la création ; on tape les quantités, Entrée passe à la ligne suivante. Chaque saisie est enregistrée et horodatée, les ventes passées depuis sont déduites, et l'on peut reprendre plus tard.
+- Fiche d'inventaire : stock à l'ouverture, mouvements de la période, stock attendu, compté, écart, CMUP, montant de l'écart et valeur comptée, en rose les déficitaires, en bleu les excédentaires, en vert les produits sans écart. Filtres, historique des saisies, export Excel et CSV, import d'un CSV de comptage, impression du résultat A4 avec signatures.
+- Date d'inventaire antidatée possible (31/12) : le stock est arrêté à la fin de ce jour. La clôture corrige le stock (mouvements « Inventaire n° X ») ; dans un inventaire global les produits non comptés passent à zéro après confirmation, dans un partiel ils ne changent pas. Droits séparés « compter » (magasinier) et « créer, clôturer, annuler » (gérant).
 - Alertes de péremption (J-7, J-3, J-1, périmé), niveaux rupture/alerte/surstock.
 
 **Fournisseurs et achats**
@@ -113,7 +115,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Produit › Étiquettes de rayon : liste « À refaire » des étiquettes à imprimer, articles reçus jamais étiquetés et prix changés depuis la dernière impression (ancien prix barré), par rayon ou par recherche. Une étiquette par unité et par conditionnement (Carton de 100 : 10 500 F, soit 105 F l'unité).
 - Prix du magasin, promotion comprise (ancien prix barré, bandeau PROMO ou « 3 pour 2 »), code-barres EAN-13, EAN-8 ou Code 128 dessiné sur l'étiquette, date d'impression pour repérer une étiquette périmée.
 - Planches A4 de 24, 40 ou 65 étiquettes, ou rouleau d'imprimante d'étiquettes 50 × 30 mm. Aperçu fidèle avant impression, nombre d'exemplaires par article, et « étiquettes déjà utilisées » pour finir une planche entamée.
-- Inventaire saisi en cartons, paquets et unités (3 cartons 2 paquets 4 ampoules = 324), écarts affichés aussi en conditionnements. Feuille de comptage A4 par rayon à imprimer avant de compter.
+- Inventaire saisi en cartons, paquets et unités (3 cartons 2 paquets 4 ampoules = 324). Fiche de comptage A4 par rayon, avec une case par conditionnement, à imprimer avant de compter.
 
 **Devis et factures proforma**
 - Devis (DV-) ou facture proforma (PF-) pour un client enregistré ou un simple prospect, avec durée de validité, remises par ligne (code du gérant pour un caissier) et conditions.

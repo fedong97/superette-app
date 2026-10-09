@@ -200,6 +200,49 @@ export function createPrinter(s: Services): Printer {
         <div class="sign"><span>Compté par : ……………………</span><span>Heure de fin : ……………</span><span>Signature : ……………………</span></div>`);
     },
 
+    async inventorySheet(inventoryId) {
+      const { inventory: inv, lines } = s.inventories.get(inventoryId);
+      const store = s.admin.getStore(inv.store_id);
+      let dept: string | null | undefined;
+      const rows = lines
+        .map((l) => {
+          const levels = l.unit === 'piece' ? [...l.packs.map((p) => p.name), l.unit_name || 'Pièce'] : [l.unit === 'kg' ? 'kg' : 'litres'];
+          const head = l.department_name !== dept ? `<tr><th colspan="3">${esc((dept = l.department_name) ?? 'Sans rayon')}</th></tr>` : '';
+          return `${head}<tr><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="count">${levels.map((v) => `<span>……… ${esc(v)}</span>`).join('')}</td></tr>`;
+        })
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Inventaire n° ${inv.number} : feuille de comptage</h1>
+        <p>Dépôt : <b>${esc(inv.warehouse_name)}</b> · date d'inventaire ${new Date(`${inv.inventory_date}T12:00:00`).toLocaleDateString('fr-FR')} · ${lines.length} produits</p>
+        <p class="muted">Comptez chaque produit en cartons, paquets et unités ; notez l'heure de fin de chaque rayon.</p>
+        <style>.count span { display: inline-block; min-width: 32mm; } th[colspan] { background: #e8eef7; text-align: left; }</style>
+        <table><tr><th style="width:22mm">Code</th><th>Produit</th><th style="width:105mm">Compté</th></tr>${rows}</table>
+        <div class="sign"><span>Compté par : ……………………</span><span>Heure de fin : ……………</span><span>Signature : ……………………</span></div>`);
+    },
+
+    async inventoryResult(inventoryId) {
+      const { inventory: inv, lines } = s.inventories.get(inventoryId);
+      const store = s.admin.getStore(inv.store_id);
+      const counted = lines.filter((l) => l.counted !== null);
+      const rows = counted
+        .map(
+          (l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="r">${formatQty(l.expected, l.unit)}</td><td class="r">${formatQty(l.counted!, l.unit)}</td>
+            <td class="r">${formatQty(l.difference ?? 0, l.unit)}</td><td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.gap_value ?? 0)}</td><td class="r">${money(l.counted_value ?? 0)}</td></tr>`,
+        )
+        .join('');
+      const gap = inv.gap_value;
+      const status = inv.status === 'closed' ? `clôturé le ${new Date(inv.closed_at!).toLocaleString('fr-FR')} par ${esc(inv.closed_by_name ?? '')}` : inv.status === 'open' ? 'en cours (résultat provisoire)' : 'annulé';
+      await printA4(`${a4Head(store)}
+        <h1>Résultat de l'inventaire n° ${inv.number}</h1>
+        <p>${inv.kind === 'global' ? 'Inventaire global' : `Inventaire partiel${inv.departments.length ? ` : ${esc(inv.departments.join(', '))}` : ''}`} · dépôt <b>${esc(inv.warehouse_name)}</b> ·
+          date d'inventaire ${new Date(`${inv.inventory_date}T12:00:00`).toLocaleDateString('fr-FR')} · ${status}</p>
+        <p>${counted.length} produits comptés sur ${lines.length}. Valeur du stock compté : <b>${money(inv.counted_value)} FCFA</b>.
+          L'inventaire est <b>${gap < 0 ? `déficitaire de ${money(-gap)} FCFA` : gap > 0 ? `excédentaire de ${money(gap)} FCFA` : 'sans écart'}</b>.</p>
+        <table><thead><tr><th>Code</th><th>Produit</th><th class="r">Attendu</th><th class="r">Compté</th><th class="r">Écart</th><th class="r">CMUP</th><th class="r">Montant écart</th><th class="r">Valeur comptée</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="6">Totaux</td><td class="r">${money(gap)}</td><td class="r">${money(inv.counted_value)}</td></tr></tbody></table>
+        <div class="sign"><span>Le magasinier : ……………………</span><span>Le gérant : ……………………</span></div>`);
+    },
+
     async ticket(saleId, opts) {
       const cfg = config();
       let kick = false;

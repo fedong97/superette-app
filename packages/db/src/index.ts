@@ -20,6 +20,7 @@ import { TaxService } from './tax';
 import { NotesService } from './notes';
 import { FinancialStatementsService } from './statements';
 import { StockService } from './stock';
+import { InventoryService } from './inventories';
 import { SyncService } from './sync';
 import { TreasuryService } from './treasury';
 import type { Clock } from './util';
@@ -36,6 +37,7 @@ export * from './expenses';
 export * from './pos';
 export * from './backup';
 export * from './labels';
+export * from './inventories';
 export * from './promotions';
 export * from './purchases';
 export * from './receipts';
@@ -56,6 +58,7 @@ export interface Services {
   admin: AdminService;
   catalogue: CatalogueService;
   stock: StockService;
+  inventories: InventoryService;
   customers: CustomerService;
   expenses: ExpenseService;
   charges: ChargeService;
@@ -82,6 +85,7 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const admin = new AdminService(db, clock);
   const catalogue = new CatalogueService(db, clock);
   const stock = new StockService(db, clock);
+  const inventories = new InventoryService(db, clock, stock);
   const customers = new CustomerService(db, clock);
   const expenses = new ExpenseService(db, clock);
   const charges = new ChargeService(db, clock);
@@ -102,7 +106,7 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const disclosures = new DisclosureService(db, clock);
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, customers, expenses, charges, controls, quotes, pos, treasury, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, sync };
+  return { db, admin, catalogue, stock, inventories, customers, expenses, charges, controls, quotes, pos, treasury, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

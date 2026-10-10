@@ -32,3 +32,14 @@ describe('classeur Excel', () => {
     if (process.env.XLSX_OUT) writeFileSync(process.env.XLSX_OUT, bytes);
   });
 });
+
+describe('lecture xlsx', () => {
+  it('relit un classeur écrit par xlsxWorkbook', async () => {
+    const { readXlsxRows, xlsxWorkbook } = await import('../src');
+    const book = xlsxWorkbook([
+      { name: 'Fiche', title: ['Inventaire n° 2'], columns: [{ header: 'Code' }, { header: 'Produit' }, { header: 'Compté', format: 'qty' }], rows: [['DLA1-001', 'Bière & eau <33>', 12.5], ['DLA1-002', 'Riz', null]] },
+    ]);
+    const rows = await readXlsxRows(book);
+    expect(rows.filter((r) => r.length)).toEqual([['Inventaire n° 2'], ['Code', 'Produit', 'Compté'], ['DLA1-001', 'Bière & eau <33>', '12.5'], ['DLA1-002', 'Riz', '']]);
+  });
+});

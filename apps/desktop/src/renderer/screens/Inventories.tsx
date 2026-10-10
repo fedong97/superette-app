@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { readXlsxRows } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, dateFr, dateTime, downloadText, fcfa, has, qty, today, useLoad, useToast } from '../ui';
 import { saveXlsx } from './Controls';
@@ -212,6 +213,7 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
   };
   const [hideIdle, setHideIdle] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [sheetFormat, setSheetFormat] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const tableRef = useRef<HTMLTableSectionElement>(null);
   const reload = () => {
@@ -341,25 +343,75 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
     ].join('\r\n');
     downloadText(`${file}.csv`, `﻿${csv}`);
   };
-  const importCsv = async (f: File) => {
-    const text = (await f.text()).replace(/^﻿/, '');
-    const rows = text.split(/\r?\n/).filter((r) => r.trim());
-    if (!rows.length) return toast.error('Fichier vide');
-    const sep = rows[0]!.includes(';') ? ';' : rows[0]!.includes('\t') ? '\t' : ',';
-    const split = (r: string) => r.split(sep).map((c) => c.trim().replace(/^"|"$/g, ''));
-    const head = split(rows[0]!).map((h) => h.toLowerCase());
-    const hasHead = head.some((h) => h.startsWith('code'));
-    const codeAt = hasHead ? head.findIndex((h) => h.startsWith('code')) : 0;
-    const qtyAt = hasHead ? head.findIndex((h) => /compt|quant|qt/.test(h)) : 1;
+  /** Fiche Excel à remplir : un nombre de conditionnements principaux et d'unités par produit, à réimporter ensuite. */
+  const exportBlankXlsx = (model: SheetModel) => {
+    const withExpected = model === 'withStock' || model === 'control';
+    const filled = model === 'control' || model === 'counted';
+    saveXlsx(`${file}-fiche-a-remplir.xlsx`, {
+      name: `Comptage ${inv.number}`,
+      title: [`Inventaire n° ${inv.number} · ${inv.warehouse_name} · fiche de comptage à remplir puis à réimporter (bouton Importer)`],
+      columns: [
+        { header: 'Code', width: 14 },
+        { header: 'Produit', width: 32 },
+        { header: 'Rayon', width: 16 },
+        { header: 'Conditionnement', width: 18 },
+        ...(withExpected ? [{ header: 'Attendu (unités)', format: 'qty' as const }] : []),
+        { header: 'Compté (conditionnements)', width: 16, format: 'qty' as const },
+        { header: 'Compté (unités)', width: 14, format: 'qty' as const },
+      ],
+      rows: lines.map((l) => {
+        const pack = l.unit === 'piece' ? l.packs[0] : undefined;
+        const counted = filled && l.counted !== null ? l.counted / 1000 : null;
+        return [
+          l.code,
+          l.name,
+          l.department_name ?? '',
+          pack ? `${pack.name} de ${pack.units / 1000}` : '',
+          ...(withExpected ? [l.expected / 1000] : []),
+          null,
+          counted,
+        ];
+      }),
+    });
+  };
+  /** Lignes d'un CSV ou d'un classeur : colonne Code, puis Compté / Quantité, ou conditionnements + unités. */
+  const importRows = async (rows: string[][]) => {
+    const headAt = rows.findIndex((r) => r.some((c) => c.trim().toLowerCase().startsWith('code')));
+    const head = headAt >= 0 ? rows[headAt]!.map((h) => h.trim().toLowerCase()) : [];
+    const codeAt = headAt >= 0 ? head.findIndex((h) => h.startsWith('code')) : 0;
+    const packAt = head.findIndex((h) => /compt.*condition/.test(h));
+    const unitAt = head.findIndex((h) => /compt.*unit/.test(h));
+    const qtyAt = headAt < 0 ? 1 : unitAt >= 0 ? unitAt : head.findIndex((h) => /compt|quant|qt/.test(h));
     if (qtyAt < 0) return toast.error('Colonne « Compté » ou « Quantité » introuvable');
-    const parsed = (hasHead ? rows.slice(1) : rows)
-      .map(split)
-      .filter((c) => c[codeAt] && c[qtyAt] !== undefined && c[qtyAt] !== '')
-      .map((c) => ({ code: c[codeAt]!, qty: toNumber(c[qtyAt]!) }));
+    const byCode = new Map(lines.flatMap((l) => [[l.code, l] as const, ...l.barcodes.map((b) => [b, l] as const)]));
+    const parsed: { code: string; qty: number }[] = [];
+    for (const c of rows.slice(headAt + 1)) {
+      const code = c[codeAt]?.trim();
+      const units = c[qtyAt]?.trim() ?? '';
+      const packs = packAt >= 0 ? (c[packAt]?.trim() ?? '') : '';
+      if (!code || (units === '' && packs === '')) continue;
+      const line = byCode.get(code);
+      const per = line && line.unit === 'piece' && line.packs[0] ? line.packs[0].units / 1000 : 0;
+      const n = (units ? toNumber(units) : 0) + (packs ? toNumber(packs) * per : 0);
+      if (!Number.isFinite(n) || n < 0) return toast.error(`Quantité invalide pour le code ${code}`);
+      parsed.push({ code, qty: n });
+    }
     try {
       const r = await call('inventories.import', id, parsed);
       toast.ok(`${r.imported} quantités importées${r.unknown.length ? ` · codes inconnus : ${r.unknown.slice(0, 5).join(', ')}${r.unknown.length > 5 ? '…' : ''}` : ''}`);
       reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const importFile = async (f: File) => {
+    try {
+      if (/\.xlsx$/i.test(f.name)) return void (await importRows(await readXlsxRows(new Uint8Array(await f.arrayBuffer()))));
+      const text = (await f.text()).replace(/^\uFEFF/, '');
+      const raw = text.split(/\r?\n/).filter((r) => r.trim());
+      if (!raw.length) return toast.error('Fichier vide');
+      const sep = raw[0]!.includes(';') ? ';' : raw[0]!.includes('\t') ? '\t' : ',';
+      await importRows(raw.map((r) => r.split(sep).map((c) => c.trim().replace(/^"|"$/g, ''))));
     } catch (err) {
       toast.error(err);
     }
@@ -390,10 +442,10 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
       {inv.label && <p className="muted">{inv.label}</p>}
       <div className="inv-actions">
         <button onClick={onBack}>← Liste des inventaires</button>
-        <button onClick={() => call('inventories.printSheet', id).catch(toast.error)}>Fiche de comptage</button>
+        <button onClick={() => setSheetFormat(true)}>Fiche de comptage…</button>
         <button onClick={exportXlsx}>Exporter Excel</button>
         <button onClick={exportCsv}>Exporter CSV</button>
-        {open && <button onClick={() => fileRef.current?.click()}>Importer CSV</button>}
+        {open && <button onClick={() => fileRef.current?.click()}>Importer (Excel ou CSV)</button>}
         <button onClick={() => call('inventories.printResult', id).catch(toast.error)}>Imprimer le résultat</button>
         <span className="spacer" />
         {open && canManage && (
@@ -420,12 +472,12 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.txt"
+          accept=".csv,.txt,.xlsx"
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0];
             e.target.value = '';
-            if (f) void importCsv(f);
+            if (f) void importFile(f);
           }}
         />
       </div>
@@ -591,6 +643,20 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
           {open ? ' (provisoire)' : ''}
         </strong>
       </div>
+      {sheetFormat && (
+        <SheetFormatDialog
+          onClose={() => setSheetFormat(false)}
+          onChoose={async (model, output) => {
+            setSheetFormat(false);
+            if (output === 'excel') return exportBlankXlsx(model);
+            try {
+              await call('inventories.printSheet', id, { model, output });
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        />
+      )}
       {closing && (
         <CloseInventory
           inventory={inv}
@@ -660,6 +726,61 @@ function CloseInventory({ inventory: inv, lines, onClose, onDone }: { inventory:
           }}
         >
           Clôturer et corriger le stock
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+type SheetModel = 'blind' | 'withStock' | 'control' | 'counted';
+type SheetOutput = 'a4' | 'ticket' | 'pdf' | 'excel';
+const SHEET_MODELS: [SheetModel, string, string][] = [
+  ['blind', 'Modèle classique, sans stock', 'Comptage à l’aveugle : le compteur ne voit pas le stock'],
+  ['withStock', 'Modèle classique, avec stock', 'Le stock attendu est imprimé à côté des cases'],
+  ['control', 'Stock compté + stock attendu', 'Pour contrôler les écarts après le comptage'],
+  ['counted', 'Stock compté uniquement', 'Les quantités déjà saisies'],
+];
+const SHEET_OUTPUTS: [SheetOutput, string, string][] = [
+  ['a4', 'Imprimante A4 ou de listing', 'La fenêtre d’impression Windows permet de choisir l’imprimante'],
+  ['ticket', 'Imprimante de tickets (80 mm)', 'Sur l’imprimante de caisse réglée dans Administration'],
+  ['pdf', 'Enregistrer en PDF', 'Pour l’envoyer ou l’imprimer ailleurs'],
+  ['excel', 'Fichier Excel à remplir', 'À remplir sur un autre PC puis à réimporter avec « Importer »'],
+];
+
+/** Choix du modèle et de la sortie de la fiche de comptage, comme dans KONTROL. */
+function SheetFormatDialog({ onClose, onChoose }: { onClose: () => void; onChoose: (model: SheetModel, output: SheetOutput) => void }) {
+  const [model, setModel] = useState<SheetModel>('blind');
+  const [output, setOutput] = useState<SheetOutput>('a4');
+  return (
+    <Modal title="Choisir un format de la fiche de comptage" onClose={onClose}>
+      <h3>Modèle de document</h3>
+      <div className="radio-list">
+        {SHEET_MODELS.map(([k, label, hint]) => (
+          <label key={k}>
+            <input type="radio" name="model" checked={model === k} onChange={() => setModel(k)} />
+            <span>
+              {label}
+              <small>{hint}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+      <h3>Sortie</h3>
+      <div className="radio-list">
+        {SHEET_OUTPUTS.map(([k, label, hint]) => (
+          <label key={k}>
+            <input type="radio" name="output" checked={output === k} onChange={() => setOutput(k)} />
+            <span>
+              {label}
+              <small>{hint}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="actions">
+        <button onClick={onClose}>Fermer</button>
+        <button className="primary" onClick={() => onChoose(model, output)}>
+          OK
         </button>
       </div>
     </Modal>

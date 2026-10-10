@@ -45,6 +45,11 @@ import {
   type SupplierPaymentMethod,
   type CentralNature,
   type InventoryInput,
+  type InventorySheetModel,
+  type TransferInput,
+  type TransferStatus,
+  type StockRequestStatus,
+  type RebateRuleInput,
   type StoreOptions,
   type User,
 } from '@superette/db';
@@ -81,6 +86,7 @@ export interface Printer {
   taxAssessment(storeId: string, year: number): Promise<void>;
   notes(storeId: string, year: number): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
+  rebateVoucher(entryId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
@@ -88,9 +94,11 @@ export interface Printer {
   labels(html: string, format: LabelFormatId): Promise<boolean>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
   /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
-  inventorySheet(inventoryId: string): Promise<void>;
+  inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
   /** Résultat d'un inventaire : écarts valorisés, totaux et signatures. */
   inventoryResult(inventoryId: string): Promise<void>;
+  /** Bon de transfert A4 : bon de route (expédition) ou bon de réception. */
+  transferNote(transferId: string): Promise<void>;
 }
 
 /**
@@ -313,6 +321,32 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.stock.recordLoss(ctx(STOCK), input),
     'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
       s.stock.transfer(ctx(STOCK), input),
+    // --- Bons de transfert entre dépôts --------------------------------------------
+    'transfers.list': (status?: TransferStatus | null) => s.transfers.list(ctx(STOCK).storeId, { status }),
+    'transfers.get': (id: string) => (requireUser(STOCK), s.transfers.get(id)),
+    'transfers.create': (input: TransferInput) => s.transfers.create(ctx(STOCK), input),
+    'transfers.update': (id: string, input: TransferInput) => s.transfers.update(ctx(STOCK), id, input),
+    'transfers.ship': (id: string, routeNumber?: string | null) => s.transfers.ship(ctx(STOCK), id, routeNumber),
+    'transfers.receive': (id: string, input?: { receptionNumber?: string | null; lines?: { articleId: string; receivedQty: Milli }[] }) =>
+      s.transfers.receive(ctx(STOCK), id, input),
+    'transfers.cancel': (id: string) => s.transfers.cancel(ctx(STOCK), id),
+    'transfers.movements': (id: string) => (requireUser(STOCK), s.transfers.movements(id)),
+    'transfers.print': async (id: string) => {
+      requireUser(STOCK);
+      await printer.transferNote(id);
+      s.transfers.markPrinted(id);
+    },
+    // --- Monitoring de l'évolution du stock --------------------------------------
+    'monitoring.changes': (articleId: string, warehouseId: string | null, from: string, to: string) =>
+      s.monitoring.changes(ctx(STOCK).storeId, { articleId, warehouseId, from, to }),
+    'monitoring.requests': (opts?: { articleId?: string | null; status?: StockRequestStatus | null; from?: string | null; to?: string | null }) =>
+      s.monitoring.requests(ctx([...STOCK, ...INVENTORY]).storeId, opts),
+    // Le gérant corrige directement ; le magasinier fait une demande que le gérant valide.
+    'monitoring.request': (input: { articleId: string; warehouseId: string; newQty: Milli; reason: string }) => {
+      const c = ctx(INVENTORY);
+      return s.monitoring.request(c, input, can(user!, ['inventory']));
+    },
+    'monitoring.decide': (id: string, approve: boolean, note?: string | null) => s.monitoring.decide(ctx(['inventory']), id, approve, note ?? null),
     // --- Inventaires enregistrés -------------------------------------------------
     'inventories.list': () => s.inventories.list(ctx(INVENTORY).storeId),
     'inventories.get': (id: string) => (requireUser(INVENTORY), s.inventories.get(id)),
@@ -325,7 +359,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'inventories.import': (id: string, rows: { code: string; qty: number }[]) => s.inventories.importCounts(ctx(INVENTORY), id, rows),
     'inventories.close': (id: string) => s.inventories.close(ctx(['inventory']), id),
     'inventories.cancel': (id: string) => s.inventories.cancel(ctx(['inventory']), id),
-    'inventories.printSheet': (id: string) => (requireUser(INVENTORY), printer.inventorySheet(id)),
+    'inventories.printSheet': (id: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }) => (requireUser(INVENTORY), printer.inventorySheet(id, opts)),
     'inventories.printResult': (id: string) => (requireUser(INVENTORY), printer.inventoryResult(id)),
     'stock.inventory': (input: { warehouseId: string; counts: { articleId: string; counted: Milli; countedAt: string }[] }) =>
       s.stock.applyInventory(ctx(['inventory']), input),
@@ -607,6 +641,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
+
+    // --- Ristournes des clients spécifiques ------------------------------------
+    'rebates.rules': (customerId?: string | null) => (requireUser(CUSTOMERS), s.rebates.rules({ customerId: customerId ?? null })),
+    'rebates.allRules': () => (requireUser(CUSTOMERS), s.rebates.rules({ all: true })),
+    'rebates.saveRules': (customerId: string | null, rules: RebateRuleInput[]) => s.rebates.saveRules(ctx(['rebates']), customerId, rules),
+    'rebates.setCustomer': (customerId: string, opts: { enabled: boolean; delivered: boolean }) => s.rebates.setCustomer(ctx(['rebates']), customerId, opts),
+    'rebates.customers': () => (requireUser(CUSTOMERS), s.rebates.customers()),
+    'rebates.compute': (customerId: string, from: string, to: string) => s.rebates.compute(ctx(CUSTOMERS).storeId, customerId, from, to),
+    'rebates.state': (from: string, to: string) => s.rebates.state(ctx(CUSTOMERS).storeId, from, to),
+    'rebates.close': (from: string, to: string, customerIds?: string[] | null) => s.rebates.close(ctx(['rebates']), from, to, customerIds ?? undefined),
+    'rebates.adjust': (customerId: string, amount: Fcfa, reason: string) => s.rebates.adjust(ctx(['rebates']), customerId, amount, reason),
+    'rebates.grant': (customerId: string, amount: Fcfa, mode: 'credit' | 'cash') => {
+      const c = ctx(['rebates']);
+      if (mode === 'cash' && !can(user!, ['central_cash'])) throw new AppError("Payer en espèces demande le droit de la caisse centrale", 'FORBIDDEN');
+      return s.rebates.grant(c, customerId, amount, mode);
+    },
+    'rebates.entries': (opts?: { customerId?: string | null; from?: string | null; to?: string | null }) => s.rebates.entries(ctx(CUSTOMERS).storeId, opts ?? {}),
+    'rebates.carryForward': (date: string) => s.rebates.carryForward(ctx(CUSTOMERS).storeId, date),
+    'rebates.print': (entryId: string) => (requireUser(CUSTOMERS), printer.rebateVoucher(entryId)),
 
     // --- Devis et proformas ----------------------------------------------------
     'quotes.list': (opts?: { state?: QuoteState; customerId?: string; search?: string }) => s.quotes.list(ctx().storeId, opts),

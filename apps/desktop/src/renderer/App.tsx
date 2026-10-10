@@ -166,6 +166,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Stocks', open: ['stock', 'state'] },
       { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
+      { label: "Monitoring de l'évolution du stock", open: ['stock', 'monitoring'] },
       SEP,
       { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
       { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'] },
@@ -200,6 +201,12 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Règlements reçus', open: ['customers', 'payments'] },
       { label: 'Retours et avoirs clients', open: ['sales', 'returns'] },
+      SEP,
+      { label: 'Ristournes : état des ristournes', open: ['customers', 'rebates-state'] },
+      { label: 'Ristournes : reports à nouveau', open: ['customers', 'rebates-carry'] },
+      { label: 'Ristournes : réglage de base', open: ['customers', 'rebates-base'] },
+      { label: 'Ristournes : réglage des clients spécifiques', open: ['customers', 'rebates-clients'] },
+      { label: 'Ristournes : régularisations et bons', open: ['customers', 'rebates-entries'] },
     ],
   ],
   [
@@ -221,6 +228,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'État du stock', open: ['stock', 'state'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
+      { label: 'Monitoring du stock', open: ['stock', 'monitoring'] },
       { label: 'Pertes et casse', open: ['stock', 'loss'] },
       { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
       { label: 'Péremptions', open: ['stock', 'expiry'] },
@@ -310,7 +318,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // Sans tout le registre, le caissier garde « Mes factures » pour ses trois dernières.
   const canWin = (kind: WinKind) => can(WINDOWS[kind].perm) || (kind === 'sales' && (can('cash') || can('credit')));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
-  const [wins, setWins] = useState<Win[]>([{ kind: first, nonce: 0 }]);
+  // Le caissier et le vendeur arrivent sur leur fiche de facturation ; les autres sur la page d'accueil.
+  const [wins, setWins] = useState<Win[]>(() => (['cashier', 'seller'].includes(user.role) ? [{ kind: first, nonce: 0 }] : []));
   const [active, setActive] = useState<WinKind>(first);
   const [menu, setMenu] = useState<string | null>(null);
   const [chooseRegister, setChooseRegister] = useState(false);
@@ -354,8 +363,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const close = (kind: WinKind) => {
     const rest = wins.filter((w) => w.kind !== kind);
     setWins(rest);
+    // Sans fenêtre ouverte, la page d'accueil s'affiche.
     if (active === kind) setActive(rest[rest.length - 1]?.kind ?? first);
-    if (!rest.length) setWins([{ kind: first, nonce: 0 }]);
   };
 
   /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
@@ -444,6 +453,25 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </button>
       </nav>
       <main className="windows">
+        {!wins.length && (
+          <section className="home">
+            <div className="home-card">
+              <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
+              <h1>{state.station?.store.name}</h1>
+              {(state.station?.store.address || state.station?.store.phone) && (
+                <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
+              )}
+              <p className="home-sub">Superette Gestion · bonjour {user.name.split(' ')[0]}</p>
+              <div className="home-tiles">
+                {QUICK.filter((q) => q.open && canWin(q.open[0])).slice(0, 8).map((q) => (
+                  <button key={q.label} className={q.credit ? 'credit' : ''} onClick={() => open(...q.open!)}>
+                    {q.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
         {wins.map((w) => (
           <section key={`${w.kind}-${w.nonce}`} className="window" hidden={w.kind !== active}>
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
@@ -533,6 +561,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['F4 ou Entrée sur saisie vide', 'Valider la fiche (espèces si l’encaissé couvre le total)'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],
+                ['F10', 'Rappeler un ticket en attente'],
                 ['F2', 'Réimprimer le dernier ticket'],
                 ['F6', 'Remise sur la ligne sélectionnée'],
                 ['F7', 'Listing des factures'],

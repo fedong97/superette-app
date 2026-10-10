@@ -34,6 +34,8 @@ export const ACCOUNT_ROLES = {
   cash_over: 'Excédents de caisse',
   stock: 'Stock de marchandises',
   stock_variation: 'Variation des stocks',
+  rebates: 'Ristournes accordées',
+  rebates_due: 'Ristournes à accorder',
 } as const;
 export type AccountRole = keyof typeof ACCOUNT_ROLES;
 
@@ -149,6 +151,7 @@ export class AccountingService extends Base {
       ...this.cashEntries(storeId, r, opts),
       ...this.centralEntries(storeId, r, opts),
       ...this.customerPaymentEntries(storeId, r, opts),
+      ...this.rebateEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
       ...this.expenseEntries(storeId, r, opts),
@@ -256,6 +259,32 @@ export class AccountingService extends Base {
           ? [side(r.central_cash, sign * m.amount, m.label), side(r.transfer, -sign * m.amount, m.label), side(r.transfer, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)]
           : [side(r.central_cash, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)];
         return { journal: m.nature === 'bank' ? ('BQ' as const) : ('CA' as const), date: m.d, ref: m.number, label: m.label, source: 'auto' as const, lines };
+      });
+  }
+
+  /**
+   * Ristournes : acquise ou régularisée, charge (7019) contre ristourne à
+   * accorder (4198) ; accordée en avoir, 4198 contre le compte client (411) ;
+   * payée en espèces, 4198 contre la caisse centrale.
+   */
+  private rebateEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.number, e.kind, e.amount, e.label, date(e.at, 'localtime') AS d, c.code, c.name
+         FROM rebate_entries e JOIN customers c ON c.id = e.customer_id WHERE e.store_id = ? ORDER BY e.at`,
+      )
+      .all(storeId) as { number: string; kind: 'earned' | 'adjust' | 'credit' | 'cash'; amount: number; label: string; d: string; code: string; name: string }[];
+    return rows
+      .filter((e) => inRange(e.d, opts.from, opts.to) && e.amount !== 0)
+      .map((e) => {
+        const label = `${e.label} ${e.name}`;
+        const lines =
+          e.kind === 'earned' || e.kind === 'adjust'
+            ? [side(r.rebates, e.amount, label), side(r.rebates_due, -e.amount, label)]
+            : e.kind === 'credit'
+              ? [side(r.rebates_due, e.amount, label), side(r.customers, -e.amount, label, { code: e.code, name: e.name })]
+              : [side(r.rebates_due, e.amount, label), side(r.central_cash, -e.amount, label)];
+        return { journal: e.kind === 'cash' ? ('CA' as const) : ('OD' as const), date: e.d, ref: e.number, label, source: 'auto' as const, lines };
       });
   }
 

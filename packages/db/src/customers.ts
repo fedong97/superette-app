@@ -78,7 +78,7 @@ export interface CustomerAccount {
 
 export interface StatementLine {
   date: string;
-  kind: 'sale' | 'return' | 'payment';
+  kind: 'sale' | 'return' | 'payment' | 'rebate';
   ref_id: string;
   number: string;
   label: string;
@@ -215,9 +215,12 @@ export class CustomerService extends Base {
       .pluck()
       .get(storeId, customerId) as number;
     const paid = this.db
-      .prepare('SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE store_id = ? AND customer_id = ?')
+      .prepare(
+        `SELECT (SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE store_id = @s AND customer_id = @c)
+              + (SELECT COALESCE(SUM(amount), 0) FROM rebate_entries WHERE store_id = @s AND customer_id = @c AND kind = 'credit')`,
+      )
       .pluck()
-      .get(storeId, customerId) as number;
+      .get({ s: storeId, c: customerId }) as number;
     const total = debits.reduce((t, d) => t + d.amount, 0);
     const today = this.today();
     const openItems = allocateOldestFirst(debits, returned + paid)
@@ -280,6 +283,8 @@ export class CustomerService extends Base {
          GROUP BY s.id
          UNION ALL
          SELECT paid_at, 'payment', id, number, -amount FROM customer_payments WHERE store_id = @storeId AND customer_id = @customerId
+         UNION ALL
+         SELECT at, 'rebate', id, number, -amount FROM rebate_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'credit'
          ORDER BY 1, 4`,
       )
       .all({ storeId, customerId }) as { date: string; kind: StatementLine['kind']; ref_id: string; number: string; amount: number }[];
@@ -306,6 +311,8 @@ export class CustomerService extends Base {
           ? 'Vente à crédit'
           : r.kind === 'return'
             ? 'Retour de marchandise'
+            : r.kind === 'rebate'
+              ? 'Ristourne accordée en avoir'
             : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }

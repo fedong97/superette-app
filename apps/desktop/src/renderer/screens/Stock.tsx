@@ -3,6 +3,8 @@ import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType } from '@superette/core';
 import { type Result, call } from '../api';
 import { StockByWarehouse } from './Controls';
 import { Inventories } from './Inventories';
+import { Transfers } from './Transfers';
+import { Monitoring } from './Monitoring';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
@@ -10,7 +12,7 @@ import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty,
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves' | 'adjustments';
+type Tab = 'state' | 'critical' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
@@ -28,6 +30,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
     ['expiry', 'Péremptions'],
     ['moves', 'Mouvements'],
     ['adjustments', 'Ajustements'],
+    ['monitoring', 'Monitoring'],
   ];
   return (
     <div className="page">
@@ -39,11 +42,12 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'warehouses' && <StockByWarehouse />}
       {tab === 'receive' && <Reception />}
       {tab === 'loss' && <Loss />}
-      {tab === 'transfer' && <Transfer />}
+      {tab === 'transfer' && <Transfers />}
       {tab === 'inventory' && <Inventories user={user} />}
       {tab === 'expiry' && <Expiry />}
       {tab === 'moves' && <Moves />}
       {tab === 'adjustments' && <Moves adjustments />}
+      {tab === 'monitoring' && <Monitoring user={user} />}
     </div>
   );
 }
@@ -296,60 +300,6 @@ function Loss() {
       >
         Enregistrer la sortie
       </button>
-    </div>
-  );
-}
-
-function Transfer() {
-  const toast = useToast();
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [lines, setLines] = useState<{ article: Article; qty: string }[]>([]);
-  return (
-    <div>
-      <div className="grid2">
-        <WarehouseSelect label="Depuis" value={from} onChange={setFrom} />
-        <WarehouseSelect label="Vers" value={to} onChange={setTo} />
-      </div>
-      <ArticlePicker onPick={(a) => setLines([...lines, { article: a, qty: '1' }])} />
-      <table className="list">
-        <tbody>
-          {lines.map((l, i) => (
-            <tr key={i}>
-              <td>{l.article.name}</td>
-              <td>
-                <input className="qty" value={l.qty} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} />
-              </td>
-              <td>
-                <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
-                  ✕
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="actions">
-        <button
-          className="primary"
-          disabled={!lines.length || from === to}
-          onClick={async () => {
-            try {
-              await call('stock.transfer', {
-                fromWarehouseId: from,
-                toWarehouseId: to,
-                lines: lines.map((l) => ({ articleId: l.article.id, qty: parseQty(l.qty) ?? 0 })),
-              });
-              toast.ok('Transfert enregistré');
-              setLines([]);
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        >
-          Valider le transfert
-        </button>
-      </div>
     </div>
   );
 }

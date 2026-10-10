@@ -459,3 +459,119 @@ tr.inv-ok, .inv-legend .inv-ok { background: var(--ok-soft); }
 .inv-legend span { padding: 3px 10px; border: 1px solid var(--line); border-radius: 4px; }
 .inv-history { width: auto !important; min-width: 320px; }
 .inv-foot > strong { margin-left: auto; font-size: 16px; align-self: center; }
+
+/* --- 0.28.0 : plus de nuances, dans les verts de l'application --- */
+.window { background: linear-gradient(180deg, #e9f3f0 0, #f5f8f8 260px); }
+.page-head { background: linear-gradient(90deg, #0f5f58, #1b8a6b 55%, #57b083); color: #fff; border-radius: 10px; padding: 10px 16px; box-shadow: 0 2px 6px rgba(15, 95, 88, 0.25); }
+.page-head h1 { color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.15); }
+.page-head .muted, .page-head small { color: #dff5ec; }
+.page-head button:not(.primary) { background: rgba(255, 255, 255, 0.92); border-color: transparent; }
+.page-head button.primary { background: #fff; color: var(--brand); border-color: #fff; }
+.tabs { border-bottom: 2px solid #cfe5df; }
+.tabs button { border-radius: 6px 6px 0 0; color: #35534e; }
+.tabs button:hover:not(:disabled) { background: #e6f2ef; }
+.tabs button.active { background: #fff; border-bottom: 3px solid var(--brand); box-shadow: 0 -1px 0 #cfe5df inset; }
+button { background: linear-gradient(#ffffff, #f1f6f5); }
+button:hover:not(:disabled) { background: var(--brand-soft); }
+button.primary:hover:not(:disabled) { background: #0c625b; }
+button.ghost, button.link, .tabs button, .menubar .menu > button, .menu-drop button, .seg button, .suggest button { background: transparent; }
+table.list { overflow: hidden; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06); }
+table.list thead th { background: linear-gradient(#eaf4f1, #d9ebe6); color: #1f4f49; border-bottom: 1px solid #bcdcd3; }
+table.list tfoot th, table.list tfoot td { background: #eef6f3; }
+table.list > tbody > tr:nth-child(even):not(.inv-short):not(.inv-surplus):not(.inv-ok):not(.selected):not(.total):not(.mon-in):not(.mon-out) { background: #f5faf8; }
+table.list tr.clickable:hover { background: #d9efe9 !important; }
+.search, .inv-search, .picker input, .toolbar input, input.key { background: #fff7cc; border-color: #e3c84b; }
+.search:focus, .inv-search:focus, .picker input:focus, .toolbar input:focus, input.key:focus { background: #fff1a6; }
+.statusbar { background: linear-gradient(#e8f2ef, #d8e8e3); border-top-color: #b9d6cd; }
+.modal { box-shadow: 0 18px 48px rgba(16, 24, 40, 0.3); }
+.modal-head { margin: -18px -22px 14px; padding: 12px 22px; background: linear-gradient(90deg, #0f5f58, #1b8a6b 60%, #57b083); border-radius: 12px 12px 0 0; }
+.modal-head h2, .modal-head h3 { color: #fff; }
+.modal-head button { background: rgba(255, 255, 255, 0.9); border-color: transparent; }
+.kpis > div, .tre-foot > div { border-left: 4px solid var(--brand); background: linear-gradient(135deg, #ffffff, #eef7f4); }
+.kpis > div:nth-child(4n + 2), .tre-foot > div:nth-child(4n + 2) { border-left-color: #2563eb; background: linear-gradient(135deg, #ffffff, #eef3ff); }
+.kpis > div:nth-child(4n + 3), .tre-foot > div:nth-child(4n + 3) { border-left-color: #d97706; background: linear-gradient(135deg, #ffffff, #fff6e8); }
+.kpis > div:nth-child(4n + 4), .tre-foot > div:nth-child(4n + 4) { border-left-color: #7c3aed; background: linear-gradient(135deg, #ffffff, #f4efff); }
+.tre-bar, .tre-pane { box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06); }
+.tre-pane h3 { background: #e6f2ef; margin: -10px -10px 8px; padding: 7px 10px; border-radius: 10px 10px 0 0; }
+.quickbar button.active { border-top: 3px solid var(--brand); }
+/* Page d'accueil quand aucune fenêtre n'est ouverte */
+.home { height: 100%; display: grid; place-items: center; background: radial-gradient(circle at 20% 15%, #b7e4d3 0, transparent 45%), radial-gradient(circle at 85% 80%, #c9dcf5 0, transparent 50%), linear-gradient(135deg, #0f5f58, #1b8a6b 50%, #4e9fc4); }
+.home-card { background: rgba(255, 255, 255, 0.93); border-radius: 18px; padding: 34px 44px; text-align: center; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); min-width: 480px; }
+.home-mark { width: 84px; height: 84px; margin: 0 auto 12px; border-radius: 22px; display: grid; place-items: center; font-size: 46px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #0f766e, #57b083); box-shadow: 0 6px 16px rgba(15, 118, 110, 0.4); }
+.home-card h1 { font-size: 30px; color: #0f4f49; }
+.home-card p { margin: 6px 0 0; color: var(--muted); }
+.home-sub { font-weight: 600; color: #1b8a6b !important; }
+.home-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 22px; }
+.home-tiles button { padding: 14px 10px; font-weight: 600; background: linear-gradient(#ffffff, #e6f2ef); border-color: #bcdcd3; }
+.home-tiles button.credit { color: #b42318; }
+.modal-head button.ghost { background: transparent; color: #fff; font-size: 18px; }
+.modal-head button.ghost:hover { background: rgba(255, 255, 255, 0.2); }
+.card h3 { color: #0f5f58; }
+/* Fiche de facturation : solde du client, homonymes, tickets en attente */
+.fiche-head .solde { grid-row: 2; grid-column: 3 / span 3; display: flex; gap: 8px; align-items: center; }
+.solde-chip { padding: 4px 12px; border-radius: 4px; font-weight: 700; font-variant-numeric: tabular-nums; border: 1px solid; }
+.solde-chip.pos { background: #dcf5e6; color: #046c3c; border-color: #6cc596; }
+.solde-chip.neg { background: #fde3e1; color: #b42318; border-color: #f1a49c; }
+.solde-chip.zero { background: #eef1f6; color: #4b5565; border-color: #c9d1de; }
+.solde-chip small { font-weight: 500; }
+.fiche-head .namesake { grid-row: 3; grid-column: 3 / span 3; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.namesake button { padding: 2px 10px; font-size: 13px; border-radius: 4px; background: #fff7cc; border-color: #e3c84b; }
+.fiche-actions .held-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 5px; border-radius: 10px; background: #e11d1d; color: #fff; font-size: 12px; }
+.pick-list button:focus { outline: 2px solid var(--brand); background: var(--brand-soft); }
+.radio-list { display: flex; flex-direction: column; gap: 4px; }
+.radio-list label { display: flex; gap: 10px; align-items: flex-start; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.radio-list label:hover { background: var(--brand-soft); }
+.radio-list label:has(input:checked) { background: #e6f2ef; box-shadow: inset 3px 0 0 var(--brand); }
+.radio-list input { width: auto; margin-top: 3px; }
+.radio-list small { display: block; color: var(--muted); }
+/* Bon de transfert (fiche KONTROL « Détails du transfert de marchandises ») */
+.transfer-body { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 10px; }
+.transfer-main { background: var(--panel); border: 1px solid #bcdcd3; border-radius: 10px; padding: 12px 14px; }
+.transfer-head { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 14px; }
+.transfer-head input[readonly] { background: #eef3f8; }
+.transfer-head input.status-draft { color: var(--muted); }
+.transfer-head input.status-shipped { color: var(--warn); font-weight: 700; }
+.transfer-head input.status-received { color: var(--ok); font-weight: 700; }
+.transfer-head input.status-cancelled { color: var(--danger); font-weight: 700; }
+h3.section { margin: 10px 0 6px; padding-bottom: 3px; border-bottom: 1px solid #cfe5df; color: #0f5f58; font-size: 14px; }
+.transfer-wh { display: grid; grid-template-columns: 1fr 1fr 1.3fr auto; gap: 0 14px; align-items: end; }
+.transfer-wh > button { margin-bottom: 10px; }
+.transfer-add { margin-bottom: 8px; }
+.transfer-add .picker { margin: 0; }
+.transfer-add form.inline { gap: 12px; background: #fff7cc; border: 1px solid #e3c84b; border-radius: 8px; padding: 6px 10px; }
+.transfer-grid { max-height: calc(100vh - 470px); min-height: 200px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.transfer-grid table.list { border: 0; border-radius: 0; }
+.transfer-grid thead th { position: sticky; top: 0; z-index: 1; }
+.transfer-grid tfoot th { position: sticky; bottom: 0; background: #eef6f3; }
+.transfer-grid tr.gap-row td { background: #fde4ec; }
+.transfer-grid input.qty { width: 80px; text-align: right; padding: 3px 6px; }
+.transfer-actions { background: linear-gradient(#e6f2ef, #d4e9e3); border: 1px solid #bcdcd3; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.transfer-actions button { font-weight: 600; text-align: left; }
+.transfer-actions button.main { background: linear-gradient(#e8f6ee, #b8e0c7); border-color: #3f8f5b; padding: 12px 10px; }
+.transfer-actions button.close { margin-top: auto; color: #b91c1c; }
+.transfer-actions hr { border: none; border-top: 1px solid #bcdcd3; margin: 3px 0; width: 100%; }
+/* Monitoring de l'évolution du stock */
+.mon-head { display: grid; grid-template-columns: minmax(280px, 2fr) 160px 160px 200px auto; gap: 12px; align-items: end; margin-bottom: 12px; background: var(--panel); border: 1px solid #bcdcd3; border-radius: 10px; padding: 10px 14px; }
+.mon-head .field { margin-bottom: 0; }
+.mon-product { display: flex; flex-direction: column; gap: 4px; }
+.mon-product > span { font-size: 13px; color: var(--muted); }
+.mon-product .picker { margin: 0; }
+.mon-chosen { background: #f6e05e !important; border-color: #c9b015; font-weight: 700; text-align: left; }
+.mon-section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.mon-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.mon-title h3 { margin: 0; color: #0f5f58; }
+.mon-scroll { max-height: calc(100vh - 470px); min-height: 160px; overflow: auto; }
+.mon-scroll thead th { position: sticky; top: 0; }
+tr.mon-in td:nth-child(n) { background: #f2fbf6; }
+tr.mon-out td:nth-child(n) { background: #fff6f5; }
+
+/* Ristournes */
+.tag.info { background: #e3eefb; color: #1f5fa8; }
+.rebates .filters .field { margin: 0; }
+table.rebate-rules input.num { width: 110px; text-align: right; }
+table.rebate-rules select { min-width: 240px; }
+.rebate-clients { display: grid; grid-template-columns: minmax(460px, 1fr) 2fr; gap: 16px; align-items: start; }
+.rebate-clients .picker { position: relative; margin-bottom: 8px; }
+.rebate-clients .pick-list { position: absolute; z-index: 5; left: 0; right: 0; background: #fff; border: 1px solid var(--line, #d8e2dc); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+.rebate-clients .pick-list button { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; background: none; }
+.rebate-clients .pick-list button:hover { background: var(--brand-soft); }

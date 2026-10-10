@@ -16,4 +16,5 @@ export * from './packs';
 export * from './promotion';
 export * from './labels';
 export * from './xlsx';
+export * from './xlsxRead';
 export * from './permissions';

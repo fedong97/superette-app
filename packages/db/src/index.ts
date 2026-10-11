@@ -23,6 +23,8 @@ import { StockService } from './stock';
 import { InventoryService } from './inventories';
 import { TransferService } from './transfers';
 import { MonitoringService } from './monitoring';
+import { ProductionService } from './production';
+import { AttentionService } from './attention';
 import { RebateService } from './rebates';
 import { SyncService } from './sync';
 import { TreasuryService } from './treasury';
@@ -43,6 +45,8 @@ export * from './labels';
 export * from './inventories';
 export * from './transfers';
 export * from './monitoring';
+export * from './production';
+export * from './attention';
 export * from './rebates';
 export * from './promotions';
 export * from './purchases';
@@ -67,6 +71,8 @@ export interface Services {
   inventories: InventoryService;
   transfers: TransferService;
   monitoring: MonitoringService;
+  production: ProductionService;
+  attention: AttentionService;
   rebates: RebateService;
   customers: CustomerService;
   expenses: ExpenseService;
@@ -97,6 +103,7 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const inventories = new InventoryService(db, clock, stock);
   const transfers = new TransferService(db, clock, stock);
   const monitoring = new MonitoringService(db, clock, stock);
+  const production = new ProductionService(db, clock, stock);
   const customers = new CustomerService(db, clock);
   const expenses = new ExpenseService(db, clock);
   const charges = new ChargeService(db, clock);
@@ -117,8 +124,9 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const tax = new TaxService(db, clock, accounting, statements);
   const disclosures = new DisclosureService(db, clock);
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
+  const attention = new AttentionService(db, clock, stock, pos, purchases, customers, rebates);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, inventories, transfers, monitoring, customers, expenses, charges, controls, quotes, pos, treasury, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, sync };
+  return { db, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, expenses, charges, controls, quotes, pos, treasury, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, attention, sync };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

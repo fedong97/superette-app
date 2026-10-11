@@ -42,7 +42,7 @@ describe('monitoring du stock', () => {
       ['SALE', 15_000, -3_000, 12_000],
       ['INVENTORY_ADJUST', 12_000, -2_000, 10_000],
     ]);
-    expect(h.rows[1]!.reason).toBe('Correction n° 1 : Casier cassé non déclaré');
+    expect(h.rows[1]!.reason).toBe('Correction n° DLA11-1 : Casier cassé non déclaré');
 
     const direct = s.monitoring.request(admin, { articleId: biere, warehouseId: wh, newQty: 11_000, reason: 'Recomptage' }, true);
     expect(direct.status).toBe('approved');

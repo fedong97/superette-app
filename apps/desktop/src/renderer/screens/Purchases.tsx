@@ -2,7 +2,7 @@ import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
-import { PendingReceipts, PurchasesByProduct } from './Controls';
+import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 
@@ -999,7 +999,10 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
   const suppliers = useLoad(() => call('suppliers.list'));
   const [warehouseId, setWarehouseId] = useState('');
   const [edits, setEdits] = useState<Record<string, { qty: string; supplierId: string; on: boolean }>>({});
-  const rows = useMemo(
+  const [dept, setDept] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [outOnly, setOutOnly] = useState(false);
+  const all = useMemo(
     () =>
       (proposal.data ?? []).map((r) => {
         const e = edits[r.article_id];
@@ -1007,6 +1010,39 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
       }),
     [proposal.data, edits],
   );
+  // Filtres : rayon, fournisseur, ruptures seulement. Seules les lignes affichées et cochées sont commandées.
+  const rows = all.filter(
+    (r) => (!dept || r.department_id === dept) && (!supplierFilter || (supplierFilter === '-' ? !r.supplierId : r.supplierId === supplierFilter)) && (!outOnly || r.stock <= 0),
+  );
+  const departments = [...new Map(all.filter((r) => r.department_id).map((r) => [r.department_id!, r.department_name!])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const supplierName = (id: string) => (suppliers.data ?? []).find((f) => f.id === id)?.name ?? '';
+  const inPacks = (r: (typeof rows)[number]) => {
+    const q = parseQty(r.qtyText);
+    return q && r.packs.length ? describeInPacks(q, r.packs, r.unit_name || 'Pièce') : '';
+  };
+  const exportXlsx = () =>
+    saveXlsx(`proposition-de-commande-${today()}.xlsx`, {
+      name: 'Proposition de commande',
+      title: [`Proposition de commande du ${dateFr(today())} · ${cover} jours à couvrir`],
+      columns: [
+        { header: 'Code', width: 14 },
+        { header: 'Article', width: 32 },
+        { header: 'Rayon', width: 16 },
+        { header: 'Fournisseur', width: 22 },
+        { header: 'Stock', format: 'qty' },
+        { header: 'En commande', format: 'qty' },
+        { header: 'Ventes / jour', format: 'qty' },
+        { header: 'Point de commande', format: 'qty' },
+        { header: 'À commander', format: 'qty' },
+        { header: 'En conditionnements', width: 22 },
+        { header: 'PU HT', format: 'money' },
+        { header: 'Montant HT', format: 'money' },
+      ],
+      rows: chosen.map((r) => {
+        const q = parseQty(r.qtyText) ?? 0;
+        return [r.article_code, r.article_name, r.department_name ?? '', supplierName(r.supplierId), r.stock / 1000, r.on_order / 1000, r.avg_daily_sales / 1000, r.reorder_point / 1000, q / 1000, inPacks(r), r.unit_cost, Math.round((q * r.unit_cost) / 1000)];
+      }),
+    });
   const set = (id: string, patch: Partial<{ qty: string; supplierId: string; on: boolean }>) =>
     setEdits((e) => {
       const r = rows.find((x) => x.article_id === id)!;
@@ -1026,6 +1062,45 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
         </Field>
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} label="Livrer au dépôt" />
       </div>
+      <div className="filters">
+        <select value={dept} onChange={(e) => setDept(e.target.value)}>
+          <option value="">Tous les rayons</option>
+          {departments.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)}>
+          <option value="">Tous les fournisseurs</option>
+          <option value="-">Sans fournisseur</option>
+          {(suppliers.data ?? []).map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <label>
+          <input type="checkbox" checked={outOnly} onChange={(e) => setOutOnly(e.target.checked)} /> Ruptures seulement
+        </label>
+        <span className="muted">
+          {rows.length} article(s) sur {all.length}
+        </span>
+        <button style={{ marginLeft: 'auto' }} disabled={!chosen.length} onClick={exportXlsx}>
+          Exporter Excel
+        </button>
+        <button
+          disabled={!chosen.length}
+          onClick={() =>
+            call(
+              'purchases.printReorder',
+              chosen.map((r) => ({ articleId: r.article_id, supplierId: r.supplierId || null, qty: parseQty(r.qtyText) ?? 0, unitCost: r.unit_cost })),
+            ).catch(toast.error)
+          }
+        >
+          Imprimer
+        </button>
+      </div>
       {rows.length === 0 ? (
         <Empty>Rien à commander : tous les stocks couvrent le délai de livraison.</Empty>
       ) : (
@@ -1040,6 +1115,7 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
               <th className="r">Ventes / jour</th>
               <th className="r">Point de commande</th>
               <th>À commander</th>
+              <th>En conditionnements</th>
               <th className="r">PU HT</th>
               <th className="r">Montant HT</th>
             </tr>
@@ -1052,6 +1128,7 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
                 </td>
                 <td>
                   {r.article_name} <small className="muted">{r.article_code}</small>
+                  {r.department_name && <small className="muted block">{r.department_name}</small>}
                 </td>
                 <td>
                   <select value={r.supplierId} onChange={(e) => set(r.article_id, { supplierId: e.target.value, on: Boolean(e.target.value) })}>
@@ -1070,6 +1147,7 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
                 <td>
                   <input className="qty" value={r.qtyText} onChange={(e) => set(r.article_id, { qty: e.target.value })} />
                 </td>
+                <td className="muted">{inPacks(r)}</td>
                 <td className="r">{fcfa(r.unit_cost)}</td>
                 <td className="r">{fcfa(Math.round(((parseQty(r.qtyText) ?? 0) * r.unit_cost) / 1000))}</td>
               </tr>

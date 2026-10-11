@@ -82,6 +82,17 @@ export class Base {
       .run(name, value);
   }
 
+  /**
+   * Numéro de document propre à ce poste (« DLA11-4 ») : deux PC qui créent
+   * un document en même temps ne prennent jamais le même numéro. La suite
+   * reprend après les anciens numéros entiers du magasin.
+   */
+  protected docNumber(table: string, counter: string, storeId: string): string {
+    const last = this.db.prepare(`SELECT MAX(number) FROM ${table} WHERE store_id = ? AND typeof(number) = 'integer'`).pluck().get(storeId) as number | null;
+    if (last) this.raiseCounter(counter, last);
+    return `${this.stationPrefix()}-${this.nextCounter(counter)}`;
+  }
+
   protected nextCounter(name: string): number {
     const row = this.db
       .prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT(name) DO UPDATE SET value = value + 1 RETURNING value')

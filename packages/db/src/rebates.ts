@@ -142,15 +142,23 @@ export class RebateService extends Base {
       );
       const now = this.now();
       for (const r of rules) ins.run(newId(), customerId, r.familyId, r.rateBp, r.unitAmount, r.minQty, r.pickupFee, now, now);
-      if (customerId) this.db.prepare('UPDATE customers SET rebate_enabled = 1 WHERE id = ?').run(customerId);
+      if (customerId) {
+        this.db.prepare('UPDATE customers SET rebate_enabled = 1, updated_at = ? WHERE id = ?').run(now, customerId);
+        this.enqueue(null, 'customer', customerId, 'upsert', {});
+      }
       this.audit(ctx.userId, 'rebate.rules', 'customer', customerId ?? undefined, { rules: rules.length });
+      // Les clients sont communs aux magasins : leurs réglages aussi.
+      this.enqueue(null, 'rebate_rules', customerId ?? 'base', 'upsert', {});
       return this.rules({ customerId });
     });
   }
 
   /** Coche un client « à ristourne » et indique si la superette le livre (frais d'enlèvement déduits). */
   setCustomer(ctx: Context, customerId: string, opts: { enabled: boolean; delivered: boolean }): void {
-    this.db.prepare('UPDATE customers SET rebate_enabled = ?, rebate_delivered = ? WHERE id = ?').run(opts.enabled ? 1 : 0, opts.delivered ? 1 : 0, customerId);
+    this.db
+      .prepare('UPDATE customers SET rebate_enabled = ?, rebate_delivered = ?, updated_at = ? WHERE id = ?')
+      .run(opts.enabled ? 1 : 0, opts.delivered ? 1 : 0, this.now(), customerId);
+    this.enqueue(null, 'customer', customerId, 'upsert', {});
     this.audit(ctx.userId, 'rebate.customer', 'customer', customerId, opts);
   }
 

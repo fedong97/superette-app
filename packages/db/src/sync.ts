@@ -55,10 +55,20 @@ const TABLES: Record<string, string> = {
   charge_plan: 'charge_plans',
   role_rights: 'role_rights',
   central_cash_movement: 'central_cash_movements',
+  inventory_entry: 'inventory_entries',
+  rebate_entry: 'rebate_entries',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
-const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement']);
+const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement', 'inventory_entry', 'rebate_entry']);
+
+/** Ordre des statuts : une version plus ancienne reçue d'un autre PC ne fait jamais reculer un document. */
+const STATUS_RANK: Record<string, Record<string, number>> = {
+  transfers: { draft: 0, shipped: 1, received: 2, cancelled: 2 },
+  inventories: { open: 0, closed: 1, cancelled: 1 },
+  stock_requests: { pending: 0, approved: 1, rejected: 1 },
+  production_orders: { draft: 0, done: 1, cancelled: 1 },
+};
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
 const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> = {
@@ -198,6 +208,33 @@ export class SyncService extends Base {
             | undefined) ?? null
         );
       }
+      case 'inventory': {
+        const row = this.db.prepare('SELECT * FROM inventories WHERE id = ?').get(entityId) as Record<string, unknown> | undefined;
+        if (!row) return null;
+        return { ...row, lines: this.db.prepare('SELECT * FROM inventory_lines WHERE inventory_id = ?').all(entityId) };
+      }
+      case 'inventory_line':
+        return (this.db.prepare('SELECT * FROM inventory_lines WHERE id = ?').get(entityId) as Record<string, unknown> | undefined) ?? null;
+      case 'transfer': {
+        const row = this.db.prepare('SELECT * FROM transfers WHERE id = ?').get(entityId) as Record<string, unknown> | undefined;
+        if (!row) return null;
+        return { ...row, lines: this.db.prepare('SELECT * FROM transfer_lines WHERE transfer_id = ? ORDER BY position').all(entityId) };
+      }
+      case 'stock_request':
+        return (this.db.prepare('SELECT * FROM stock_requests WHERE id = ?').get(entityId) as Record<string, unknown> | undefined) ?? null;
+      case 'rebate_rules': {
+        const customerId = entityId === 'base' ? null : entityId;
+        const rules = this.db.prepare('SELECT * FROM rebate_rules WHERE customer_id IS ? ORDER BY created_at').all(customerId) as Record<string, unknown>[];
+        const updatedAt = (this.db.prepare('SELECT MAX(updated_at) FROM rebate_rules WHERE customer_id IS ?').pluck().get(customerId) as string | null) ?? this.now();
+        return { customer_id: customerId, updated_at: updatedAt, rules };
+      }
+      case 'recipe': {
+        const row = this.db.prepare('SELECT * FROM recipes WHERE id = ?').get(entityId) as Record<string, unknown> | undefined;
+        if (!row) return null;
+        return { ...row, lines: this.db.prepare('SELECT * FROM recipe_lines WHERE recipe_id = ? ORDER BY position').all(entityId) };
+      }
+      case 'production_order':
+        return (this.db.prepare('SELECT * FROM production_orders WHERE id = ?').get(entityId) as Record<string, unknown> | undefined) ?? null;
       case 'sale': {
         const row = this.db.prepare('SELECT * FROM sales WHERE id = ?').get(entityId) as Record<string, unknown> | undefined;
         if (!row) return null;
@@ -287,6 +324,88 @@ export class SyncService extends Base {
     return { applied, conflicts };
   }
 
+  /** Le document local est-il plus avancé (expédié, clôturé…) que la version reçue ? */
+  private isAhead(table: string, id: string, remoteStatus: unknown): boolean {
+    const local = this.db.prepare(`SELECT status FROM ${table} WHERE id = ?`).pluck().get(id) as string | undefined;
+    if (local === undefined) return false;
+    const rank = STATUS_RANK[table]!;
+    return (rank[local] ?? 0) > (rank[String(remoteStatus)] ?? 0);
+  }
+
+  /**
+   * Inventaires, transferts, demandes de correction, ristournes et fabrication.
+   * Renvoie vrai si l'opération a été traitée ici.
+   */
+  private applyDocument(event: SyncEvent): boolean {
+    const p = event.payload;
+    switch (event.entity) {
+      case 'inventory': {
+        if (!p) return true;
+        if (this.isAhead('inventories', event.entityId, p['status'])) return true;
+        this.upsert('inventories', p);
+        // En cours : les lignes reçues ne remplacent pas les comptages faits ici. Clôturé ou annulé : la version reçue fait foi.
+        const final = p['status'] !== 'open';
+        for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) {
+          if (final) this.db.prepare('DELETE FROM inventory_lines WHERE inventory_id = ? AND article_id = ? AND id <> ?').run(event.entityId, line['article_id'], line['id']);
+          this.upsert('inventory_lines', line, ['id'], !final);
+        }
+        return true;
+      }
+      case 'inventory_line': {
+        if (event.op === 'delete' || !p) {
+          this.db.prepare('DELETE FROM inventory_lines WHERE id = ? AND counted IS NULL').run(event.entityId);
+          return true;
+        }
+        const status = this.db.prepare('SELECT status FROM inventories WHERE id = ?').pluck().get(p['inventory_id']) as string | undefined;
+        if (status && status !== 'open') return true;
+        // Le même produit compté sur deux PC : la saisie la plus récente l'emporte.
+        const local = this.db.prepare('SELECT counted_at FROM inventory_lines WHERE id = ?').pluck().get(event.entityId) as string | null | undefined;
+        if (local && p['counted_at'] && String(local) > String(p['counted_at'])) return true;
+        this.upsert('inventory_lines', p);
+        return true;
+      }
+      case 'transfer': {
+        if (!p) return true;
+        if (this.isAhead('transfers', event.entityId, p['status'])) return true;
+        this.upsert('transfers', p);
+        this.db.prepare('DELETE FROM transfer_lines WHERE transfer_id = ?').run(event.entityId);
+        for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert('transfer_lines', line);
+        return true;
+      }
+      case 'stock_request': {
+        if (!p) return true;
+        if (this.isAhead('stock_requests', event.entityId, p['status'])) return true;
+        this.upsert('stock_requests', p);
+        return true;
+      }
+      case 'production_order': {
+        if (!p) return true;
+        if (this.isAhead('production_orders', event.entityId, p['status'])) return true;
+        this.upsert('production_orders', p);
+        return true;
+      }
+      case 'rebate_rules': {
+        if (!p) return true;
+        const customerId = (p['customer_id'] as string | null) ?? null;
+        const local = this.db.prepare('SELECT MAX(updated_at) FROM rebate_rules WHERE customer_id IS ?').pluck().get(customerId) as string | null;
+        if (local && local > String(p['updated_at'])) return true;
+        this.db.prepare('DELETE FROM rebate_rules WHERE customer_id IS ?').run(customerId);
+        for (const r of (p['rules'] as Record<string, unknown>[]) ?? []) this.upsert('rebate_rules', r);
+        return true;
+      }
+      case 'recipe': {
+        if (event.op === 'delete' || !p) return true;
+        if (this.keepsLocal('recipes', event.entityId, p)) return true;
+        this.upsert('recipes', p);
+        this.db.prepare('DELETE FROM recipe_lines WHERE recipe_id = ?').run(event.entityId);
+        for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert('recipe_lines', line);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
   private applyOne(event: SyncEvent, stock: Map<string, [string, string]>, lots: Set<string>): void {
     const p = event.payload;
     if (event.entity === 'store_price') {
@@ -298,6 +417,7 @@ export class SyncService extends Base {
       }
       return;
     }
+    if (this.applyDocument(event)) return;
     const doc = WITH_LINES[event.entity];
     if (doc && (event.op === 'delete' || !p)) {
       this.db.prepare(`DELETE FROM ${doc.table} WHERE id = ?`).run(event.entityId);

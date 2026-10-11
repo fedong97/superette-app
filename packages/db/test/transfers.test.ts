@@ -31,7 +31,7 @@ const qtyIn = (wh: string, article: string) => s.stock.list(ctx.storeId, { wareh
 describe('bons de transfert', () => {
   it('brouillon, expédition, réception partielle avec écart et lots conservés', () => {
     const t = s.transfers.create(ctx, { fromWarehouseId: reserve, toWarehouseId: shop, lines: [{ articleId: lait, qty: 12_000 }] });
-    expect(t).toMatchObject({ number: 1, status: 'draft', from_name: 'Réserve', to_name: 'Surface de vente', line_count: 1, value: 32_400 });
+    expect(t).toMatchObject({ number: 'DLA11-1', status: 'draft', from_name: 'Réserve', to_name: 'Surface de vente', line_count: 1, value: 32_400 });
     s.transfers.update(ctx, t.id, { fromWarehouseId: reserve, toWarehouseId: shop, lines: [{ articleId: lait, qty: 12_000 }, { articleId: riz, qty: 4_000, packPosition: 0 }] });
     expect(qtyIn(reserve, lait)).toBe(24_000);
 

@@ -81,6 +81,8 @@ export const MOVEMENT_TYPES = {
   INTERNAL_USE: 'Consommation interne',
   INVENTORY_ADJUST: "Écart d'inventaire",
   REGULARIZATION: 'Régularisation (vendu sans stock)',
+  PRODUCTION_OUT: 'Consommé en fabrication',
+  PRODUCTION_IN: 'Produit fabriqué',
 } as const;
 
 export type MovementType = keyof typeof MOVEMENT_TYPES;

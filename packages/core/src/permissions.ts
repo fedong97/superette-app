@@ -51,6 +51,7 @@ export const PERMISSIONS = {
   receivables: { label: 'Comptes clients : échéances et plafonds', group: 'Gestion', roles: ACCOUNTING },
   rebates: { label: 'Ristournes : réglages, constater, accorder et régulariser', group: 'Gestion', roles: MANAGE },
   inventory: { label: 'Inventaires : créer, clôturer (corrige le stock) et annuler', group: 'Gestion', roles: MANAGE },
+  production: { label: 'Fabrication : recettes et ordres de fabrication', group: 'Gestion', roles: ['manager', 'stock'] },
   inventory_count: { label: 'Inventaires : compter (saisir les quantités)', group: 'Gestion', roles: ['manager', 'stock'] },
   import: { label: 'Importer le catalogue (CSV)', group: 'Gestion', roles: MANAGE },
   store_price: { label: 'Prix propre au magasin', group: 'Gestion', roles: MANAGE },

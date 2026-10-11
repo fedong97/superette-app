@@ -92,7 +92,7 @@ export class StockService extends Base {
     const current = this.db
       .prepare('SELECT qty, avg_cost FROM stock WHERE article_id = ? AND warehouse_id = ?')
       .get(m.articleId, m.warehouseId) as { qty: number; avg_cost: number };
-    const valuedEntry = m.qty > 0 && m.unitCost !== undefined && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN');
+    const valuedEntry = m.qty > 0 && m.unitCost !== undefined && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN' || m.type === 'PRODUCTION_IN');
     const avgCost = valuedEntry ? weightedAverageCost(current.qty, current.avg_cost, m.qty, m.unitCost!) : current.avg_cost;
     const unitCost = m.qty > 0 && m.unitCost !== undefined ? m.unitCost : current.avg_cost;
     this.db
@@ -124,7 +124,7 @@ export class StockService extends Base {
   }
 
   /** Crée un lot ; sa quantité est ensuite tenue par les mouvements qui le citent. */
-  private insertLot(
+  insertLot(
     ctx: Context,
     lot: { id: string; articleId: string; warehouseId: string; lotNumber?: string | null; expiry?: string | null; qty: Milli; receivedAt?: string },
   ): void {
@@ -158,7 +158,7 @@ export class StockService extends Base {
     let qty = 0;
     let avg = 0;
     for (const m of moves) {
-      if (m.qty > 0 && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN')) avg = weightedAverageCost(qty, avg, m.qty, m.unit_cost);
+      if (m.qty > 0 && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN' || m.type === 'PRODUCTION_IN')) avg = weightedAverageCost(qty, avg, m.qty, m.unit_cost);
       qty += m.qty;
     }
     this.db
@@ -196,7 +196,7 @@ export class StockService extends Base {
         qty = 0;
         avg = 0;
       }
-      if (m.qty > 0 && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN')) avg = weightedAverageCost(qty, avg, m.qty, m.unit_cost);
+      if (m.qty > 0 && (m.type === 'RECEPTION' || m.type === 'TRANSFER_IN' || m.type === 'PRODUCTION_IN')) avg = weightedAverageCost(qty, avg, m.qty, m.unit_cost);
       qty += m.qty;
     }
     if (key) flush();

@@ -453,7 +453,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
   );
 }
 
-function TransferMoves({ id, number, onClose }: { id: string; number: number; onClose: () => void }) {
+function TransferMoves({ id, number, onClose }: { id: string; number: string | number; onClose: () => void }) {
   const moves = useLoad(() => call('transfers.movements', id), [id]);
   return (
     <Modal title={`Mouvements des marchandises · transfert n° ${number}`} onClose={onClose} wide>

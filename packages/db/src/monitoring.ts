@@ -21,7 +21,8 @@ export type StockRequestStatus = 'pending' | 'approved' | 'rejected';
 
 export interface StockRequest {
   id: string;
-  number: number;
+  /** « DLA11-4 » (ancien format : entier). */
+  number: string | number;
   warehouse_id: string;
   warehouse_name: string;
   article_id: string;
@@ -108,16 +109,15 @@ export class MonitoringService extends Base {
     const before = (this.db.prepare('SELECT qty FROM stock WHERE article_id = ? AND warehouse_id = ?').pluck().get(input.articleId, input.warehouseId) as number | undefined) ?? 0;
     if (before === input.newQty) throw new AppError('Le stock est déjà à cette quantité', 'INVALID');
     return this.tx(() => {
-      const last = this.db.prepare('SELECT MAX(number) FROM stock_requests WHERE store_id = ?').pluck().get(ctx.storeId) as number | null;
-      if (last) this.raiseCounter(`stock_request:${ctx.storeId}`, last);
       const id = newId();
       this.db
         .prepare(
           `INSERT INTO stock_requests (id, number, store_id, warehouse_id, article_id, before_qty, requested_qty, reason, requested_at, requested_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, this.nextCounter(`stock_request:${ctx.storeId}`), ctx.storeId, input.warehouseId, input.articleId, before, input.newQty, input.reason.trim(), this.now(), ctx.userId);
+        .run(id, this.docNumber('stock_requests', `stock_request:${ctx.storeId}`, ctx.storeId), ctx.storeId, input.warehouseId, input.articleId, before, input.newQty, input.reason.trim(), this.now(), ctx.userId);
       this.audit(ctx.userId, 'stock.request', 'article', input.articleId, { before, requested: input.newQty });
+      this.enqueue(ctx, 'stock_request', id, 'upsert', {});
       return approveNow ? this.decide(ctx, id, true, null) : this.getRequest(id);
     });
   }
@@ -141,6 +141,7 @@ export class MonitoringService extends Base {
         .prepare('UPDATE stock_requests SET status = ?, decided_at = ?, decided_by = ?, decision_note = ?, applied_delta = ? WHERE id = ?')
         .run(approve ? 'approved' : 'rejected', this.now(), ctx.userId, note?.trim() || null, approve ? r.delta : null, id);
       this.audit(ctx.userId, approve ? 'stock.request.approve' : 'stock.request.reject', 'article', r.article_id, { id });
+      this.enqueue(ctx, 'stock_request', id, 'upsert', {});
       return this.getRequest(id);
     });
   }

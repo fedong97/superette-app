@@ -1128,4 +1128,53 @@ UPDATE accounts SET role = 'rebates_due' WHERE id = '4198' AND role IS NULL AND 
 UPDATE accounts SET role = 'rebates' WHERE id = '7019' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'rebates');
 `,
   },
+  {
+    version: 22,
+    name: 'fabrication : recettes et ordres de fabrication',
+    sql: `
+-- Recette : un produit fini fait de composants, pour un lot de « yield_qty » unités.
+CREATE TABLE recipes (
+  id TEXT PRIMARY KEY,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  yield_qty INTEGER NOT NULL CHECK (yield_qty > 0),
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX recipes_article ON recipes(article_id);
+CREATE TABLE recipe_lines (
+  id TEXT PRIMARY KEY,
+  recipe_id TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  qty INTEGER NOT NULL CHECK (qty > 0)
+);
+CREATE INDEX recipe_lines_recipe ON recipe_lines(recipe_id, position);
+-- Ordre de fabrication : brouillon, puis fabriqué (composants sortis, produit entré au coût de revient).
+CREATE TABLE production_orders (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  recipe_id TEXT NOT NULL REFERENCES recipes(id),
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  qty INTEGER NOT NULL CHECK (qty > 0),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'done', 'cancelled')),
+  label TEXT,
+  expiry TEXT,
+  -- Composants à la création (prévus), puis réellement sortis avec leur coût : [{article_id, qty, unit_cost}].
+  components TEXT NOT NULL,
+  unit_cost INTEGER,
+  total_cost INTEGER,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  done_at TEXT,
+  done_by TEXT REFERENCES users(id),
+  cancelled_at TEXT,
+  cancelled_by TEXT REFERENCES users(id)
+);
+CREATE INDEX production_orders_store ON production_orders(store_id, created_at);
+`,
+  },
 ];

@@ -5,11 +5,12 @@ import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
-import { Dashboard } from './screens/Dashboard';
+import { Dashboard, type DashboardTab } from './screens/Dashboard';
 import { Expenses, type ExpensesTab } from './screens/Expenses';
 import { Login } from './screens/Login';
 import { Pos, RegisterChooser } from './screens/Pos';
 import { Labels } from './screens/Labels';
+import { Production, type ProductionTab } from './screens/Production';
 import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
 import { Quotes } from './screens/Quotes';
@@ -26,7 +27,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'treasury' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'treasury' | 'dashboard' | 'admin' | 'production';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -55,6 +56,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission }> = {
   treasury: { label: 'Opérations de trésorerie', perm: 'treasury' },
   dashboard: { label: 'Tableau de bord', perm: 'dashboard' },
   admin: { label: 'Administration', perm: 'admin' },
+  production: { label: 'Fabrication', perm: 'production' },
 };
 
 interface MenuItem {
@@ -107,7 +109,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       { label: 'Situation des ventes', open: ['reports', 'department'], perm: 'reports' },
       { label: 'Évolution périodique', open: ['reports', 'evolution'], perm: 'reports' },
-      { label: 'Tableau de bord', open: ['dashboard'] },
+      { label: 'Tableau de bord', open: ['dashboard', 'day'] },
+      { label: "Points d'attention", open: ['dashboard', 'attention'] },
     ],
   ],
   [
@@ -129,7 +132,14 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_invoices' },
     ],
   ],
-  ['Fabrication', [{ label: 'Recettes et ordres de fabrication', soon: true }]],
+  [
+    'Fabrication',
+    [
+      { label: 'Nouvel ordre de fabrication', open: ['production', 'new'] },
+      { label: 'Ordres de fabrication', open: ['production', 'orders'] },
+      { label: 'Recettes (produits fabriqués)', open: ['production', 'recipes'] },
+    ],
+  ],
   [
     'Trésorerie',
     [
@@ -279,7 +289,8 @@ const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?
   { label: 'Dépenses', open: ['expenses', 'list'] },
   { label: 'Achats', open: ['purchases', 'orders'] },
   { label: 'Trésorerie', open: ['treasury', 'day'] },
-  { label: 'TABORD', open: ['dashboard'] },
+  { label: 'TABORD', open: ['dashboard', 'day'] },
+  { label: 'Attention', open: ['dashboard', 'attention'] },
 ];
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -497,6 +508,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
             {w.kind === 'suppliers' && <Suppliers user={user} initialTab={w.tab as SuppliersTab | undefined} />}
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
+            {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
@@ -504,7 +516,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
-            {w.kind === 'dashboard' && <Dashboard />}
+            {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>
         ))}

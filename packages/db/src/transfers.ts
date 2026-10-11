@@ -8,7 +8,8 @@ export const TRANSFER_STATUS: Record<TransferStatus, string> = { draft: 'Brouill
 
 export interface Transfer {
   id: string;
-  number: number;
+  /** « DLA11-4 » (ancien format : entier). */
+  number: string | number;
   store_id: string;
   from_warehouse_id: string;
   to_warehouse_id: string;
@@ -84,7 +85,7 @@ export class TransferService extends Base {
          JOIN warehouses wf ON wf.id = t.from_warehouse_id JOIN warehouses wt ON wt.id = t.to_warehouse_id
          JOIN users uc ON uc.id = t.created_by LEFT JOIN users us ON us.id = t.shipped_by LEFT JOIN users ur ON ur.id = t.received_by
          WHERE t.store_id = @storeId AND (@status IS NULL OR t.status = @status) AND (@id IS NULL OR t.id = @id)
-         ORDER BY t.number DESC`,
+         ORDER BY t.created_at DESC`,
       )
       .all({ storeId, status: opts.status ?? null, id: opts.id ?? null }) as Transfer[];
   }
@@ -144,17 +145,16 @@ export class TransferService extends Base {
   create(ctx: Context, input: TransferInput): Transfer {
     this.check(input);
     return this.tx(() => {
-      const last = this.db.prepare('SELECT MAX(number) FROM transfers WHERE store_id = ?').pluck().get(ctx.storeId) as number | null;
-      if (last) this.raiseCounter(`transfer:${ctx.storeId}`, last);
       const id = newId();
       this.db
         .prepare(
           `INSERT INTO transfers (id, number, store_id, from_warehouse_id, to_warehouse_id, label, route_number, created_at, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, this.nextCounter(`transfer:${ctx.storeId}`), ctx.storeId, input.fromWarehouseId, input.toWarehouseId, input.label?.trim() || null, input.routeNumber?.trim() || null, this.now(), ctx.userId);
+        .run(id, this.docNumber('transfers', `transfer:${ctx.storeId}`, ctx.storeId), ctx.storeId, input.fromWarehouseId, input.toWarehouseId, input.label?.trim() || null, input.routeNumber?.trim() || null, this.now(), ctx.userId);
       this.writeLines(id, input.lines);
       this.audit(ctx.userId, 'transfer.create', 'transfer', id, { lines: input.lines.length });
+      this.enqueue(ctx, 'transfer', id, 'upsert', {});
       return this.header(id);
     });
   }
@@ -168,6 +168,7 @@ export class TransferService extends Base {
         .run(input.fromWarehouseId, input.toWarehouseId, input.label?.trim() || null, input.routeNumber?.trim() || null, id);
       this.writeLines(id, input.lines);
       this.audit(ctx.userId, 'transfer.update', 'transfer', id, { lines: input.lines.length });
+      this.enqueue(ctx, 'transfer', id, 'upsert', {});
       return this.header(id);
     });
   }
@@ -187,6 +188,7 @@ export class TransferService extends Base {
         .prepare("UPDATE transfers SET status = 'shipped', shipped_at = ?, shipped_by = ?, route_number = COALESCE(?, route_number) WHERE id = ?")
         .run(this.now(), ctx.userId, routeNumber?.trim() || null, id);
       this.audit(ctx.userId, 'transfer.ship', 'transfer', id);
+      this.enqueue(ctx, 'transfer', id, 'upsert', {});
       return this.header(id);
     });
   }
@@ -216,6 +218,7 @@ export class TransferService extends Base {
         .prepare("UPDATE transfers SET status = 'received', received_at = ?, received_by = ?, reception_number = ? WHERE id = ?")
         .run(this.now(), ctx.userId, input.receptionNumber?.trim() || null, id);
       this.audit(ctx.userId, 'transfer.receive', 'transfer', id);
+      this.enqueue(ctx, 'transfer', id, 'upsert', {});
       return this.header(id);
     });
   }
@@ -244,12 +247,15 @@ export class TransferService extends Base {
       }
       this.db.prepare("UPDATE transfers SET status = 'cancelled', cancelled_at = ?, cancelled_by = ? WHERE id = ?").run(this.now(), ctx.userId, id);
       this.audit(ctx.userId, 'transfer.cancel', 'transfer', id);
+      this.enqueue(ctx, 'transfer', id, 'upsert', {});
       return this.header(id);
     });
   }
 
   markPrinted(id: string): void {
     this.db.prepare('UPDATE transfers SET printed_at = ? WHERE id = ?').run(this.now(), id);
+    const storeId = this.db.prepare('SELECT store_id FROM transfers WHERE id = ?').pluck().get(id) as string | undefined;
+    if (storeId) this.enqueue({ storeId, registerId: null }, 'transfer', id, 'upsert', {});
   }
 
   /** Mouvements de stock du transfert (sorties, entrées, retours). */

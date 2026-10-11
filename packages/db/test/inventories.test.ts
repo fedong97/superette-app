@@ -36,7 +36,7 @@ const qtyOf = (article: string) => s.stock.list(ctx.storeId, { warehouseId: wh }
 describe('inventaires enregistrés', () => {
   it('inventaire global : liste complète, ventes pendant le comptage, non comptés à zéro', () => {
     const inv = s.inventories.create(ctx, { warehouseId: wh, kind: 'global' });
-    expect(inv).toMatchObject({ number: 1, status: 'open', kind: 'global', line_count: 3, counted_count: 0 });
+    expect(inv).toMatchObject({ number: 'DLA11-1', status: 'open', kind: 'global', line_count: 3, counted_count: 0 });
     expect(line(inv.id, A.riz!)).toMatchObject({ opening_qty: 10_000, expected: 10_000, counted: null });
 
     now = new Date('2026-10-09T10:00:00Z');
@@ -58,7 +58,7 @@ describe('inventaires enregistrés', () => {
     expect(qtyOf(A.sucre!)).toBe(0); // non compté dans un inventaire global
     expect(() => s.inventories.setCount(ctx, inv.id, A.riz!, 1_000)).toThrow(/clôturé/);
     const moves = s.db.prepare("SELECT reason FROM stock_movements WHERE ref_type = 'inventory'").pluck().all();
-    expect(moves).toContain('Inventaire n° 1');
+    expect(moves).toContain('Inventaire n° DLA11-1');
   });
 
   it('inventaire partiel : par rayon, ajout de produits, non comptés inchangés, import CSV', () => {

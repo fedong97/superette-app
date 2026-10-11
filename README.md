@@ -37,6 +37,11 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Fiche d'inventaire : stock à l'ouverture, mouvements de la période, stock attendu, compté, écart, CMUP, montant de l'écart et valeur comptée, en rose les déficitaires, en bleu les excédentaires, en vert les produits sans écart. Filtres, historique des saisies, export Excel et CSV, import d'un CSV de comptage, impression du résultat A4 avec signatures.
 - Date d'inventaire antidatée possible (31/12) : le stock est arrêté à la fin de ce jour. La clôture corrige le stock (mouvements « Inventaire n° X ») ; dans un inventaire global les produits non comptés passent à zéro après confirmation, dans un partiel ils ne changent pas. Droits séparés « compter » (magasinier) et « créer, clôturer, annuler » (gérant).
 - Alertes de péremption (J-7, J-3, J-1, périmé), niveaux rupture/alerte/surstock.
+- Inventaires à plusieurs PC : chaque PC compte sa partie et voit les comptages des autres ; pour un même produit, la saisie la plus récente l'emporte. Transferts, demandes de correction et leur validation passent aussi d'un PC à l'autre. Les numéros portent le code du poste (DLA11-4, DLA12-1) pour ne jamais se doubler.
+
+**Fabrication**
+- Recettes (menu Fabrication) : un produit fini fait de composants, pour un lot de N unités, avec le coût de revient estimé au CMUP actuel et la marge sur le prix de vente.
+- Ordres de fabrication (OF-…) : brouillon avec les composants nécessaires et le stock disponible, puis « Fabriquer » sort les composants du stock et entre le produit fini au coût de revient (somme des CMUP). Refus si un composant manque, sauf avec « Ignorer la gestion des stocks ». Bon de fabrication A4 avec signatures, liste des ordres, droit « Fabrication » pour le gérant et le magasinier. Recettes et ordres se synchronisent.
 
 **Fournisseurs et achats**
 - Fiches fournisseurs (NIU, délais de paiement et de livraison, franco), articles référencés avec référence fournisseur, prix négocié, colisage et fournisseur principal.
@@ -44,7 +49,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Réception libre sans commande toujours possible depuis le Stock ; chaque réception produit un bon de réception (BR-…).
 - Factures et avoirs fournisseurs (FF-…/AF-…) rapprochés des bons de réception, refus des doublons, échéance calculée sur le délai de paiement.
 - Règlements en espèces, virement, chèque, MTN Mobile Money ou Orange Money (référence obligatoire hors espèces), échéancier avec retards, solde dû par fournisseur.
-- Proposition de commande : ventes moyennes des 4 dernières semaines, délai de livraison, stock d'alerte et colisage ; un bon par fournisseur en un clic.
+- Proposition de commande : ventes moyennes des 4 dernières semaines, délai de livraison, stock d'alerte et colisage ; filtres par rayon, par fournisseur et « ruptures seulement », quantité en cartons et pièces, export Excel et impression A4 par fournisseur ; un bon par fournisseur en un clic.
 - Commandes, réceptions et factures se synchronisent entre les PC du magasin ; les fiches fournisseurs sont communes à tous les magasins.
 
 **Clients et vente à crédit**
@@ -130,6 +135,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 **Pilotage et administration**
 - Page d'accueil au nom du magasin avec les fenêtres les plus utilisées ; écrans en couleurs (bandeaux verts, lignes alternées, champs clés en jaune, tuiles de chiffres colorées).
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
+- Points d'attention (Vente › Points d'attention, ou l'onglet rapide « Attention ») : une tuile par point qui attend une action, ruptures et alertes de stock, écarts de caisse à justifier, transferts expédiés non reçus, demandes de correction, ristournes à constater ou à accorder, inventaires en cours, factures fournisseurs et clients en retard, ordres de fabrication. Chaque tuile ouvre la fenêtre qui la traite ; chaque utilisateur ne voit que les points de ses droits.
 - Export CSV des ventes.
 - Caisses attribuées aux utilisateurs : l'administrateur crée, renomme et désactive autant de caisses qu'il veut (Administration › Caisses) et attribue une caisse à chaque utilisateur (Administration › Utilisateurs). Le caissier ou le vendeur vend sur sa caisse depuis n'importe quel PC du magasin ; sans caisse attribuée il ne peut pas vendre. Le gérant et l'administrateur sans caisse choisissent la leur au moment de vendre (barre d'état ou Trésorerie). La numérotation des tickets et des Z reprend après les numéros reçus des autres PC. À la mise à jour, chaque caissier garde la caisse de sa dernière vente.
 - Magasins, caisses (code d'activation), dépôts, utilisateurs et rôles (administrateur, gérant, caissier, vendeur, responsable d'achat (appro), magasinier, comptable), paramètres, journal d'audit.
@@ -217,7 +223,7 @@ PORT=3000 \
 npm start -w @superette/server
 ```
 
-Les tables sont créées au premier démarrage. `ENROLLMENT_KEY` (12 caractères minimum) protège l'enrôlement du premier PC ; les PC suivants n'en ont pas besoin, le code d'activation de leur caisse suffit. Sur Internet, placez le serveur derrière un proxy HTTPS (Caddy, Nginx).
+Les tables sont créées au premier démarrage. À chaque nouvelle version qui synchronise de nouvelles données (0.29.0 : inventaires, transferts, demandes de correction, ristournes, fabrication), mettez à jour le serveur central avant les PC. `ENROLLMENT_KEY` (12 caractères minimum) protège l'enrôlement du premier PC ; les PC suivants n'en ont pas besoin, le code d'activation de leur caisse suffit. Sur Internet, placez le serveur derrière un proxy HTTPS (Caddy, Nginx).
 
 ## Données
 

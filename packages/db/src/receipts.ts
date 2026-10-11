@@ -3,10 +3,11 @@ import type { AdminService } from './admin';
 import { CUSTOMER_PAYMENT_METHODS, type CustomerService } from './customers';
 import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
 import type { Db } from './database';
-import type { PosService } from './pos';
+import type { CashJournalRow, PosService } from './pos';
 import type { TreasuryService } from './treasury';
 import type { InventoryService } from './inventories';
 import { REBATE_KINDS, type RebateService } from './rebates';
+import { EmoneyService } from './emoney';
 import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
@@ -109,15 +110,29 @@ export class ReceiptService extends Base {
     );
     if (z.session.closed_at) r.push({ t: 'text', text: `Clôture ${dateFr(z.session.closed_at)}` });
     if (z.declared) {
-      // Caisse électronique ou banque : encaissé, solde relevé et écart par moyen.
+      // Caisse électronique ou banque : départ, encaissé, sorties, solde relevé et écart par moyen.
       r.push({ t: 'rule' });
-      for (const l of z.declared) {
-        r.push(title(l.label), row('  Encaissé', l.expected));
+      const used = z.declared.filter((l) => l.opening || l.received || l.outflows || l.inflows || l.declared);
+      for (const l of used.length ? used : z.declared) {
+        r.push(title(l.label));
+        if (l.opening) r.push(row('  Solde de départ', l.opening));
+        r.push(row('  Encaissé', l.received));
+        if (l.inflows) r.push(row('  Transferts reçus', l.inflows));
+        if (l.outflows) r.push(row('  Sorties', -l.outflows));
+        if (l.opening || l.inflows || l.outflows) r.push(row('  Attendu', l.expected));
         if (l.declared !== null) r.push(row('  Relevé', l.declared), row('  Écart', l.declared - l.expected));
+        if (l.deposited) r.push(row('  Versé à la centrale', l.deposited));
+        if (l.left !== null && l.deposited) r.push(row('  Reste sur le compte', l.left));
       }
-      r.push({ t: 'rule' }, { ...row('Total encaissé', z.declared.reduce((t, l) => t + l.expected, 0)), bold: true });
+      r.push({ t: 'rule' }, { ...row('Total attendu', z.declared.reduce((t, l) => t + l.expected, 0)), bold: true });
       if (z.counted !== null) r.push(row('Total relevé', z.counted), { ...row('Écart', z.difference ?? 0), bold: true });
       if (z.session.gap_reason) r.push({ t: 'text', text: `Motif de l'écart : ${z.session.gap_reason}` });
+      const exits = z.emoneyJournal?.exits.filter((e) => !e.closing) ?? [];
+      if (exits.length) {
+        r.push({ t: 'rule' }, title('Sorties du compte'));
+        for (const e of exits) r.push(row(`${e.nature} ${e.label}`.slice(0, 40), e.amount), { t: 'row', left: `${e.method_label}${e.reference ? ` ${e.reference}` : ''}`, right: '', indent: 2 });
+      }
+      if (z.emoneyDeposit) r.push({ t: 'rule' }, { t: 'text', text: `Versement ${z.emoneyDeposit.number} vers ${z.emoneyDeposit.centralName}` });
       return r;
     }
     r.push(
@@ -143,6 +158,8 @@ export class ReceiptService extends Base {
     r.push(row('Remboursements', -z.cash.cashRefunds), row('Apports', z.cash.cashIn), row('Prélèvements', -z.cash.cashOut));
     if (z.cash.customerReceipts) r.push(row('Règlements clients', z.cash.customerReceipts));
     if (z.cash.expenses) r.push(row('Dépenses payées', -z.cash.expenses));
+    if (z.cash.otherIn) r.push(row('Autres entrées (Encaisser)', z.cash.otherIn));
+    if (z.cash.otherOut) r.push(row('Autres sorties (Décaisser)', -z.cash.otherOut));
     r.push({ ...row('Théorique', z.cash.expected), bold: true });
     if (z.counted !== null) r.push(row('Compté', z.counted), { ...row('Écart', z.difference ?? 0), bold: true });
     if (z.session.gap_reason) r.push({ t: 'text', text: `Motif de l'écart : ${z.session.gap_reason}` });
@@ -213,6 +230,55 @@ export class ReceiptService extends Base {
     return r;
   }
 
+  /**
+   * Bon d'un mouvement de caisse électronique : versement de la recette vers la
+   * centrale (tous les moyens du même bon), transfert, dépôt à la banque…
+   */
+  emoneyVoucher(movementId: string): Receipt {
+    const emoney = new EmoneyService(this.db, this.clock);
+    const m = emoney.get(movementId);
+    const out = m.direction === 'OUT' ? m : m.counterpart_id ? emoney.get(m.counterpart_id) : m;
+    const lines = this.db
+      .prepare("SELECT id FROM emoney_movements WHERE number = ? AND direction = ? ORDER BY method")
+      .pluck()
+      .all(out.number, out.direction)
+      .map((id) => emoney.get(id as string));
+    const title =
+      out.nature === 'deposit'
+        ? 'BON DE VERSEMENT ÉLECTRONIQUE'
+        : out.nature === 'register'
+          ? 'TRANSFERT ÉLECTRONIQUE'
+          : out.direction === 'IN'
+            ? 'ENTRÉE CAISSE ÉLECTRONIQUE'
+            : 'SORTIE CAISSE ÉLECTRONIQUE';
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: title, align: 'center', bold: true },
+      { t: 'text', text: out.number },
+      { t: 'text', text: [dateFr(out.at), out.user_name].filter(Boolean).join(' · ') },
+      { t: 'rule' },
+      { t: 'text', text: out.label, bold: true },
+      { t: 'text', text: out.other_name ? `De : ${out.register_name} · À : ${out.other_name}` : out.register_name },
+      { t: 'rule' },
+    ];
+    for (const l of lines) r.push({ t: 'row', left: PAYMENT_METHODS[l.method], right: money(l.amount) }, ...(l.reference ? [{ t: 'row' as const, left: `Réf. ${l.reference}`, right: '', indent: 2 }] : []));
+    if (lines.length > 1) r.push({ t: 'row', left: 'Total FCFA', right: money(lines.reduce((t, l) => t + l.amount, 0)), bold: true });
+    // Versement de clôture : solde relevé et reste laissé sur le compte du caissier.
+    if (out.nature === 'deposit' && out.session_id) {
+      const z = this.pos.zReport(out.session_id);
+      for (const l of z.declared ?? []) if (l.deposited) r.push({ t: 'row', left: `${l.label} : relevé ${money(l.declared ?? 0)}`, right: `reste ${money(l.left ?? 0)}` });
+    }
+    r.push(
+      { t: 'rule' },
+      { t: 'feed' },
+      { t: 'row', left: out.nature === 'deposit' ? 'Versé par' : 'Fait par', right: out.nature === 'deposit' || out.nature === 'register' ? 'Reçu par' : 'Le responsable' },
+      { t: 'feed' },
+      { t: 'feed' },
+      { t: 'row', left: '................', right: '................' },
+    );
+    return r;
+  }
+
   /** Reçu de règlement d'un client à crédit. */
   customerReceipt(paymentId: string): Receipt {
     const p = this.customers.getPayment(paymentId);
@@ -249,6 +315,9 @@ export class ReceiptService extends Base {
     if (e.period_from && e.period_to) r.push({ t: 'text', text: `Période du ${dayFr(e.period_from)} au ${dayFr(e.period_to)}` });
     r.push(
       { t: 'row', left: `${REBATE_KINDS[e.kind]} FCFA`, right: money(e.amount), bold: true, big: true },
+      ...(e.kind === 'cash' && e.method !== 'CASH'
+        ? [{ t: 'text' as const, text: `${PAYMENT_METHODS[e.method as 'MTN_MOMO'] ?? e.method}${e.reference ? ` · Réf. ${e.reference}` : ''}${e.register_name ? ` · ${e.register_name}` : ''}` }]
+        : []),
       { t: 'row', left: 'Reste de ristourne à accorder', right: money(left) },
       { t: 'rule' },
       { t: 'row', left: 'Le client', right: 'Le responsable' },
@@ -277,6 +346,40 @@ export class ReceiptService extends Base {
     r.push({ t: 'text', text: `${EXPENSE_PAYMENT_METHODS[e.method]}${e.reference ? ` ${e.reference}` : ''}` });
     if (e.authorized_by_name) r.push({ t: 'text', text: `Autorisé par ${e.authorized_by_name}` });
     r.push({ t: 'rule' }, { t: 'row', left: 'Le bénéficiaire', right: 'Le responsable' }, { t: 'feed' }, { t: 'feed' }, { t: 'feed' });
+    return r;
+  }
+
+  /**
+   * Reçu d'une entrée ou bon d'une sortie de caisse, tels que les montrent les
+   * Opérations de trésorerie (« Imprimer le reçu », bon de « Décaisser »).
+   */
+  deskTicket(input: { row: CashJournalRow; direction: 'IN' | 'OUT'; register: string; duplicate?: boolean; authorizedBy?: string | null }): Receipt {
+    const { row: x, direction } = input;
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: direction === 'IN' ? 'REÇU DE CAISSE' : 'BON DE SORTIE DE CAISSE', align: 'center', bold: true },
+      ...(input.duplicate ? [{ t: 'text' as const, text: 'DUPLICATA', align: 'center' as const, bold: true }] : []),
+      ...(x.number ? [{ t: 'text' as const, text: x.number }] : []),
+      { t: 'text', text: [dateFr(x.at), input.register, x.user_name].filter(Boolean).join(' · ') },
+      { t: 'rule' },
+      { t: 'text', text: x.nature },
+      // Le n° de pièce est déjà en tête : le motif seul.
+      { t: 'text', text: x.number && x.label.startsWith(x.number) ? x.label.slice(x.number.length).trim() || x.nature : x.label, bold: true },
+    ];
+    if (x.party) r.push({ t: 'text', text: `${direction === 'IN' ? 'Reçu de' : 'Bénéficiaire'} : ${x.party}` });
+    r.push(
+      { t: 'rule' },
+      { t: 'row', left: 'Montant FCFA', right: money(x.amount), bold: true, big: true },
+      { t: 'text', text: `${x.method_label ?? PAYMENT_METHODS.CASH}${x.reference ? ` · Réf. ${x.reference}` : ''}` },
+    );
+    if (input.authorizedBy) r.push({ t: 'text', text: `Autorisé par ${input.authorizedBy}` });
+    r.push(
+      { t: 'rule' },
+      { t: 'row', left: direction === 'IN' ? 'Le client' : 'Le bénéficiaire', right: 'Le caissier' },
+      { t: 'feed' },
+      { t: 'feed' },
+      { t: 'feed' },
+    );
     return r;
   }
 

@@ -33,10 +33,14 @@ export interface CashMovements {
   customerReceipts?: Fcfa;
   /** Dépenses payées avec les espèces du tiroir (transport, sacs…). */
   expenses?: Fcfa;
+  /** Autres entrées d'espèces (« Encaisser ») : fournisseur qui rembourse, collaborateur, recette diverse. */
+  otherIn?: Fcfa;
+  /** Autres sorties d'espèces (« Décaisser ») : fournisseur payé, avance ou salaire, client remboursé, autre. */
+  otherOut?: Fcfa;
 }
 
 export function expectedCash(m: CashMovements): Fcfa {
-  return m.openingFloat + m.cashSales - m.cashRefunds + m.cashIn - m.cashOut + (m.customerReceipts ?? 0) - (m.expenses ?? 0);
+  return m.openingFloat + m.cashSales - m.cashRefunds + m.cashIn - m.cashOut + (m.customerReceipts ?? 0) - (m.expenses ?? 0) + (m.otherIn ?? 0) - (m.otherOut ?? 0);
 }
 
 /** Écart de clôture : positif = excédent, négatif = manquant. */

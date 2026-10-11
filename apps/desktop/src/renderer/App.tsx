@@ -18,6 +18,7 @@ import { Quotes } from './screens/Quotes';
 import { Purchases, type PurchasesTab } from './screens/Purchases';
 import { SaleDetail, Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
+import { Staff, type StaffTab } from './screens/Staff';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
@@ -64,6 +65,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
+  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries'] },
 };
 
 interface MenuItem {
@@ -161,6 +163,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
       { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_history', badge: 'gaps' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
+      { label: 'Caisses électroniques (MoMo, OM) et centrale', open: ['treasury', 'emoney'], perm: 'central_cash' },
       SEP,
       { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
       { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },
@@ -245,6 +248,10 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Dépenses par catégorie', open: ['expenses', 'summary'], perm: 'expenses' },
       SEP,
       { label: 'Constats de charges', open: ['expenses', 'schedule'], perm: 'charge_plans' },
+      SEP,
+      { label: 'Collaborateurs (fiches, comptes tiers)', open: ['staff', 'list'] },
+      { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
+      { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
   ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_direct'] }]],
@@ -698,6 +705,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
+            {w.kind === 'staff' && <Staff user={user} initialTab={w.tab as StaffTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}

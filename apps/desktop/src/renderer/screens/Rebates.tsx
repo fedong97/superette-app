@@ -256,8 +256,13 @@ function StateDetail({ row, user, manage, from, to, onClose, onChanged }: { row:
 function GrantDialog({ user, customerId, customerName, due, onClose, onDone }: { user: User; customerId: string; customerName: string; due: number; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [amount, setAmount] = useState(String(due));
-  const [mode, setMode] = useState<'credit' | 'cash'>('credit');
+  const [mode, setMode] = useState<'credit' | 'cash' | 'MTN_MOMO' | 'ORANGE_MONEY'>('credit');
+  const [reference, setReference] = useState('');
+  const [registerId, setRegisterId] = useState('');
   const canCash = has(user, 'central_cash');
+  const emoney = useLoad(() => call('emoney.registers'), []);
+  const electronic = mode === 'MTN_MOMO' || mode === 'ORANGE_MONEY';
+  const chosen = registerId || emoney.data?.centralId || emoney.data?.registers[0]?.id || '';
   return (
     <Modal title={`Accorder la ristourne : ${customerName}`} onClose={onClose}>
       <form
@@ -266,8 +271,10 @@ function GrantDialog({ user, customerId, customerName, due, onClose, onDone }: {
           const n = parseAmount(amount);
           if (!n) return toast.error('Montant invalide');
           try {
-            const entry = await call('rebates.grant', customerId, n, mode);
-            toast.ok(mode === 'credit' ? 'Avoir porté sur le compte du client' : 'Ristourne payée depuis la caisse centrale');
+            const entry = electronic
+              ? await call('rebates.grant', customerId, n, 'cash', { method: mode, reference, registerId: chosen || null })
+              : await call('rebates.grant', customerId, n, mode as 'credit' | 'cash');
+            toast.ok(mode === 'credit' ? 'Avoir porté sur le compte du client' : electronic ? 'Ristourne payée depuis la caisse électronique' : 'Ristourne payée depuis la caisse centrale');
             await call('rebates.print', entry.id).catch(toast.error);
             onDone();
           } catch (err) {
@@ -285,7 +292,30 @@ function GrantDialog({ user, customerId, customerName, due, onClose, onDone }: {
           <label className={canCash ? '' : 'muted'}>
             <input type="radio" disabled={!canCash} checked={mode === 'cash'} onChange={() => setMode('cash')} /> En espèces, depuis la caisse centrale
           </label>
+          <label className={canCash ? '' : 'muted'}>
+            <input type="radio" disabled={!canCash} checked={mode === 'MTN_MOMO'} onChange={() => setMode('MTN_MOMO')} /> Par MTN MoMo, depuis une caisse électronique
+          </label>
+          <label className={canCash ? '' : 'muted'}>
+            <input type="radio" disabled={!canCash} checked={mode === 'ORANGE_MONEY'} onChange={() => setMode('ORANGE_MONEY')} /> Par Orange Money, depuis une caisse électronique
+          </label>
         </div>
+        {electronic && (
+          <>
+            <Field label="Payée depuis la caisse électronique" hint="La ristourne sort du solde de cette caisse électronique">
+              <select value={chosen} onChange={(e) => setRegisterId(e.target.value)}>
+                {(emoney.data?.registers ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                    {r.central ? ' (centrale)' : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Référence du transfert">
+              <input value={reference} onChange={(e) => setReference(e.target.value)} required />
+            </Field>
+          </>
+        )}
         <p className="muted">Un bon de ristourne s’imprime pour la signature du client.</p>
         <div className="actions">
           <button type="button" onClick={onClose}>
@@ -667,7 +697,7 @@ function Entries({ manage }: { manage: boolean }) {
                 <td className="nowrap">{dateTime(e.at)}</td>
                 <td>{e.customer_name}</td>
                 <td>
-                  <span className={`tag ${KIND_TAG[e.kind]}`}>{KIND[e.kind]}</span>
+                  <span className={`tag ${KIND_TAG[e.kind]}`}>{e.kind === 'cash' && e.method !== 'CASH' ? (e.method === 'MTN_MOMO' ? 'MTN MoMo' : 'Orange Money') : KIND[e.kind]}</span>
                 </td>
                 <td>{e.label}</td>
                 <td className={`r ${e.kind === 'credit' || e.kind === 'cash' || e.amount < 0 ? 'neg' : 'pos'}`}>

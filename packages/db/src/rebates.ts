@@ -1,5 +1,6 @@
-import { type Fcfa, type Milli, formatFcfa } from '@superette/core';
+import { type Fcfa, type Milli, PAYMENT_METHODS, formatFcfa } from '@superette/core';
 import type { Db } from './database';
+import { EmoneyService, isPayout } from './emoney';
 import type { TreasuryService } from './treasury';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 
@@ -69,7 +70,7 @@ export const REBATE_KINDS: Record<RebateEntryKind, string> = {
   earned: 'Ristourne acquise',
   adjust: 'Régularisation',
   credit: 'Accordée en avoir',
-  cash: 'Payée en espèces',
+  cash: 'Ristourne payée',
 };
 
 export interface RebateEntry {
@@ -84,6 +85,10 @@ export interface RebateEntry {
   label: string;
   at: string;
   user_name: string | null;
+  /** Ristourne payée : espèces, MTN MoMo ou Orange Money, avec la référence du transfert. */
+  method: string;
+  reference: string | null;
+  register_name: string | null;
 }
 
 const dayFr = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('fr-FR');
@@ -266,14 +271,41 @@ export class RebateService extends Base {
     });
   }
 
-  private insert(ctx: Context, e: { customerId: string; kind: RebateEntryKind; amount: Fcfa; label: string; from?: string | null; to?: string | null }): string {
+  private insert(
+    ctx: Context,
+    e: {
+      customerId: string;
+      kind: RebateEntryKind;
+      amount: Fcfa;
+      label: string;
+      from?: string | null;
+      to?: string | null;
+      pay?: { method: string; reference: string | null; registerId: string | null; sessionId: string | null };
+    },
+  ): string {
     const id = newId();
     this.db
       .prepare(
-        `INSERT INTO rebate_entries (id, number, store_id, customer_id, kind, amount, period_from, period_to, label, at, user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO rebate_entries (id, number, store_id, customer_id, kind, amount, period_from, period_to, label, at, user_id, method, reference, register_id, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, this.number(), ctx.storeId, e.customerId, e.kind, e.amount, e.from ?? null, e.to ?? null, e.label, this.now(), ctx.userId);
+      .run(
+        id,
+        this.number(),
+        ctx.storeId,
+        e.customerId,
+        e.kind,
+        e.amount,
+        e.from ?? null,
+        e.to ?? null,
+        e.label,
+        this.now(),
+        ctx.userId,
+        e.pay?.method ?? 'CASH',
+        e.pay?.reference ?? null,
+        e.pay?.registerId ?? null,
+        e.pay?.sessionId ?? null,
+      );
     this.enqueue(ctx, 'rebate_entry', id, 'upsert', {});
     this.audit(ctx.userId, `rebate.${e.kind}`, 'customer', e.customerId, { amount: e.amount });
     return id;
@@ -313,22 +345,43 @@ export class RebateService extends Base {
     return this.tx(() => this.getEntry(this.insert(ctx, { customerId, kind: 'adjust', amount, label: `Régularisation : ${reason.trim()}` })));
   }
 
-  /** Accorde tout ou partie du solde : en avoir sur le compte client, ou en espèces depuis la caisse centrale. */
-  grant(ctx: Context, customerId: string, amount: Fcfa, mode: 'credit' | 'cash'): RebateEntry {
+  /**
+   * Accorde tout ou partie du solde : en avoir sur le compte client, ou payée en
+   * espèces depuis la caisse centrale, ou par MoMo/OM depuis une caisse
+   * électronique (la centrale électronique par défaut), avec la référence du transfert.
+   */
+  grant(
+    ctx: Context,
+    customerId: string,
+    amount: Fcfa,
+    mode: 'credit' | 'cash',
+    opts: { method?: string | null; reference?: string | null; registerId?: string | null } = {},
+  ): RebateEntry {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     const due = this.balance(ctx.storeId, customerId);
     if (amount > due) throw new AppError(`Le client n'a que ${formatFcfa(due)} de ristourne à accorder`, 'INVALID');
-    if (mode === 'cash' && amount > this.treasury.balance(ctx.storeId)) throw new AppError(`La caisse centrale n'a que ${formatFcfa(this.treasury.balance(ctx.storeId))}`, 'INSUFFICIENT');
-    return this.tx(() =>
-      this.getEntry(this.insert(ctx, { customerId, kind: mode, amount, label: mode === 'credit' ? 'Ristourne accordée en avoir' : 'Ristourne payée en espèces' })),
-    );
+    const method = mode === 'cash' ? opts.method || 'CASH' : 'CASH';
+    let pay: { method: string; reference: string | null; registerId: string | null; sessionId: string | null } | undefined;
+    if (mode === 'cash' && method === 'CASH') {
+      if (amount > this.treasury.balance(ctx.storeId)) throw new AppError(`La caisse centrale n'a que ${formatFcfa(this.treasury.balance(ctx.storeId))}`, 'INSUFFICIENT');
+    } else if (mode === 'cash') {
+      if (!isPayout(method)) throw new AppError('Une ristourne se paie en espèces, par MTN MoMo ou par Orange Money', 'INVALID');
+      const reference = opts.reference?.trim() || null;
+      if (!reference) throw new AppError('Indiquez la référence du transfert', 'REFERENCE_REQUIRED');
+      const src = new EmoneyService(this.db, this.clock).source(ctx.storeId, method, opts.registerId);
+      if (!src.registerId) throw new AppError('Choisissez la caisse électronique qui paie (ou la centrale dans les paramètres)', 'INVALID');
+      pay = { method, reference, registerId: src.registerId, sessionId: src.sessionId };
+    }
+    const label = mode === 'credit' ? 'Ristourne accordée en avoir' : method === 'CASH' ? 'Ristourne payée en espèces' : `Ristourne payée par ${PAYMENT_METHODS[method as 'MTN_MOMO']}`;
+    return this.tx(() => this.getEntry(this.insert(ctx, { customerId, kind: mode, amount, label, pay })));
   }
 
   entries(storeId: string, opts: { customerId?: string | null; from?: string | null; to?: string | null; id?: string } = {}): RebateEntry[] {
     return this.db
       .prepare(
-        `SELECT e.id, e.number, e.customer_id, c.name AS customer_name, e.kind, e.amount, e.period_from, e.period_to, e.label, e.at, u.name AS user_name
-         FROM rebate_entries e JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id
+        `SELECT e.id, e.number, e.customer_id, c.name AS customer_name, e.kind, e.amount, e.period_from, e.period_to, e.label, e.at, u.name AS user_name,
+                e.method, e.reference, g.name AS register_name
+         FROM rebate_entries e JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id LEFT JOIN registers g ON g.id = e.register_id
          WHERE e.store_id = @storeId AND (@customerId IS NULL OR e.customer_id = @customerId) AND (@id IS NULL OR e.id = @id)
            AND (@from IS NULL OR date(e.at, 'localtime') >= @from) AND (@to IS NULL OR date(e.at, 'localtime') <= @to)
          ORDER BY e.at DESC, e.number DESC`,

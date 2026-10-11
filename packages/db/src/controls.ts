@@ -396,7 +396,7 @@ export class ControlService extends Base {
          SELECT e.id, 'expense', e.created_at, r.name, u.name, e.label, -e.amount, e.number
          FROM expenses e JOIN cash_sessions cs ON cs.id = e.session_id JOIN registers r ON r.id = cs.register_id
          LEFT JOIN users u ON u.id = e.user_id
-         WHERE ${session} AND e.status = 'active' AND date(e.created_at, 'localtime') BETWEEN @from AND @to
+         WHERE ${session} AND e.status = 'active' AND e.method = 'CASH' AND date(e.created_at, 'localtime') BETWEEN @from AND @to
          UNION ALL
          SELECT cp.id, 'customer_payment', cp.paid_at, r.name, u.name, c.name, cp.amount, cp.number
          FROM customer_payments cp JOIN cash_sessions cs ON cs.id = cp.session_id JOIN registers r ON r.id = cs.register_id

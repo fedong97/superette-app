@@ -421,34 +421,56 @@ export function createPrinter(s: Services): Printer {
       await printReceipt(s.receipts.centralVoucher(movementId), false, true);
     },
 
+    async emoneyVoucher(movementId) {
+      await printReceipt(s.receipts.emoneyVoucher(movementId), false, true);
+    },
+
     async sessionReport(sessionId, blind = false) {
       const z = s.pos.zReport(sessionId);
       const se = z.session;
       const store = s.admin.getStore(se.store_id);
       if (z.declared) {
-        // Caisse électronique ou banque : solde relevé par moyen, puis chaque paiement reçu avec sa référence.
+        // Caisse électronique ou banque : solde relevé par moyen, puis entrées et sorties avec leur référence.
         const payments = s.pos.sessionPayments(sessionId);
-        const lines = z.declared
-          .map(
-            (l) => `<tr><td>${esc(l.label)}</td>${blind ? '' : `<td class="r">${money(l.expected)}</td>`}<td class="r">${l.declared === null ? '' : money(l.declared)}</td>${
-              blind ? '' : `<td class="r">${l.declared === null ? '' : money(l.declared - l.expected)}</td>`
-            }</tr>`,
-          )
-          .join('');
-        const total = (f: (l: NonNullable<typeof z.declared>[number]) => number) => z.declared!.reduce((t, l) => t + f(l), 0);
+        const electronic = z.registerKind === 'electronic';
+        type L = NonNullable<typeof z.declared>[number];
+        const cols: { th: string; v: (l: L) => number | null; hide?: boolean }[] = [
+          { th: 'Solde de départ', v: (l) => l.opening, hide: blind || !electronic },
+          { th: 'Encaissé', v: (l) => l.received, hide: blind },
+          { th: 'Sorties', v: (l) => -l.outflows, hide: !electronic },
+          { th: 'Attendu', v: (l) => l.expected, hide: blind || !electronic },
+          { th: 'Solde relevé', v: (l) => l.declared },
+          { th: 'Écart', v: (l) => (l.declared === null ? null : l.declared - l.expected), hide: blind },
+          { th: 'Versé à la centrale', v: (l) => l.deposited, hide: !electronic || !z.declared.some((l) => l.deposited) },
+          { th: 'Reste', v: (l) => l.left, hide: !electronic || !z.declared.some((l) => l.deposited) },
+        ];
+        const shown = cols.filter((c) => !c.hide);
+        const cell = (v: number | null) => `<td class="r">${v === null ? '' : money(v)}</td>`;
+        const lines = z.declared.map((l) => `<tr><td>${esc(l.label)}</td>${shown.map((c) => cell(c.v(l))).join('')}</tr>`).join('');
+        const totals = shown.map((c) => cell(c.th === 'Écart' ? z.difference : z.declared!.some((l) => c.v(l) === null) ? null : z.declared!.reduce((t, l) => t + (c.v(l) ?? 0), 0))).join('');
+        const journalRows = (rows: { at: string; nature: string; label: string; party: string | null; method_label: string; reference: string | null; user_name: string | null; amount: number }[]) =>
+          rows
+            .map((r) => `<tr><td>${dateFr(r.at).slice(-5)}</td><td>${esc(r.nature)}</td><td>${esc(r.label)}</td><td>${esc(r.party ?? '')}</td><td>${esc(r.method_label)}</td><td>${esc(r.reference ?? '')}</td><td>${esc(r.user_name ?? '')}</td><td class="r">${money(r.amount)}</td></tr>`)
+            .join('');
+        const head = '<thead><tr><th>Heure</th><th>Nature</th><th>Pièce</th><th>Tiers</th><th>Moyen</th><th>Référence</th><th>Par</th><th class="r">Montant</th></tr></thead>';
+        const j = z.emoneyJournal;
         await printA4(`${a4Head(store)}
           <h1>Bon de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
           <p>Ouverture le ${dateFr(se.opened_at)} par ${esc(se.user_name)}${se.closed_at ? ` · clôture le ${dateFr(se.closed_at)}${se.closed_by_name ? ` par ${esc(se.closed_by_name)}` : ''}` : ''}</p>
-          <table><thead><tr><th>Moyen</th>${blind ? '' : '<th class="r">Encaissé</th>'}<th class="r">Solde relevé</th>${blind ? '' : '<th class="r">Écart</th>'}</tr></thead>
-          <tbody>${lines}<tr class="total"><td>Total</td>${blind ? '' : `<td class="r">${money(total((l) => l.expected))}</td>`}<td class="r">${se.status === 'closed' ? money(total((l) => l.declared ?? 0)) : ''}</td>${
-            blind ? '' : `<td class="r">${z.difference === null ? '' : money(z.difference)}</td>`
-          }</tr></tbody></table>
+          <table><thead><tr><th>Moyen</th>${shown.map((c) => `<th class="r">${c.th}</th>`).join('')}</tr></thead>
+          <tbody>${lines}<tr class="total"><td>Total</td>${totals}</tr></tbody></table>
+          ${z.emoneyDeposit ? `<p>Versement <b>${esc(z.emoneyDeposit.number)}</b> vers ${esc(z.emoneyDeposit.centralName)}.</p>` : ''}
           ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b>${se.gap_approved_by_name ? `, justifié par ${esc(se.gap_approved_by_name)}` : ''}</p>` : !blind && s.pos.gapPending(se) ? '<p><b>Écart à justifier par le gérant.</b></p>' : ''}
-          <h3>Paiements reçus (${payments.length})</h3>
+          ${
+            j
+              ? `<h3>Entrées (${j.entries.length})</h3><table>${head}<tbody>${journalRows(j.entries)}</tbody></table>
+                 <h3>Sorties (${j.exits.length})</h3><table>${head}<tbody>${journalRows(j.exits)}</tbody></table>`
+              : `<h3>Paiements reçus (${payments.length})</h3>
           <table><thead><tr><th>Heure</th><th>Pièce</th><th>Moyen</th><th>Référence</th><th>Caissier</th><th class="r">Montant</th></tr></thead>
           <tbody>${payments
             .map((p) => `<tr><td>${dateFr(p.at).slice(-5)}</td><td>${esc(p.number)}</td><td>${esc(p.label)}</td><td>${esc(p.reference ?? '')}</td><td>${esc(p.user_name ?? '')}</td><td class="r">${money(p.amount)}</td></tr>`)
-            .join('')}</tbody></table>
+            .join('')}</tbody></table>`
+          }
           <div class="sign"><span>Le caissier : ……………………</span><span>Le gérant : ……………………</span></div>`);
         return;
       }
@@ -472,6 +494,7 @@ export function createPrinter(s: Services): Printer {
           ${row('Fond à l’ouverture', z.cash.openingFloat)}${se.carried_float !== null ? row('dont fond laissé la veille', se.carried_float) : ''}
           ${row('Ventes en espèces', z.cash.cashSales)}${row('Règlements clients en espèces', z.cash.customerReceipts)}${row('Apports', z.cash.cashIn)}
           ${row('Remboursements', -z.cash.cashRefunds)}${row('Prélèvements versés à la centrale', -z.cash.cashOut)}${row('Dépenses payées', -z.cash.expenses)}
+          ${z.cash.otherIn ? row('Autres entrées (Encaisser)', z.cash.otherIn) : ''}${z.cash.otherOut ? row('Autres sorties (Décaisser)', -z.cash.otherOut) : ''}
           ${row('Attendu à la clôture', z.cash.expected, true)}${row('Relevé à la clôture', z.counted)}${se.first_counted !== null && se.first_counted !== z.counted ? row('Premier comptage', se.first_counted) : ''}
           ${row('Différentiel', z.difference, true)}${se.deposit !== null ? row('Versé à la caisse centrale', se.deposit) + row('Fond laissé dans le tiroir', se.float_left) : ''}
         </table><table class="totals" style="width:50%;margin:0">
@@ -659,6 +682,99 @@ export function createPrinter(s: Services): Printer {
 
     async rebateVoucher(entryId) {
       await printReceipt(s.receipts.rebateVoucher(entryId), false);
+    },
+
+    async deskTicket(sessionId, source, id, opts) {
+      await printReceipt(s.receipts.deskTicket({ ...s.cashdesk.row(sessionId, source, id), duplicate: opts?.duplicate, authorizedBy: opts?.authorizedBy }), false);
+    },
+
+    async officeVoucher(entryId) {
+      const e = s.cashdesk.get(entryId);
+      await printReceipt(s.receipts.deskTicket({ ...s.cashdesk.entryRow(entryId), authorizedBy: e.authorized_by_name }), false);
+    },
+
+    async deskA4(sessionId, source, id, opts) {
+      const { row: x, direction, register } = s.cashdesk.row(sessionId, source, id);
+      const store = s.admin.getStore(s.pos.getSession(sessionId).store_id);
+      await printA4(`${a4Head(store)}
+        <h1>${direction === 'IN' ? 'Reçu de caisse' : 'Bon de sortie de caisse'}${opts?.duplicate ? ' · DUPLICATA' : ''}</h1>
+        <table class="totals" style="width:100%">
+          <tr><td>Pièce</td><td>${esc(x.number ?? '')}</td></tr>
+          <tr><td>Date</td><td>${dateFr(x.at)}</td></tr>
+          <tr><td>Caisse</td><td>${esc(register)}${x.user_name ? ` · ${esc(x.user_name)}` : ''}</td></tr>
+          <tr><td>Nature</td><td>${esc(x.nature)}</td></tr>
+          <tr><td>Motif</td><td>${esc(x.label)}</td></tr>
+          <tr><td>${direction === 'IN' ? 'Reçu de' : 'Bénéficiaire'}</td><td>${esc(x.party ?? '')}</td></tr>
+          <tr><td>Mode</td><td>${esc(x.method_label ?? PAYMENT_METHODS.CASH)}${x.reference ? ` · Réf. ${esc(x.reference)}` : ''}</td></tr>
+          <tr class="total"><td>Montant</td><td>${money(x.amount)} FCFA</td></tr>
+        </table>
+        <p>Arrêté à la somme de <b>${esc(numberToWordsFr(x.amount))} francs CFA</b>.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:18mm"><div>${direction === 'IN' ? 'Le client' : 'Le bénéficiaire'}</div><div>Le caissier</div></div>`);
+    },
+
+    async discharge(sessionId, source, id) {
+      const { row: x, register } = s.cashdesk.row(sessionId, source, id);
+      const store = s.admin.getStore(s.pos.getSession(sessionId).store_id);
+      const day = new Date(x.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      // Collaborateur : sa CNI est sur sa fiche ; le motif sans le n° de pièce déjà en tête.
+      const staffId = source === 'entry' ? s.cashdesk.get(id).staff_id : null;
+      const idCard = staffId ? s.staff.get(staffId).id_card : null;
+      const motif = x.number && x.label.startsWith(x.number) ? x.label.slice(x.number.length).trim() : x.label;
+      await printA4(`${a4Head(store)}
+        <h1 style="text-align:center;margin-top:10mm">DÉCHARGE</h1>
+        <p style="text-align:center" class="muted">Pièce ${esc(x.number ?? '')} · ${esc(register)}</p>
+        <p style="font-size:12pt;line-height:2;margin-top:10mm">
+          Je soussigné(e), <b>${x.party ? esc(x.party) : '..............................................................'}</b>,
+          CNI n° ${idCard ? `<b>${esc(idCard)}</b>` : '...............................'}, reconnais avoir reçu de <b>${esc(store.name)}</b>
+          la somme de <b>${money(x.amount)} FCFA</b> (${esc(numberToWordsFr(x.amount))} francs CFA),
+          ${x.method_label && x.method_label !== PAYMENT_METHODS.CASH ? `par ${esc(x.method_label)}${x.reference ? ` (réf. ${esc(x.reference)})` : ''}, ` : 'en espèces, '}
+          au titre de : <b>${esc(x.nature)}${motif ? `, ${esc(motif)}` : ''}</b>.
+        </p>
+        <p style="font-size:12pt">Fait à ....................................., le ${esc(day)}.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:14mm;font-size:11pt">
+          <div style="text-align:center">Le bénéficiaire<br><span class="muted">(lu et approuvé)</span></div>
+          <div style="text-align:center">Le caissier<br><span class="muted">${esc(x.user_name ?? '')}</span></div>
+          <div style="text-align:center">Le responsable</div>
+        </div>`);
+    },
+
+    async salarySlip(salaryId) {
+      const { salary: x, staff: st, payments, periodLabel } = s.staff.slip(salaryId);
+      const store = s.admin.getStore(x.store_id);
+      const pays = payments
+        .map((p) => `<tr><td>${dateFr(p.at)}</td><td>${esc(p.number)}</td><td>${esc(PAYMENT_METHODS[p.method as 'CASH'] ?? p.method)}${p.reference ? ` · ${esc(p.reference)}` : ''}${p.register_name ? ` · ${esc(p.register_name)}` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Bulletin de paie, ${esc(periodLabel)}</h1>
+        <div class="box" style="margin-bottom:6mm"><b>${esc(st.name)}</b>${st.position ? ` · ${esc(st.position)}` : ''}<br>
+          Matricule ${esc(st.code)}${st.id_card ? ` · CNI ${esc(st.id_card)}` : ''}${st.phone ? ` · ${esc(st.phone)}` : ''}${st.hired_on ? `<br>Entré(e) le ${dayFr(st.hired_on)}` : ''}</div>
+        <table class="totals" style="width:100%">
+          <tr><td>Salaire brut du mois</td><td class="r">${money(x.gross)}</td></tr>
+          <tr><td>Avances et acomptes retenus</td><td class="r">${x.deducted ? `-${money(x.deducted)}` : '0'}</td></tr>
+          <tr class="total"><td>Net à payer</td><td class="r">${money(x.net)}</td></tr>
+          <tr><td>Déjà payé</td><td class="r">${money(x.paid)}</td></tr>
+          <tr class="total"><td>Reste à payer</td><td class="r">${money(x.rest)}</td></tr>
+        </table>
+        ${pays ? `<h3>Paiements</h3><table><thead><tr><th>Date</th><th>Pièce</th><th>Mode</th><th class="r">Montant</th></tr></thead><tbody>${pays}</tbody></table>` : ''}
+        <p class="muted">Avances restant à rembourser : ${money(Math.max(0, st.advances))} FCFA. Retenues CNPS et IRPP non calculées dans cette version.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:16mm"><div>Le collaborateur</div><div>L'employeur</div></div>`);
+    },
+
+    async staffStatement(staffId, from, to) {
+      const st = s.staff.statement(staffId, { from: from ?? undefined, to: to ?? undefined });
+      const store = s.admin.getStore(st.staff.store_id);
+      const rows = st.lines
+        .map(
+          (l) =>
+            `<tr><td>${dateFr(l.at)}</td><td>${esc(l.number)}</td><td>${esc(l.label)}</td><td class="r">${l.due ? money(l.due) : ''}</td><td class="r">${money(l.dueBalance)}</td><td class="r">${l.advance ? money(l.advance) : ''}</td><td class="r">${money(l.advanceBalance)}</td></tr>`,
+        )
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Extrait de compte, ${esc(st.staff.name)}</h1>
+        <p>${periodFr(from, to)} · comptes ${esc(st.staff.salary_account)} (rémunérations dues) et ${esc(st.staff.advance_account)} (avances)</p>
+        <table><thead><tr><th>Date</th><th>Pièce</th><th>Libellé</th><th class="r">Salaire</th><th class="r">Dû au collaborateur</th><th class="r">Avance</th><th class="r">Avances à rembourser</th></tr></thead>
+        <tbody>${from ? `<tr><td colspan="4">Soldes au ${dayFr(from)}</td><td class="r">${money(st.opening.due)}</td><td></td><td class="r">${money(st.opening.advances)}</td></tr>` : ''}${rows}
+        <tr class="total"><td colspan="4">Soldes</td><td class="r">${money(st.staff.due)}</td><td></td><td class="r">${money(st.staff.advances)}</td></tr></tbody></table>`);
     },
 
     async vatReturn(storeId, month) {

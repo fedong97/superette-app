@@ -1,5 +1,6 @@
 import type { Fcfa } from '@superette/core';
 import { ChargeService } from './charges';
+import { EmoneyService, isPayout } from './emoney';
 import { AppError, Base, type Context, newId } from './util';
 
 export const EXPENSE_PAYMENT_METHODS = {
@@ -59,8 +60,12 @@ export interface ExpenseInput {
   vat?: Fcfa;
   method: ExpensePaymentMethod;
   reference?: string | null;
-  /** Payée avec les espèces du tiroir de la caisse ouverte : elle sort du Z. */
+  /** Payée à la caisse ouverte (espèces du tiroir, ou compte MoMo/OM du caissier) : elle sort du Z. */
   atRegister?: boolean;
+  /** Payée par MoMo/OM au bureau : caisse électronique d'où elle sort (la centrale par défaut). */
+  registerId?: string | null;
+  /** Payée dans cette journée ouverte (« Décaisser » de l'écran de trésorerie) : espèces du tiroir ou compte MoMo/OM de la caisse. */
+  sessionId?: string | null;
   /** Gérant qui a autorisé une sortie de caisse faite par un caissier. */
   authorizedBy?: string | null;
   /** Échéance de charge fixe que la dépense constate (charge et mois AAAA-MM). */
@@ -127,13 +132,33 @@ export class ExpenseService extends Base {
       new ChargeService(this.db, this.clock).assertOpen(ctx.storeId, input.planId, input.planPeriod);
     }
     let sessionId: string | null = null;
+    let registerId: string | null = null;
     let date = input.date || this.today();
-    if (input.atRegister) {
-      if (input.method !== 'CASH') throw new AppError('Une sortie de caisse se paie en espèces', 'INVALID');
-      if (!ctx.registerId) throw new AppError("Ce poste n'a pas de caisse", 'NO_REGISTER');
-      sessionId = this.db.prepare("SELECT id FROM cash_sessions WHERE register_id = ? AND status = 'open'").pluck().get(ctx.registerId) as string | null;
-      if (!sessionId) throw new AppError("Ouvrez la caisse avant d'y prendre de l'argent", 'NO_SESSION');
+    const emoney = new EmoneyService(this.db, this.clock);
+    if (input.sessionId) {
+      ({ registerId, sessionId } = emoney.openSession(ctx.storeId, input.sessionId, input.method));
       date = this.today();
+    } else if (input.atRegister) {
+      if (isPayout(input.method)) {
+        // Payée avec le compte MoMo/OM du caissier : elle sort de sa caisse électronique.
+        const own = emoney.userRegister(ctx.userId);
+        if (!own.registerId) throw new AppError("Vous n'avez pas de caisse électronique : payez en espèces", 'INVALID');
+        if (!own.sessionId) throw new AppError("Ouvrez la caisse avant d'y prendre de l'argent", 'NO_SESSION');
+        registerId = own.registerId;
+        sessionId = own.sessionId;
+      } else {
+        if (input.method !== 'CASH') throw new AppError('Une sortie de caisse se paie en espèces ou avec votre compte MoMo/OM', 'INVALID');
+        if (!ctx.registerId) throw new AppError("Ce poste n'a pas de caisse", 'NO_REGISTER');
+        sessionId = this.db.prepare("SELECT id FROM cash_sessions WHERE register_id = ? AND status = 'open'").pluck().get(ctx.registerId) as string | null;
+        if (!sessionId) throw new AppError("Ouvrez la caisse avant d'y prendre de l'argent", 'NO_SESSION');
+        registerId = ctx.registerId;
+      }
+      date = this.today();
+    } else {
+      // Au bureau : MoMo/OM sort de la caisse électronique choisie, sinon de la centrale.
+      const src = emoney.source(ctx.storeId, input.method, input.registerId);
+      registerId = src.registerId;
+      sessionId = src.sessionId;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new AppError('Date invalide', 'INVALID');
     if (date > this.today()) throw new AppError('La date de la dépense ne peut pas être dans le futur', 'INVALID');
@@ -160,7 +185,7 @@ export class ExpenseService extends Base {
           vat,
           method: input.method,
           reference: input.reference?.trim() || null,
-          register: sessionId ? ctx.registerId : null,
+          register: registerId,
           session: sessionId,
           user: ctx.userId,
           authorizedBy: input.authorizedBy ?? null,
@@ -183,8 +208,9 @@ export class ExpenseService extends Base {
     if (!reason.trim()) throw new AppError("Le motif de l'annulation est obligatoire", 'INVALID');
     if (e.session_id) {
       const status = this.db.prepare('SELECT status FROM cash_sessions WHERE id = ?').pluck().get(e.session_id);
-      if (status !== 'open') throw new AppError("Le Z de cette caisse est clôturé : la sortie d'espèces ne peut plus être annulée", 'SESSION_CLOSED');
+      if (status !== 'open') throw new AppError("Le Z de cette caisse est clôturé : la sortie de caisse ne peut plus être annulée", 'SESSION_CLOSED');
     }
+    if (e.method !== 'CASH') new EmoneyService(this.db, this.clock).assertNotCarried(e.register_id, e.session_id, e.created_at);
     this.tx(() => {
       this.db
         .prepare("UPDATE expenses SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, updated_at = ? WHERE id = ?")

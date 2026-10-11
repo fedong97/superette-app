@@ -31,6 +31,7 @@ import type { PromotionService } from './promotions';
 import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
 import type { TreasuryService } from './treasury';
+import { ENTRY_KINDS, type EmoneyRow, type EmoneyService, type EntryKind, isEmoney } from './emoney';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
 
@@ -66,7 +67,27 @@ export interface CashSession {
 }
 
 /** Ligne d'entrée ou de sortie d'espèces d'une journée de caisse. */
+/** Pièce d'où vient une ligne d'entrée ou de sortie de caisse. */
+export type JournalSource =
+  | 'sale'
+  | 'refund'
+  | 'customer_payment'
+  | 'cash_operation'
+  | 'expense'
+  | 'central'
+  | 'entry'
+  | 'supplier_payment'
+  | 'movement'
+  | 'rebate';
+
 export interface CashJournalRow {
+  source: JournalSource;
+  id: string;
+  number?: string;
+  /** Nature d'une pièce d'« Encaisser » ou « Décaisser » (avance, salaire, autre…). */
+  kind?: string | null;
+  method_label?: string;
+  reference?: string | null;
   at: string;
   amount: Fcfa;
   nature: string;
@@ -87,6 +108,8 @@ export interface CloseOptions {
   gapReason?: string | null;
   /** Gérant qui valide un écart au-delà du seuil. */
   gapApprovedBy?: string | null;
+  /** Caisse électronique avec centrale : recette versée vers la centrale, par moyen, avec la référence du transfert. */
+  deposit?: Partial<Record<PaymentMethod, { amount: Fcfa; reference?: string | null }>>;
 }
 
 /** Ligne envoyée par l'écran de caisse : le prix est relu en base, jamais pris de l'écran. */
@@ -212,13 +235,17 @@ export interface ZReport {
   customerReceipts: { method: string; label: string; amount: Fcfa }[];
   /** Dépenses payées avec les espèces du tiroir. */
   expenses: { number: string; label: string; amount: Fcfa }[];
-  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expenses: Fcfa; expected: Fcfa };
+  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expenses: Fcfa; otherIn: Fcfa; otherOut: Fcfa; expected: Fcfa };
   counted: Fcfa | null;
   difference: Fcfa | null;
   /** Type de la caisse : une caisse électronique ou banque n'a ni tiroir ni fond. */
   registerKind: RegisterKind;
   /** Caisse électronique ou banque : attendu et solde relevé par moyen de paiement. */
   declared: DeclaredLine[] | null;
+  /** Caisse électronique : entrées et sorties de la journée, ligne par ligne. */
+  emoneyJournal: { entries: EmoneyRow[]; exits: EmoneyRow[] } | null;
+  /** Caisse électronique versée à la centrale : nom de la centrale et numéro du bon. */
+  emoneyDeposit: { centralName: string; number: string } | null;
   /** Tickets de cette caisse payés sur la caisse électronique ou banque du caissier. */
   elsewhere: { method: PaymentMethod; label: string; registerName: string; amount: Fcfa }[];
 }
@@ -227,16 +254,35 @@ export interface ZReport {
 export interface DeclaredDetail {
   declared: Record<string, Fcfa>;
   expected: Record<string, Fcfa>;
+  /** Caisse électronique : solde de départ, sorties, versé à la centrale et reste pour le lendemain. */
+  opening?: Record<string, Fcfa>;
+  outflows?: Record<string, Fcfa>;
+  inflows?: Record<string, Fcfa>;
+  deposited?: Record<string, Fcfa>;
+  left?: Record<string, Fcfa>;
+  depositNumber?: string | null;
 }
 
 /** Clôture d'une caisse électronique ou banque : un moyen de paiement. */
 export interface DeclaredLine {
   method: PaymentMethod;
   label: string;
-  /** Encaissé dans la journée (ventes, retours et règlements clients). */
+  /** Solde de départ (reste de la dernière clôture et mouvements depuis). */
+  opening: Fcfa;
+  /** Encaissé dans la journée : ventes, retours et règlements clients. */
+  received: Fcfa;
+  /** Dépenses, fournisseurs et transferts sortis de la caisse dans la journée (sans le versement de clôture). */
+  outflows: Fcfa;
+  /** Transferts reçus dans la journée. */
+  inflows: Fcfa;
+  /** Attendu : départ + encaissé + reçu − sorties. */
   expected: Fcfa;
   /** Montant relevé sur le téléphone, le terminal ou le relevé (null : pas encore clôturée). */
   declared: Fcfa | null;
+  /** Versé à la caisse électronique centrale à la clôture. */
+  deposited: Fcfa;
+  /** Reste sur le compte pour le lendemain (null : pas encore clôturée). */
+  left: Fcfa | null;
 }
 
 export class PosService extends Base {
@@ -250,6 +296,7 @@ export class PosService extends Base {
     private readonly quotes: QuoteService,
     private readonly promotions: PromotionService,
     private readonly treasury: TreasuryService,
+    private readonly emoney: EmoneyService,
   ) {
     super(db, clock);
   }
@@ -351,13 +398,15 @@ export class PosService extends Base {
       const reg = this.admin.getRegister(registerId);
       if (!reg.active) continue;
       const id = newId();
+      // Caisse électronique : elle repart du reste laissé à sa dernière clôture.
+      const opening = reg.kind === 'electronic' ? JSON.stringify(this.emoney.balance(registerId)) : null;
       this.tx(() => {
         this.db
           .prepare(
-            `INSERT INTO cash_sessions (id, store_id, register_id, user_id, opened_at, opening_float, carried_float, status)
-             VALUES (?, ?, ?, ?, ?, 0, NULL, 'open')`,
+            `INSERT INTO cash_sessions (id, store_id, register_id, user_id, opened_at, opening_float, carried_float, status, opening_detail)
+             VALUES (?, ?, ?, ?, ?, 0, NULL, 'open', ?)`,
           )
-          .run(id, ctx.storeId, registerId, ctx.userId, this.now());
+          .run(id, ctx.storeId, registerId, ctx.userId, this.now(), opening);
         this.enqueue(ctx, 'cash_session', id, 'upsert', this.getSession(id));
         this.audit(ctx.userId, 'cash.open', 'cash_session', id, { kind: reg.kind });
       });
@@ -412,12 +461,12 @@ export class PosService extends Base {
    * Apport (IN) ou prélèvement (OUT) d'espèces en cours de journée : l'apport
    * vient de la caisse centrale, le prélèvement y est versé.
    */
-  cashOperation(ctx: Context, type: 'IN' | 'OUT', amount: Fcfa, reason: string): void {
+  cashOperation(ctx: Context, type: 'IN' | 'OUT', amount: Fcfa, reason: string): string {
     const session = this.requireOpenSession(ctx);
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     if (!reason.trim()) throw new AppError('Le motif est obligatoire', 'INVALID');
     const register = this.admin.getRegister(session.register_id);
-    this.tx(() => {
+    return this.tx(() => {
       const id = newId();
       const row = { id, session_id: session.id, type, amount, reason: reason.trim(), user_id: ctx.userId, at: this.now() };
       this.db
@@ -434,6 +483,7 @@ export class PosService extends Base {
         cashOperationId: id,
       });
       this.audit(ctx.userId, type === 'IN' ? 'cash.in' : 'cash.out', 'cash_session', session.id, { amount, reason });
+      return id;
     });
   }
 
@@ -982,8 +1032,18 @@ export class PosService extends Base {
     const customerReceipts = this.customers.sessionReceipts(sessionId);
     const receiptsCash = customerReceipts.find((r) => r.method === 'CASH')?.amount ?? 0;
     const expenses = this.db
-      .prepare("SELECT number, label, amount FROM expenses WHERE session_id = ? AND status = 'active' ORDER BY created_at")
+      .prepare("SELECT number, label, amount FROM expenses WHERE session_id = ? AND status = 'active' AND method = 'CASH' ORDER BY created_at")
       .all(sessionId) as ZReport['expenses'];
+    // « Encaisser » et « Décaisser » : pièces de trésorerie, fournisseurs payés ou remboursés en espèces à cette caisse.
+    const other = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount END), 0) AS inflow, COALESCE(SUM(CASE WHEN direction = 'OUT' THEN amount END), 0) AS outflow FROM (
+           SELECT direction, amount FROM treasury_entries WHERE session_id = @id AND status = 'active' AND method = 'CASH'
+           UNION ALL
+           SELECT CASE WHEN i.kind = 'invoice' THEN 'OUT' ELSE 'IN' END, p.amount FROM supplier_payments p JOIN supplier_invoices i ON i.id = p.invoice_id
+           WHERE p.session_id = @id AND p.method = 'CASH')`,
+      )
+      .get({ id: sessionId }) as { inflow: number; outflow: number };
     const cash = {
       openingFloat: session.opening_float,
       cashSales,
@@ -992,6 +1052,8 @@ export class PosService extends Base {
       cashOut,
       customerReceipts: receiptsCash,
       expenses: expenses.reduce((t, e) => t + e.amount, 0),
+      otherIn: other.inflow,
+      otherOut: other.outflow,
     };
     const { expected } = closingDifference(cash, {});
     return {
@@ -1000,6 +1062,8 @@ export class PosService extends Base {
       registerName: register.name,
       registerKind: register.kind,
       declared: register.kind === 'cash' ? null : this.declaredLines(session),
+      emoneyJournal: register.kind === 'electronic' ? { entries: this.emoney.sessionEntries(sessionId), exits: this.emoney.sessionExits(sessionId) } : null,
+      emoneyDeposit: this.emoneyDeposit(session),
       elsewhere,
       ticketCount: agg.ticketCount,
       salesTtc: agg.salesTtc,
@@ -1038,17 +1102,53 @@ export class PosService extends Base {
     return out;
   }
 
+  /** Ce qui fait l'attendu d'une journée électronique ou banque, par moyen : départ, encaissé, entrées et sorties. */
+  private expectedParts(session: CashSession, kind: RegisterKind) {
+    const methods = this.kindMethods(kind);
+    const received = this.receivedByMethod(session.id);
+    const openingRaw = (session as CashSession & { opening_detail?: string | null }).opening_detail;
+    const openingAll = openingRaw ? (JSON.parse(openingRaw) as Record<string, Fcfa>) : {};
+    const adj = kind === 'electronic' ? this.emoney.sessionAdjustments(session.id) : null;
+    const pick = (f: (m: PaymentMethod) => Fcfa) => Object.fromEntries(methods.map((m) => [m, f(m)])) as Record<string, Fcfa>;
+    const opening = pick((m) => openingAll[m] ?? 0);
+    const rec = pick((m) => received.get(m) ?? 0);
+    const outflows = pick((m) => (adj && isEmoney(m) ? adj.outflows[m] : 0));
+    const inflows = pick((m) => (adj && isEmoney(m) ? adj.inflows[m] : 0));
+    const expected = pick((m) => opening[m]! + rec[m]! + inflows[m]! - outflows[m]!);
+    return { methods, opening, received: rec, outflows, inflows, expected };
+  }
+
   private declaredLines(session: CashSession): DeclaredLine[] {
     const kind = this.admin.getRegister(session.register_id).kind;
-    const received = this.receivedByMethod(session.id);
+    const live = this.expectedParts(session, kind);
     // Clôturée : attendu et relevé tels qu'enregistrés à la clôture.
     const stored = session.status === 'closed' ? (JSON.parse((session as CashSession & { counted_detail?: string }).counted_detail ?? '{}') as Partial<DeclaredDetail>) : null;
-    return this.kindMethods(kind).map((m) => ({
-      method: m,
-      label: PAYMENT_METHODS[m],
-      expected: stored?.expected?.[m] ?? received.get(m) ?? 0,
-      declared: stored ? (stored.declared?.[m] ?? 0) : null,
-    }));
+    return live.methods.map((m) => {
+      const declared = stored ? (stored.declared?.[m] ?? 0) : null;
+      return {
+        method: m,
+        label: PAYMENT_METHODS[m],
+        opening: stored?.opening?.[m] ?? (stored ? 0 : live.opening[m]!),
+        received: live.received[m]!,
+        outflows: stored?.outflows?.[m] ?? live.outflows[m]!,
+        inflows: stored?.inflows?.[m] ?? live.inflows[m]!,
+        expected: stored?.expected?.[m] ?? live.expected[m]!,
+        declared,
+        deposited: stored?.deposited?.[m] ?? 0,
+        left: stored ? (stored.left?.[m] ?? declared) : null,
+      };
+    });
+  }
+
+  private emoneyDeposit(session: CashSession): ZReport['emoneyDeposit'] {
+    if (session.status !== 'closed') return null;
+    const detail = JSON.parse((session as CashSession & { counted_detail?: string }).counted_detail ?? '{}') as Partial<DeclaredDetail>;
+    if (!detail.depositNumber) return null;
+    const central = this.db
+      .prepare("SELECT r.name FROM emoney_movements m JOIN registers r ON r.id = m.other_register_id WHERE m.session_id = ? AND m.nature = 'deposit' AND m.direction = 'OUT' LIMIT 1")
+      .pluck()
+      .get(session.id) as string | undefined;
+    return { centralName: central ?? 'Caisse électronique centrale', number: detail.depositNumber };
   }
 
   /** Paiements reçus par une journée, un par ligne : tickets et règlements clients, avec leur référence. */
@@ -1077,18 +1177,37 @@ export class PosService extends Base {
     if (register.kind === 'cash') throw new AppError('Une caisse espèces se clôture par le comptage des coupures', 'INVALID');
     const session = this.currentSession(registerId);
     if (!session) throw new AppError(`${register.name} n'est pas ouverte`, 'SESSION_CLOSED');
-    const methods = this.kindMethods(register.kind);
+    const parts = this.expectedParts(session, register.kind);
+    const methods = parts.methods;
     const detail: Record<string, Fcfa> = {};
     for (const m of methods) {
       const v = declared[m] ?? 0;
       if (!Number.isSafeInteger(v) || v < 0) throw new AppError(`Montant invalide pour ${PAYMENT_METHODS[m]}`, 'INVALID');
       detail[m] = v;
     }
-    const received = this.receivedByMethod(session.id);
-    const expectedDetail = Object.fromEntries(methods.map((m) => [m, received.get(m) ?? 0])) as Record<string, Fcfa>;
+    const expectedDetail = parts.expected;
     const expected = methods.reduce((t, m) => t + expectedDetail[m]!, 0);
     const counted = methods.reduce((t, m) => t + detail[m]!, 0);
     const difference = counted - expected;
+    // Versement de la recette vers la caisse électronique centrale (mode centrale) : le reste repart le lendemain.
+    const mode = register.kind === 'electronic' ? this.emoney.mode(session.store_id) : null;
+    const deposited: Record<string, Fcfa> = {};
+    const references: Record<string, string> = {};
+    for (const m of methods) {
+      const d = opts.deposit?.[m];
+      const amount = d?.amount ?? 0;
+      if (!amount) continue;
+      if (m === 'CARD') throw new AppError('Les paiements par carte vont à la banque : rien à verser', 'INVALID');
+      if (!mode?.centralId) throw new AppError("Pas de caisse électronique centrale : choisissez-la dans Administration › Paramètres", 'INVALID');
+      if (!Number.isSafeInteger(amount) || amount < 0) throw new AppError(`Versement invalide pour ${PAYMENT_METHODS[m]}`, 'INVALID');
+      if (amount > detail[m]!) throw new AppError(`Le versement ${PAYMENT_METHODS[m]} dépasse le solde relevé`, 'INVALID');
+      const reference = d?.reference?.trim();
+      if (!reference) throw new AppError(`Indiquez la référence du transfert ${PAYMENT_METHODS[m]}`, 'REFERENCE_REQUIRED');
+      deposited[m] = amount;
+      references[m] = reference;
+    }
+    // Le terminal de carte vire chaque jour à la banque : rien ne reste sur la caisse.
+    const left = Object.fromEntries(methods.map((m) => [m, m === 'CARD' ? 0 : detail[m]! - (deposited[m] ?? 0)])) as Record<string, Fcfa>;
     const threshold = this.admin.getStore(session.store_id).cash_gap_threshold;
     const gapReason = Math.abs(difference) > threshold && opts.gapApprovedBy ? opts.gapReason?.trim() || null : null;
     const gapApprovedBy = gapReason ? opts.gapApprovedBy! : null;
@@ -1096,14 +1215,32 @@ export class PosService extends Base {
       const lastZ = this.db.prepare('SELECT MAX(z_number) FROM cash_sessions WHERE register_id = ?').pluck().get(registerId) as number | null;
       if (lastZ) this.raiseCounter(`z:${registerId}`, lastZ);
       const zNumber = this.nextCounter(`z:${registerId}`);
+      let depositNumber: string | null = null;
+      for (const m of methods) {
+        if (!deposited[m] || !isEmoney(m)) continue;
+        const mv = this.emoney.transfer(ctx, {
+          fromId: registerId,
+          toId: mode!.centralId!,
+          method: m,
+          amount: deposited[m]!,
+          reference: references[m]!,
+          nature: 'deposit',
+          label: `Recette de ${register.name}, Z${zNumber}`,
+          fromSessionId: session.id,
+          number: depositNumber,
+        });
+        depositNumber = mv.number;
+      }
+      const stored: DeclaredDetail = { declared: detail, expected: expectedDetail };
+      if (register.kind === 'electronic') Object.assign(stored, { opening: parts.opening, outflows: parts.outflows, inflows: parts.inflows, deposited, left, depositNumber });
       this.db
         .prepare(
           `UPDATE cash_sessions SET status = 'closed', closed_at = ?, closed_by = ?, counted_detail = ?, expected_cash = ?, counted_cash = ?,
              difference = ?, z_number = ?, first_counted = COALESCE(first_counted, ?), gap_reason = ?, gap_approved_by = ?, gap_justified_at = ? WHERE id = ?`,
         )
-        .run(this.now(), ctx.userId, JSON.stringify({ declared: detail, expected: expectedDetail } satisfies DeclaredDetail), expected, counted, difference, zNumber, counted, gapReason, gapApprovedBy, gapReason ? this.now() : null, session.id);
+        .run(this.now(), ctx.userId, JSON.stringify(stored), expected, counted, difference, zNumber, counted, gapReason, gapApprovedBy, gapReason ? this.now() : null, session.id);
       this.enqueue(ctx, 'cash_session', session.id, 'upsert', this.getSession(session.id));
-      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, kind: register.kind, expected, counted, difference, gapReason });
+      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, kind: register.kind, expected, counted, difference, gapReason, deposited });
     });
     return this.zReport(session.id);
   }
@@ -1193,32 +1330,40 @@ export class PosService extends Base {
   cashJournal(sessionId: string): { entries: CashJournalRow[]; exits: CashJournalRow[]; creditSales: Fcfa } {
     const sales = this.db
       .prepare(
-        `SELECT s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name, s.user_id,
+        `SELECT s.id, s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name, s.user_id,
                 SUM(p.amount) - s.change_given AS amount
          FROM sales s JOIN sale_payments p ON p.sale_id = s.id AND p.method = 'CASH' JOIN users u ON u.id = s.user_id
          LEFT JOIN customers c ON c.id = s.customer_id
          WHERE s.session_id = ? AND s.status = 'completed' GROUP BY s.id ORDER BY s.created_at`,
       )
-      .all(sessionId) as { at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; user_id: string; amount: number }[];
+      .all(sessionId) as { id: string; at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; user_id: string; amount: number }[];
     const receipts = this.db
       .prepare(
-        `SELECT p.paid_at AS at, p.number, c.name AS party, u.name AS user_name, p.user_id, p.amount FROM customer_payments p
+        `SELECT p.id, p.paid_at AS at, p.number, p.reference, c.name AS party, u.name AS user_name, p.user_id, p.amount FROM customer_payments p
          JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.user_id
          WHERE p.session_id = ? AND p.method = 'CASH' ORDER BY p.paid_at`,
       )
-      .all(sessionId) as { at: string; number: string; party: string; user_name: string | null; user_id: string | null; amount: number }[];
+      .all(sessionId) as { id: string; at: string; number: string; reference: string | null; party: string; user_name: string | null; user_id: string | null; amount: number }[];
     const ops = this.db
-      .prepare('SELECT o.at, o.type, o.amount, o.reason, u.name AS user_name, o.user_id FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
-      .all(sessionId) as { at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null; user_id: string | null }[];
+      .prepare('SELECT o.id, o.at, o.type, o.amount, o.reason, u.name AS user_name, o.user_id FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
+      .all(sessionId) as { id: string; at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null; user_id: string | null }[];
     const expenses = this.db
       .prepare(
-        `SELECT e.created_at AS at, e.number, e.label, e.beneficiary, e.amount, u.name AS user_name, e.user_id FROM expenses e LEFT JOIN users u ON u.id = e.user_id
-         WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.created_at`,
+        `SELECT e.id, e.created_at AS at, e.number, e.label, e.beneficiary, e.reference, e.amount, u.name AS user_name, e.user_id FROM expenses e LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.session_id = ? AND e.status = 'active' AND e.method = 'CASH' ORDER BY e.created_at`,
       )
-      .all(sessionId) as { at: string; number: string; label: string; beneficiary: string | null; amount: number; user_name: string | null; user_id: string | null }[];
+      .all(sessionId) as { id: string; at: string; number: string; label: string; beneficiary: string | null; reference: string | null; amount: number; user_name: string | null; user_id: string | null }[];
+    const suppliers = this.db
+      .prepare(
+        `SELECT p.id, p.paid_at AS at, i.number, i.kind, i.supplier_number, p.reference, f.name AS party, p.amount, u.name AS user_name, p.user_id
+         FROM supplier_payments p JOIN supplier_invoices i ON i.id = p.invoice_id JOIN suppliers f ON f.id = p.supplier_id LEFT JOIN users u ON u.id = p.user_id
+         WHERE p.session_id = ? AND p.method = 'CASH' ORDER BY p.paid_at`,
+      )
+      .all(sessionId) as { id: string; at: string; number: string; kind: 'invoice' | 'credit_note'; supplier_number: string; reference: string | null; party: string; amount: number; user_name: string | null; user_id: string | null }[];
+    const pieces = this.desk(sessionId, 'CASH');
     const closing = this.db
-      .prepare("SELECT at, number, amount, label FROM central_cash_movements WHERE session_id = ? AND kind = 'DEPOSIT' AND cash_operation_id IS NULL ORDER BY at")
-      .all(sessionId) as { at: string; number: string; amount: number; label: string }[];
+      .prepare("SELECT id, at, number, amount, label FROM central_cash_movements WHERE session_id = ? AND kind = 'DEPOSIT' AND cash_operation_id IS NULL ORDER BY at")
+      .all(sessionId) as { id: string; at: string; number: string; amount: number; label: string }[];
     const credit = this.db
       .prepare(
         `SELECT COALESCE(SUM(p.amount), 0) FROM sale_payments p JOIN sales s ON s.id = p.sale_id
@@ -1226,18 +1371,67 @@ export class PosService extends Base {
       )
       .pluck()
       .get(sessionId) as number;
+    const cash = PAYMENT_METHODS.CASH;
     const entries: CashJournalRow[] = [
-      ...sales.filter((x) => x.amount > 0).map((x) => ({ at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
-      ...receipts.map((x) => ({ at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
-      ...ops.filter((x) => x.type === 'IN').map((x) => ({ at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
-    ].sort((a, b) => a.at.localeCompare(b.at));
+      ...sales.filter((x) => x.amount > 0).map((x) => ({ source: 'sale' as const, id: x.id, number: x.number, at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...receipts.map((x) => ({ source: 'customer_payment' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...ops.filter((x) => x.type === 'IN').map((x) => ({ source: 'cash_operation' as const, id: x.id, at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
+      ...suppliers.filter((x) => x.kind === 'credit_note').map((x) => ({ source: 'supplier_payment' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Fournisseur', label: `Avoir ${x.supplier_number} remboursé`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...pieces.entries,
+    ]
+      .map((r) => ({ method_label: cash, ...r }))
+      .sort((a, b) => a.at.localeCompare(b.at));
     const exits: CashJournalRow[] = [
-      ...sales.filter((x) => x.amount < 0).map((x) => ({ at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
-      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
-      ...expenses.map((x) => ({ at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name, user_id: x.user_id })),
-      ...closing.map((x) => ({ at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, user_id: null, closing: true })),
-    ].sort((a, b) => a.at.localeCompare(b.at));
+      ...sales.filter((x) => x.amount < 0).map((x) => ({ source: 'refund' as const, id: x.id, number: x.number, at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ source: 'cash_operation' as const, id: x.id, at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
+      ...expenses.map((x) => ({ source: 'expense' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name, user_id: x.user_id })),
+      ...suppliers.filter((x) => x.kind === 'invoice').map((x) => ({ source: 'supplier_payment' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Règlement fournisseur', label: `Facture ${x.supplier_number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...pieces.exits,
+      ...closing.map((x) => ({ source: 'central' as const, id: x.id, number: x.number, at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, user_id: null, closing: true })),
+    ]
+      .map((r) => ({ method_label: cash, ...r }))
+      .sort((a, b) => a.at.localeCompare(b.at));
     return { entries, exits, creditSales: credit };
+  }
+
+  /**
+   * Pièces d'« Encaisser » et « Décaisser » d'une journée (avances, salaires,
+   * remboursements, autres), en espèces ou par MoMo/OM selon la caisse.
+   */
+  desk(sessionId: string, method: 'CASH' | 'EMONEY'): { entries: CashJournalRow[]; exits: CashJournalRow[] } {
+    const rows = this.db
+      .prepare(
+        `SELECT e.id, e.at, e.number, e.direction, e.kind, e.amount, e.method, e.reference, e.piece, e.label,
+                COALESCE(s.name, c.name, e.party) AS party, u.name AS user_name, e.user_id
+         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.session_id = ? AND e.status = 'active' AND ${method === 'CASH' ? "e.method = 'CASH'" : "e.method <> 'CASH'"} ORDER BY e.at`,
+      )
+      .all(sessionId) as { id: string; at: string; number: string; direction: 'IN' | 'OUT'; kind: EntryKind; amount: number; method: PaymentMethod; reference: string | null; piece: string | null; label: string; party: string | null; user_name: string | null; user_id: string | null }[];
+    const map = (x: (typeof rows)[number]): CashJournalRow => ({
+      source: 'entry',
+      id: x.id,
+      number: x.number,
+      kind: x.kind,
+      method_label: PAYMENT_METHODS[x.method] ?? x.method,
+      reference: x.reference ?? x.piece,
+      at: x.at,
+      amount: x.amount,
+      nature: ENTRY_KINDS[x.kind],
+      label: `${x.number} ${x.label}`,
+      party: x.party,
+      user_name: x.user_name,
+      user_id: x.user_id,
+    });
+    return { entries: rows.filter((x) => x.direction === 'IN').map(map), exits: rows.filter((x) => x.direction === 'OUT').map(map) };
+  }
+
+  /** Entrées et sorties d'une journée, quelle que soit la caisse : espèces, ou comptes MoMo/OM d'une caisse électronique. */
+  journal(sessionId: string): { entries: CashJournalRow[]; exits: CashJournalRow[] } {
+    const se = this.getSession(sessionId);
+    const kind = this.admin.getRegister(se.register_id).kind;
+    if (kind !== 'electronic') return this.cashJournal(sessionId);
+    const map = (r: EmoneyRow): CashJournalRow => ({ ...r, label: r.label, source: r.source === 'sale' ? 'sale' : r.source });
+    return { entries: this.emoney.sessionEntries(sessionId).map(map), exits: this.emoney.sessionExits(sessionId).map(map) };
   }
 
   /** Écart au-delà du seuil, pas encore justifié par un gérant. */

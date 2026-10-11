@@ -2,6 +2,7 @@ import { type Fcfa, type Milli, dueDate, lineAmount, parseStoreSettings, suggest
 import type { Db } from './database';
 import type { ReceptionLine, StockService } from './stock';
 import { AppError, Base, type Clock, type Context, newId } from './util';
+import { EmoneyService } from './emoney';
 
 export interface Supplier {
   id: string;
@@ -696,21 +697,52 @@ export class PurchaseService extends Base {
   }
 
   /** Règlement (total ou partiel) d'une facture fournisseur ; pour un avoir, c'est un remboursement reçu. */
-  paySupplier(ctx: Context, input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null; paidAt?: string }): SupplierInvoice {
+  paySupplier(
+    ctx: Context,
+    input: {
+      invoiceId: string;
+      method: SupplierPaymentMethod;
+      amount: Fcfa;
+      reference?: string | null;
+      paidAt?: string;
+      registerId?: string | null;
+      /** Payé ou remboursé dans une caisse ouverte (« Décaisser », « Encaisser ») : espèces du tiroir ou compte MoMo/OM de la caisse. */
+      sessionId?: string | null;
+    },
+  ): SupplierInvoice {
     const invoice = this.getInvoice(input.invoiceId);
     if (!(input.method in SUPPLIER_PAYMENT_METHODS)) throw new AppError('Mode de règlement inconnu', 'INVALID');
     if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     if (input.amount > invoice.balance) throw new AppError(`Le montant dépasse le reste à payer (${invoice.balance} FCFA)`, 'INVALID');
     if (input.method !== 'CASH' && !input.reference?.trim()) throw new AppError('La référence du règlement est obligatoire', 'INVALID');
+    // Payé par MoMo/OM : il sort de la caisse électronique choisie, sinon de la centrale (un avoir remboursé n'y est pas rattaché).
+    const src = input.sessionId
+      ? new EmoneyService(this.db, this.clock).openSession(ctx.storeId, input.sessionId, input.method)
+      : invoice.kind === 'invoice'
+        ? new EmoneyService(this.db, this.clock).source(ctx.storeId, input.method, input.registerId)
+        : { registerId: null, sessionId: null };
     return this.tx(() => {
       const id = newId();
       this.db
         .prepare(
-          `INSERT INTO supplier_payments (id, invoice_id, supplier_id, store_id, method, amount, reference, paid_at, user_id, from_central)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO supplier_payments (id, invoice_id, supplier_id, store_id, method, amount, reference, paid_at, user_id, from_central, register_id, session_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         // Espèces payées au bureau : elles sortent de la caisse centrale.
-        .run(id, invoice.id, invoice.supplier_id, ctx.storeId, input.method, input.amount, input.reference?.trim() || null, input.paidAt ?? this.now(), ctx.userId, input.method === 'CASH' ? 1 : 0);
+        .run(
+          id,
+          invoice.id,
+          invoice.supplier_id,
+          ctx.storeId,
+          input.method,
+          input.amount,
+          input.reference?.trim() || null,
+          input.paidAt ?? this.now(),
+          ctx.userId,
+          input.method === 'CASH' && !src.sessionId ? 1 : 0,
+          src.registerId,
+          src.sessionId,
+        );
       this.enqueue(ctx, 'supplier_payment', id, 'upsert', {});
       this.audit(ctx.userId, 'supplier.payment', 'supplier_invoice', invoice.id, { amount: input.amount, method: input.method });
       return this.getInvoice(invoice.id);

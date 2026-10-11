@@ -1177,4 +1177,18 @@ CREATE TABLE production_orders (
 CREATE INDEX production_orders_store ON production_orders(store_id, created_at);
 `,
   },
+  {
+    version: 23,
+    name: 'caisses espèces, électroniques et banque',
+    sql: `
+-- Type de caisse : espèces (tiroir), électronique (Mobile Money, carte) ou banque (virement, chèque).
+ALTER TABLE registers ADD COLUMN kind TEXT NOT NULL DEFAULT 'cash' CHECK (kind IN ('cash', 'electronic', 'bank'));
+-- Un caissier peut tenir une caisse de chaque type : register_id reste sa caisse espèces.
+ALTER TABLE users ADD COLUMN emoney_register_id TEXT REFERENCES registers(id);
+ALTER TABLE users ADD COLUMN bank_register_id TEXT REFERENCES registers(id);
+-- Journée de caisse qui a reçu le paiement (caisse électronique ou banque) ; vide : celle du ticket.
+ALTER TABLE sale_payments ADD COLUMN session_id TEXT;
+CREATE INDEX sale_payments_session ON sale_payments(session_id);
+`,
+  },
 ];

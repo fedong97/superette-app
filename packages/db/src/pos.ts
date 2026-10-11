@@ -8,7 +8,11 @@ import {
   type PriceLevel,
   type PromotedLine,
   PAYMENT_METHODS,
+  type RegisterKind,
   applyPromotions,
+  paymentRegisterKind,
+  ELECTRONIC_METHODS,
+  BANK_METHODS,
   closingDifference,
   computeTotals,
   lineTotal,
@@ -208,6 +212,28 @@ export interface ZReport {
   cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expenses: Fcfa; expected: Fcfa };
   counted: Fcfa | null;
   difference: Fcfa | null;
+  /** Type de la caisse : une caisse électronique ou banque n'a ni tiroir ni fond. */
+  registerKind: RegisterKind;
+  /** Caisse électronique ou banque : attendu et solde relevé par moyen de paiement. */
+  declared: DeclaredLine[] | null;
+  /** Tickets de cette caisse payés sur la caisse électronique ou banque du caissier. */
+  elsewhere: { method: PaymentMethod; label: string; registerName: string; amount: Fcfa }[];
+}
+
+/** Détail enregistré à la clôture d'une caisse électronique ou banque, par moyen de paiement. */
+export interface DeclaredDetail {
+  declared: Record<string, Fcfa>;
+  expected: Record<string, Fcfa>;
+}
+
+/** Clôture d'une caisse électronique ou banque : un moyen de paiement. */
+export interface DeclaredLine {
+  method: PaymentMethod;
+  label: string;
+  /** Encaissé dans la journée (ventes, retours et règlements clients). */
+  expected: Fcfa;
+  /** Montant relevé sur le téléphone, le terminal ou le relevé (null : pas encore clôturée). */
+  declared: Fcfa | null;
 }
 
 export class PosService extends Base {
@@ -290,6 +316,53 @@ export class PosService extends Base {
     return this.lastClosedSession(registerId)?.float_left ?? null;
   }
 
+  /** Caisses électronique et banque attribuées à l'utilisateur (null : pas de caisse de ce type). */
+  linkedRegisters(userId: string): Record<Exclude<RegisterKind, 'cash'>, string | null> {
+    const u = this.admin.getUser(userId);
+    return { electronic: u.emoney_register_id, bank: u.bank_register_id };
+  }
+
+  /**
+   * Journée qui reçoit un paiement : celle de la caisse électronique ou banque
+   * du caissier pour ces moyens, sinon celle du ticket. Une caisse attribuée mais
+   * fermée refuse le paiement plutôt que de le ranger dans le tiroir.
+   */
+  sessionFor(ctx: Context, method: string, cashSessionId: string): string {
+    const kind = paymentRegisterKind(method);
+    if (kind === 'cash') return cashSessionId;
+    const registerId = this.linkedRegisters(ctx.userId)[kind];
+    if (!registerId) return cashSessionId;
+    const open = this.currentSession(registerId);
+    if (!open) throw new AppError(`${this.admin.getRegister(registerId).name} est fermée : ouvrez-la dans Trésorerie › Opérations de trésorerie`, 'SESSION_CLOSED');
+    return open.id;
+  }
+
+  /**
+   * Ouvre les caisses électronique et banque de l'utilisateur qui ne le sont pas
+   * encore : elles n'ont ni fond ni tiroir. Renvoie les journées ouvertes.
+   */
+  openLinked(ctx: Context): CashSession[] {
+    const opened: CashSession[] = [];
+    for (const registerId of Object.values(this.linkedRegisters(ctx.userId))) {
+      if (!registerId || this.currentSession(registerId)) continue;
+      const reg = this.admin.getRegister(registerId);
+      if (!reg.active) continue;
+      const id = newId();
+      this.tx(() => {
+        this.db
+          .prepare(
+            `INSERT INTO cash_sessions (id, store_id, register_id, user_id, opened_at, opening_float, carried_float, status)
+             VALUES (?, ?, ?, ?, ?, 0, NULL, 'open')`,
+          )
+          .run(id, ctx.storeId, registerId, ctx.userId, this.now());
+        this.enqueue(ctx, 'cash_session', id, 'upsert', this.getSession(id));
+        this.audit(ctx.userId, 'cash.open', 'cash_session', id, { kind: reg.kind });
+      });
+      opened.push(this.getSession(id));
+    }
+    return opened;
+  }
+
   /**
    * Ouverture de la journée avec son fond de caisse. Le fond reprend celui
    * laissé la veille ; un complément est pris dans la caisse centrale, un
@@ -304,6 +377,7 @@ export class PosService extends Base {
     }
     const carried = this.carriedFloat(registerId);
     const register = this.admin.getRegister(registerId);
+    if (register.kind !== 'cash') throw new AppError(`${register.name} n'est pas une caisse espèces`, 'INVALID');
     const id = newId();
     this.tx(() => {
       this.db
@@ -326,6 +400,8 @@ export class PosService extends Base {
       this.enqueue(ctx, 'cash_session', id, 'upsert', this.getSession(id));
       this.audit(ctx.userId, 'cash.open', 'cash_session', id, { openingFloat, carried });
     });
+    // Une seule ouverture pour toutes les caisses du caissier.
+    this.openLinked(ctx);
     return this.getSession(id);
   }
 
@@ -545,6 +621,8 @@ export class PosService extends Base {
       }
     }
     const withoutStock = this.assertInStock(ctx.storeId, lines);
+    // Chaque paiement va à la journée de la caisse de son type (espèces, électronique, banque).
+    const paymentSessions = input.payments.map((p) => this.sessionFor(ctx, p.method, session.id));
     const settlement = settle(totals.totalTtc, input.payments);
     if (!settlement.complete) throw new AppError('Le ticket n’est pas entièrement réglé', 'UNPAID');
     const onCredit = input.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0);
@@ -604,8 +682,8 @@ export class PosService extends Base {
           line.packName, line.packUnits ?? null, line.packPrice ?? null,
         );
       });
-      const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference) VALUES (?, ?, ?, ?, ?)');
-      for (const p of input.payments) insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null);
+      const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id) VALUES (?, ?, ?, ?, ?, ?)');
+      input.payments.forEach((p, i) => insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null, paymentSessions[i]));
       if (totals.totalDiscount > 0) {
         this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: totals.totalDiscount, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
       }
@@ -743,6 +821,7 @@ export class PosService extends Base {
     if (input.refundMethod === 'CUSTOMER_CREDIT' && !original.customer_id) {
       throw new AppError('Ce ticket n’a pas de client : remboursez en espèces ou par un autre moyen', 'INVALID');
     }
+    const refundSession = this.sessionFor(ctx, input.refundMethod, session.id);
 
     return this.tx(() => {
       const id = newId();
@@ -765,7 +844,9 @@ export class PosService extends Base {
       for (const r of returned) {
         insertLine.run(newId(), id, r.line.line_no, r.line.article_id, r.line.label, r.line.barcode, -r.qty, r.line.unit_price, r.line.vat_rate_bp, -r.amount);
       }
-      this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference) VALUES (?, ?, ?, ?, NULL)').run(newId(), id, input.refundMethod, -total);
+      this.db
+        .prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id) VALUES (?, ?, ?, ?, NULL, ?)')
+        .run(newId(), id, input.refundMethod, -total, refundSession);
       const qtyByArticle = new Map<string, Milli>();
       for (const r of returned) qtyByArticle.set(r.line.article_id, (qtyByArticle.get(r.line.article_id) ?? 0) + r.qty);
       this.restockSaleMovements(ctx, original.id, 'sale_return', id, qtyByArticle);
@@ -837,9 +918,18 @@ export class PosService extends Base {
       .prepare(
         `SELECT p.method, SUM(CASE WHEN p.amount > 0 THEN p.amount ELSE 0 END) AS received, SUM(CASE WHEN p.amount < 0 THEN -p.amount ELSE 0 END) AS refunded
          FROM sale_payments p JOIN sales s ON s.id = p.sale_id
-         WHERE s.session_id = ? AND s.status = 'completed' GROUP BY p.method`,
+         WHERE COALESCE(p.session_id, s.session_id) = ? AND s.status = 'completed' GROUP BY p.method`,
       )
       .all(sessionId) as { method: PaymentMethod; received: number; refunded: number }[];
+    const elsewhere = (
+      this.db
+        .prepare(
+          `SELECT p.method, r.name AS registerName, SUM(p.amount) AS amount
+           FROM sale_payments p JOIN sales s ON s.id = p.sale_id JOIN cash_sessions cs ON cs.id = p.session_id JOIN registers r ON r.id = cs.register_id
+           WHERE s.session_id = ? AND p.session_id <> s.session_id AND s.status = 'completed' GROUP BY p.method, r.name ORDER BY r.name, p.method`,
+        )
+        .all(sessionId) as { method: PaymentMethod; registerName: string; amount: number }[]
+    ).map((r) => ({ ...r, label: PAYMENT_METHODS[r.method] }));
     const cashRow = methods.find((m) => m.method === 'CASH');
     const cashSales = (cashRow?.received ?? 0) - agg.changeGiven;
     const cashRefunds = cashRow?.refunded ?? 0;
@@ -881,6 +971,9 @@ export class PosService extends Base {
       session,
       storeName: store.name,
       registerName: register.name,
+      registerKind: register.kind,
+      declared: register.kind === 'cash' ? null : this.declaredLines(session),
+      elsewhere,
       ticketCount: agg.ticketCount,
       salesTtc: agg.salesTtc,
       returnsTtc: agg.returnsTtc,
@@ -897,6 +990,95 @@ export class PosService extends Base {
       counted: session.counted_cash,
       difference: session.difference,
     };
+  }
+
+  /** Moyens de paiement reçus par une caisse électronique ou banque. */
+  private kindMethods(kind: RegisterKind): PaymentMethod[] {
+    return kind === 'electronic' ? [...ELECTRONIC_METHODS] : kind === 'bank' ? [...BANK_METHODS] : ['CASH'];
+  }
+
+  /** Encaissé par moyen de paiement dans une journée : ventes, retours et règlements clients. */
+  private receivedByMethod(sessionId: string): Map<string, Fcfa> {
+    const out = new Map<string, Fcfa>();
+    const rows = this.db
+      .prepare(
+        `SELECT p.method, SUM(p.amount) AS amount FROM sale_payments p JOIN sales s ON s.id = p.sale_id
+         WHERE COALESCE(p.session_id, s.session_id) = ? AND s.status = 'completed' GROUP BY p.method`,
+      )
+      .all(sessionId) as { method: string; amount: number }[];
+    for (const r of rows) out.set(r.method, r.amount);
+    for (const r of this.customers.sessionReceipts(sessionId)) out.set(r.method, (out.get(r.method) ?? 0) + r.amount);
+    return out;
+  }
+
+  private declaredLines(session: CashSession): DeclaredLine[] {
+    const kind = this.admin.getRegister(session.register_id).kind;
+    const received = this.receivedByMethod(session.id);
+    // Clôturée : attendu et relevé tels qu'enregistrés à la clôture.
+    const stored = session.status === 'closed' ? (JSON.parse((session as CashSession & { counted_detail?: string }).counted_detail ?? '{}') as Partial<DeclaredDetail>) : null;
+    return this.kindMethods(kind).map((m) => ({
+      method: m,
+      label: PAYMENT_METHODS[m],
+      expected: stored?.expected?.[m] ?? received.get(m) ?? 0,
+      declared: stored ? (stored.declared?.[m] ?? 0) : null,
+    }));
+  }
+
+  /** Paiements reçus par une journée, un par ligne : tickets et règlements clients, avec leur référence. */
+  sessionPayments(sessionId: string): { at: string; number: string; method: string; label: string; amount: Fcfa; reference: string | null; user_name: string | null }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.created_at AS at, s.number, p.method, p.amount, p.reference, u.name AS user_name
+         FROM sale_payments p JOIN sales s ON s.id = p.sale_id LEFT JOIN users u ON u.id = s.user_id
+         WHERE COALESCE(p.session_id, s.session_id) = ? AND s.status = 'completed'
+         UNION ALL
+         SELECT c.paid_at, c.number, c.method, c.amount, c.reference, u.name
+         FROM customer_payments c LEFT JOIN users u ON u.id = c.user_id WHERE c.session_id = ?
+         ORDER BY 1`,
+      )
+      .all(sessionId, sessionId) as { at: string; number: string; method: string; amount: number; reference: string | null; user_name: string | null }[];
+    return rows.map((r) => ({ ...r, label: PAYMENT_METHODS[r.method as PaymentMethod] ?? r.method }));
+  }
+
+  /**
+   * Clôture d'une caisse électronique ou banque : le caissier relève le solde
+   * de chaque téléphone, terminal ou relevé. L'écart avec l'encaissé de la
+   * journée se justifie comme celui des espèces (motif du gérant au-delà du seuil).
+   */
+  closeDeclared(ctx: Context, registerId: string, declared: Partial<Record<PaymentMethod, Fcfa>>, opts: Omit<CloseOptions, 'floatLeft'> = {}): ZReport {
+    const register = this.admin.getRegister(registerId);
+    if (register.kind === 'cash') throw new AppError('Une caisse espèces se clôture par le comptage des coupures', 'INVALID');
+    const session = this.currentSession(registerId);
+    if (!session) throw new AppError(`${register.name} n'est pas ouverte`, 'SESSION_CLOSED');
+    const methods = this.kindMethods(register.kind);
+    const detail: Record<string, Fcfa> = {};
+    for (const m of methods) {
+      const v = declared[m] ?? 0;
+      if (!Number.isSafeInteger(v) || v < 0) throw new AppError(`Montant invalide pour ${PAYMENT_METHODS[m]}`, 'INVALID');
+      detail[m] = v;
+    }
+    const received = this.receivedByMethod(session.id);
+    const expectedDetail = Object.fromEntries(methods.map((m) => [m, received.get(m) ?? 0])) as Record<string, Fcfa>;
+    const expected = methods.reduce((t, m) => t + expectedDetail[m]!, 0);
+    const counted = methods.reduce((t, m) => t + detail[m]!, 0);
+    const difference = counted - expected;
+    const threshold = this.admin.getStore(session.store_id).cash_gap_threshold;
+    const gapReason = Math.abs(difference) > threshold && opts.gapApprovedBy ? opts.gapReason?.trim() || null : null;
+    const gapApprovedBy = gapReason ? opts.gapApprovedBy! : null;
+    this.tx(() => {
+      const lastZ = this.db.prepare('SELECT MAX(z_number) FROM cash_sessions WHERE register_id = ?').pluck().get(registerId) as number | null;
+      if (lastZ) this.raiseCounter(`z:${registerId}`, lastZ);
+      const zNumber = this.nextCounter(`z:${registerId}`);
+      this.db
+        .prepare(
+          `UPDATE cash_sessions SET status = 'closed', closed_at = ?, closed_by = ?, counted_detail = ?, expected_cash = ?, counted_cash = ?,
+             difference = ?, z_number = ?, first_counted = COALESCE(first_counted, ?), gap_reason = ?, gap_approved_by = ?, gap_justified_at = ? WHERE id = ?`,
+        )
+        .run(this.now(), ctx.userId, JSON.stringify({ declared: detail, expected: expectedDetail } satisfies DeclaredDetail), expected, counted, difference, zNumber, counted, gapReason, gapApprovedBy, gapReason ? this.now() : null, session.id);
+      this.enqueue(ctx, 'cash_session', session.id, 'upsert', this.getSession(session.id));
+      this.audit(ctx.userId, 'cash.close', 'cash_session', session.id, { zNumber, kind: register.kind, expected, counted, difference, gapReason });
+    });
+    return this.zReport(session.id);
   }
 
   /**

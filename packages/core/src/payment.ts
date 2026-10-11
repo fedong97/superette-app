@@ -5,11 +5,27 @@ export const PAYMENT_METHODS = {
   MTN_MOMO: 'MTN Mobile Money',
   ORANGE_MONEY: 'Orange Money',
   CARD: 'Carte bancaire',
+  BANK_TRANSFER: 'Virement',
+  CHEQUE: 'Chèque',
   CUSTOMER_CREDIT: 'Crédit client',
   VOUCHER: "Bon d'achat",
 } as const;
 
 export type PaymentMethod = keyof typeof PAYMENT_METHODS;
+
+/**
+ * Caisse qui reçoit un paiement : les espèces vont au tiroir, Mobile Money et
+ * carte à la caisse électronique du caissier, virement et chèque à sa caisse banque.
+ * Crédit client et bon d'achat restent sur la journée du ticket.
+ */
+export type RegisterKind = 'cash' | 'electronic' | 'bank';
+export const ELECTRONIC_METHODS = ['MTN_MOMO', 'ORANGE_MONEY', 'CARD'] as const;
+export const BANK_METHODS = ['BANK_TRANSFER', 'CHEQUE'] as const;
+export function paymentRegisterKind(method: string): RegisterKind {
+  if ((ELECTRONIC_METHODS as readonly string[]).includes(method)) return 'electronic';
+  if ((BANK_METHODS as readonly string[]).includes(method)) return 'bank';
+  return 'cash';
+}
 
 export interface Payment {
   method: PaymentMethod;
@@ -48,5 +64,5 @@ export function settle(total: Fcfa, payments: readonly Payment[]): Settlement {
 
 /** Paiements qui exigent une référence de transaction avant validation. */
 export function requiresReference(method: PaymentMethod): boolean {
-  return method === 'MTN_MOMO' || method === 'ORANGE_MONEY' || method === 'VOUCHER';
+  return method === 'MTN_MOMO' || method === 'ORANGE_MONEY' || method === 'VOUCHER' || method === 'BANK_TRANSFER' || method === 'CHEQUE';
 }

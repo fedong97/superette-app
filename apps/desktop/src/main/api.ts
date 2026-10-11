@@ -12,6 +12,7 @@ import {
   type PriceLevel,
   type StatementLine,
   type StockLevel,
+  type RegisterKind,
 } from '@superette/core';
 import {
   AppError,
@@ -38,6 +39,7 @@ import {
   type SalesReportInput,
   type ReceptionLine,
   type Role,
+  type UserRegisters,
   type SaleLineInput,
   type Services,
   type PromotionInput,
@@ -75,7 +77,8 @@ export interface Printer {
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
   /** Rapport de clôture A4 : Z, mouvements d'espèces et liste des ventes de la journée. */
-  sessionReport(sessionId: string): Promise<void>;
+  /** Rapport A4 d'une journée ; blind : bon de clôture d'une caisse électronique ou banque sans l'attendu ni l'écart. */
+  sessionReport(sessionId: string, blind?: boolean): Promise<void>;
   openDrawer(): Promise<void>;
   testPage(withDrawer: boolean): Promise<void>;
   purchaseOrder(orderId: string): Promise<void>;
@@ -139,7 +142,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     const usable = (id: string | null) => {
       if (!id) return null;
       const r = s.admin.getRegister(id);
-      return r.active && r.store_id === storeId ? r : null;
+      return r.active && r.kind === 'cash' && r.store_id === storeId ? r : null;
     };
     if (assigned) return usable(assigned);
     if (!isSupervisor(u)) return null;
@@ -200,6 +203,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
       /** Le gérant ou l'administrateur sans caisse attribuée peut choisir sa caisse. */
       canChooseRegister: Boolean(user && isSupervisor(user) && !s.admin.getUser(user.id).register_id),
+      /** Caisses électronique et banque de l'utilisateur : leurs paiements y vont. */
+      linkedRegisters: (() => {
+        if (!user) return { electronic: null, bank: null };
+        const ids = s.pos.linkedRegisters(user.id);
+        const named = (id: string | null) => (id ? { id, name: s.admin.getRegister(id).name } : null);
+        return { electronic: named(ids.electronic), bank: named(ids.bank) };
+      })(),
     }),
     'setup.bootstrap': (input: BootstrapInput) => {
       const result = s.admin.bootstrap(input);
@@ -223,12 +233,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!isSupervisor(u) || s.admin.getUser(u.id).register_id) throw new AppError('Votre caisse est fixée par l’administrateur', 'FORBIDDEN');
       if (registerId) {
         const r = s.admin.getRegister(registerId);
-        if (!r.active || r.store_id !== ctx().storeId) throw new AppError('Caisse indisponible', 'INVALID');
+        if (!r.active || r.kind !== 'cash' || r.store_id !== ctx().storeId) throw new AppError('Caisse indisponible', 'INVALID');
       }
       chosenRegisterId = registerId;
       return ctx().registerId;
     },
-    'pos.registers': () => s.admin.listRegisters(ctx().storeId).filter((r) => r.active).map(({ activation_code: _, ...r }) => r),
+    'pos.registers': () => s.admin.listRegisters(ctx().storeId).filter((r) => r.active && r.kind === 'cash').map(({ activation_code: _, ...r }) => r),
     'auth.checkSupervisor': (pin: string) => {
       const sup = supervisor(pin);
       return { id: sup.id, name: sup.name };
@@ -251,14 +261,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.admin.setStoreOptions(u.id, ctx().storeId, options);
     },
     'admin.registers': (storeId: string) => (requireUser(ADMIN), s.admin.listRegisters(storeId)),
-    'admin.createRegister': (storeId: string, name?: string) => s.admin.createRegister(requireAdmin().id, storeId, name),
+    'admin.createRegister': (storeId: string, name?: string, kind?: RegisterKind) => s.admin.createRegister(requireAdmin().id, storeId, name, kind),
     'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean }) => s.admin.updateRegister(requireAdmin().id, id, patch),
     'admin.warehouses': () => s.admin.listWarehouses(ctx().storeId),
     'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(ADMIN).storeId, name, kind),
     'admin.users': () => (requireUser(ADMIN), s.admin.listUsers()),
-    'admin.createUser': (input: { name: string; login: string; pin: string; role: Role; storeId: string | null; registerId?: string | null }) =>
+    'admin.createUser': (input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null }) =>
       s.admin.createUser(requireUser(ADMIN).id, input),
-    'admin.updateUser': (id: string, patch: { name?: string; role?: Role; storeId?: string | null; registerId?: string | null; active?: boolean; pin?: string }) =>
+    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }) =>
       s.admin.updateUser(requireUser(ADMIN).id, id, patch),
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
     'admin.settings': () => {
@@ -519,7 +529,31 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         centralBalance: can(user!, ['central_cash', 'accounting']) ? s.treasury.balance(c.storeId) : null,
         gapThreshold: s.admin.getStore(c.storeId).cash_gap_threshold,
         canSeeAmounts: can(user!, AMOUNTS),
+        /** Caisses électronique et banque de l'utilisateur, avec leur journée. */
+        linked: Object.values(s.pos.linkedRegisters(user!.id))
+          .filter((id): id is string => Boolean(id))
+          .map((id) => {
+            const { activation_code: _, ...r } = s.admin.getRegister(id);
+            const open = s.pos.currentSession(id);
+            return { ...r, session: open, stale: open ? s.pos.isStale(open) : false };
+          }),
       };
+    },
+    /** Rouvre les caisses électronique et banque de l'utilisateur (après une clôture en cours de journée). */
+    'treasury.openLinked': () => s.pos.openLinked(ctx(TREASURY)),
+    /**
+     * Clôture d'une caisse électronique ou banque : solde relevé par moyen.
+     * Le caissier clôture les siennes ; le gérant (droit des écarts) peut clôturer toute caisse et justifier l'écart.
+     */
+    'treasury.closeDeclared': (registerId: string, declared: Partial<Record<PaymentMethod, Fcfa>>, opts?: { gapReason?: string | null }) => {
+      const c = ctx(TREASURY);
+      const u = user!;
+      const mine = Object.values(s.pos.linkedRegisters(u.id)).includes(registerId);
+      if (!mine && !can(u, ['cash_open'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
+      const z = s.pos.closeDeclared(c, registerId, declared, { gapReason: opts?.gapReason ?? null, gapApprovedBy: can(u, ['cash_open']) ? u.id : null });
+      const threshold = s.admin.getStore(c.storeId).cash_gap_threshold;
+      // Sans le droit des montants, le caissier ne voit ni l'attendu ni l'écart.
+      return can(u, AMOUNTS) ? { z, sessionId: z.session.id, needsApproval: false } : { z: null, sessionId: z.session.id, needsApproval: Math.abs(z.difference ?? 0) > threshold };
     },
     'treasury.sessions': (registerId?: string | null) => {
       const c = ctx(TREASURY);
@@ -629,7 +663,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'treasury.record': (input: { kind: 'IN' | 'OUT'; nature: CentralNature; amount: Fcfa; label?: string | null }) => s.treasury.record(ctx(['central_cash']), input),
     'treasury.printVoucher': (movementId: string) => (requireUser([...TREASURY, 'central_cash']), printer.centralVoucher(movementId)),
-    'treasury.printReport': (sessionId: string) => (requireAmounts(), printer.sessionReport(sessionId)),
+    'treasury.printReport': (sessionId: string) => {
+      const u = requireUser(TREASURY);
+      if (can(u, AMOUNTS)) return printer.sessionReport(sessionId);
+      // Le caissier imprime le bon de clôture de sa caisse électronique ou banque, sans l'attendu.
+      const se = s.pos.getSession(sessionId);
+      if (!Object.values(s.pos.linkedRegisters(u.id)).includes(se.register_id)) requireAmounts();
+      return printer.sessionReport(sessionId, true);
+    },
     'pos.printInvoice': (saleId: string) => (requireSaleAccess(saleId), printer.invoice(saleId)),
 
     // --- Clients et crédit ----------------------------------------------------
@@ -655,7 +696,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Encaissé à la caisse : rattaché à la session ouverte, les espèces vont dans le tiroir.
       const session = input.atRegister && c.registerId ? s.pos.currentSession(c.registerId) : null;
       if (input.atRegister && !session) throw new AppError("Ouvrez la caisse avant d'encaisser un règlement client", 'NO_SESSION');
-      return s.customers.receivePayment(c, { ...input, sessionId: session?.id ?? null });
+      // Mobile Money et carte vont à la caisse électronique du caissier, virement et chèque à sa caisse banque.
+      return s.customers.receivePayment(c, { ...input, sessionId: session ? s.pos.sessionFor(c, input.method, session.id) : null });
     },
     'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),

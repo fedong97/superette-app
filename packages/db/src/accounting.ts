@@ -206,11 +206,11 @@ export class AccountingService extends Base {
       .all(storeId) as { id: string; type: 'IN' | 'OUT'; amount: number; reason: string; d: string; register: string }[];
     const closings = this.db
       .prepare(
-        `SELECT cs.z_number, cs.difference, date(cs.closed_at, 'localtime') AS d, g.name AS register
+        `SELECT cs.z_number, cs.difference, cs.counted_detail, date(cs.closed_at, 'localtime') AS d, g.name AS register, g.kind
          FROM cash_sessions cs JOIN registers g ON g.id = cs.register_id
          WHERE cs.store_id = ? AND cs.status = 'closed' AND cs.difference IS NOT NULL AND cs.difference <> 0`,
       )
-      .all(storeId) as { z_number: number; difference: number; d: string; register: string }[];
+      .all(storeId) as { z_number: number; difference: number; counted_detail: string | null; d: string; register: string; kind: string }[];
     const out: Entry[] = [];
     for (const o of ops.filter((x) => inRange(x.d, opts.from, opts.to))) {
       const label = `${o.type === 'IN' ? 'Apport' : 'Prélèvement'} ${o.register} : ${o.reason}`;
@@ -232,10 +232,23 @@ export class AccountingService extends Base {
         ref: `Z${c.z_number}`,
         label,
         source: 'auto',
-        lines: [side(r.cash, c.difference, label), side(c.difference < 0 ? r.cash_short : r.cash_over, -c.difference, label)],
+        lines: [...this.closingLines(r, c, label), side(c.difference < 0 ? r.cash_short : r.cash_over, -c.difference, label)],
       });
     }
     return out;
+  }
+
+  /**
+   * Écart de clôture sur le compte de la caisse : le tiroir pour une caisse
+   * espèces, le compte de chaque moyen (MTN, Orange, carte, banque) pour une
+   * caisse électronique ou banque, selon le relevé et l'attendu enregistrés.
+   */
+  private closingLines(r: Record<AccountRole, string>, c: { difference: number; counted_detail: string | null; kind: string }, label: string): EntryLine[] {
+    if (c.kind === 'cash' || !c.counted_detail) return [side(r.cash, c.difference, label)];
+    const detail = JSON.parse(c.counted_detail) as { declared?: Record<string, number>; expected?: Record<string, number> };
+    const methods = Object.keys(detail.declared ?? {});
+    const lines = methods.map((m) => side(r[METHOD_ROLE[m] ?? 'cash'], (detail.declared?.[m] ?? 0) - (detail.expected?.[m] ?? 0), label)).filter((l) => l.debit || l.credit);
+    return lines.length ? lines : [side(r.cash, c.difference, label)];
   }
 
   /**

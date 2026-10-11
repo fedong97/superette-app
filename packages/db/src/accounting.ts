@@ -311,10 +311,10 @@ export class AccountingService extends Base {
   private rebateEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT e.number, e.kind, e.amount, e.label, date(e.at, 'localtime') AS d, c.code, c.name
+        `SELECT e.number, e.kind, e.amount, e.label, e.method, date(e.at, 'localtime') AS d, c.code, c.name
          FROM rebate_entries e JOIN customers c ON c.id = e.customer_id WHERE e.store_id = ? ORDER BY e.at`,
       )
-      .all(storeId) as { number: string; kind: 'earned' | 'adjust' | 'credit' | 'cash'; amount: number; label: string; d: string; code: string; name: string }[];
+      .all(storeId) as { number: string; kind: 'earned' | 'adjust' | 'credit' | 'cash'; amount: number; label: string; method: string; d: string; code: string; name: string }[];
     return rows
       .filter((e) => inRange(e.d, opts.from, opts.to) && e.amount !== 0)
       .map((e) => {
@@ -324,7 +324,7 @@ export class AccountingService extends Base {
             ? [side(r.rebates, e.amount, label), side(r.rebates_due, -e.amount, label)]
             : e.kind === 'credit'
               ? [side(r.rebates_due, e.amount, label), side(r.customers, -e.amount, label, { code: e.code, name: e.name })]
-              : [side(r.rebates_due, e.amount, label), side(r.central_cash, -e.amount, label)];
+              : [side(r.rebates_due, e.amount, label), side(e.method === 'CASH' ? r.central_cash : r[METHOD_ROLE[e.method] ?? 'mtn'], -e.amount, label)];
         return { journal: e.kind === 'cash' ? ('CA' as const) : ('OD' as const), date: e.d, ref: e.number, label, source: 'auto' as const, lines };
       });
   }

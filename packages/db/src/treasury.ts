@@ -124,7 +124,7 @@ export class TreasuryService extends Base {
          UNION ALL
          SELECT 'rebate', e.id, e.number, e.at, e.label, c.name, u.name, -e.amount
          FROM rebate_entries e JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id
-         WHERE e.store_id = @storeId AND e.kind = 'cash'
+         WHERE e.store_id = @storeId AND e.kind = 'cash' AND e.method = 'CASH'
          ORDER BY 4, 3`,
       )
       .all({ storeId }) as Omit<CentralLedgerRow, 'balance'>[];

@@ -1261,4 +1261,15 @@ ALTER TABLE supplier_payments ADD COLUMN register_id TEXT;
 ALTER TABLE supplier_payments ADD COLUMN session_id TEXT;
 `,
   },
+  {
+    version: 27,
+    name: 'ristournes payées par Mobile Money',
+    sql: `
+-- Ristourne payée : en espèces (caisse centrale) ou par MoMo/OM depuis une caisse électronique.
+ALTER TABLE rebate_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'CASH';
+ALTER TABLE rebate_entries ADD COLUMN reference TEXT;
+ALTER TABLE rebate_entries ADD COLUMN register_id TEXT;
+ALTER TABLE rebate_entries ADD COLUMN session_id TEXT;
+`,
+  },
 ];

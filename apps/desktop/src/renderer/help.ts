@@ -190,7 +190,7 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'statement', title: 'Extrait de compte', steps: ['Ventes à crédit et règlements d’un client sur une période ; imprimez le relevé pour le lui remettre.'] },
       { tab: 'payments', title: 'Règlements', steps: ['Liste des règlements reçus. Pour encaisser : « Encaisser un règlement » sur le compte du client, ou à la caisse par Action.'] },
       { tab: 'receivables', title: 'Situation (balance âgée)', perm: 'receivables', steps: ['Ce que doit chaque client, par ancienneté du retard.'] },
-      { tab: 'rebates-state', title: 'Ristournes', perm: 'rebates', steps: ['Réglez les taux par famille, puis chaque mois « Constater » et « Accorder » en avoir ou en bon.'] },
+      { tab: 'rebates-state', title: 'Ristournes', perm: 'rebates', steps: ['Réglez les taux par famille, puis chaque mois « Constater » et « Accorder » en avoir ou en bon.', 'Payée : en espèces depuis la caisse centrale, ou par MTN MoMo / Orange Money depuis une caisse électronique (la centrale par défaut), avec la référence du transfert.'] },
     ],
   },
   expenses: {

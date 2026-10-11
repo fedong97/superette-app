@@ -313,6 +313,9 @@ export class ReceiptService extends Base {
     if (e.period_from && e.period_to) r.push({ t: 'text', text: `Période du ${dayFr(e.period_from)} au ${dayFr(e.period_to)}` });
     r.push(
       { t: 'row', left: `${REBATE_KINDS[e.kind]} FCFA`, right: money(e.amount), bold: true, big: true },
+      ...(e.kind === 'cash' && e.method !== 'CASH'
+        ? [{ t: 'text' as const, text: `${PAYMENT_METHODS[e.method as 'MTN_MOMO'] ?? e.method}${e.reference ? ` · Réf. ${e.reference}` : ''}${e.register_name ? ` · ${e.register_name}` : ''}` }]
+        : []),
       { t: 'row', left: 'Reste de ristourne à accorder', right: money(left) },
       { t: 'rule' },
       { t: 'row', left: 'Le client', right: 'Le responsable' },

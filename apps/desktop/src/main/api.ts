@@ -921,10 +921,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'rebates.state': (from: string, to: string) => s.rebates.state(ctx(CUSTOMERS).storeId, from, to),
     'rebates.close': (from: string, to: string, customerIds?: string[] | null) => s.rebates.close(ctx(['rebates']), from, to, customerIds ?? undefined),
     'rebates.adjust': (customerId: string, amount: Fcfa, reason: string) => s.rebates.adjust(ctx(['rebates']), customerId, amount, reason),
-    'rebates.grant': (customerId: string, amount: Fcfa, mode: 'credit' | 'cash') => {
+    'rebates.grant': (customerId: string, amount: Fcfa, mode: 'credit' | 'cash', opts?: { method?: string | null; reference?: string | null; registerId?: string | null }) => {
       const c = ctx(['rebates']);
-      if (mode === 'cash' && !can(user!, ['central_cash'])) throw new AppError("Payer en espèces demande le droit de la caisse centrale", 'FORBIDDEN');
-      return s.rebates.grant(c, customerId, amount, mode);
+      if (mode === 'cash' && !can(user!, ['central_cash'])) throw new AppError('Payer une ristourne demande le droit de la caisse centrale', 'FORBIDDEN');
+      return s.rebates.grant(c, customerId, amount, mode, opts ?? {});
     },
     'rebates.entries': (opts?: { customerId?: string | null; from?: string | null; to?: string | null }) => s.rebates.entries(ctx(CUSTOMERS).storeId, opts ?? {}),
     'rebates.carryForward': (date: string) => s.rebates.carryForward(ctx(CUSTOMERS).storeId, date),

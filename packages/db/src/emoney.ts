@@ -37,7 +37,7 @@ export interface EmoneyMovement {
 
 /** Ligne du journal d'une caisse électronique : entrée ou sortie, par moyen de paiement. */
 export interface EmoneyRow {
-  source: 'sale' | 'refund' | 'customer_payment' | 'expense' | 'supplier_payment' | 'movement';
+  source: 'sale' | 'refund' | 'customer_payment' | 'expense' | 'supplier_payment' | 'rebate' | 'movement';
   id: string;
   at: string;
   number: string;
@@ -194,12 +194,20 @@ export class EmoneyService extends Base {
          WHERE ${cond} ${bySession ? '' : 'AND x.paid_at > @after'}`,
       )
       .all(params) as { id: string; at: string; number: string; method: PaymentMethod; amount: number; reference: string | null; party: string; user_name: string | null; user_id: string | null }[];
+    const rebates = this.db
+      .prepare(
+        `SELECT x.id, x.at, x.number, x.method, x.amount, x.reference, c.name AS party, u.name AS user_name, x.user_id
+         FROM rebate_entries x JOIN customers c ON c.id = x.customer_id LEFT JOIN users u ON u.id = x.user_id
+         WHERE ${cond} AND x.kind = 'cash' AND x.method <> 'CASH' ${bySession ? '' : 'AND x.at > @after'}`,
+      )
+      .all(params) as { id: string; at: string; number: string; method: PaymentMethod; amount: number; reference: string | null; party: string; user_name: string | null; user_id: string | null }[];
     const moves = bySession
       ? this.movements({ sessionId: where.sessionId, direction: 'OUT' })
       : this.movements({ registerId: where.registerId, after: where.after, outsideSession: true, direction: 'OUT' });
     return [
       ...expenses.map((x) => this.row('expense', x, 'Dépense', `${x.number} ${x.label}`)),
       ...suppliers.map((x) => this.row('supplier_payment', x, 'Fournisseur', `Facture ${x.number}`)),
+      ...rebates.map((x) => this.row('rebate', x, 'Ristourne', `Bon ${x.number}`)),
       ...moves.map((m) => this.moveRow(m)),
     ];
   }

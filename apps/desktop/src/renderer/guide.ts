@@ -117,6 +117,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'À la clôture, le caissier voit ses sorties par son compte électronique.',
       'Paramètres › Caisses électroniques : avec une caisse électronique centrale (chaque caissier y verse sa recette le soir, avec la référence du transfert et un bon), ou caisses indépendantes (le solde passe au lendemain).',
       'Trésorerie › Caisses électroniques (MoMo, OM) et centrale : solde de chaque caisse, livre, transferts et dépôts à la banque.',
+      'Ristournes payées par MTN MoMo ou Orange Money depuis une caisse électronique, avec la référence du transfert sur le bon.',
     ],
   },
   {

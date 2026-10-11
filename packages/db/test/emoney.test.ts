@@ -145,4 +145,22 @@ describe('caisses électroniques', () => {
     const entries = s.accounting.entries(storeId).filter((e) => e.ref.startsWith('VE-'));
     expect(entries.map((e) => e.journal).sort()).toEqual(['BQ', 'CA']);
   });
+
+  it('une ristourne payée par MoMo sort de la centrale électronique, pas de la caisse centrale espèces', () => {
+    useCentral();
+    const office = { storeId, registerId: null, userId: adminId };
+    s.emoney.record(office, { registerId: centrale, direction: 'IN', nature: 'other', method: 'MTN_MOMO', amount: 20_000 });
+    const client = s.customers.saveCustomer(adminId, { name: 'Chez Mballa' } as never) as { id: string };
+    s.rebates.adjust(office, client.id, 6_000, 'Ristourne du trimestre');
+    expect(() => s.rebates.grant(office, client.id, 4_000, 'cash', { method: 'MTN_MOMO' })).toThrow(/référence/);
+    const e = s.rebates.grant(office, client.id, 4_000, 'cash', { method: 'MTN_MOMO', reference: 'MP-RIS' });
+    expect(e).toMatchObject({ method: 'MTN_MOMO', reference: 'MP-RIS', register_name: 'MoMo magasin', label: 'Ristourne payée par MTN Mobile Money' });
+    expect(s.emoney.balance(centrale).MTN_MOMO).toBe(16_000);
+    expect(s.emoney.ledger(centrale).rows[0]).toMatchObject({ nature: 'Ristourne', signed: -4_000, party: 'Chez Mballa' });
+    expect(s.treasury.ledger(storeId).rows.some((r) => r.source === 'rebate')).toBe(false);
+    expect(s.rebates.balance(storeId, client.id)).toBe(2_000);
+    const mtn = s.accounting.listAccounts().find((a) => a.role === 'mtn')!.id;
+    const entry = s.accounting.entries(storeId).find((x) => x.ref === e.number)!;
+    expect(entry.lines.find((l) => l.account === mtn)).toMatchObject({ credit: 4_000 });
+  });
 });

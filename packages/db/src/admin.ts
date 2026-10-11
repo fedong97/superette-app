@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { EDITABLE_ROLES, PERMISSIONS, type Permission, TVA_CAMEROUN_NORMAL, roleRights } from '@superette/core';
+import { EDITABLE_ROLES, PERMISSIONS, type Permission, type RegisterKind, TVA_CAMEROUN_NORMAL, roleRights } from '@superette/core';
 import { AppError, Base, hashPin, newId, verifyPin } from './util';
 
 export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
@@ -20,9 +20,26 @@ export interface User {
   login: string;
   role: Role;
   store_id: string | null;
-  /** Caisse attribuée : l'utilisateur y vend depuis n'importe quel PC. */
+  /** Caisse espèces attribuée : l'utilisateur y vend depuis n'importe quel PC. */
   register_id: string | null;
+  /** Caisse électronique (Mobile Money, carte) qui reçoit ses paiements électroniques. */
+  emoney_register_id: string | null;
+  /** Caisse banque (virements, chèques) qui reçoit ses paiements bancaires. */
+  bank_register_id: string | null;
   active: number;
+}
+
+export const REGISTER_KINDS: Record<RegisterKind, string> = {
+  cash: 'Espèces',
+  electronic: 'Électronique (Mobile Money, carte)',
+  bank: 'Banque (virement, chèque)',
+};
+
+/** Caisses attribuées à un utilisateur, une de chaque type au plus. */
+export interface UserRegisters {
+  registerId?: string | null;
+  emoneyRegisterId?: string | null;
+  bankRegisterId?: string | null;
 }
 
 export interface Store {
@@ -56,6 +73,7 @@ export interface Register {
   activation_code: string;
   activated_at: string | null;
   active: number;
+  kind: RegisterKind;
 }
 
 export interface Warehouse {
@@ -231,19 +249,30 @@ export class AdminService extends Base {
     return reg;
   }
 
-  /** Déclare une caisse supplémentaire ; elle s'active sur son PC avec le code renvoyé. */
-  createRegister(userId: string, storeId: string, name?: string): Register {
+  /**
+   * Déclare une caisse supplémentaire. Une caisse espèces s'active sur son PC
+   * avec le code renvoyé ; une caisse électronique ou banque s'attribue aux caissiers.
+   */
+  createRegister(userId: string, storeId: string, name?: string, kind: RegisterKind = 'cash'): Register {
+    if (!(kind in REGISTER_KINDS)) throw new AppError('Type de caisse inconnu', 'INVALID');
     const number =
       ((this.db.prepare('SELECT MAX(number) FROM registers WHERE store_id = ?').pluck().get(storeId) as number | null) ?? 0) + 1;
     const id = newId();
     const code = String(randomInt(100000, 1000000));
     this.db
-      .prepare('INSERT INTO registers (id, store_id, number, name, activation_code) VALUES (?, ?, ?, ?, ?)')
-      .run(id, storeId, number, name ?? `Caisse ${number}`, code);
+      .prepare('INSERT INTO registers (id, store_id, number, name, activation_code, kind) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, storeId, number, name?.trim() || this.defaultRegisterName(storeId, number, kind), code, kind);
     const reg = this.getRegister(id);
     this.enqueue({ storeId, registerId: null }, 'register', id, 'upsert', reg);
-    this.audit(userId, 'register.create', 'register', id, { number });
+    this.audit(userId, 'register.create', 'register', id, { number, kind });
     return reg;
+  }
+
+  /** Caisse 3, ou Mobile 1 et Banque 1 : les caisses électroniques et banque se numérotent entre elles. */
+  private defaultRegisterName(storeId: string, number: number, kind: RegisterKind): string {
+    if (kind === 'cash') return `Caisse ${number}`;
+    const n = (this.db.prepare('SELECT COUNT(*) FROM registers WHERE store_id = ? AND kind = ?').pluck().get(storeId, kind) as number) + 1;
+    return `${kind === 'electronic' ? 'Mobile' : 'Banque'} ${n}`;
   }
 
   /** Renomme ou désactive une caisse. Une caisse ouverte se clôture avant d'être désactivée. */
@@ -265,7 +294,7 @@ export class AdminService extends Base {
   /** Utilisateurs à qui une caisse est attribuée. */
   registerUsers(registerId: string): User[] {
     return this.db
-      .prepare('SELECT id, name, login, role, store_id, register_id, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
+      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
       .all(registerId) as User[];
   }
 
@@ -275,6 +304,7 @@ export class AdminService extends Base {
       .prepare('SELECT * FROM registers WHERE activation_code = ? AND active = 1')
       .get(code.trim()) as Register | undefined;
     if (!reg) throw new AppError("Code d'activation inconnu", 'INVALID_CODE');
+    if (reg.kind !== 'cash') throw new AppError("Seule une caisse espèces s'active sur un PC", 'INVALID_CODE');
     this.db.prepare('UPDATE registers SET activated_at = ? WHERE id = ?').run(this.now(), reg.id);
     this.setSetting('station.storeId', reg.store_id);
     this.setSetting('station.registerId', reg.id);
@@ -292,25 +322,29 @@ export class AdminService extends Base {
   // --- Utilisateurs ---------------------------------------------------------
 
   listUsers(): User[] {
-    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, active FROM users ORDER BY name').all() as User[];
+    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, active FROM users ORDER BY name').all() as User[];
   }
 
   getUser(id: string): User {
-    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, active FROM users WHERE id = ?').get(id) as User | undefined;
+    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, active FROM users WHERE id = ?').get(id) as User | undefined;
     if (!user) throw new AppError('Utilisateur introuvable', 'NOT_FOUND');
     return user;
   }
 
   createUser(
     byUserId: string,
-    input: { name: string; login: string; pin: string; role: Role; storeId: string | null; registerId?: string | null },
+    input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null },
   ): User {
     const id = newId();
-    const registerId = this.checkRegister(input.registerId ?? null);
+    const registerId = this.checkRegister(input.registerId ?? null, 'cash');
+    const emoneyId = this.checkRegister(input.emoneyRegisterId ?? null, 'electronic');
+    const bankId = this.checkRegister(input.bankRegisterId ?? null, 'bank');
     try {
       this.db
-        .prepare('INSERT INTO users (id, name, login, pin_hash, role, store_id, register_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, input.name.trim(), input.login.trim().toLowerCase(), hashPin(input.pin), input.role, input.storeId, registerId, this.now());
+        .prepare(
+          'INSERT INTO users (id, name, login, pin_hash, role, store_id, register_id, emoney_register_id, bank_register_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(id, input.name.trim(), input.login.trim().toLowerCase(), hashPin(input.pin), input.role, input.storeId, registerId, emoneyId, bankId, this.now());
     } catch (e) {
       if (String(e).includes('UNIQUE')) throw new AppError('Identifiant déjà utilisé', 'DUPLICATE');
       throw e;
@@ -324,16 +358,18 @@ export class AdminService extends Base {
   updateUser(
     byUserId: string,
     id: string,
-    patch: { name?: string; role?: Role; storeId?: string | null; registerId?: string | null; active?: boolean; pin?: string },
+    patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string },
   ): User {
     const current = this.getUser(id);
     this.db
-      .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, active = ? WHERE id = ?')
+      .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, emoney_register_id = ?, bank_register_id = ?, active = ? WHERE id = ?')
       .run(
         patch.name ?? current.name,
         patch.role ?? current.role,
         patch.storeId === undefined ? current.store_id : patch.storeId,
-        patch.registerId === undefined ? current.register_id : this.checkRegister(patch.registerId),
+        patch.registerId === undefined ? current.register_id : this.checkRegister(patch.registerId, 'cash'),
+        patch.emoneyRegisterId === undefined ? current.emoney_register_id : this.checkRegister(patch.emoneyRegisterId, 'electronic'),
+        patch.bankRegisterId === undefined ? current.bank_register_id : this.checkRegister(patch.bankRegisterId, 'bank'),
         patch.active === undefined ? current.active : patch.active ? 1 : 0,
         id,
       );
@@ -344,10 +380,12 @@ export class AdminService extends Base {
     return user;
   }
 
-  /** Caisse attribuable : elle existe et n'est pas désactivée. */
-  private checkRegister(registerId: string | null): string | null {
+  /** Caisse attribuable : elle existe, n'est pas désactivée et a le type attendu. */
+  private checkRegister(registerId: string | null, kind: RegisterKind): string | null {
     if (!registerId) return null;
-    if (!this.getRegister(registerId).active) throw new AppError('Cette caisse est désactivée', 'INVALID');
+    const reg = this.getRegister(registerId);
+    if (!reg.active) throw new AppError('Cette caisse est désactivée', 'INVALID');
+    if (reg.kind !== kind) throw new AppError(`${reg.name} n'est pas une caisse ${REGISTER_KINDS[kind].split(' ')[0]!.toLowerCase()}`, 'INVALID');
     return registerId;
   }
 

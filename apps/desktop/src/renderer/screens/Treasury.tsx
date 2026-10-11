@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DENOMINATIONS_FCFA, countedTotal } from '@superette/core';
+import { BANK_METHODS, DENOMINATIONS_FCFA, ELECTRONIC_METHODS, PAYMENT_METHODS, type PaymentMethod, type RegisterKind, countedTotal } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
 import { ZView } from './PosDialogs';
@@ -7,6 +7,7 @@ import { ZView } from './PosDialogs';
 type User = NonNullable<Result<'app.state'>['user']>;
 type State = Result<'treasury.state'>;
 type RegisterRow = State['registers'][number];
+type LinkedRow = State['linked'][number];
 type Journey = Result<'treasury.session'>;
 type CashRow = Journey['cash']['entries'][number];
 
@@ -14,6 +15,9 @@ export type TreasuryTab = 'day' | 'history' | 'central';
 
 /** Caisse choisie en haut de l'écran : une caisse de vente, ou la caisse centrale. */
 const CENTRAL = 'central';
+
+const KIND_LABEL: Record<RegisterKind, string> = { cash: 'Espèces', electronic: 'Électronique', bank: 'Banque' };
+const KIND_METHODS: Record<Exclude<RegisterKind, 'cash'>, readonly PaymentMethod[]> = { electronic: ELECTRONIC_METHODS, bank: BANK_METHODS };
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const dayTime = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -51,9 +55,11 @@ function FullTreasury({
   const [selected, setSelected] = useState<string | null>(initialTab === 'central' && canCentral ? CENTRAL : null);
   const [tab, setTab] = useState<Exclude<TreasuryTab, 'central'>>(initialTab === 'history' ? 'history' : 'day');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'open' | 'close' | 'central-in' | 'central-out' | null>(null);
+  const [dialog, setDialog] = useState<'open' | 'close' | 'declared' | 'central-in' | 'central-out' | null>(null);
+  // Historique filtré par type de caisse : espèces, électronique ou banque.
+  const [kind, setKind] = useState<RegisterKind | 'all'>('all');
 
-  const registers = state.data?.registers ?? [];
+  const registers = (state.data?.registers ?? []).filter((r) => kind === 'all' || r.kind === kind);
   const register: RegisterRow | undefined = registers.find((r) => r.id === selected) ?? registers.find((r) => r.isThisStation) ?? registers[0];
   const central = selected === CENTRAL;
   const history = useLoad(() => (register && !central ? call('treasury.sessions', register.id) : Promise.resolve([])), [register?.id, central]);
@@ -89,6 +95,8 @@ function FullTreasury({
   if (!state.data) return null;
   const open = register?.session ?? null;
   const here = Boolean(register?.isThisStation);
+  const declared = Boolean(register && register.kind !== 'cash');
+  const mine = Boolean(register && state.data.linked.some((l) => l.id === register.id));
 
   return (
     <div className="page treasury">
@@ -97,12 +105,32 @@ function FullTreasury({
       </header>
       <div className="tre-bar">
         <label>
+          Type
+          <select
+            className="tre-kind"
+            value={kind}
+            onChange={(e) => {
+              setKind(e.target.value as RegisterKind | 'all');
+              setSelected(null);
+              setSessionId(null);
+            }}
+          >
+            <option value="all">Toutes</option>
+            {(Object.keys(KIND_LABEL) as RegisterKind[]).map((k) => (
+              <option key={k} value={k}>
+                {KIND_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Caisse
           <select value={central ? CENTRAL : (register?.id ?? '')} onChange={(e) => setSelected(e.target.value)}>
             {registers.map((r) => (
               <option key={r.id} value={r.id}>
                 {String(r.number).padStart(2, '0')} · {r.name}
-                {r.isThisStation ? ' (ma caisse)' : ''}
+                {r.kind !== 'cash' ? ` (${KIND_LABEL[r.kind].toLowerCase()})` : ''}
+                {r.isThisStation || state.data!.linked.some((l) => l.id === r.id) ? ' (ma caisse)' : ''}
               </option>
             ))}
             {canCentral && <option value={CENTRAL}>99 · Caisse centrale</option>}
@@ -120,6 +148,18 @@ function FullTreasury({
               <button onClick={() => setDialog('central-in')}>Entrée en caisse centrale…</button>
               <button onClick={() => setDialog('central-out')}>Sortie (dépôt en banque…)</button>
             </>
+          )
+        ) : declared ? (
+          open && (mine || state.data.canOpen) ? (
+            <button className="danger" onClick={() => setDialog('declared')}>
+              Clôturer la caisse…
+            </button>
+          ) : !open && mine ? (
+            <button className="primary" onClick={() => call('treasury.openLinked').then(reload, toast.error)}>
+              Ouvrir la caisse
+            </button>
+          ) : (
+            <span className="muted">{open ? 'Seul son caissier ou le gérant la clôture.' : 'Elle s’ouvre avec la caisse espèces de son caissier.'}</span>
           )
         ) : here ? (
           open ? (
@@ -235,6 +275,21 @@ function FullTreasury({
           }}
         />
       )}
+      {dialog === 'declared' && register && open && (
+        <DeclaredCloseDialog
+          register={register}
+          session={open}
+          blind={false}
+          canApprove={state.data.canOpen}
+          threshold={state.data.gapThreshold}
+          onClose={() => setDialog(null)}
+          onDone={(id) => {
+            setDialog(null);
+            setSessionId(id);
+            reload();
+          }}
+        />
+      )}
       {(dialog === 'central-in' || dialog === 'central-out') && (
         <CentralDialog
           kind={dialog === 'central-in' ? 'IN' : 'OUT'}
@@ -280,6 +335,8 @@ function Day({
   const diffClass = z.difference === null ? '' : z.difference < 0 ? 'neg' : z.difference > 0 ? 'pos' : '';
   // Bons de la journée : remise ou retour de fond à l'ouverture, versement de la recette à la clôture.
   const vouchers = journey.movements.filter((m) => !m.cash_operation_id);
+  // Caisse électronique ou banque : le Z par moyen tient lieu d'entrées, de sorties et de pied de journée.
+  const declared = z.declared;
   return (
     <div className="tre-day">
       <div className="tre-head">
@@ -299,12 +356,14 @@ function Day({
         <Field label="Clôture le">
           <input readOnly value={se.closed_at ? `${dateTime(se.closed_at)} · ${se.closed_by_name ?? ''}` : ''} />
         </Field>
-        <Field label="Mnt. à l'ouverture" hint={se.carried_float !== null ? `dont ${fcfa(se.carried_float)} laissés la veille` : undefined}>
-          <input readOnly className="r tre-amount" value={fcfa(se.opening_float)} />
-        </Field>
+        {!declared && (
+          <Field label="Mnt. à l'ouverture" hint={se.carried_float !== null ? `dont ${fcfa(se.carried_float)} laissés la veille` : undefined}>
+            <input readOnly className="r tre-amount" value={fcfa(se.opening_float)} />
+          </Field>
+        )}
         <div className="tre-print">
           <button onClick={() => call('pos.printZ', se.id).catch(toast.error)}>Imprimer le Z</button>
-          <button onClick={() => call('treasury.printReport', se.id).catch(toast.error)}>Rapport de clôture (A4)</button>
+          <button onClick={() => call('treasury.printReport', se.id).catch(toast.error)}>{declared ? 'Bon de clôture (A4)' : 'Rapport de clôture (A4)'}</button>
           {vouchers.map((m) => (
             <button key={m.id} onClick={() => call('treasury.printVoucher', m.id).catch(toast.error)}>
               {m.kind === 'FLOAT' ? 'Bon de remise de fond' : 'Bon de versement'} {m.number}
@@ -312,51 +371,59 @@ function Day({
           ))}
         </div>
       </div>
-      <div className="seg">
-        <button className={view === 'cash' ? 'active' : ''} onClick={() => setView('cash')}>
-          Entrées et sorties de caisse
-        </button>
-        <button className={view === 'sales' ? 'active' : ''} onClick={() => setView('sales')}>
-          Historique des ventes ({sales.length})
-        </button>
-        <button className={view === 'z' ? 'active' : ''} onClick={() => setView('z')}>
-          Vue détaillée (Z)
-        </button>
-      </div>
-      {view === 'cash' && (
-        <div className="tre-panes">
-          <CashPane title="Entrées de caisse" rows={cash.entries} party="Tiers" total={sum(cash.entries)} />
-          <CashPane title="Sorties de caisse" rows={cash.exits} party="Bénéficiaire" total={sum(cash.exits)} />
+      {declared ? (
+        <ZView z={z} />
+      ) : (
+        <>
+          <div className="seg">
+            <button className={view === 'cash' ? 'active' : ''} onClick={() => setView('cash')}>
+              Entrées et sorties de caisse
+            </button>
+            <button className={view === 'sales' ? 'active' : ''} onClick={() => setView('sales')}>
+              Historique des ventes ({sales.length})
+            </button>
+            <button className={view === 'z' ? 'active' : ''} onClick={() => setView('z')}>
+              Vue détaillée (Z)
+            </button>
+          </div>
+          {view === 'cash' && (
+            <div className="tre-panes">
+              <CashPane title="Entrées de caisse" rows={cash.entries} party="Tiers" total={sum(cash.entries)} />
+              <CashPane title="Sorties de caisse" rows={cash.exits} party="Bénéficiaire" total={sum(cash.exits)} />
+            </div>
+          )}
+          {view === 'sales' && <SalesList sales={sales} />}
+          {view === 'z' && <ZView z={z} />}
+        </>
+      )}
+      {!declared && (
+        <div className="tre-foot">
+          <div>
+            <small>V. à crédit</small>
+            <strong className="tre-credit">{fcfa(cash.creditSales)}</strong>
+          </div>
+          <div>
+            <small>Attendu à la clôture</small>
+            <strong className="tre-amount">{fcfa(z.cash.expected)}</strong>
+          </div>
+          <div>
+            <small>Relevé à la clôture</small>
+            <strong className="tre-amount">{z.counted === null ? '—' : fcfa(z.counted)}</strong>
+          </div>
+          <div className={diffClass}>
+            <small>Différentiel</small>
+            <strong className="tre-amount">{z.difference === null ? '—' : fcfa(z.difference)}</strong>
+          </div>
+          {se.deposit !== null && (
+            <div>
+              <small>Versé à la centrale · fond laissé</small>
+              <strong>
+                {fcfa(se.deposit)} · {fcfa(se.float_left ?? 0)}
+              </strong>
+            </div>
+          )}
         </div>
       )}
-      {view === 'sales' && <SalesList sales={sales} />}
-      {view === 'z' && <ZView z={z} />}
-      <div className="tre-foot">
-        <div>
-          <small>V. à crédit</small>
-          <strong className="tre-credit">{fcfa(cash.creditSales)}</strong>
-        </div>
-        <div>
-          <small>Attendu à la clôture</small>
-          <strong className="tre-amount">{fcfa(z.cash.expected)}</strong>
-        </div>
-        <div>
-          <small>Relevé à la clôture</small>
-          <strong className="tre-amount">{z.counted === null ? '—' : fcfa(z.counted)}</strong>
-        </div>
-        <div className={diffClass}>
-          <small>Différentiel</small>
-          <strong className="tre-amount">{z.difference === null ? '—' : fcfa(z.difference)}</strong>
-        </div>
-        {se.deposit !== null && (
-          <div>
-            <small>Versé à la centrale · fond laissé</small>
-            <strong>
-              {fcfa(se.deposit)} · {fcfa(se.float_left ?? 0)}
-            </strong>
-          </div>
-        )}
-      </div>
       {gapPending(se, threshold) && (
         <p className="danger-text tre-gap">
           Écart à justifier : {fcfa(se.difference ?? 0)} à la clôture de {se.closed_by_name ?? se.user_name}.
@@ -829,6 +896,7 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
     day.reload();
     onChanged?.();
   };
+  const linked = state.data ? <LinkedRegisters linked={state.data.linked} canApprove={state.data.canOpen} threshold={state.data.gapThreshold} onChanged={reload} /> : null;
 
   if (!state.data) return null;
   const register = state.data.registers.find((r) => r.isThisStation);
@@ -906,6 +974,7 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
           ) : (
             <Empty>Aucune journée pour votre caisse. Ouvrez la caisse pour commencer la journée.</Empty>
           )}
+          {linked}
         </>
       )}
       {dialog === 'open' && register && (
@@ -1166,5 +1235,173 @@ function CentralLedger() {
         </table>
       </div>
     </>
+  );
+}
+
+/**
+ * Caisses électronique et banque du caissier : elles s'ouvrent avec sa caisse
+ * espèces. À la clôture, il saisit le montant relevé sur chaque téléphone,
+ * terminal ou relevé, sans voir l'attendu.
+ */
+function LinkedRegisters({ linked, canApprove, threshold, onChanged }: { linked: LinkedRow[]; canApprove: boolean; threshold: number; onChanged: () => void }) {
+  const toast = useToast();
+  const [closing, setClosing] = useState<LinkedRow | null>(null);
+  if (!linked.length) return null;
+  return (
+    <section className="tre-linked">
+      <h3>Mes autres caisses</h3>
+      <table className="list compact">
+        <tbody>
+          {linked.map((r) => (
+            <tr key={r.id}>
+              <td>
+                <strong>{r.name}</strong>
+                <span className={`tag kind-${r.kind}`}>{KIND_LABEL[r.kind]}</span>
+              </td>
+              <td className="muted">{KIND_METHODS[r.kind as Exclude<RegisterKind, 'cash'>]?.map((m) => PAYMENT_METHODS[m]).join(', ')}</td>
+              <td className={`tre-state ${r.session ? 'open' : 'closed'}`}>{r.session ? (r.stale ? 'Ouverte (journée non clôturée)' : 'Ouverte.') : 'Fermée.'}</td>
+              <td className="r">
+                {r.session ? (
+                  <button className="danger" onClick={() => setClosing(r)}>
+                    Clôturer…
+                  </button>
+                ) : (
+                  <button onClick={() => call('treasury.openLinked').then(onChanged, toast.error)}>Ouvrir</button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {closing?.session && (
+        <DeclaredCloseDialog
+          register={closing}
+          session={closing.session}
+          blind
+          canApprove={canApprove}
+          threshold={threshold}
+          onClose={() => setClosing(null)}
+          onDone={() => {
+            setClosing(null);
+            onChanged();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/**
+ * Clôture d'une caisse électronique ou banque : un montant relevé par moyen
+ * (téléphone MTN, téléphone Orange, terminal de carte ; relevé de virements,
+ * chèques reçus). Avec le droit des montants, l'encaissé et l'écart s'affichent ;
+ * le gérant donne le motif d'un écart au-delà du seuil. Le bon de clôture s'imprime ensuite.
+ */
+function DeclaredCloseDialog({
+  register,
+  session,
+  blind,
+  canApprove,
+  threshold,
+  onClose,
+  onDone,
+}: {
+  register: { id: string; name: string; kind: RegisterKind };
+  session: { id: string };
+  blind: boolean;
+  canApprove: boolean;
+  threshold: number;
+  onClose: () => void;
+  onDone: (sessionId: string) => void;
+}) {
+  const toast = useToast();
+  const methods = KIND_METHODS[register.kind as Exclude<RegisterKind, 'cash'>] ?? [];
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [reason, setReason] = useState('');
+  const [done, setDone] = useState<Result<'treasury.closeDeclared'> | null>(null);
+  const journey = useLoad(() => (blind ? Promise.resolve(null) : call('treasury.session', session.id)), [session.id, blind]);
+  const expectedOf = (m: PaymentMethod) => journey.data?.z.declared?.find((l) => l.method === m)?.expected ?? 0;
+  const declared = Object.fromEntries(methods.map((m) => [m, parseAmount(values[m] ?? '') ?? 0])) as Record<PaymentMethod, number>;
+  const filled = methods.every((m) => (values[m] ?? '').trim() !== '' && parseAmount(values[m]!) !== null);
+  const gap = methods.reduce((t, m) => t + declared[m] - expectedOf(m), 0);
+  const needsReason = !blind && canApprove && filled && Math.abs(gap) > threshold;
+  const hint = (m: PaymentMethod) =>
+    m === 'CARD' ? 'Total du jour sur le terminal de paiement' : m === 'BANK_TRANSFER' ? 'Virements reçus, d’après le relevé' : m === 'CHEQUE' ? 'Total des chèques reçus' : 'Montant reçu aujourd’hui, lu sur le téléphone';
+
+  if (done) {
+    return (
+      <Modal title={`${register.name} clôturée`} onClose={() => onDone(done.sessionId)} wide={Boolean(done.z)}>
+        {done.z ? <ZView z={done.z} /> : <p>{done.needsApproval ? 'Clôture enregistrée. Le gérant justifiera l’écart constaté.' : 'Clôture enregistrée.'}</p>}
+        <div className="actions">
+          <button onClick={() => call('treasury.printReport', done.sessionId).catch(toast.error)}>Imprimer le bon de clôture</button>
+          <button className="primary" onClick={() => onDone(done.sessionId)}>
+            Terminer
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title={`Clôturer ${register.name}`} onClose={onClose} wide={!blind}>
+      <p className="muted">Saisissez pour chaque moyen le montant relevé, puis validez. {blind ? '' : 'L’écart se calcule avec l’encaissé de la journée.'}</p>
+      <table className="list declared-form">
+        <thead>
+          <tr>
+            <th>Moyen</th>
+            {!blind && <th className="r">Encaissé</th>}
+            <th className="r">Montant relevé</th>
+            {!blind && <th className="r">Écart</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {methods.map((m, i) => {
+            const v = (values[m] ?? '').trim() === '' ? null : parseAmount(values[m]!);
+            const d = v === null ? null : v - expectedOf(m);
+            return (
+              <tr key={m}>
+                <td>
+                  {PAYMENT_METHODS[m]}
+                  <br />
+                  <small className="muted">{hint(m)}</small>
+                </td>
+                {!blind && <td className="r">{fcfa(expectedOf(m))}</td>}
+                <td className="r">
+                  <input autoFocus={i === 0} inputMode="numeric" value={values[m] ?? ''} onChange={(e) => setValues({ ...values, [m]: e.target.value })} />
+                </td>
+                {!blind && <td className={`r ${d ? (d < 0 ? 'neg' : 'pos') : ''}`}>{d === null ? '—' : fcfa(d)}</td>}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {!blind && filled && (
+        <p className={Math.abs(gap) > threshold ? 'danger-text' : 'muted'}>
+          Écart total : {fcfa(gap)}
+          {Math.abs(gap) > threshold && !canApprove ? ' : le gérant le justifiera.' : ''}
+        </p>
+      )}
+      {needsReason && (
+        <Field label="Motif de l'écart">
+          <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      )}
+      <div className="actions">
+        <button onClick={onClose}>Annuler</button>
+        <button
+          className="danger"
+          disabled={!filled || (needsReason && !reason.trim())}
+          onClick={async () => {
+            try {
+              setDone(await call('treasury.closeDeclared', register.id, declared, { gapReason: needsReason ? reason : null }));
+            } catch (e) {
+              toast.error(e);
+            }
+          }}
+        >
+          Clôturer la caisse
+        </button>
+      </div>
+    </Modal>
   );
 }

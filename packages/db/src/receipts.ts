@@ -102,6 +102,18 @@ export class ReceiptService extends Base {
       { t: 'text', text: `Ouverture ${dateFr(z.session.opened_at)}` },
     );
     if (z.session.closed_at) r.push({ t: 'text', text: `Clôture ${dateFr(z.session.closed_at)}` });
+    if (z.declared) {
+      // Caisse électronique ou banque : encaissé, solde relevé et écart par moyen.
+      r.push({ t: 'rule' });
+      for (const l of z.declared) {
+        r.push(title(l.label), row('  Encaissé', l.expected));
+        if (l.declared !== null) r.push(row('  Relevé', l.declared), row('  Écart', l.declared - l.expected));
+      }
+      r.push({ t: 'rule' }, { ...row('Total encaissé', z.declared.reduce((t, l) => t + l.expected, 0)), bold: true });
+      if (z.counted !== null) r.push(row('Total relevé', z.counted), { ...row('Écart', z.difference ?? 0), bold: true });
+      if (z.session.gap_reason) r.push({ t: 'text', text: `Motif de l'écart : ${z.session.gap_reason}` });
+      return r;
+    }
     r.push(
       { t: 'rule' },
       { t: 'row', left: 'Tickets', right: String(z.ticketCount) },
@@ -116,6 +128,7 @@ export class ReceiptService extends Base {
       ...z.byMethod.map((m) => row(m.label, m.amount)),
       { t: 'rule' },
     );
+    if (z.elsewhere.length) r.push(title('Payé sur une autre caisse'), ...z.elsewhere.map((m) => row(`${m.label} (${m.registerName})`, m.amount)), { t: 'rule' });
     if (z.customerReceipts.length) r.push(title('Règlements clients (crédit)'), ...z.customerReceipts.map((m) => row(m.label, m.amount)), { t: 'rule' });
     if (z.expenses.length) r.push(title('Dépenses payées en caisse'), ...z.expenses.map((e) => row(`${e.number} ${e.label}`, e.amount)), { t: 'rule' });
     if (z.vat.some((v) => v.rate > 0)) r.push(title('TVA'), ...z.vat.map((v) => row(`${formatRate(v.rate)} HT ${money(v.ht)}`, v.tva)), { t: 'rule' });

@@ -1,4 +1,4 @@
-import { CODEPAGES, type Codepage, PERMISSIONS, PERMISSION_KEYS, type Permission } from '@superette/core';
+import { CODEPAGES, type Codepage, PERMISSIONS, type RegisterKind, PERMISSION_KEYS, type Permission } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
@@ -129,6 +129,9 @@ function Stores({ onChanged }: { onChanged: () => void }) {
   );
 }
 
+const KIND_LABEL: Record<RegisterKind, string> = { cash: 'Espèces', electronic: 'Électronique (MTN, Orange, carte)', bank: 'Banque (virement, chèque)' };
+const KIND_SHORT: Record<RegisterKind, string> = { cash: 'Espèces', electronic: 'Électronique', bank: 'Banque' };
+
 function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
   const toast = useToast();
   const state = useLoad(() => call('app.state'));
@@ -139,8 +142,10 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
   const users = useLoad(() => call('admin.users'));
   const [code, setCode] = useState('');
   const [newName, setNewName] = useState('');
+  const [newKind, setNewKind] = useState<RegisterKind>('cash');
   const [editing, setEditing] = useState<{ id: string; name: string; active: boolean } | null>(null);
-  const assigned = (id: string) => (users.data ?? []).filter((u) => u.register_id === id && u.active === 1).map((u) => u.name);
+  const assigned = (id: string) =>
+    (users.data ?? []).filter((u) => (u.register_id === id || u.emoney_register_id === id || u.bank_register_id === id) && u.active === 1).map((u) => u.name);
   return (
     <>
       <div className="filters">
@@ -154,14 +159,16 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
         <span className="muted">Ce PC : {state.data?.station?.register?.name ?? 'non activé comme caisse'}</span>
       </div>
       <p className="muted">
-        Chaque utilisateur vend sur la caisse qui lui est attribuée (Administration › Utilisateurs), depuis n'importe quel PC du magasin. Le code
-        d'activation ne sert plus qu'à rattacher un nouveau PC au magasin.
+        Chaque utilisateur vend sur la caisse qui lui est attribuée (Administration › Utilisateurs), depuis n'importe quel PC du magasin. Un
+        caissier peut avoir une caisse de chaque type : espèces (le tiroir), électronique (MTN, Orange, carte) et banque (virement, chèque) ; chaque
+        paiement va dans la caisse de son type. Le code d'activation d'une caisse espèces sert à rattacher un nouveau PC au magasin.
       </p>
       <table className="list">
         <thead>
           <tr>
             <th>N°</th>
             <th>Nom</th>
+            <th>Type</th>
             <th>Attribuée à</th>
             <th>Code d'activation</th>
             <th>État</th>
@@ -173,10 +180,11 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             <tr key={r.id} className={r.active ? '' : 'inactive'}>
               <td>{r.number}</td>
               <td>{r.name}</td>
-              <td>{assigned(r.id).join(', ') || <span className="muted">personne</span>}</td>
               <td>
-                <code>{r.activation_code}</code>
+                <span className={`tag kind-${r.kind}`}>{KIND_SHORT[r.kind]}</span>
               </td>
+              <td>{assigned(r.id).join(', ') || <span className="muted">personne</span>}</td>
+              <td>{r.kind === 'cash' ? <code>{r.activation_code}</code> : <span className="muted">—</span>}</td>
               <td>{r.active ? 'Active' : 'Désactivée'}</td>
               {isAdmin && (
                 <td>
@@ -195,7 +203,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              const r = await call('admin.createRegister', sid, newName.trim() || undefined);
+              const r = await call('admin.createRegister', sid, newName.trim() || undefined, newKind);
               toast.ok(`${r.name} créée`);
               setNewName('');
               registers.reload();
@@ -205,7 +213,14 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             }
           }}
         >
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nom (facultatif), ex. Caisse boissons" />
+          <select value={newKind} onChange={(e) => setNewKind(e.target.value as RegisterKind)} aria-label="Type de caisse">
+            {(Object.keys(KIND_LABEL) as RegisterKind[]).map((k) => (
+              <option key={k} value={k}>
+                {KIND_LABEL[k]}
+              </option>
+            ))}
+          </select>
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newKind === 'cash' ? 'Nom (facultatif), ex. Caisse boissons' : newKind === 'electronic' ? 'Nom (facultatif), ex. Mobile 1' : 'Nom (facultatif), ex. Banque SGC'} />
           <button className="primary" type="submit">
             Ajouter une caisse
           </button>
@@ -343,6 +358,8 @@ function Users({ currentRole }: { currentRole: Role }) {
     role: Role;
     storeId: string;
     registerId: string;
+    emoneyRegisterId: string;
+    bankRegisterId: string;
     active: boolean;
   }>(null);
   const sells = (role: Role) => role === 'cashier' || role === 'seller';
@@ -366,7 +383,18 @@ function Users({ currentRole }: { currentRole: Role }) {
               key={u.id}
               className={`clickable ${u.active ? '' : 'inactive'}`}
               onClick={() =>
-                setForm({ id: u.id, name: u.name, login: u.login, pin: '', role: u.role, storeId: u.store_id ?? '', registerId: u.register_id ?? '', active: u.active === 1 })
+                setForm({
+                  id: u.id,
+                  name: u.name,
+                  login: u.login,
+                  pin: '',
+                  role: u.role,
+                  storeId: u.store_id ?? '',
+                  registerId: u.register_id ?? '',
+                  emoneyRegisterId: u.emoney_register_id ?? '',
+                  bankRegisterId: u.bank_register_id ?? '',
+                  active: u.active === 1,
+                })
               }
             >
               <td>{u.name}</td>
@@ -376,6 +404,12 @@ function Users({ currentRole }: { currentRole: Role }) {
               <td>
                 {registerLabel(u.register_id) ||
                   (sells(u.role) ? <span className="tag alerte">aucune : ne peut pas vendre</span> : <span className="muted">—</span>)}
+                {[u.emoney_register_id, u.bank_register_id].filter(Boolean).map((id) => (
+                  <small key={id} className="muted">
+                    {' '}
+                    + {registerLabel(id)}
+                  </small>
+                ))}
               </td>
               <td>{!u.active && <span className="tag">désactivé</span>}</td>
             </tr>
@@ -383,7 +417,7 @@ function Users({ currentRole }: { currentRole: Role }) {
         </tbody>
       </table>
       <div className="actions">
-        <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', active: true })}>
+        <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', active: true })}>
           Ajouter un utilisateur
         </button>
       </div>
@@ -399,6 +433,8 @@ function Users({ currentRole }: { currentRole: Role }) {
                     role: form.role,
                     storeId: form.storeId || null,
                     registerId: form.registerId || null,
+                    emoneyRegisterId: form.emoneyRegisterId || null,
+                    bankRegisterId: form.bankRegisterId || null,
                     active: form.active,
                     pin: form.pin || undefined,
                   });
@@ -410,6 +446,8 @@ function Users({ currentRole }: { currentRole: Role }) {
                     role: form.role,
                     storeId: form.storeId || null,
                     registerId: form.registerId || null,
+                    emoneyRegisterId: form.emoneyRegisterId || null,
+                    bankRegisterId: form.bankRegisterId || null,
                   });
                 }
                 setForm(null);
@@ -449,7 +487,7 @@ function Users({ currentRole }: { currentRole: Role }) {
                 </select>
               </Field>
               <Field
-                label="Caisse"
+                label="Caisse espèces"
                 hint={
                   sells(form.role)
                     ? 'Il vend sur cette caisse depuis n’importe quel PC. Sans caisse, il ne peut pas vendre.'
@@ -459,7 +497,7 @@ function Users({ currentRole }: { currentRole: Role }) {
                 <select value={form.registerId} onChange={(e) => setForm({ ...form, registerId: e.target.value })}>
                   <option value="">Aucune caisse</option>
                   {(registers.data ?? [])
-                    .filter((r) => (r.active || r.id === form.registerId) && (!form.storeId || r.store_id === form.storeId))
+                    .filter((r) => r.kind === 'cash' && (r.active || r.id === form.registerId) && (!form.storeId || r.store_id === form.storeId))
                     .map((r) => (
                       <option key={r.id} value={r.id}>
                         {registerLabel(r.id)}
@@ -467,6 +505,25 @@ function Users({ currentRole }: { currentRole: Role }) {
                     ))}
                 </select>
               </Field>
+              {(
+                [
+                  ['emoneyRegisterId', 'electronic', 'Caisse électronique', 'Reçoit ses paiements MTN, Orange Money et carte.'],
+                  ['bankRegisterId', 'bank', 'Caisse banque', 'Reçoit ses virements et chèques.'],
+                ] as const
+              ).map(([key, kind, label, hint]) => (
+                <Field key={key} label={label} hint={hint}>
+                  <select value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })}>
+                    <option value="">Aucune (dans la caisse espèces)</option>
+                    {(registers.data ?? [])
+                      .filter((r) => r.kind === kind && (r.active || r.id === form[key]) && (!form.storeId || r.store_id === form.storeId))
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {registerLabel(r.id)}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              ))}
               {form.id && (
                 <label className="inline">
                   <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Compte actif

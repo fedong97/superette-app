@@ -1,9 +1,24 @@
 import { useState } from 'react';
-import { DENOMINATIONS_FCFA, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, requiresReference, settle } from '@superette/core';
+import { DENOMINATIONS_FCFA, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, paymentRegisterKind, requiresReference, settle } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, dateTime, fcfa, parseAmount, qty, useLoad, useToast } from '../ui';
 
 const METHODS: PaymentMethod[] = ['CASH', 'MTN_MOMO', 'ORANGE_MONEY', 'CARD', 'VOUCHER'];
+
+/**
+ * Moyens proposés au caissier : virement et chèque seulement s'il a une caisse
+ * banque. Pour chaque moyen, la caisse qui le reçoit (électronique ou banque).
+ */
+function useMethods(): { methods: PaymentMethod[]; target: (m: PaymentMethod) => string | null } {
+  const app = useLoad(() => call('app.state'), []);
+  const linked = app.data?.linkedRegisters;
+  const methods = linked?.bank ? [...METHODS, 'BANK_TRANSFER', 'CHEQUE' as PaymentMethod] : METHODS;
+  const target = (m: PaymentMethod) => {
+    const kind = paymentRegisterKind(m);
+    return kind === 'cash' ? null : (linked?.[kind]?.name ?? null);
+  };
+  return { methods: methods as PaymentMethod[], target };
+}
 
 /** Règlement : paiements mixtes, rendu monnaie, références mobile money. */
 export function PaymentDialog({
@@ -27,6 +42,7 @@ export function PaymentDialog({
   const [reference, setReference] = useState('');
   const [busy, setBusy] = useState(false);
   const [askPin, setAskPin] = useState(false);
+  const { methods, target } = useMethods();
   const state = settle(total, payments);
   const suggestions = [...new Set([state.remaining, ...[1000, 2000, 5000, 10000].map((n) => Math.ceil(state.remaining / n) * n)])].filter((v) => v > 0).slice(0, 5);
 
@@ -62,12 +78,13 @@ export function PaymentDialog({
         <div>
           <div className="big-total">{fcfa(total)}</div>
           <div className="methods">
-            {[...METHODS, ...(allowCredit ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
+            {[...methods, ...(allowCredit ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
               <button key={m} className={method === m ? 'active' : ''} onClick={() => setMethod(m)}>
                 {PAYMENT_METHODS[m]}
               </button>
             ))}
           </div>
+          {target(method) && <p className="muted method-target">Encaissé sur {target(method)}</p>}
           {!state.complete && (
             <form
               onSubmit={(e) => {
@@ -79,7 +96,10 @@ export function PaymentDialog({
                 <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={String(state.remaining)} />
               </Field>
               {requiresReference(method) && (
-                <Field label="Référence de la transaction" hint="Numéro reçu par SMS de confirmation">
+                <Field
+                  label={method === 'CHEQUE' ? 'Numéro du chèque' : 'Référence de la transaction'}
+                  hint={method === 'CHEQUE' ? 'Banque et numéro inscrits sur le chèque' : method === 'BANK_TRANSFER' ? 'Référence du virement sur le relevé' : 'Numéro reçu par SMS de confirmation'}
+                >
                   <input value={reference} onChange={(e) => setReference(e.target.value)} />
                 </Field>
               )}
@@ -238,6 +258,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
   const [sale, setSale] = useState<Result<'pos.sale'> | null>(null);
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [refund, setRefund] = useState<PaymentMethod>('CASH');
+  const { methods } = useMethods();
   const [reason, setReason] = useState('');
   const [askPin, setAskPin] = useState(false);
   const selected = sale ? sale.lines.filter((l) => (qtys[l.id] ?? 0) > 0) : [];
@@ -303,7 +324,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
           <div className="grid2">
             <Field label="Remboursement">
               <select value={refund} onChange={(e) => setRefund(e.target.value as PaymentMethod)}>
-                {[...METHODS, ...(sale.customer_id ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
+                {[...methods, ...(sale.customer_id ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
                   <option key={m} value={m}>
                     {PAYMENT_METHODS[m]}
                   </option>
@@ -395,6 +416,7 @@ export function CashOpDialog({ type, needsSupervisor, onClose }: { type: 'IN' | 
 
 export function ZView({ z }: { z: Result<'pos.zReport'> }) {
   const diffClass = z.difference === null ? '' : z.difference < 0 ? 'neg' : z.difference > 0 ? 'pos' : '';
+  if (z.declared) return <DeclaredZView z={z} lines={z.declared} diffClass={diffClass} />;
   return (
     <div className="zview">
       <div className="kpis">
@@ -422,6 +444,14 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
             {z.byMethod.map((m) => (
               <tr key={m.method}>
                 <td>{m.label}</td>
+                <td className="r">{fcfa(m.amount)}</td>
+              </tr>
+            ))}
+            {z.elsewhere.map((m) => (
+              <tr key={`ew-${m.method}-${m.registerName}`} className="muted">
+                <td>
+                  {m.label} (sur {m.registerName})
+                </td>
                 <td className="r">{fcfa(m.amount)}</td>
               </tr>
             ))}
@@ -481,6 +511,55 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/** Z d'une caisse électronique ou banque : encaissé, solde relevé et écart par moyen, puis les règlements clients. */
+function DeclaredZView({ z, lines, diffClass }: { z: Result<'pos.zReport'>; lines: NonNullable<Result<'pos.zReport'>['declared']>; diffClass: string }) {
+  const expected = lines.reduce((t, l) => t + l.expected, 0);
+  return (
+    <div className="zview">
+      <div className="kpis">
+        <div>
+          <small>Encaissé</small>
+          <strong>{fcfa(expected)}</strong>
+        </div>
+        <div>
+          <small>Solde relevé</small>
+          <strong>{z.counted === null ? '—' : fcfa(z.counted)}</strong>
+        </div>
+        <div className={diffClass}>
+          <small>Écart</small>
+          <strong>{z.difference === null ? '—' : fcfa(z.difference)}</strong>
+        </div>
+      </div>
+      <table className="list">
+        <thead>
+          <tr>
+            <th>Moyen</th>
+            <th className="r">Encaissé</th>
+            <th className="r">Solde relevé</th>
+            <th className="r">Écart</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l) => {
+            const gap = l.declared === null ? null : l.declared - l.expected;
+            return (
+              <tr key={l.method}>
+                <td>{l.label}</td>
+                <td className="r">{fcfa(l.expected)}</td>
+                <td className="r">{l.declared === null ? '—' : fcfa(l.declared)}</td>
+                <td className={`r ${gap ? (gap < 0 ? 'neg' : 'pos') : ''}`}>{gap === null ? '—' : fcfa(gap)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {z.customerReceipts.length > 0 && (
+        <p className="muted">Dont règlements clients : {z.customerReceipts.map((m) => `${m.label} ${fcfa(m.amount)}`).join(', ')}</p>
+      )}
     </div>
   );
 }

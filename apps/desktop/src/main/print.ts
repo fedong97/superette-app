@@ -384,10 +384,37 @@ export function createPrinter(s: Services): Printer {
       await printReceipt(s.receipts.centralVoucher(movementId), false, true);
     },
 
-    async sessionReport(sessionId) {
+    async sessionReport(sessionId, blind = false) {
       const z = s.pos.zReport(sessionId);
       const se = z.session;
       const store = s.admin.getStore(se.store_id);
+      if (z.declared) {
+        // Caisse électronique ou banque : solde relevé par moyen, puis chaque paiement reçu avec sa référence.
+        const payments = s.pos.sessionPayments(sessionId);
+        const lines = z.declared
+          .map(
+            (l) => `<tr><td>${esc(l.label)}</td>${blind ? '' : `<td class="r">${money(l.expected)}</td>`}<td class="r">${l.declared === null ? '' : money(l.declared)}</td>${
+              blind ? '' : `<td class="r">${l.declared === null ? '' : money(l.declared - l.expected)}</td>`
+            }</tr>`,
+          )
+          .join('');
+        const total = (f: (l: NonNullable<typeof z.declared>[number]) => number) => z.declared!.reduce((t, l) => t + f(l), 0);
+        await printA4(`${a4Head(store)}
+          <h1>Bon de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
+          <p>Ouverture le ${dateFr(se.opened_at)} par ${esc(se.user_name)}${se.closed_at ? ` · clôture le ${dateFr(se.closed_at)}${se.closed_by_name ? ` par ${esc(se.closed_by_name)}` : ''}` : ''}</p>
+          <table><thead><tr><th>Moyen</th>${blind ? '' : '<th class="r">Encaissé</th>'}<th class="r">Solde relevé</th>${blind ? '' : '<th class="r">Écart</th>'}</tr></thead>
+          <tbody>${lines}<tr class="total"><td>Total</td>${blind ? '' : `<td class="r">${money(total((l) => l.expected))}</td>`}<td class="r">${se.status === 'closed' ? money(total((l) => l.declared ?? 0)) : ''}</td>${
+            blind ? '' : `<td class="r">${z.difference === null ? '' : money(z.difference)}</td>`
+          }</tr></tbody></table>
+          ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b>${se.gap_approved_by_name ? `, justifié par ${esc(se.gap_approved_by_name)}` : ''}</p>` : !blind && s.pos.gapPending(se) ? '<p><b>Écart à justifier par le gérant.</b></p>' : ''}
+          <h3>Paiements reçus (${payments.length})</h3>
+          <table><thead><tr><th>Heure</th><th>Pièce</th><th>Moyen</th><th>Référence</th><th>Caissier</th><th class="r">Montant</th></tr></thead>
+          <tbody>${payments
+            .map((p) => `<tr><td>${dateFr(p.at).slice(-5)}</td><td>${esc(p.number)}</td><td>${esc(p.label)}</td><td>${esc(p.reference ?? '')}</td><td>${esc(p.user_name ?? '')}</td><td class="r">${money(p.amount)}</td></tr>`)
+            .join('')}</tbody></table>
+          <div class="sign"><span>Le caissier : ……………………</span><span>Le gérant : ……………………</span></div>`);
+        return;
+      }
       const journal = s.pos.cashJournal(sessionId);
       const sales = s.pos.listSales({ sessionId, limit: 5000 }).reverse();
       const cashRows = (rows: typeof journal.entries) =>
@@ -414,6 +441,7 @@ export function createPrinter(s: Services): Printer {
           ${row('Tickets', null)}<tr><td colspan="2">${z.ticketCount} ventes, ${z.cancelled.count} annulés</td></tr>
           ${row('Chiffre d’affaires net TTC', z.netTtc, true)}${row('Remises', z.discounts)}${row('Promotions', z.promotions)}${row('Ventes à crédit', journal.creditSales)}
           ${z.byMethod.map((m) => row(esc(m.label), m.amount)).join('')}
+          ${z.elsewhere.map((m) => row(`${esc(m.label)} (sur ${esc(m.registerName)})`, m.amount)).join('')}
         </table></div>
         ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b>${se.gap_approved_by_name ? `, justifié par ${esc(se.gap_approved_by_name)}` : ''}</p>` : s.pos.gapPending(se) ? '<p><b>Écart à justifier par le gérant.</b></p>' : ''}
         <h3>Entrées d'espèces</h3>

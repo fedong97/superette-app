@@ -591,3 +591,13 @@ table.rebate-rules select { min-width: 240px; }
 .attention .tile.info .tile-count { color: var(--brand); }
 .attention .tile.calm { opacity: 0.7; border-left-color: var(--ok); }
 .attention .tile.calm .tile-count { color: var(--ok); }
+
+/* Caisses espèces, électronique et banque */
+.tag.kind-cash { background: var(--ok-soft); color: var(--ok); }
+.tag.kind-electronic { background: #fff4e0; color: #b25e00; }
+.tag.kind-bank { background: #e3eefb; color: #1f5fa8; }
+.method-target { margin: 6px 0 0; font-size: 13px; }
+.tre-linked { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 12px; }
+.tre-linked h3 { margin: 0 0 8px; }
+.tre-linked table td { vertical-align: middle; }
+.declared-form td input { width: 140px; text-align: right; }

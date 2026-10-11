@@ -1,26 +1,32 @@
-import { CODEPAGES, type Codepage, PERMISSIONS, type RegisterKind, PERMISSION_KEYS, type Permission } from '@superette/core';
+import { type Permission, type RegisterKind } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
 import { Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
+import { RoleRights, UserPrivileges } from './AdminRights';
+import { Settings } from './AdminSettings';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'settings' | 'backups' | 'server' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'backups' | 'server' | 'audit';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
+  // Utilisateur ouvert depuis la liste (« Privilèges… ») dans l'onglet des privilèges.
+  const [privUser, setPrivUser] = useState<string | null>(null);
+  const can = (p: Permission) => user.rights.includes(p);
   const tabs: [Tab, string][] = [
     ...(user.role === 'admin' ? ([['stores', 'Magasins']] as [Tab, string][]) : []),
     ['registers', 'Caisses'],
     ['warehouses', 'Dépôts'],
     ['users', 'Utilisateurs'],
     ['rights', 'Droits par rôle'],
+    ['privileges', 'Privilèges par utilisateur'],
     ['settings', 'Paramètres'],
-    ['backups', 'Sauvegardes'],
+    ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
-    ['audit', "Journal d'audit"],
+    ...(can('audit') ? ([['audit', "Journal d'audit"]] as [Tab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -30,13 +36,23 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'stores' && <Stores onChanged={onChanged} />}
       {tab === 'registers' && <Registers isAdmin={user.role === 'admin'} onChanged={onChanged} />}
-      {tab === 'warehouses' && <Warehouses />}
-      {tab === 'users' && <Users currentRole={user.role} />}
-      {tab === 'rights' && <Rights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
+      {tab === 'warehouses' && <Warehouses canCreate={can('warehouses_manage')} />}
+      {tab === 'users' && (
+        <Users
+          currentRole={user.role}
+          canManage={can('users_manage')}
+          onPrivileges={(id) => {
+            setPrivUser(id);
+            setTab('privileges');
+          }}
+        />
+      )}
+      {tab === 'rights' && <RoleRights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
+      {tab === 'privileges' && <UserPrivileges key={privUser ?? ''} isAdmin={user.role === 'admin'} initialUserId={privUser} onChanged={onChanged} />}
       {tab === 'settings' && <Settings user={user} onChanged={onChanged} />}
-      {tab === 'backups' && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
+      {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
-      {tab === 'audit' && <Audit />}
+      {tab === 'audit' && can('audit') && <Audit />}
     </div>
   );
 }
@@ -287,7 +303,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
   );
 }
 
-function Warehouses() {
+function Warehouses({ canCreate }: { canCreate: boolean }) {
   const toast = useToast();
   const wh = useLoad(() => call('admin.warehouses'));
   const [name, setName] = useState('');
@@ -306,6 +322,7 @@ function Warehouses() {
           ))}
         </tbody>
       </table>
+      {canCreate && (
       <form
         className="inline"
         onSubmit={async (e) => {
@@ -331,11 +348,12 @@ function Warehouses() {
           Ajouter
         </button>
       </form>
+      )}
     </>
   );
 }
 
-function Users({ currentRole }: { currentRole: Role }) {
+function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; canManage: boolean; onPrivileges: (id: string) => void }) {
   const toast = useToast();
   const users = useLoad(() => call('admin.users'));
   const stores = useLoad(() => call('admin.stores'));
@@ -374,6 +392,7 @@ function Users({ currentRole }: { currentRole: Role }) {
             <th>Rôle</th>
             <th>Magasin</th>
             <th>Caisse</th>
+            <th>Privilèges</th>
             <th />
           </tr>
         </thead>
@@ -381,8 +400,9 @@ function Users({ currentRole }: { currentRole: Role }) {
           {(users.data ?? []).map((u) => (
             <tr
               key={u.id}
-              className={`clickable ${u.active ? '' : 'inactive'}`}
+              className={`${canManage ? 'clickable' : ''} ${u.active ? '' : 'inactive'}`}
               onClick={() =>
+                canManage &&
                 setForm({
                   id: u.id,
                   name: u.name,
@@ -411,16 +431,54 @@ function Users({ currentRole }: { currentRole: Role }) {
                   </small>
                 ))}
               </td>
-              <td>{!u.active && <span className="tag">désactivé</span>}</td>
+              <td onClick={(e) => e.stopPropagation()}>
+                {u.role === 'admin' ? (
+                  <span className="muted">tous les droits</span>
+                ) : (
+                  <button className="ghost" onClick={() => onPrivileges(u.id)}>
+                    {u.privileges ? (
+                      <span className="tag normal" title="Privilèges personnels">
+                        {[u.privileges.grants ? `+${u.privileges.grants}` : '', u.privileges.revokes ? `−${u.privileges.revokes}` : ''].filter(Boolean).join(' ')}
+                      </span>
+                    ) : (
+                      'Rôle seul'
+                    )}{' '}
+                    ›
+                  </button>
+                )}
+              </td>
+              <td onClick={(e) => e.stopPropagation()}>
+                {!u.active && <span className="tag">désactivé</span>}
+                {u.locked && (
+                  <>
+                    <span className="tag rupture">bloqué (codes faux)</span>{' '}
+                    {canManage && (
+                      <button
+                        className="ghost"
+                        onClick={() =>
+                          call('admin.unlockUser', u.id).then(() => {
+                            toast.ok(`${u.name} est débloqué`);
+                            users.reload();
+                          }, toast.error)
+                        }
+                      >
+                        Débloquer
+                      </button>
+                    )}
+                  </>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <div className="actions">
-        <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', active: true })}>
-          Ajouter un utilisateur
-        </button>
-      </div>
+      {canManage && (
+        <div className="actions">
+          <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', active: true })}>
+            Ajouter un utilisateur
+          </button>
+        </div>
+      )}
       {form && (
         <Modal title={form.id ? form.name : 'Nouvel utilisateur'} onClose={() => setForm(null)}>
           <form
@@ -464,7 +522,7 @@ function Users({ currentRole }: { currentRole: Role }) {
               <Field label="Identifiant">
                 <input value={form.login} disabled={Boolean(form.id)} onChange={(e) => setForm({ ...form, login: e.target.value })} required />
               </Field>
-              <Field label={form.id ? 'Nouveau code (laisser vide pour garder)' : 'Code secret'} hint="4 à 8 chiffres">
+              <Field label={form.id ? 'Nouveau code (laisser vide pour garder)' : 'Code secret'} hint="Chiffres seulement ; la longueur minimale se règle dans Paramètres › Sécurité">
                 <input type="password" inputMode="numeric" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value })} required={!form.id} />
               </Field>
               <Field label="Rôle">
@@ -539,224 +597,6 @@ function Users({ currentRole }: { currentRole: Role }) {
         </Modal>
       )}
     </>
-  );
-}
-
-/**
- * Réglages du magasin : TVA (administrateur seulement, elle change les prix
- * HT et la comptabilité), vente sans stock (droit « ignore_stock », le gérant
- * par défaut) et seuil d'écart de caisse à faire valider.
- */
-function StoreOptionsPanel({ user, onChanged }: { user: User; onChanged: () => void }) {
-  const toast = useToast();
-  const state = useLoad(() => call('app.state'));
-  const [threshold, setThreshold] = useState<string | null>(null);
-  const store = state.data?.station?.store;
-  if (!store) return null;
-  const isAdmin = user.role === 'admin';
-  const canStock = user.rights.includes('ignore_stock');
-  const save = async (options: { vatEnabled?: boolean; ignoreStock?: boolean; cashGapThreshold?: number }, message: string) => {
-    try {
-      await call('admin.storeOptions', options);
-      toast.ok(message);
-      state.reload();
-      onChanged();
-    } catch (e) {
-      toast.error(e);
-    }
-  };
-  return (
-    <>
-      <h3>Magasin : {store.name}</h3>
-      <label className="check">
-        <input
-          type="checkbox"
-          disabled={!isAdmin}
-          checked={store.vat_enabled === 1}
-          onChange={(e) => {
-            const on = e.target.checked;
-            if (
-              !confirm(
-                on
-                  ? 'Activer la TVA ? Les prochaines ventes, factures, achats et dépenses porteront la TVA (19,25 % par défaut). Les pièces déjà enregistrées ne changent pas.'
-                  : 'Désactiver la TVA (régime simplifié) ? Les prochaines pièces seront sans TVA et porteront « TVA non applicable ». Les pièces déjà enregistrées ne changent pas.',
-              )
-            )
-              return;
-            void save({ vatEnabled: on }, on ? 'TVA activée' : 'TVA désactivée');
-          }}
-        />{' '}
-        Magasin assujetti à la TVA (régime du réel)
-      </label>
-      <p className="muted">{isAdmin ? 'Ne s’applique qu’aux nouvelles pièces.' : 'Seul un administrateur peut changer ce réglage.'}</p>
-      <label className="check">
-        <input
-          type="checkbox"
-          disabled={!canStock}
-          checked={store.ignore_stock === 1}
-          onChange={(e) =>
-            void save({ ignoreStock: e.target.checked }, e.target.checked ? 'Vente sans stock autorisée' : 'Gestion des stocks rétablie')
-          }
-        />{' '}
-        Ignorer la gestion des stocks (vendre même si le stock en machine est épuisé)
-      </label>
-      <p className="muted">
-        À cocher quand la marchandise est arrivée mais pas encore saisie. Le stock passe en négatif et la prochaine réception le régularise
-        automatiquement. Pensez à décocher une fois les réceptions saisies.
-      </p>
-      <div className="grid2">
-        <Field label="Écart de caisse toléré (FCFA)" hint="Au-delà, la clôture demande un motif et la validation du gérant">
-          <input
-            inputMode="numeric"
-            disabled={!isAdmin}
-            value={threshold ?? String(store.cash_gap_threshold)}
-            onChange={(e) => setThreshold(e.target.value)}
-            onBlur={() => {
-              if (threshold === null) return;
-              const n = Number(threshold.replace(/\s/g, ''));
-              if (!Number.isInteger(n) || n < 0) return toast.error('Montant invalide');
-              if (n !== store.cash_gap_threshold) void save({ cashGapThreshold: n }, 'Seuil d’écart enregistré');
-              setThreshold(null);
-            }}
-          />
-        </Field>
-      </div>
-    </>
-  );
-}
-
-function Settings({ user, onChanged }: { user: User; onChanged: () => void }) {
-  const toast = useToast();
-  const settings = useLoad(() => call('admin.settings'));
-  const printers = useLoad(() => call('admin.printers'));
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  if (!settings.data) return null;
-  const v = (k: string, d = '') => draft[k] ?? settings.data![k] ?? d;
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setDraft({ ...draft, [k]: e.target.value });
-  const mode = v('printer.mode', 'driver');
-  return (
-    <div className="narrow">
-      <StoreOptionsPanel user={user} onChanged={onChanged} />
-      <h3>Imprimante ticket et tiroir-caisse</h3>
-      <div className="grid2">
-        <Field label="Mode d'impression" hint="ESC/POS : plus rapide, accents gérés, coupe du papier et tiroir">
-          <select value={mode} onChange={set('printer.mode')}>
-            <option value="driver">Pilote Windows (comme une imprimante normale)</option>
-            <option value="windows">ESC/POS direct, imprimante USB installée sous Windows</option>
-            <option value="network">ESC/POS direct, imprimante réseau (IP)</option>
-          </select>
-        </Field>
-        {mode === 'network' ? (
-          <>
-            <Field label="Adresse IP de l'imprimante" hint="Imprimée sur la page d'autotest de l'imprimante">
-              <input value={v('printer.host')} placeholder="192.168.1.100" onChange={set('printer.host')} />
-            </Field>
-            <Field label="Port">
-              <input value={v('printer.port', '9100')} inputMode="numeric" onChange={set('printer.port')} />
-            </Field>
-          </>
-        ) : (
-          <Field label="Imprimante ticket">
-            <select value={v('printer.name')} onChange={set('printer.name')}>
-              <option value="">Imprimante par défaut de Windows</option>
-              {(printers.data ?? []).map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        {mode !== 'driver' && (
-          <>
-            <Field label="Largeur du papier">
-              <select value={v('printer.columns', '48')} onChange={set('printer.columns')}>
-                <option value="48">80 mm (48 caractères)</option>
-                <option value="42">80 mm (42 caractères)</option>
-                <option value="32">58 mm (32 caractères)</option>
-              </select>
-            </Field>
-            <Field label="Table de caractères" hint="Si les accents sortent faux sur la page de test, essayez une autre table">
-              <select value={v('printer.codepage', 'pc850')} onChange={set('printer.codepage')}>
-                {(Object.keys(CODEPAGES) as Codepage[]).map((c) => (
-                  <option key={c} value={c}>
-                    {CODEPAGES[c].label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Coupe automatique du papier">
-              <select value={v('printer.cut', '1')} onChange={set('printer.cut')}>
-                <option value="1">Oui</option>
-                <option value="0">Non (imprimante sans massicot)</option>
-              </select>
-            </Field>
-          </>
-        )}
-        <Field label="Impression automatique du ticket">
-          <select value={v('printer.enabled', '1')} onChange={set('printer.enabled')}>
-            <option value="1">Oui</option>
-            <option value="0">Non</option>
-          </select>
-        </Field>
-        <Field label="Ouverture du tiroir-caisse" hint="Tiroir branché sur l'imprimante (prise RJ11)">
-          <select value={v('drawer.mode', 'never')} onChange={set('drawer.mode')}>
-            <option value="never">Jamais automatiquement</option>
-            <option value="cash">À chaque encaissement en espèces</option>
-            <option value="always">À chaque vente</option>
-          </select>
-        </Field>
-        <Field label="Pied de ticket">
-          <input value={v('ticket.footer', 'Merci de votre visite !')} onChange={set('ticket.footer')} />
-        </Field>
-      </div>
-      <div className="actions">
-        <button
-          disabled={Object.keys(draft).length > 0}
-          title={Object.keys(draft).length ? "Enregistrez d'abord les paramètres" : undefined}
-          onClick={() => call('admin.printTest', false).then(() => toast.ok('Page de test envoyée'), toast.error)}
-        >
-          Imprimer une page de test
-        </button>
-        <button
-          disabled={Object.keys(draft).length > 0}
-          title={Object.keys(draft).length ? "Enregistrez d'abord les paramètres" : undefined}
-          onClick={() => call('admin.printTest', true).then(() => toast.ok('Page de test envoyée, le tiroir doit s’ouvrir'), toast.error)}
-        >
-          Page de test et tiroir
-        </button>
-      </div>
-      <h3>Étiquettes balance</h3>
-      <div className="grid2">
-        <Field label="Préfixes" hint="Séparés par des virgules, ex. 21,22">
-          <input value={v('scale.prefixes', '21,22')} onChange={set('scale.prefixes')} />
-        </Field>
-        <Field label="La balance imprime">
-          <select value={v('scale.valueType', 'price')} onChange={set('scale.valueType')}>
-            <option value="price">le prix (FCFA)</option>
-            <option value="weight">le poids (grammes)</option>
-          </select>
-        </Field>
-      </div>
-      <div className="actions">
-        <button
-          className="primary"
-          disabled={!Object.keys(draft).length}
-          onClick={async () => {
-            try {
-              await call('admin.saveSettings', draft);
-              setDraft({});
-              settings.reload();
-              toast.ok('Paramètres enregistrés');
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        >
-          Enregistrer
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -1152,79 +992,3 @@ function RestoreDialog({ backup, onClose }: { backup: BackupInfo; onClose: () =>
  * Droits par rôle : l'administrateur coche, pour chaque rôle, les fenêtres et
  * les actions permises. L'administrateur a toujours tous les droits.
  */
-function Rights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
-  const toast = useToast();
-  const matrix = useLoad(() => call('admin.rights'), []);
-  const [draft, setDraft] = useState<Record<string, Permission[]> | null>(null);
-  useEffect(() => {
-    if (matrix.data) setDraft(Object.fromEntries(matrix.data.map((r) => [r.role, r.rights])));
-  }, [matrix.data]);
-  if (!matrix.data || !draft) return null;
-  const changed = matrix.data.filter((r) => [...r.rights].sort().join() !== [...(draft[r.role] ?? [])].sort().join());
-  const toggle = (role: string, perm: Permission, on: boolean) =>
-    setDraft({ ...draft, [role]: on ? [...(draft[role] ?? []), perm] : (draft[role] ?? []).filter((p) => p !== perm) });
-  const groups = [...new Set(PERMISSION_KEYS.map((k) => PERMISSIONS[k].group))];
-  return (
-    <>
-      <p className="muted">
-        Cochez ce que chaque rôle peut ouvrir et faire. L'administrateur a toujours tous les droits. Un changement vaut pour tous les utilisateurs du rôle, à leur
-        prochaine connexion.
-      </p>
-      <table className="list compact rights">
-        <thead>
-          <tr>
-            <th>Droit</th>
-            <th className="c">Administrateur</th>
-            {matrix.data.map((r) => (
-              <th key={r.role} className="c">
-                {r.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        {groups.map((g) => (
-          <tbody key={g}>
-            <tr className="group">
-              <th colSpan={matrix.data!.length + 2}>{g}</th>
-            </tr>
-            {PERMISSION_KEYS.filter((k) => PERMISSIONS[k].group === g).map((k) => (
-              <tr key={k}>
-                <td>{PERMISSIONS[k].label}</td>
-                <td className="c">
-                  <input type="checkbox" checked disabled />
-                </td>
-                {matrix.data!.map((r) => (
-                  <td key={r.role} className="c">
-                    <input type="checkbox" disabled={!isAdmin} checked={draft[r.role]?.includes(k) ?? false} onChange={(e) => toggle(r.role, k, e.target.checked)} />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        ))}
-      </table>
-      <div className="actions">
-        {!isAdmin && <span className="muted">Seul l'administrateur modifie les droits.</span>}
-        <button className="ghost" disabled={!changed.length} onClick={() => setDraft(Object.fromEntries(matrix.data!.map((r) => [r.role, r.rights])))}>
-          Annuler les changements
-        </button>
-        <button
-          className="primary"
-          disabled={!isAdmin || !changed.length}
-          onClick={async () => {
-            try {
-              for (const r of changed) await call('admin.saveRights', r.role, draft[r.role] ?? []);
-              toast.ok(`Droits enregistrés (${changed.map((r) => r.label).join(', ')})`);
-              matrix.reload();
-              onChanged();
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        >
-          Enregistrer
-        </button>
-      </div>
-    </>
-  );
-}

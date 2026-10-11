@@ -224,7 +224,8 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
   if (!data.data) return null;
   const { inventory: inv, lines } = data.data;
   const open = inv.status === 'open';
-  const canManage = has(user, 'inventory');
+  const canCount = has(user, 'inventory_count');
+  const canEdit = has(user, 'inventory_edit');
   const q = search.trim().toLowerCase();
   const shown = lines.filter((l) => {
     if (hideIdle && l.opening_qty === 0 && l.period_qty === 0 && l.counted === null) return false;
@@ -442,14 +443,13 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
       {inv.label && <p className="muted">{inv.label}</p>}
       <div className="inv-actions">
         <button onClick={onBack}>← Liste des inventaires</button>
-        <button onClick={() => setSheetFormat(true)}>Fiche de comptage…</button>
+        {has(user, 'inventory_print') && <button onClick={() => setSheetFormat(true)}>Fiche de comptage…</button>}
         <button onClick={exportXlsx}>Exporter Excel</button>
         <button onClick={exportCsv}>Exporter CSV</button>
-        {open && <button onClick={() => fileRef.current?.click()}>Importer (Excel ou CSV)</button>}
-        <button onClick={() => call('inventories.printResult', id).catch(toast.error)}>Imprimer le résultat</button>
+        {open && has(user, 'inventory_import') && <button onClick={() => fileRef.current?.click()}>Importer (Excel ou CSV)</button>}
+        {has(user, 'inventory_print') && <button onClick={() => call('inventories.printResult', id).catch(toast.error)}>Imprimer le résultat</button>}
         <span className="spacer" />
-        {open && canManage && (
-          <>
+        {open && has(user, 'inventory_cancel') && (
             <button
               className="ghost"
               onClick={async () => {
@@ -464,10 +464,11 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
             >
               Annuler l'inventaire
             </button>
+        )}
+        {open && has(user, 'inventory_close') && (
             <button className="danger" onClick={() => setClosing(true)}>
               Clôturer l'inventaire…
             </button>
-          </>
         )}
         <input
           ref={fileRef}
@@ -499,7 +500,7 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
         <label>
           <input type="checkbox" checked={hideIdle} onChange={(e) => setHideIdle(e.target.checked)} /> Masquer les produits sans mouvement ni stock
         </label>
-        {open && (
+        {open && (canCount || canEdit) && (
           <div className="inv-add">
             <ArticlePicker
               placeholder="Ajouter un produit à l'inventaire"
@@ -554,6 +555,7 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
                           <input
                             className="inv-count"
                             inputMode="decimal"
+                            readOnly={!canCount}
                             value={parts[k] ?? ''}
                             placeholder="—"
                             onChange={(e) => setEdits({ ...edits, [l.article_id]: parts.map((p, m) => (m === k ? e.target.value : p)) })}
@@ -579,7 +581,7 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
                   <td title={l.counted_at ? dateTime(l.counted_at) : ''}>{l.counted_by_name ?? ''}</td>
                   {open && (
                     <td>
-                      {l.counted === null && canManage && (
+                      {l.counted === null && canEdit && (
                         <button
                           className="link"
                           title="Retirer ce produit de l'inventaire"

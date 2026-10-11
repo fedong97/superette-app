@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Expense = Result<'expenses.get'>;
@@ -22,7 +22,8 @@ const monthStart = () => `${today().slice(0, 7)}-01`;
 
 /** Dépenses courantes : loyer, ENEO, salaires, transport… Elles passent seules en comptabilité. */
 export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab?: ExpensesTab }) {
-  const [tab, setTab] = useState<ExpensesTab>(initialTab === 'new' ? 'list' : initialTab);
+  const plans = has(user, 'charge_plans');
+  const [tab, setTab] = useState<ExpensesTab>(initialTab === 'new' ? 'list' : !plans && (initialTab === 'schedule' || initialTab === 'plans') ? 'list' : initialTab);
   return (
     <div className="page">
       <header className="page-head">
@@ -32,18 +33,18 @@ export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab
         value={tab}
         onChange={setTab}
         tabs={[
-          ['schedule', 'Constats de charges'],
+          ...(plans ? ([['schedule', 'Constats de charges']] as [ExpensesTab, string][]) : []),
           ['list', 'Historique des dépenses'],
           ['summary', 'Par catégorie'],
-          ['plans', 'Charges fixes'],
+          ...(plans ? ([['plans', 'Charges fixes']] as [ExpensesTab, string][]) : []),
           ['categories', 'Types de charge'],
         ]}
       />
       {tab === 'list' && <ExpenseList user={user} autoAdd={initialTab === 'new'} />}
       {tab === 'summary' && <Summary />}
       {tab === 'categories' && <Categories />}
-      {tab === 'plans' && <ChargePlans />}
-      {tab === 'schedule' && <ChargeSchedule />}
+      {tab === 'plans' && plans && <ChargePlans />}
+      {tab === 'schedule' && plans && <ChargeSchedule />}
     </div>
   );
 }
@@ -83,9 +84,11 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
         <label>
           <input type="checkbox" checked={cancelled} onChange={(e) => setCancelled(e.target.checked)} /> Annulées
         </label>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}>
-          Nouvelle dépense
-        </button>
+        {has(user, 'expense_record') && (
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}>
+            Nouvelle dépense
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <Empty>Aucune dépense sur la période. Saisissez ici le loyer, les factures ENEO, les salaires… ; les petites dépenses payées au tiroir se saisissent depuis la caisse (Action › Dépense payée en caisse).</Empty>
@@ -418,6 +421,7 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
       <div className="actions">
         <button onClick={() => call('expenses.print', id).catch(toast.error)}>Imprimer la pièce</button>
         {e.status === 'active' &&
+          has(user, 'expense_cancel') &&
           (cancelling ? (
             <button className="danger" disabled={!reason.trim()} onClick={() => (isManager(user) ? void cancel() : setAskPin(true))}>
               Confirmer l'annulation
@@ -530,15 +534,18 @@ function Summary() {
 }
 
 function Categories() {
+  const can = useCan();
   const list = useLoad(() => call('expenses.categories', true), []);
   const [open, setOpen] = useState<Category | 'new' | null>(null);
   return (
     <>
       <div className="filters">
         <span className="muted">Chaque catégorie passe sur un compte de charges du plan comptable (classe 6).</span>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
-          Nouvelle catégorie
-        </button>
+        {can('expense_categories') && (
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+            Nouvelle catégorie
+          </button>
+        )}
       </div>
       <table className="list compact">
         <thead>
@@ -550,7 +557,7 @@ function Categories() {
         </thead>
         <tbody>
           {(list.data ?? []).map((c) => (
-            <tr key={c.id} className={`clickable ${c.active ? '' : 'inactive'}`} onClick={() => setOpen(c)}>
+            <tr key={c.id} className={`${can('expense_categories') ? 'clickable' : ''} ${c.active ? '' : 'inactive'}`} onClick={() => can('expense_categories') && setOpen(c)}>
               <td>{c.name}</td>
               <td>{c.account_id}</td>
               <td>{c.account_label}</td>

@@ -18,3 +18,4 @@ export * from './labels';
 export * from './xlsx';
 export * from './xlsxRead';
 export * from './permissions';
+export * from './storeSettings';

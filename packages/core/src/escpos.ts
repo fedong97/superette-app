@@ -12,7 +12,13 @@ export type ReceiptLine =
   /** Libellé à gauche, montant aligné à droite ; le libellé trop long passe à la ligne. */
   | { t: 'row'; left: string; right: string; bold?: boolean; big?: boolean; indent?: number }
   | { t: 'rule' }
-  | { t: 'feed' };
+  | { t: 'feed' }
+  /**
+   * Image centrée (logo du magasin) : `src` est une data URL pour l'impression
+   * par le pilote ; `raster` est l'image en noir et blanc (1 bit par point,
+   * lignes de `ceil(width / 8)` octets) pour l'impression ESC/POS directe.
+   */
+  | { t: 'image'; src: string; raster?: { width: number; height: number; data: Uint8Array } };
 export type Receipt = ReceiptLine[];
 
 /**
@@ -147,6 +153,14 @@ export function receiptToEscPos(receipt: Receipt, opts: EscPosOptions): Uint8Arr
       text('-'.repeat(columns));
     } else if (line.t === 'feed') {
       out.push(0x0a);
+    } else if (line.t === 'image') {
+      // Sans image noir et blanc préparée, le logo n'est pas imprimé.
+      if (!line.raster) continue;
+      const { width, height, data } = line.raster;
+      const bytes = Math.ceil(width / 8);
+      style(false, false, 1);
+      out.push(GS, 0x76, 0x30, 0, bytes & 0xff, bytes >> 8, height & 0xff, height >> 8, ...data);
+      out.push(0x0a);
     } else if (line.t === 'text') {
       const width = line.big ? Math.floor(columns / 2) : columns;
       style(Boolean(line.bold), Boolean(line.big), line.align === 'center' ? 1 : line.align === 'right' ? 2 : 0);
@@ -170,6 +184,7 @@ export function receiptToText(receipt: Receipt, columns: number, codepage: Codep
   for (const line of receipt) {
     if (line.t === 'rule') lines.push('-'.repeat(columns));
     else if (line.t === 'feed') lines.push('');
+    else if (line.t === 'image') lines.push('[logo]'.padStart(Math.floor((columns + 6) / 2)));
     else if (line.t === 'text') {
       const width = line.big ? Math.floor(columns / 2) : columns;
       for (const l of wrapText(toPrinterText(line.text, codepage), width)) {

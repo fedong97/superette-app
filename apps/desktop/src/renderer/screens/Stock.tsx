@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType } from '@superette/core';
+import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType, type Permission } from '@superette/core';
 import { type Result, call } from '../api';
 import { StockByWarehouse } from './Controls';
 import { Inventories } from './Inventories';
@@ -19,35 +19,51 @@ const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', su
 export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
   // Les stocks critiques sont l'état du stock filtré sur les ruptures et alertes.
   const [tab, setTab] = useState<Tab>(initialTab === 'critical' ? 'state' : initialTab);
-  const canInventory = has(user, 'inventory') || has(user, 'inventory_count');
-  const tabs: [Tab, string][] = [
-    ['state', 'État du stock'],
-    ['warehouses', 'Articles par dépôt'],
-    ['receive', 'Réception'],
-    ['loss', 'Pertes et casse'],
-    ['transfer', 'Transfert'],
-    ...(canInventory ? ([['inventory', 'Inventaires']] as [Tab, string][]) : []),
-    ['expiry', 'Péremptions'],
-    ['moves', 'Mouvements'],
-    ['adjustments', 'Ajustements'],
-    ['monitoring', 'Monitoring'],
-  ];
+  const any = (...rights: Permission[]) => rights.some((r) => has(user, r));
+  const allowed: Record<Tab, boolean> = {
+    state: true,
+    critical: true,
+    warehouses: true,
+    receive: has(user, 'stock_receive'),
+    loss: has(user, 'stock_loss'),
+    transfer: any('transfer_view', 'transfer_create', 'transfer_ship', 'transfer_receive', 'transfer_cancel'),
+    inventory: any('inventory', 'inventory_count', 'inventory_close', 'inventory_cancel', 'inventory_edit', 'inventory_import', 'inventory_print'),
+    expiry: true,
+    moves: any('stock_moves', 'stock'),
+    adjustments: any('stock_moves', 'stock'),
+    monitoring: any('stock_monitoring', 'stock_request', 'stock_adjust', 'stock_decide'),
+  };
+  const tabs = (
+    [
+      ['state', 'État du stock'],
+      ['warehouses', 'Articles par dépôt'],
+      ['receive', 'Réception'],
+      ['loss', 'Pertes et casse'],
+      ['transfer', 'Transfert'],
+      ['inventory', 'Inventaires'],
+      ['expiry', 'Péremptions'],
+      ['moves', 'Mouvements'],
+      ['adjustments', 'Ajustements'],
+      ['monitoring', 'Monitoring'],
+    ] as [Tab, string][]
+  ).filter(([k]) => allowed[k]);
   return (
     <div className="page">
       <header className="page-head">
         <h1>Stock</h1>
       </header>
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      {!allowed[tab] && <Empty>Vous n'avez pas accès à cet onglet.</Empty>}
       {tab === 'state' && <StockState critical={initialTab === 'critical'} />}
       {tab === 'warehouses' && <StockByWarehouse />}
-      {tab === 'receive' && <Reception />}
-      {tab === 'loss' && <Loss />}
-      {tab === 'transfer' && <Transfers />}
-      {tab === 'inventory' && <Inventories user={user} />}
+      {tab === 'receive' && allowed.receive && <Reception />}
+      {tab === 'loss' && allowed.loss && <Loss />}
+      {tab === 'transfer' && allowed.transfer && <Transfers />}
+      {tab === 'inventory' && allowed.inventory && <Inventories user={user} />}
       {tab === 'expiry' && <Expiry />}
-      {tab === 'moves' && <Moves />}
-      {tab === 'adjustments' && <Moves adjustments />}
-      {tab === 'monitoring' && <Monitoring user={user} />}
+      {tab === 'moves' && allowed.moves && <Moves />}
+      {tab === 'adjustments' && allowed.adjustments && <Moves adjustments />}
+      {tab === 'monitoring' && allowed.monitoring && <Monitoring user={user} />}
     </div>
   );
 }

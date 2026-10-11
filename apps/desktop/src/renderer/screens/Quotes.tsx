@@ -1,7 +1,7 @@
 import { type CartLine, computeTotals, lineTotal } from '@superette/core';
 import { useState } from 'react';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker } from './pickers';
 
@@ -46,7 +46,7 @@ export function Quotes({ user }: { user: User }) {
           <option value="">Tous</option>
         </select>
         <input placeholder="N°, client" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
+        <button className="primary" style={{ marginLeft: 'auto' }} disabled={!has(user, 'quote_save')} onClick={() => setEditing('new')}>
           Nouveau devis
         </button>
       </div>
@@ -306,6 +306,7 @@ function QuoteEditor({ user, quote, onClose, onSaved }: { user: User; quote: Quo
 
 function QuoteDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: () => void; onEdit: (q: Quote) => void; onChanged: () => void }) {
   const toast = useToast();
+  const can = useCan();
   const loaded = useLoad(() => call('quotes.get', id), [id]);
   const q = loaded.data;
   if (!q) return null;
@@ -369,12 +370,12 @@ function QuoteDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
       {q.notes && <p className="muted">{q.notes}</p>}
       {q.state === 'open' && <p className="muted">Pour le facturer : caisse › Action › Facturer un devis / proforma.</p>}
       <div className="actions">
-        {q.status === 'open' && (
+        {q.status === 'open' && can('quote_cancel') && (
           <button type="button" className="danger" onClick={() => void cancel()}>
             Annuler le document
           </button>
         )}
-        {q.status === 'open' && (
+        {q.status === 'open' && can('quote_save') && (
           <button type="button" onClick={() => onEdit(q)}>
             Modifier
           </button>

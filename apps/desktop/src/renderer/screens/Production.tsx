@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, has, parseQty, qty, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, has, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker, WarehouseSelect } from './pickers';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -22,7 +22,7 @@ const units = (v: number) => String(v / 1000).replace('.', ',');
 export function Production({ user, initialTab = 'orders' }: { user: User; initialTab?: ProductionTab }) {
   const [tab, setTab] = useState<ProductionTab>(initialTab === 'new' ? 'orders' : initialTab);
   const [creating, setCreating] = useState(initialTab === 'new');
-  const manage = has(user, 'production');
+  const manage = has(user, 'production_create');
   return (
     <div className="page production">
       <header className="page-head">
@@ -37,7 +37,7 @@ export function Production({ user, initialTab = 'orders' }: { user: User; initia
         ]}
       />
       {tab === 'orders' && <Orders manage={manage} creating={creating} setCreating={setCreating} />}
-      {tab === 'recipes' && <Recipes manage={manage} />}
+      {tab === 'recipes' && <Recipes manage={has(user, 'production_recipes')} />}
     </div>
   );
 }
@@ -118,7 +118,6 @@ function Orders({ manage, creating, setCreating }: { manage: boolean; creating: 
       {open && (
         <OrderDetail
           id={open}
-          manage={manage}
           onClose={() => setOpen(null)}
           onChanged={() => {
             list.reload();
@@ -213,8 +212,9 @@ function NewOrder({ onClose, onDone }: { onClose: () => void; onDone: (id: strin
   );
 }
 
-function OrderDetail({ id, manage, onClose, onChanged }: { id: string; manage: boolean; onClose: () => void; onChanged: () => void }) {
+function OrderDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
+  const can = useCan();
   const order = useLoad(() => call('production.order', id), [id]);
   const o: Order | undefined = order.data;
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -271,15 +271,15 @@ function OrderDetail({ id, manage, onClose, onChanged }: { id: string; manage: b
       </p>
       <div className="actions">
         <button onClick={() => call('production.print', o.id).catch(toast.error)}>Imprimer</button>
-        {manage && o.status === 'draft' && (
-          <>
-            <button className="danger" onClick={() => confirm('Annuler cet ordre de fabrication ?') && act(() => call('production.cancel', o.id), 'Ordre annulé')}>
-              Annuler l’ordre
-            </button>
-            <button className="primary" onClick={() => act(() => call('production.produce', o.id), 'Fabrication enregistrée : stock mis à jour')}>
-              Fabriquer
-            </button>
-          </>
+        {can('production_cancel') && o.status === 'draft' && (
+          <button className="danger" onClick={() => confirm('Annuler cet ordre de fabrication ?') && act(() => call('production.cancel', o.id), 'Ordre annulé')}>
+            Annuler l’ordre
+          </button>
+        )}
+        {can('production_validate') && o.status === 'draft' && (
+          <button className="primary" onClick={() => act(() => call('production.produce', o.id), 'Fabrication enregistrée : stock mis à jour')}>
+            Fabriquer
+          </button>
         )}
       </div>
     </Modal>

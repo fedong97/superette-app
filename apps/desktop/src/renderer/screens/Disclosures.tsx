@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Field, dateTime, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { Field, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 
 type Data = Result<'accounting.disclosures'>;
 type Draft = Omit<Data, 'year' | 'updatedAt' | 'updatedBy' | 'labels'>;
@@ -16,6 +16,7 @@ const amountOf = (v: string) => parseAmount(v) ?? 0;
  * Elles s'impriment avec les notes calculées (États financiers › Notes annexes).
  */
 export function Disclosures() {
+  const can = useCan();
   const toast = useToast();
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear - 1);
@@ -313,7 +314,7 @@ export function Disclosures() {
       />
 
       <div className="actions sticky">
-        <button className="primary" disabled={!dirty} onClick={save}>
+        <button className="primary" disabled={!dirty || !can('tax_settings')} onClick={save}>
           Enregistrer les notes déclaratives
         </button>
         {dirty && <span className="muted">Modifications non enregistrées</span>}

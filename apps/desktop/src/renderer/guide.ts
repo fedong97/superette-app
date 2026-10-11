@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.32.0',
+    items: [
+      'Droits par rôle plus détaillés, rangés par groupe (Facturation, Trésorerie, Stocks…) avec recherche et « Tout cocher ».',
+      'Privilèges par utilisateur : donner ou retirer un droit à une seule personne, sans changer son rôle.',
+      'Paramètres plus complets : logo et RCCM sur les tickets, remise maximale, arrondi des espèces, nombre de tickets, client obligatoire au-delà d’un montant…',
+      'Sécurité : déconnexion après inactivité, longueur du code, blocage après plusieurs codes faux.',
+      'Préfixes des numéros (tickets, devis, bons de commande), sauvegarde à heure fixe et grand texte.',
+    ],
+  },
+  {
     version: '0.31.0',
     items: [
       'Menus et textes en gras, plus lisibles.',

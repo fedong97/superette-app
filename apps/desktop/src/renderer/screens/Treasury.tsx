@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BANK_METHODS, DENOMINATIONS_FCFA, ELECTRONIC_METHODS, PAYMENT_METHODS, type PaymentMethod, type RegisterKind, countedTotal } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { ZView } from './PosDialogs';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -201,7 +201,7 @@ function FullTreasury({
             onChange={setTab}
             tabs={[
               ['day', 'Opérations journalières'],
-              ['history', 'Historique des journées'],
+              ...(user.rights.includes('cash_history') ? ([['history', 'Historique des journées']] as [Exclude<TreasuryTab, 'central'>, string][]) : []),
             ]}
           />
           {tab === 'day' &&
@@ -211,7 +211,7 @@ function FullTreasury({
                 sessions={history.data ?? []}
                 onSession={setSessionId}
                 threshold={state.data.gapThreshold}
-                canJustify={user.rights.includes('cash_open')}
+                canJustify={user.rights.includes('gap_justify')}
                 onJustified={reload}
               />
             ) : (
@@ -329,6 +329,7 @@ function Day({
   onJustified: () => void;
 }) {
   const toast = useToast();
+  const can = useCan();
   const [justifying, setJustifying] = useState(false);
   const { z, cash, sales } = journey;
   const se = z.session;
@@ -364,7 +365,7 @@ function Day({
           </Field>
         )}
         <div className="tre-print">
-          <button onClick={() => call('pos.printZ', se.id).catch(toast.error)}>Imprimer le Z</button>
+          {can('cash_z') && <button onClick={() => call('pos.printZ', se.id).catch(toast.error)}>Imprimer le Z</button>}
           <button onClick={() => call('treasury.printReport', se.id).catch(toast.error)}>{declared ? 'Bon de clôture (A4)' : 'Rapport de clôture (A4)'}</button>
           {vouchers.map((m) => (
             <button key={m.id} onClick={() => call('treasury.printVoucher', m.id).catch(toast.error)}>
@@ -766,6 +767,7 @@ function CloseDialog({
   onDone: (sessionId: string) => void;
 }) {
   const toast = useToast();
+  const canZ = useCan()('cash_z');
   const [count, setCount] = useState<Record<number, number>>({});
   const [preview, setPreview] = useState<Result<'treasury.countPreview'> | null>(null);
   const [floatText, setFloatText] = useState('');
@@ -825,7 +827,7 @@ function CloseDialog({
             try {
               const z = await call('treasury.close', count, { floatLeft, gapReason: reason, registerId: session.register_id });
               setDone(z);
-              call('pos.printZ', z.session.id).catch(toast.error);
+              if (canZ) call('pos.printZ', z.session.id).catch(toast.error);
               const dep = (await call('treasury.session', z.session.id)).movements.find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
               if (dep) call('treasury.printVoucher', dep.id).catch(toast.error);
             } catch (err) {

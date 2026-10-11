@@ -70,7 +70,8 @@ void app.whenReady().then(() => {
   // Sauvegarde automatique : peu après le démarrage puis toutes les heures, une fois par jour.
   const autoBackup = () => void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
   const backupStart = setTimeout(autoBackup, 60_000);
-  const backupTimer = setInterval(autoBackup, 3_600_000);
+  // Toutes les 5 minutes : la sauvegarde du jour, puis celle de l'heure fixe réglée.
+  const backupTimer = setInterval(autoBackup, 300_000);
 
   const system: SystemHooks = {
     chooseFolder: async (title) => {

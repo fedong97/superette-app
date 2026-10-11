@@ -1204,4 +1204,27 @@ CREATE TABLE user_prefs (
 );
 `,
   },
+  {
+    version: 25,
+    name: 'droits détaillés, privilèges par utilisateur et paramètres du magasin',
+    sql: `
+-- Paramètres du magasin (ventes, crédit, stock, achats, sécurité, numérotation) : objet JSON.
+ALTER TABLE stores ADD COLUMN settings TEXT;
+-- Arrondi des espèces accordé sur le ticket (compris dans les remises).
+ALTER TABLE sales ADD COLUMN rounding INTEGER NOT NULL DEFAULT 0;
+-- Privilèges personnels : droits accordés en plus du rôle et droits retirés (listes JSON).
+CREATE TABLE user_rights (
+  id TEXT PRIMARY KEY REFERENCES users(id),
+  grants TEXT NOT NULL DEFAULT '[]',
+  revokes TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL
+);
+-- Codes faux de suite, sur ce PC : au-delà du maximum, l'utilisateur est bloqué un moment.
+CREATE TABLE login_attempts (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  failures INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT
+);
+`,
+  },
 ];

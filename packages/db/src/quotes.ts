@@ -137,7 +137,10 @@ export class QuoteService extends Base {
           .run(row);
         this.db.prepare('DELETE FROM quote_lines WHERE quote_id = ?').run(id);
       } else {
-        const number = `${KIND_PREFIX[input.kind]}-${this.stationPrefix()}-${String(this.nextCounter(`quote:${input.kind}`)).padStart(5, '0')}`;
+        // Préfixe réglé dans les paramètres du magasin (DV et PF par défaut).
+        const set = this.admin.storeSettings(ctx.storeId);
+        const prefix = (input.kind === 'quote' ? set.prefixQuote : set.prefixProforma) || KIND_PREFIX[input.kind];
+        const number = `${prefix}-${this.stationPrefix()}-${String(this.nextCounter(`quote:${input.kind}`)).padStart(5, '0')}`;
         this.db
           .prepare(
             `INSERT INTO quotes (id, number, kind, store_id, customer_id, customer_name, quote_date, valid_until, status, total_ttc, total_ht, total_tva,

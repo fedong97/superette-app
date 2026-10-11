@@ -1,4 +1,4 @@
-import { type Fcfa, type Milli, dueDate, lineAmount, suggestReorder, ttcFromHt } from '@superette/core';
+import { type Fcfa, type Milli, dueDate, lineAmount, parseStoreSettings, suggestReorder, ttcFromHt } from '@superette/core';
 import type { Db } from './database';
 import type { ReceptionLine, StockService } from './stock';
 import { AppError, Base, type Clock, type Context, newId } from './util';
@@ -206,6 +206,11 @@ export class PurchaseService extends Base {
     super(db, clock);
   }
 
+  /** Préfixe des bons de commande réglé dans les paramètres du magasin (BC par défaut). */
+  private orderPrefix(storeId: string): string {
+    return parseStoreSettings(this.db.prepare('SELECT settings FROM stores WHERE id = ?').pluck().get(storeId) as string | null).prefixOrder || 'BC';
+  }
+
   private number(prefix: string, counter: string): string {
     return `${prefix}-${this.stationPrefix()}-${String(this.nextCounter(counter)).padStart(5, '0')}`;
   }
@@ -382,7 +387,7 @@ export class PurchaseService extends Base {
           `INSERT INTO purchase_orders (id, number, store_id, warehouse_id, supplier_id, status, order_date, expected_date, notes, user_id, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, this.number('BC', 'order.number'), ctx.storeId, input.warehouseId, input.supplierId, today, expected, input.notes?.trim() || null, ctx.userId, now, now);
+        .run(id, this.number(this.orderPrefix(ctx.storeId), 'order.number'), ctx.storeId, input.warehouseId, input.supplierId, today, expected, input.notes?.trim() || null, ctx.userId, now, now);
       this.writeLines(id, input.lines);
       this.enqueue(ctx, 'purchase_order', id, 'upsert', {});
       this.audit(ctx.userId, 'order.create', 'purchase_order', id, { supplier: supplier.name, lines: input.lines.length });

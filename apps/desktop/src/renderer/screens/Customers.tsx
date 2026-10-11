@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, useLoad, useStoreSettings, useToast } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
-import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, draftOf, inputOf } from './customerDialogs';
+import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | `rebates-${RebatesTab}`;
@@ -15,7 +15,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
   const rebateTab = (initialTab.startsWith('rebates-') ? initialTab.slice(8) : 'state') as RebatesTab;
   const tabs: [CustomersTab, string][] = [
     ['list', 'Liste'],
-    ['statement', 'Extrait de compte'],
+    ...(has(user, 'customer_statement') || accounting ? ([['statement', 'Extrait de compte']] as [CustomersTab, string][]) : []),
     ...(accounting
       ? ([
           ['receivables', 'Situation (balance âgée)'],
@@ -59,9 +59,11 @@ function CustomerList({ user }: { user: User }) {
         <label>
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Inactifs
         </label>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
-          Nouveau client
-        </button>
+        {has(user, 'customer_create') && (
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+            Nouveau client
+          </button>
+        )}
       </div>
       {list.data?.length === 0 ? (
         <Empty>Aucun client. Créez les clients qui achètent à crédit (restaurants, boutiques, employés…) avec leur plafond.</Empty>
@@ -115,6 +117,7 @@ function CustomerList({ user }: { user: User }) {
 
 function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; customer: Customer | null; onClose: () => void; onSaved: (c: Customer) => void }) {
   const [tab, setTab] = useState<'card' | 'account' | 'statement' | 'sales'>(customer ? 'account' : 'card');
+  const statement = has(user, 'customer_statement') || has(user, 'receivables');
   return (
     <Modal title={customer ? `${customer.code} · ${customer.name}` : 'Nouveau client'} onClose={onClose} wide>
       {customer && (
@@ -123,7 +126,7 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
           onChange={setTab}
           tabs={[
             ['account', 'Compte'],
-            ['statement', 'Relevé'],
+            ...(statement ? ([['statement', 'Relevé']] as ['statement', string][]) : []),
             ['sales', 'Achats'],
             ['card', 'Fiche'],
           ]}
@@ -131,7 +134,7 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
       )}
       {tab === 'card' && <CustomerCard user={user} customer={customer} onSaved={onSaved} />}
       {tab === 'account' && customer && <Account customer={customer} />}
-      {tab === 'statement' && customer && <Statement customer={customer} />}
+      {tab === 'statement' && customer && statement && <Statement customer={customer} />}
       {tab === 'sales' && customer && <CustomerSales customer={customer} />}
     </Modal>
   );
@@ -139,7 +142,12 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
 
 function CustomerCard({ user, customer, onSaved }: { user: User; customer: Customer | null; onSaved: (c: Customer) => void }) {
   const toast = useToast();
-  const [draft, setDraft] = useState(() => draftOf(customer));
+  const settings = useStoreSettings();
+  const [draft, setDraft] = useState(() => draftOf(customer, settings));
+  // Un client existant : la fiche se corrige avec « Modifier un client » ; plafond, tarif et activité ont leurs propres droits.
+  const canSave = customer
+    ? has(user, 'customer_edit') || has(user, 'receivables') || has(user, 'customer_price_level') || has(user, 'customer_deactivate')
+    : has(user, 'customer_create');
   return (
     <form
       onSubmit={async (e) => {
@@ -153,14 +161,14 @@ function CustomerCard({ user, customer, onSaved }: { user: User; customer: Custo
         }
       }}
     >
-      <CustomerFields value={draft} onChange={setDraft} canSetCredit={canSetCredit(user)} />
+      <CustomerFields value={draft} onChange={setDraft} canSetCredit={canSetCredit(user)} canSetLevel={canSetLevel(user)} />
       {customer && (
         <label>
-          <input type="checkbox" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} /> Client actif
+          <input type="checkbox" checked={draft.active} disabled={!has(user, 'customer_deactivate')} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} /> Client actif
         </label>
       )}
       <div className="actions">
-        <button type="submit" className="primary">
+        <button type="submit" className="primary" disabled={!canSave}>
           Enregistrer
         </button>
       </div>
@@ -170,6 +178,7 @@ function CustomerCard({ user, customer, onSaved }: { user: User; customer: Custo
 
 function Account({ customer }: { customer: Customer }) {
   const toast = useToast();
+  const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
   const [paying, setPaying] = useState(false);
   if (!acc.data) return null;
@@ -220,9 +229,11 @@ function Account({ customer }: { customer: Customer }) {
                 <td className="r">{fcfa(i.remaining)}</td>
                 <td className="neg">{i.days_late ? `${i.days_late} j` : ''}</td>
                 <td>
-                  <button className="ghost" onClick={() => call('pos.printInvoice', i.id).catch(toast.error)}>
-                    Facture A4
-                  </button>
+                  {can('sale_reprint') && (
+                    <button className="ghost" onClick={() => call('pos.printInvoice', i.id).catch(toast.error)}>
+                      Facture A4
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -230,10 +241,12 @@ function Account({ customer }: { customer: Customer }) {
         </table>
       )}
       <div className="actions">
-        <button onClick={() => call('customers.printStatement', customer.id).catch(toast.error)}>Imprimer le relevé</button>
-        <button className="primary" disabled={!a.balance} onClick={() => setPaying(true)}>
-          Encaisser un règlement
-        </button>
+        {can('customer_statement', 'receivables') && <button onClick={() => call('customers.printStatement', customer.id).catch(toast.error)}>Imprimer le relevé</button>}
+        {can('customer_payment') && (
+          <button className="primary" disabled={!a.balance} onClick={() => setPaying(true)}>
+            Encaisser un règlement
+          </button>
+        )}
       </div>
       {paying && (
         <CustomerPaymentDialog
@@ -332,6 +345,7 @@ export function Statement({ customer }: { customer: Customer }) {
 
 function CustomerSales({ customer }: { customer: Customer }) {
   const toast = useToast();
+  const can = useCan();
   const sales = useLoad(() => call('customers.sales', customer.id), [customer.id]);
   if (sales.data?.length === 0) return <p className="muted">Aucun achat enregistré à son nom dans ce magasin.</p>;
   return (
@@ -355,9 +369,11 @@ function CustomerSales({ customer }: { customer: Customer }) {
             <td>{s.due_date ? dateFr(s.due_date) : 'comptant'}</td>
             <td>{s.status === 'cancelled' ? 'Annulé' : s.kind === 'return' ? 'Retour' : ''}</td>
             <td>
-              <button className="ghost" onClick={() => call('pos.printInvoice', s.id).catch(toast.error)}>
-                {s.kind === 'return' ? 'Avoir A4' : 'Facture A4'}
-              </button>
+              {can('sale_reprint') && (
+                <button className="ghost" onClick={() => call('pos.printInvoice', s.id).catch(toast.error)}>
+                  {s.kind === 'return' ? 'Avoir A4' : 'Facture A4'}
+                </button>
+              )}
             </td>
           </tr>
         ))}

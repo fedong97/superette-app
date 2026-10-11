@@ -22,6 +22,7 @@ export const GLOBAL_ENTITIES = [
   'expense_category',
   'promotion',
   'role_rights',
+  'user_rights',
   'rebate_rules',
   'recipe',
 ];

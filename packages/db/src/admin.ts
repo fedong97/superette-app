@@ -1,6 +1,21 @@
 import { randomInt } from 'node:crypto';
-import { EDITABLE_ROLES, PERMISSIONS, type Permission, type RegisterKind, TVA_CAMEROUN_NORMAL, roleRights } from '@superette/core';
+import {
+  EDITABLE_ROLES,
+  PERMISSIONS,
+  type Permission,
+  type RegisterKind,
+  type StoreSettings,
+  TVA_CAMEROUN_NORMAL,
+  type UserPrivileges,
+  mergeStoreSettings,
+  parseStoreSettings,
+  roleRights,
+  userRights,
+} from '@superette/core';
 import { AppError, Base, hashPin, newId, verifyPin } from './util';
+
+/** Durée du blocage après trop de codes faux. */
+const LOCK_MINUTES = 15;
 
 export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
 
@@ -56,6 +71,8 @@ export interface Store {
   ignore_stock: number;
   /** Écart de clôture (FCFA) au-delà duquel motif et code du gérant sont demandés. */
   cash_gap_threshold: number;
+  /** Paramètres du magasin (JSON) : lire avec `storeSettings`. */
+  settings: string | null;
 }
 
 /** Options du magasin réglées par le gérant ou l'administrateur. */
@@ -211,6 +228,30 @@ export class AdminService extends Base {
     return this.getStore(id);
   }
 
+  /** Paramètres du magasin, complétés par les valeurs par défaut. */
+  storeSettings(storeId: string): StoreSettings {
+    return parseStoreSettings(this.getStore(storeId).settings);
+  }
+
+  /** Change des paramètres du magasin ; ils partent vers les autres postes avec la fiche du magasin. */
+  saveStoreSettings(userId: string, storeId: string, patch: Partial<StoreSettings>): StoreSettings {
+    const current = this.getStore(storeId);
+    let next: StoreSettings;
+    try {
+      next = mergeStoreSettings(parseStoreSettings(current.settings), patch);
+    } catch (e) {
+      throw new AppError((e as Error).message, 'INVALID');
+    }
+    this.tx(() => {
+      this.db.prepare('UPDATE stores SET settings = ? WHERE id = ?').run(JSON.stringify(next), storeId);
+      this.enqueue({ storeId, registerId: null }, 'store', storeId, 'upsert', this.getStore(storeId));
+      // Le logo n'encombre pas le journal : on note seulement qu'il a changé.
+      const logged = { ...patch, ...(patch.logo !== undefined ? { logo: patch.logo ? 'nouveau logo' : 'logo retiré' } : {}) };
+      this.audit(userId, 'store.settings', 'store', storeId, logged);
+    });
+    return next;
+  }
+
   // --- Dépôts ---------------------------------------------------------------
 
   createWarehouse(storeId: string, name: string, kind: Warehouse['kind'], salesDefault = false): Warehouse {
@@ -355,6 +396,7 @@ export class AdminService extends Base {
     byUserId: string,
     input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null },
   ): User {
+    this.checkPinLength(input.pin, input.storeId);
     const id = newId();
     const registerId = this.checkRegister(input.registerId ?? null, 'cash');
     const emoneyId = this.checkRegister(input.emoneyRegisterId ?? null, 'electronic');
@@ -381,6 +423,7 @@ export class AdminService extends Base {
     patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string },
   ): User {
     const current = this.getUser(id);
+    if (patch.pin) this.checkPinLength(patch.pin, patch.storeId === undefined ? current.store_id : patch.storeId);
     this.db
       .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, emoney_register_id = ?, bank_register_id = ?, active = ? WHERE id = ?')
       .run(
@@ -400,6 +443,13 @@ export class AdminService extends Base {
     return user;
   }
 
+  /** Longueur minimale du code fixée dans les paramètres du magasin (celui de l'utilisateur, sinon celui de ce poste). */
+  private checkPinLength(pin: string, storeId: string | null): void {
+    const sid = storeId ?? this.getSetting('station.storeId');
+    const min = sid ? this.storeSettings(sid).pinMinLength : 4;
+    if (pin.length < min) throw new AppError(`Le code doit faire au moins ${min} chiffres`, 'INVALID_PIN');
+  }
+
   /** Caisse attribuable : elle existe, n'est pas désactivée et a le type attendu. */
   private checkRegister(registerId: string | null, kind: RegisterKind): string | null {
     if (!registerId) return null;
@@ -411,14 +461,48 @@ export class AdminService extends Base {
 
   login(login: string, pin: string): User {
     const row = this.db
-      .prepare('SELECT id, pin_hash FROM users WHERE login = ? AND active = 1')
-      .get(login.trim().toLowerCase()) as { id: string; pin_hash: string } | undefined;
+      .prepare('SELECT id, pin_hash, store_id FROM users WHERE login = ? AND active = 1')
+      .get(login.trim().toLowerCase()) as { id: string; pin_hash: string; store_id: string | null } | undefined;
+    const attempts = row
+      ? ((this.db.prepare('SELECT failures, locked_until FROM login_attempts WHERE user_id = ?').get(row.id) as { failures: number; locked_until: string | null } | undefined) ?? null)
+      : null;
+    const now = this.now();
+    if (attempts?.locked_until && attempts.locked_until > now) {
+      const minutes = Math.max(1, Math.ceil((Date.parse(attempts.locked_until) - Date.parse(now)) / 60000));
+      throw new AppError(`Trop de codes faux : compte bloqué encore ${minutes} min. L'administrateur peut le débloquer.`, 'LOCKED');
+    }
     if (!row || !verifyPin(pin, row.pin_hash)) {
       this.audit(null, 'auth.failed', 'user', row?.id, { login });
+      if (row) {
+        const sid = row.store_id ?? this.getSetting('station.storeId');
+        const max = sid ? this.storeSettings(sid).maxLoginAttempts : 0;
+        const failures = (attempts?.failures ?? 0) + 1;
+        const lock = max > 0 && failures >= max;
+        const until = lock ? new Date(Date.parse(now) + LOCK_MINUTES * 60000).toISOString() : null;
+        this.db
+          .prepare('INSERT INTO login_attempts (user_id, failures, locked_until) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET failures = excluded.failures, locked_until = excluded.locked_until')
+          .run(row.id, lock ? 0 : failures, until);
+        if (lock) {
+          this.audit(null, 'auth.locked', 'user', row.id, { login, minutes: LOCK_MINUTES });
+          throw new AppError(`Trop de codes faux : compte bloqué ${LOCK_MINUTES} minutes`, 'LOCKED');
+        }
+      }
       throw new AppError('Identifiant ou code incorrect', 'AUTH_FAILED');
     }
+    this.db.prepare('DELETE FROM login_attempts WHERE user_id = ?').run(row.id);
     this.audit(row.id, 'auth.login', 'user', row.id);
     return this.getUser(row.id);
+  }
+
+  /** Utilisateurs bloqués sur ce PC après trop de codes faux. */
+  lockedUsers(): string[] {
+    return this.db.prepare('SELECT user_id FROM login_attempts WHERE locked_until > ?').pluck().all(this.now()) as string[];
+  }
+
+  /** Débloque un utilisateur avant la fin de son blocage. */
+  unlockUser(byUserId: string, id: string): void {
+    this.db.prepare('DELETE FROM login_attempts WHERE user_id = ?').run(id);
+    this.audit(byUserId, 'user.unlock', 'user', id);
   }
 
   /** Validation superviseur (annulation, retour, remise) par le code d'un gérant. */
@@ -434,8 +518,63 @@ export class AdminService extends Base {
     return roleRights(role, this.savedRights(role));
   }
 
-  hasRight(user: Pick<User, 'role'>, permission: Permission): boolean {
-    return this.rights(user.role).includes(permission);
+  /** Privilèges personnels d'un utilisateur (droits accordés en plus de son rôle, droits retirés). */
+  privileges(userId: string): UserPrivileges {
+    const row = this.db.prepare('SELECT grants, revokes FROM user_rights WHERE id = ?').get(userId) as { grants: string; revokes: string } | undefined;
+    if (!row) return { grants: [], revokes: [] };
+    const known = (list: string) => (JSON.parse(list) as string[]).filter((p): p is Permission => p in PERMISSIONS);
+    return { grants: known(row.grants), revokes: known(row.revokes) };
+  }
+
+  /** Droits effectifs d'un utilisateur : son rôle, plus ses privilèges accordés, moins ceux qui lui sont retirés. */
+  userRights(user: Pick<User, 'id' | 'role'>): Permission[] {
+    return userRights(user.role, this.rights(user.role), user.role === 'admin' ? null : this.privileges(user.id));
+  }
+
+  hasRight(user: Pick<User, 'id' | 'role'>, permission: Permission): boolean {
+    return this.userRights(user).includes(permission);
+  }
+
+  /**
+   * Enregistre les privilèges personnels d'un utilisateur. Un droit accordé que
+   * le rôle donne déjà, ou retiré que le rôle ne donne pas, n'est pas gardé.
+   */
+  savePrivileges(byUserId: string, userId: string, input: UserPrivileges): UserPrivileges {
+    const user = this.getUser(userId);
+    if (user.role === 'admin') throw new AppError("L'administrateur a toujours tous les droits", 'INVALID');
+    const unknown = [...input.grants, ...input.revokes].find((r) => !(r in PERMISSIONS));
+    if (unknown) throw new AppError(`Droit inconnu : ${unknown}`, 'INVALID');
+    const role = new Set(this.rights(user.role));
+    const grants = [...new Set(input.grants)].filter((p) => !role.has(p));
+    const revokes = [...new Set(input.revokes)].filter((p) => role.has(p));
+    return this.tx(() => {
+      const row = { id: userId, grants: JSON.stringify(grants), revokes: JSON.stringify(revokes), updated_at: this.now() };
+      this.db
+        .prepare(
+          'INSERT INTO user_rights (id, grants, revokes, updated_at) VALUES (@id, @grants, @revokes, @updated_at) ON CONFLICT(id) DO UPDATE SET grants = excluded.grants, revokes = excluded.revokes, updated_at = excluded.updated_at',
+        )
+        .run(row);
+      this.enqueue(null, 'user_rights', userId, 'upsert', row);
+      this.audit(byUserId, 'admin.privileges', 'user', userId, { grants, revokes });
+      return { grants, revokes };
+    });
+  }
+
+  /** Utilisateurs actifs qui ont un droit (par leur rôle ou à titre personnel). */
+  holders(permission: Permission): { id: string; name: string; role: Role }[] {
+    return this.listUsers()
+      .filter((u) => u.active === 1 && this.hasRight(u, permission))
+      .map((u) => ({ id: u.id, name: u.name, role: u.role }));
+  }
+
+  /** Utilisateurs qui ont des privilèges personnels, avec leur nombre de droits accordés et retirés. */
+  privilegeCounts(): Record<string, { grants: number; revokes: number }> {
+    const out: Record<string, { grants: number; revokes: number }> = {};
+    for (const r of this.db.prepare('SELECT id FROM user_rights').pluck().all() as string[]) {
+      const p = this.privileges(r);
+      if (p.grants.length || p.revokes.length) out[r] = { grants: p.grants.length, revokes: p.revokes.length };
+    }
+    return out;
   }
 
   /** Tableau des droits : chaque rôle réglable et ses droits cochés. */

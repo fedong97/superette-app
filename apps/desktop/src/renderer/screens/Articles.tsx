@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 
@@ -12,7 +12,7 @@ export type ArticlesView = 'list' | 'new' | 'search' | 'shelving';
 
 export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesView }) {
   const [tab, setTab] = useState<'list' | 'shelving'>(view === 'shelving' ? 'shelving' : 'list');
-  const canEdit = has(user, 'articles');
+  const canEdit = has(user, 'article_families');
   return (
     <div className="page">
       <header className="page-head">
@@ -44,9 +44,11 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
         {has(user, 'import') && (
           <button onClick={() => setImporting(true)}>Importer (CSV)</button>
         )}
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
-          Nouvel article
-        </button>
+        {has(user, 'article_create') && (
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
+            Nouvel article
+          </button>
+        )}
       </div>
       {articles.data?.length === 0 ? (
         <Empty>Aucun article. Créez-en un ou importez votre catalogue.</Empty>
@@ -140,6 +142,8 @@ export function ArticleForm({
   addLevel?: 'top' | 'bottom';
 }) {
   const toast = useToast();
+  const can = useCan();
+  const settings = useStoreSettings();
   const rates = useLoad(() => call('admin.vatRates'));
   const app = useLoad(() => call('app.state'));
   const noVat = app.data?.station?.store.vat_enabled === 0;
@@ -158,7 +162,8 @@ export function ArticleForm({
     plu: article?.plu ?? '',
     quickKey: article?.quick_key === 1,
     minQty: milli(article?.min_qty),
-    alertQty: milli(article?.alert_qty),
+    // Nouveau produit : stock d'alerte proposé par les paramètres du magasin.
+    alertQty: article ? milli(article.alert_qty) : settings.defaultAlertQty ? String(settings.defaultAlertQty) : '',
     maxQty: milli(article?.max_qty),
     active: article ? article.active === 1 : true,
   });
@@ -210,6 +215,19 @@ export function ArticleForm({
   const piece = f.unit === 'piece';
   const lastOn = piece ? levels.reduce((last, l, i) => (i === 0 || l.enabled ? i : last), 0) : 0;
   const unitName = piece ? levels[lastOn]!.name.trim() || 'pièce' : f.unit === 'kg' ? 'kg' : 'litre';
+  // Prix de vente proposés (Paramètres › Achats : marge par défaut) pour les conditionnements sans prix.
+  const cost = parseAmount(buy.cost) ?? parseAmount(buy.purchase);
+  const suggested =
+    settings.defaultMarginPct > 0 && cost
+      ? levels
+          .map((l, i) => ({ l, i, d: i === 0 ? 1 : Math.floor(Number(l.divisor) || 0) }))
+          .filter(({ l, i, d }) => (i === 0 || (piece && l.enabled)) && d > 0 && !l.sale.trim())
+          .map(({ l, i, d }) => ({
+            i,
+            name: l.name.trim() || (i === 0 ? 'achat' : `niveau ${i + 1}`),
+            sale: Math.ceil(((cost / d) * (100 + settings.defaultMarginPct) * (10000 + (noVat ? 0 : rate))) / 1_000_000 / 5) * 5,
+          }))
+      : [];
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,11 +333,20 @@ export function ArticleForm({
           </p>
         )}
         <LevelGrid levels={levels} buy={buy} rate={rate} piece={piece} unitLabel={unitName.toUpperCase()} onLevels={onLevels} onBuy={setBuy} />
+        {suggested.length > 0 && (
+          <p className="muted small">
+            Marge de {settings.defaultMarginPct} % sur le revient : {suggested.map((x) => `${x.name} ${fcfa(x.sale)}`).join(', ')} TTC.{' '}
+            <button type="button" className="link" onClick={() => setLevels(levels.map((l, i) => (suggested.some((x) => x.i === i) ? { ...l, sale: String(suggested.find((x) => x.i === i)!.sale) } : l)))}>
+              Appliquer aux prix vides
+            </button>
+          </p>
+        )}
         <h3>Autres informations</h3>
         <div className="grid3">
           <Field label="Marque">
             <input value={f.brand} onChange={set('brand')} />
           </Field>
+          {can('article_families') && (
           <Field label="Nouveau rayon" hint="Crée le rayon et une famille du même nom">
             <div className="inline">
               <input value={newDept} onChange={(e) => setNewDept(e.target.value)} />
@@ -342,6 +369,7 @@ export function ArticleForm({
               </button>
             </div>
           </Field>
+          )}
           {canSetStorePrice && article && (
             <Field label={`Prix magasin (${unitName.toLowerCase()})`} hint="Vide = prix national">
               <input inputMode="numeric" value={storePrice} onChange={(e) => setStorePrice(e.target.value)} />
@@ -368,7 +396,7 @@ export function ArticleForm({
             <input type="checkbox" checked={f.quickKey} onChange={set('quickKey')} /> Touche rapide en caisse
           </label>
           <label>
-            <input type="checkbox" checked={f.active} onChange={set('active')} /> Actif
+            <input type="checkbox" checked={f.active} disabled={!can('article_deactivate')} onChange={set('active')} /> Actif
           </label>
         </div>
         <h3>{piece && lastOn > 0 ? `Codes-barres de l'unité de détail (${unitName})` : 'Codes-barres'}</h3>
@@ -437,7 +465,7 @@ export function ArticleForm({
           <button type="button" className="ghost" onClick={onClose}>
             Fermer
           </button>
-          <button type="submit" className="primary">
+          <button type="submit" className="primary" disabled={article ? !can('article_edit', 'article_price', 'article_deactivate') : !can('article_create', 'sale_new_article')}>
             Enregistrer
           </button>
         </div>

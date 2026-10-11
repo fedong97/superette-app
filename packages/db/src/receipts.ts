@@ -363,7 +363,8 @@ export class ReceiptService extends Base {
       { t: 'text', text: [dateFr(x.at), input.register, x.user_name].filter(Boolean).join(' · ') },
       { t: 'rule' },
       { t: 'text', text: x.nature },
-      { t: 'text', text: x.label, bold: true },
+      // Le n° de pièce est déjà en tête : le motif seul.
+      { t: 'text', text: x.number && x.label.startsWith(x.number) ? x.label.slice(x.number.length).trim() || x.nature : x.label, bold: true },
     ];
     if (x.party) r.push({ t: 'text', text: `${direction === 'IN' ? 'Reçu de' : 'Bénéficiaire'} : ${x.party}` });
     r.push(

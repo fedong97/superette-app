@@ -151,7 +151,7 @@ export function CashInDialog({ sessionId, onClose, onDone }: { sessionId: string
   return (
     <Modal title="Encaisser" onClose={onClose} wide>
       <form
-        className="desk"
+        className="desk-form"
         onSubmit={async (e) => {
           e.preventDefault();
           try {
@@ -297,7 +297,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
   return (
     <Modal title="Décaisser" onClose={onClose} wide>
       <form
-        className="desk"
+        className="desk-form"
         onSubmit={async (e) => {
           e.preventDefault();
           try {

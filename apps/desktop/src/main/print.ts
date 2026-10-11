@@ -716,15 +716,19 @@ export function createPrinter(s: Services): Printer {
       const { row: x, register } = s.cashdesk.row(sessionId, source, id);
       const store = s.admin.getStore(s.pos.getSession(sessionId).store_id);
       const day = new Date(x.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      // Collaborateur : sa CNI est sur sa fiche ; le motif sans le n° de pièce déjà en tête.
+      const staffId = source === 'entry' ? s.cashdesk.get(id).staff_id : null;
+      const idCard = staffId ? s.staff.get(staffId).id_card : null;
+      const motif = x.number && x.label.startsWith(x.number) ? x.label.slice(x.number.length).trim() : x.label;
       await printA4(`${a4Head(store)}
         <h1 style="text-align:center;margin-top:10mm">DÉCHARGE</h1>
         <p style="text-align:center" class="muted">Pièce ${esc(x.number ?? '')} · ${esc(register)}</p>
         <p style="font-size:12pt;line-height:2;margin-top:10mm">
           Je soussigné(e), <b>${x.party ? esc(x.party) : '..............................................................'}</b>,
-          CNI n° ..............................., reconnais avoir reçu de <b>${esc(store.name)}</b>
+          CNI n° ${idCard ? `<b>${esc(idCard)}</b>` : '...............................'}, reconnais avoir reçu de <b>${esc(store.name)}</b>
           la somme de <b>${money(x.amount)} FCFA</b> (${esc(numberToWordsFr(x.amount))} francs CFA),
           ${x.method_label && x.method_label !== PAYMENT_METHODS.CASH ? `par ${esc(x.method_label)}${x.reference ? ` (réf. ${esc(x.reference)})` : ''}, ` : 'en espèces, '}
-          au titre de : <b>${esc(x.nature)}, ${esc(x.label)}</b>.
+          au titre de : <b>${esc(x.nature)}${motif ? `, ${esc(motif)}` : ''}</b>.
         </p>
         <p style="font-size:12pt">Fait à ....................................., le ${esc(day)}.</p>
         <div style="display:flex;justify-content:space-between;margin-top:14mm;font-size:11pt">

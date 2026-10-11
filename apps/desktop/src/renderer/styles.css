@@ -688,9 +688,11 @@ html.large-text { zoom: 1.15; }
 .menu-drop.right { left: auto; right: 0; min-width: 270px; }
 .menu-drop .menu-title { padding: 6px 10px 2px; font-style: normal; font-weight: 800; color: var(--muted); }
 .menu-drop button:disabled { color: #a3abb8; }
-form.desk { min-width: 640px; }
-.desk-head { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 10px; }
-.desk-head.two { grid-template-columns: 1fr 1fr; }
+form.desk-form { min-width: 640px; }
+.desk-head { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 10px; }
+.desk-head.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.desk-head input, .desk-head select { width: 100%; box-sizing: border-box; }
+td.nowrap > button.link + button.link { margin-left: 12px; }
 .desk-types { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .desk-types label { display: flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-weight: 700; }
 .desk-types label:has(input:checked) { background: #e6f2ef; border-color: var(--brand); }

@@ -242,6 +242,13 @@ export class AdminService extends Base {
     } catch (e) {
       throw new AppError((e as Error).message, 'INVALID');
     }
+    if (patch.emoneyCentralRegisterId) {
+      // La centrale électronique est une caisse électronique du magasin que personne ne tient au quotidien.
+      const reg = this.getRegister(patch.emoneyCentralRegisterId);
+      if (reg.store_id !== storeId || reg.kind !== 'electronic') throw new AppError('Choisissez une caisse électronique de ce magasin', 'INVALID');
+      const holder = this.db.prepare('SELECT name FROM users WHERE emoney_register_id = ? AND active = 1').pluck().get(reg.id) as string | undefined;
+      if (holder) throw new AppError(`${reg.name} est la caisse électronique de ${holder} : choisissez une caisse que personne ne tient`, 'INVALID');
+    }
     this.tx(() => {
       this.db.prepare('UPDATE stores SET settings = ? WHERE id = ?').run(JSON.stringify(next), storeId);
       this.enqueue({ storeId, registerId: null }, 'store', storeId, 'upsert', this.getStore(storeId));
@@ -456,6 +463,9 @@ export class AdminService extends Base {
     const reg = this.getRegister(registerId);
     if (!reg.active) throw new AppError('Cette caisse est désactivée', 'INVALID');
     if (reg.kind !== kind) throw new AppError(`${reg.name} n'est pas une caisse ${REGISTER_KINDS[kind].split(' ')[0]!.toLowerCase()}`, 'INVALID');
+    if (kind === 'electronic' && this.storeSettings(reg.store_id).emoneyCentralRegisterId === registerId) {
+      throw new AppError(`${reg.name} est la caisse électronique centrale : elle reçoit les versements et n'est attribuée à personne`, 'INVALID');
+    }
     return registerId;
   }
 

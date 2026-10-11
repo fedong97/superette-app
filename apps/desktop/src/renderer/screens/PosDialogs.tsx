@@ -421,9 +421,9 @@ export function CashOpDialog({ type, needsSupervisor, onClose }: { type: 'IN' | 
   );
 }
 
-export function ZView({ z }: { z: Result<'pos.zReport'> }) {
+export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compact?: boolean }) {
   const diffClass = z.difference === null ? '' : z.difference < 0 ? 'neg' : z.difference > 0 ? 'pos' : '';
-  if (z.declared) return <DeclaredZView z={z} lines={z.declared} diffClass={diffClass} />;
+  if (z.declared) return <DeclaredZView z={z} lines={z.declared} diffClass={diffClass} compact={compact} />;
   return (
     <div className="zview">
       <div className="kpis">
@@ -523,31 +523,45 @@ export function ZView({ z }: { z: Result<'pos.zReport'> }) {
 }
 
 /** Z d'une caisse électronique ou banque : encaissé, solde relevé et écart par moyen, puis les règlements clients. */
-function DeclaredZView({ z, lines, diffClass }: { z: Result<'pos.zReport'>; lines: NonNullable<Result<'pos.zReport'>['declared']>; diffClass: string }) {
+function DeclaredZView({ z, lines, diffClass, compact }: { z: Result<'pos.zReport'>; lines: NonNullable<Result<'pos.zReport'>['declared']>; diffClass: string; compact: boolean }) {
   const expected = lines.reduce((t, l) => t + l.expected, 0);
+  const electronic = z.registerKind === 'electronic';
+  const has = (f: (l: (typeof lines)[number]) => number | null) => lines.some((l) => (f(l) ?? 0) !== 0);
+  const opening = electronic && has((l) => l.opening);
+  const moves = electronic && (has((l) => l.outflows) || has((l) => l.inflows));
+  const deposit = electronic && has((l) => l.deposited);
+  const cell = (v: number | null) => <td className="r">{v === null ? '—' : fcfa(v)}</td>;
   return (
     <div className="zview">
-      <div className="kpis">
-        <div>
-          <small>Encaissé</small>
-          <strong>{fcfa(expected)}</strong>
+      {!compact && (
+        <div className="kpis">
+          <div>
+            <small>{electronic ? 'Attendu' : 'Encaissé'}</small>
+            <strong>{fcfa(expected)}</strong>
+          </div>
+          <div>
+            <small>Solde relevé</small>
+            <strong>{z.counted === null ? '—' : fcfa(z.counted)}</strong>
+          </div>
+          <div className={diffClass}>
+            <small>Écart</small>
+            <strong>{z.difference === null ? '—' : fcfa(z.difference)}</strong>
+          </div>
         </div>
-        <div>
-          <small>Solde relevé</small>
-          <strong>{z.counted === null ? '—' : fcfa(z.counted)}</strong>
-        </div>
-        <div className={diffClass}>
-          <small>Écart</small>
-          <strong>{z.difference === null ? '—' : fcfa(z.difference)}</strong>
-        </div>
-      </div>
+      )}
       <table className="list">
         <thead>
           <tr>
             <th>Moyen</th>
+            {opening && <th className="r">Solde de départ</th>}
             <th className="r">Encaissé</th>
+            {moves && <th className="r">Transferts reçus</th>}
+            {moves && <th className="r">Sorties</th>}
+            {electronic && <th className="r">Attendu</th>}
             <th className="r">Solde relevé</th>
             <th className="r">Écart</th>
+            {deposit && <th className="r">Versé à la centrale</th>}
+            {deposit && <th className="r">Reste</th>}
           </tr>
         </thead>
         <tbody>
@@ -556,14 +570,25 @@ function DeclaredZView({ z, lines, diffClass }: { z: Result<'pos.zReport'>; line
             return (
               <tr key={l.method}>
                 <td>{l.label}</td>
-                <td className="r">{fcfa(l.expected)}</td>
-                <td className="r">{l.declared === null ? '—' : fcfa(l.declared)}</td>
+                {opening && cell(l.opening)}
+                {cell(electronic ? l.received : l.expected)}
+                {moves && cell(l.inflows)}
+                {moves && cell(-l.outflows)}
+                {electronic && cell(l.expected)}
+                {cell(l.declared)}
                 <td className={`r ${gap ? (gap < 0 ? 'neg' : 'pos') : ''}`}>{gap === null ? '—' : fcfa(gap)}</td>
+                {deposit && cell(l.deposited)}
+                {deposit && cell(l.left)}
               </tr>
             );
           })}
         </tbody>
       </table>
+      {z.emoneyDeposit && (
+        <p className="muted">
+          Versement {z.emoneyDeposit.number} vers {z.emoneyDeposit.centralName}.
+        </p>
+      )}
       {z.customerReceipts.length > 0 && (
         <p className="muted">Dont règlements clients : {z.customerReceipts.map((m) => `${m.label} ${fcfa(m.amount)}`).join(', ')}</p>
       )}

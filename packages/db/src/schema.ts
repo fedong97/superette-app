@@ -1227,4 +1227,38 @@ CREATE TABLE login_attempts (
 );
 `,
   },
+  {
+    version: 26,
+    name: 'sorties et versements des caisses électroniques',
+    sql: `
+-- Mouvement d'une caisse électronique hors ventes : versement de la recette vers la
+-- centrale électronique (deposit), transfert entre caisses électroniques (register),
+-- dépôt ou retrait en banque (bank), apport ou retrait de l'exploitant (owner), autre.
+-- Un versement ou un transfert s'écrit en deux lignes : la sortie et l'entrée (counterpart_id).
+CREATE TABLE emoney_movements (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  register_id TEXT NOT NULL REFERENCES registers(id),
+  session_id TEXT,
+  method TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('IN', 'OUT')),
+  nature TEXT NOT NULL CHECK (nature IN ('deposit', 'register', 'bank', 'owner', 'other')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  reference TEXT,
+  label TEXT NOT NULL,
+  other_register_id TEXT,
+  counterpart_id TEXT,
+  user_id TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX emoney_movements_register ON emoney_movements(register_id, at);
+CREATE INDEX emoney_movements_session ON emoney_movements(session_id);
+-- Solde de départ d'une journée électronique, par moyen de paiement (JSON) : le reste laissé à la clôture d'avant.
+ALTER TABLE cash_sessions ADD COLUMN opening_detail TEXT;
+-- Règlement fournisseur payé par Mobile Money : il sort de cette caisse électronique (et de sa journée si elle est ouverte).
+ALTER TABLE supplier_payments ADD COLUMN register_id TEXT;
+ALTER TABLE supplier_payments ADD COLUMN session_id TEXT;
+`,
+  },
 ];

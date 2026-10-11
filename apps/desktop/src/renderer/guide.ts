@@ -109,6 +109,17 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.33.0',
+    items: [
+      'Le journal d’une caisse électronique montre enfin ses entrées et ses sorties, avec la référence de chaque transfert.',
+      'Une dépense, un remboursement ou un règlement fournisseur payé par MoMo ou Orange Money sort de la caisse électronique : plus de faux écart à la clôture.',
+      'À la caisse, « Dépense payée en caisse » se paie en espèces ou avec votre compte MoMo/OM.',
+      'À la clôture, le caissier voit ses sorties par son compte électronique.',
+      'Paramètres › Caisses électroniques : avec une caisse électronique centrale (chaque caissier y verse sa recette le soir, avec la référence du transfert et un bon), ou caisses indépendantes (le solde passe au lendemain).',
+      'Trésorerie › Caisses électroniques (MoMo, OM) et centrale : solde de chaque caisse, livre, transferts et dépôts à la banque.',
+    ],
+  },
+  {
     version: '0.32.0',
     items: [
       'Droits par rôle plus détaillés, rangés par groupe (Facturation, Trésorerie, Stocks…) avec recherche et « Tout cocher ».',

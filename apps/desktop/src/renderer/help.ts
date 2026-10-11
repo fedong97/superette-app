@@ -197,7 +197,7 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Dépenses et charges',
     intro: 'Loyer, ENEO, salaires, transport… avec leur compte comptable.',
     sections: [
-      { tab: 'new', title: 'Saisir une dépense', steps: ['Catégorie, libellé, bénéficiaire, montant et moyen de paiement (référence hors espèces), puis Enregistrer.', 'Une dépense en espèces d’un caissier sort de sa caisse et imprime un bon de sortie.'] },
+      { tab: 'new', title: 'Saisir une dépense', steps: ['Catégorie, libellé, bénéficiaire, montant et moyen de paiement (référence hors espèces), puis Enregistrer.', 'Une dépense en espèces d’un caissier sort de sa caisse et imprime un bon de sortie.', 'Payée par MoMo ou Orange Money : le caissier paie avec son compte (sa caisse électronique) ; au bureau, choisissez la caisse électronique, la centrale par défaut.'] },
       { tab: 'plans', title: 'Charges fixes', steps: ['Déclarez le loyer, les salaires… une fois : chaque mois, le constat attendu s’affiche.'] },
       { tab: 'schedule', title: 'Constats de charges', steps: ['Les charges du mois à constater ; une charge en retard s’affiche dans la barre du bas.'] },
     ],
@@ -261,11 +261,31 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           '« Fermer la caisse… » : comptez les billets et pièces par coupure.',
           'Indiquez le fond laissé dans le tiroir ; le reste est versé à la caisse centrale avec un bon à signer.',
-          'Caisse électronique : « Clôturer… » et saisissez le montant lu sur chaque téléphone ou terminal, puis imprimez le bon.',
+          'Caisse électronique : « Clôturer… ». Vos sorties du jour par ce compte (dépenses, remboursements) s’affichent. Saisissez le solde lu sur chaque téléphone.',
+          'Avec une caisse électronique centrale : transférez votre recette vers le numéro du magasin, notez la référence de chaque transfert, puis « Clôturer et verser ». Ce que vous gardez reste pour demain. Imprimez le bon de versement.',
+        ],
+      },
+      {
+        tab: 'day',
+        title: 'Journal d’une caisse électronique',
+        perm: 'cash_amounts',
+        steps: [
+          'Choisissez la caisse électronique : « Entrées et sorties du compte » liste les ventes et règlements reçus, puis les remboursements, dépenses, fournisseurs et le versement, avec la référence de chaque transfert.',
+          'L’attendu = solde de départ + encaissé + transferts reçus − sorties.',
         ],
       },
       { tab: 'history', title: 'Historique et écarts', perm: 'cash_amounts', steps: ['Le filtre « Type » montre les caisses espèces, électroniques ou banque.', 'Un écart au-delà du seuil se justifie avec « Justifier l’écart… ».'] },
       { tab: 'central', title: 'Caisse centrale', perm: 'central_cash', steps: ['Entrées (banque, exploitant) et sorties (dépôt en banque…) avec bon imprimé ; le livre montre le solde.'] },
+      {
+        tab: 'emoney',
+        title: 'Caisses électroniques et centrale',
+        perm: 'central_cash',
+        steps: [
+          'Le tableau donne le solde MTN et Orange de chaque caisse électronique ; la centrale est en premier.',
+          'Cliquez une caisse pour voir son livre : versements reçus des caissiers, dépenses et fournisseurs payés au bureau, transferts, dépôts à la banque.',
+          '« Sortie ou transfert… » : vers une autre caisse électronique, la banque ou l’exploitant, avec la référence de la transaction et un bon imprimé.',
+        ],
+      },
     ],
   },
   dashboard: {
@@ -311,7 +331,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         tab: 'settings',
         title: 'Paramètres',
         steps: [
-          'Les paramètres sont rangés par section : identité du magasin (logo, RCCM, message du ticket), ventes et caisse, crédit clients, stock, achats, sécurité, numérotation des pièces, imprimante, balance, affichage.',
+          'Les paramètres sont rangés par section : identité du magasin (logo, RCCM, message du ticket), ventes et caisse, caisses électroniques (centrale ou indépendantes), crédit clients, stock, achats, sécurité, numérotation des pièces, imprimante, balance, affichage.',
           'Tapez un mot dans la recherche pour retrouver un paramètre, puis « Enregistrer ».',
           'Les sections « (ce PC) » ne valent que pour ce poste ; les autres valent pour tout le magasin.',
         ],

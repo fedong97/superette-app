@@ -161,6 +161,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
       { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_history', badge: 'gaps' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
+      { label: 'Caisses électroniques (MoMo, OM) et centrale', open: ['treasury', 'emoney'], perm: 'central_cash' },
       SEP,
       { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
       { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },

@@ -17,6 +17,7 @@ import {
 } from '@superette/core';
 import {
   AppError,
+  isPayout,
   COMMITMENT_KINDS,
   SECURITY_KINDS,
   inspectBackup,
@@ -77,6 +78,8 @@ export interface Printer {
   zReport(sessionId: string): Promise<void>;
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
+  /** Bon d'un mouvement de caisse électronique : versement vers la centrale, transfert, banque… */
+  emoneyVoucher(movementId: string): Promise<void>;
   /** Rapport de clôture A4 : Z, mouvements d'espèces et liste des ventes de la journée. */
   /** Rapport A4 d'une journée ; blind : bon de clôture d'une caisse électronique ou banque sans l'attendu ni l'écart. */
   sessionReport(sessionId: string, blind?: boolean): Promise<void>;
@@ -531,7 +534,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']);
       return { invoice: s.purchases.getInvoice(id), payments: s.purchases.invoicePayments(id) };
     },
-    'purchases.pay': (input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null }) =>
+    'purchases.pay': (input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null; registerId?: string | null }) =>
       s.purchases.paySupplier(ctx(['supplier_pay']), input),
     'purchases.due': () => s.purchases.dueSchedule(ctx(['purchase_due']).storeId),
     'purchases.reorder': (coverDays?: number) => s.purchases.reorderProposal(ctx(['reorder']).storeId, { coverDays }),
@@ -659,15 +662,43 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      * Clôture d'une caisse électronique ou banque : solde relevé par moyen.
      * Le caissier clôture les siennes ; le gérant (droit des écarts) peut clôturer toute caisse et justifier l'écart.
      */
-    'treasury.closeDeclared': (registerId: string, declared: Partial<Record<PaymentMethod, Fcfa>>, opts?: { gapReason?: string | null }) => {
+    'treasury.closeDeclared': (
+      registerId: string,
+      declared: Partial<Record<PaymentMethod, Fcfa>>,
+      opts?: { gapReason?: string | null; deposit?: Partial<Record<PaymentMethod, { amount: Fcfa; reference?: string | null }>> },
+    ) => {
       const c = ctx(TREASURY);
       const u = user!;
       const mine = Object.values(s.pos.linkedRegisters(u.id)).includes(registerId);
       if (!mine && !can(u, ['cash_close_other'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
-      const z = s.pos.closeDeclared(c, registerId, declared, { gapReason: opts?.gapReason ?? null, gapApprovedBy: can(u, ['cash_open']) ? u.id : null });
+      const z = s.pos.closeDeclared(c, registerId, declared, { gapReason: opts?.gapReason ?? null, gapApprovedBy: can(u, ['cash_open']) ? u.id : null, deposit: opts?.deposit });
       const threshold = s.admin.getStore(c.storeId).cash_gap_threshold;
+      const depositId = z.emoneyJournal?.exits.find((e) => e.closing)?.id ?? null;
       // Sans le droit des montants, le caissier ne voit ni l'attendu ni l'écart.
-      return can(u, AMOUNTS) ? { z, sessionId: z.session.id, needsApproval: false } : { z: null, sessionId: z.session.id, needsApproval: Math.abs(z.difference ?? 0) > threshold };
+      return can(u, AMOUNTS)
+        ? { z, sessionId: z.session.id, needsApproval: false, depositId }
+        : { z: null, sessionId: z.session.id, needsApproval: Math.abs(z.difference ?? 0) > threshold, depositId };
+    },
+    /**
+     * Avant la clôture d'une caisse électronique : le mode du magasin, la centrale
+     * où verser et les sorties faites par le compte dans la journée (le caissier les
+     * voit même sans le droit des montants). Le solde de départ suit le droit des montants.
+     */
+    'treasury.emoneyDay': (registerId: string) => {
+      const c = ctx(TREASURY);
+      const u = user!;
+      const mine = Object.values(s.pos.linkedRegisters(u.id)).includes(registerId);
+      if (!mine && !can(u, ['cash_close_other'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
+      const session = s.pos.currentSession(registerId);
+      const mode = s.emoney.mode(c.storeId);
+      const z = session ? s.pos.zReport(session.id) : null;
+      return {
+        mode: mode.mode,
+        centralName: mode.centralName,
+        canDeposit: mode.mode === 'central' && Boolean(mode.centralId) && registerId !== mode.centralId,
+        exits: session ? s.emoney.sessionExits(session.id).filter((e) => !e.closing) : [],
+        opening: can(u, AMOUNTS) && z?.declared ? Object.fromEntries(z.declared.map((l) => [l.method, l.opening])) : null,
+      };
     },
     'treasury.sessions': (registerId?: string | null) => {
       const c = ctx(TREASURY);
@@ -700,6 +731,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         },
         stale: !closed && s.pos.isStale(last),
         exits: s.pos.cashJournal(last.id).exits.filter((r) => !r.closing && r.user_id === u.id),
+        /** Sorties faites par le compte MoMo/OM du caissier dans sa journée électronique. */
+        emoneyExits: (() => {
+          const reg = s.pos.linkedRegisters(u.id).electronic;
+          const se = reg ? s.pos.listSessions(c.storeId, 1, reg)[0] : undefined;
+          return se ? s.emoney.sessionExits(se.id).filter((e) => !e.closing && e.user_id === u.id) : [];
+        })(),
         vouchers: s.treasury
           .sessionMovements(last.id)
           .filter((m) => !m.cash_operation_id)
@@ -778,6 +815,44 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'treasury.record': (input: { kind: 'IN' | 'OUT'; nature: CentralNature; amount: Fcfa; label?: string | null }) => s.treasury.record(ctx(['central_cash']), input),
     'treasury.printVoucher': (movementId: string) => (requireUser([...TREASURY, 'central_cash']), printer.centralVoucher(movementId)),
+
+    // --- Caisses électroniques : centrale, soldes et mouvements du gérant ------------
+    /** Caisses électroniques du magasin pour les listes de choix, la centrale en premier. */
+    'emoney.registers': () => {
+      const c = ctx();
+      const { centralId, mode } = s.emoney.mode(c.storeId);
+      return {
+        mode,
+        centralId,
+        registers: s.admin
+          .listRegisters(c.storeId)
+          .filter((r) => r.active && r.kind === 'electronic')
+          .map((r) => ({ id: r.id, name: r.name, central: r.id === centralId }))
+          .sort((a, b) => Number(b.central) - Number(a.central) || a.name.localeCompare(b.name)),
+      };
+    },
+    /** Écran de la caisse électronique centrale : solde de chaque caisse électronique et livre de la caisse choisie. */
+    'emoney.state': (registerId?: string | null, opts?: { from?: string; to?: string }) => {
+      const c = ctx(['central_cash', 'accounting']);
+      const mode = s.emoney.mode(c.storeId);
+      const registers = s.admin
+        .listRegisters(c.storeId)
+        .filter((r) => r.active && r.kind === 'electronic')
+        .map((r) => {
+          const open = s.pos.currentSession(r.id);
+          const holder = s.admin.listUsers().find((x) => x.emoney_register_id === r.id && x.active);
+          // Journée ouverte : son attendu ; sinon le solde laissé à la dernière clôture et les mouvements depuis.
+          const balance = open
+            ? (Object.fromEntries((s.pos.zReport(open.id).declared ?? []).map((l) => [l.method, l.expected])) as Record<string, Fcfa>)
+            : (s.emoney.balance(r.id) as Record<string, Fcfa>);
+          return { id: r.id, name: r.name, central: r.id === mode.centralId, open: Boolean(open), holder: holder?.name ?? null, balance };
+        })
+        .sort((a, b) => Number(b.central) - Number(a.central) || a.name.localeCompare(b.name));
+      const id = registerId || mode.centralId || registers[0]?.id || null;
+      return { mode: mode.mode, centralId: mode.centralId, registers, registerId: id, ledger: id ? s.emoney.ledger(id, opts ?? {}) : null, canRecord: can(user!, ['central_cash']) };
+    },
+    'emoney.record': (input: Parameters<Services['emoney']['record']>[1]) => s.emoney.record(ctx(['central_cash']), input),
+    'emoney.print': (movementId: string) => (requireUser([...TREASURY, 'central_cash']), printer.emoneyVoucher(movementId)),
     'treasury.printReport': (sessionId: string) => {
       const u = requireUser(TREASURY);
       if (can(u, AMOUNTS)) return printer.sessionReport(sessionId);
@@ -877,7 +952,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const { supervisorPin, ...rest } = input;
       const u = requireUser();
       // Le caissier ou le vendeur n'a pas la main sur la caisse centrale : ses dépenses en espèces sortent de sa caisse.
-      const atRegister = Boolean(input.atRegister) || (input.method === 'CASH' && !can(u, ['central_cash']) && can(u, POS));
+      const atRegister = Boolean(input.atRegister) || ((input.method === 'CASH' || isPayout(input.method)) && !can(u, ['central_cash']) && can(u, POS));
       const c = ctx(atRegister ? POS : ['expense_record']);
       const authorizedBy = atRegister && !can(u, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
       return s.expenses.record(c, { ...rest, atRegister, date: atRegister ? null : rest.date, authorizedBy });

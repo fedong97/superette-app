@@ -51,6 +51,7 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
   const local = useLoad(() => call('admin.settings'));
   const store = useLoad(() => call('admin.storeSettings'));
   const printers = useLoad(() => call('admin.printers'));
+  const emoney = useLoad(() => call('emoney.registers'));
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [storeDraft, setStoreDraft] = useState<Partial<StoreSettings>>({});
   const [identity, setIdentity] = useState<Partial<StoreIdentity>>({});
@@ -246,6 +247,43 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
         { label: 'Délai maximal pour annuler une vente', hint: 'Passé ce délai, on fait un retour client. 0 : sans limite.', render: () => num('cancelMinutes', 'minutes') },
         { label: 'Nombre maximal de factures en attente par caisse', hint: '0 : sans limite', render: () => num('maxHeld') },
         { label: 'Vente sous le prix de revient', hint: 'Non : un prix négocié ne descend jamais sous le coût. Oui : permis et noté dans le journal d’audit.', render: () => yes('allowBelowCost') },
+      ],
+    ],
+    [
+      'Caisses électroniques',
+      'Comptes MTN MoMo et Orange Money des caissiers.',
+      [
+        {
+          label: 'Fonctionnement des caisses électroniques',
+          hint:
+            sv('emoneyMode') === 'central'
+              ? 'Le soir, chaque caissier verse sa recette vers la caisse électronique centrale et note la référence du transfert. Il peut garder un reste pour le lendemain.'
+              : 'Chaque caisse électronique garde son solde d’un jour à l’autre ; le solde relevé à la clôture sert de départ le lendemain.',
+          render: () => (
+            <select disabled={!canEdit} value={sv('emoneyMode')} onChange={(e) => sset('emoneyMode', e.target.value as StoreSettings['emoneyMode'])}>
+              <option value="central">Avec une caisse électronique centrale</option>
+              <option value="independent">Caisses électroniques indépendantes</option>
+            </select>
+          ),
+        },
+        ...(sv('emoneyMode') === 'central'
+          ? [
+              {
+                label: 'Caisse électronique centrale (le numéro du magasin)',
+                hint: 'Elle reçoit les versements des caissiers et n’est attribuée à personne. Créez-la dans Administration › Caisses (type Électronique).',
+                render: () => (
+                  <select disabled={!canEdit} value={sv('emoneyCentralRegisterId')} onChange={(e) => sset('emoneyCentralRegisterId', e.target.value)}>
+                    <option value="">Pas encore choisie</option>
+                    {(emoney.data?.registers ?? []).map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                ),
+              },
+            ]
+          : []),
       ],
     ],
     [

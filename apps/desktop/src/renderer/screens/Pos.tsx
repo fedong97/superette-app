@@ -947,6 +947,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
       {dialog === 'expense' && (
         <ExpenseDialog
           atRegister
+          user={user}
           needsSupervisor={!has(user, 'cashout')}
           onClose={() => setDialog(null)}
           onSaved={(e) => {

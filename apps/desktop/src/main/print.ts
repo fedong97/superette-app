@@ -421,34 +421,56 @@ export function createPrinter(s: Services): Printer {
       await printReceipt(s.receipts.centralVoucher(movementId), false, true);
     },
 
+    async emoneyVoucher(movementId) {
+      await printReceipt(s.receipts.emoneyVoucher(movementId), false, true);
+    },
+
     async sessionReport(sessionId, blind = false) {
       const z = s.pos.zReport(sessionId);
       const se = z.session;
       const store = s.admin.getStore(se.store_id);
       if (z.declared) {
-        // Caisse électronique ou banque : solde relevé par moyen, puis chaque paiement reçu avec sa référence.
+        // Caisse électronique ou banque : solde relevé par moyen, puis entrées et sorties avec leur référence.
         const payments = s.pos.sessionPayments(sessionId);
-        const lines = z.declared
-          .map(
-            (l) => `<tr><td>${esc(l.label)}</td>${blind ? '' : `<td class="r">${money(l.expected)}</td>`}<td class="r">${l.declared === null ? '' : money(l.declared)}</td>${
-              blind ? '' : `<td class="r">${l.declared === null ? '' : money(l.declared - l.expected)}</td>`
-            }</tr>`,
-          )
-          .join('');
-        const total = (f: (l: NonNullable<typeof z.declared>[number]) => number) => z.declared!.reduce((t, l) => t + f(l), 0);
+        const electronic = z.registerKind === 'electronic';
+        type L = NonNullable<typeof z.declared>[number];
+        const cols: { th: string; v: (l: L) => number | null; hide?: boolean }[] = [
+          { th: 'Solde de départ', v: (l) => l.opening, hide: blind || !electronic },
+          { th: 'Encaissé', v: (l) => l.received, hide: blind },
+          { th: 'Sorties', v: (l) => -l.outflows, hide: !electronic },
+          { th: 'Attendu', v: (l) => l.expected, hide: blind || !electronic },
+          { th: 'Solde relevé', v: (l) => l.declared },
+          { th: 'Écart', v: (l) => (l.declared === null ? null : l.declared - l.expected), hide: blind },
+          { th: 'Versé à la centrale', v: (l) => l.deposited, hide: !electronic || !z.declared.some((l) => l.deposited) },
+          { th: 'Reste', v: (l) => l.left, hide: !electronic || !z.declared.some((l) => l.deposited) },
+        ];
+        const shown = cols.filter((c) => !c.hide);
+        const cell = (v: number | null) => `<td class="r">${v === null ? '' : money(v)}</td>`;
+        const lines = z.declared.map((l) => `<tr><td>${esc(l.label)}</td>${shown.map((c) => cell(c.v(l))).join('')}</tr>`).join('');
+        const totals = shown.map((c) => cell(c.th === 'Écart' ? z.difference : z.declared!.some((l) => c.v(l) === null) ? null : z.declared!.reduce((t, l) => t + (c.v(l) ?? 0), 0))).join('');
+        const journalRows = (rows: { at: string; nature: string; label: string; party: string | null; method_label: string; reference: string | null; user_name: string | null; amount: number }[]) =>
+          rows
+            .map((r) => `<tr><td>${dateFr(r.at).slice(-5)}</td><td>${esc(r.nature)}</td><td>${esc(r.label)}</td><td>${esc(r.party ?? '')}</td><td>${esc(r.method_label)}</td><td>${esc(r.reference ?? '')}</td><td>${esc(r.user_name ?? '')}</td><td class="r">${money(r.amount)}</td></tr>`)
+            .join('');
+        const head = '<thead><tr><th>Heure</th><th>Nature</th><th>Pièce</th><th>Tiers</th><th>Moyen</th><th>Référence</th><th>Par</th><th class="r">Montant</th></tr></thead>';
+        const j = z.emoneyJournal;
         await printA4(`${a4Head(store)}
           <h1>Bon de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
           <p>Ouverture le ${dateFr(se.opened_at)} par ${esc(se.user_name)}${se.closed_at ? ` · clôture le ${dateFr(se.closed_at)}${se.closed_by_name ? ` par ${esc(se.closed_by_name)}` : ''}` : ''}</p>
-          <table><thead><tr><th>Moyen</th>${blind ? '' : '<th class="r">Encaissé</th>'}<th class="r">Solde relevé</th>${blind ? '' : '<th class="r">Écart</th>'}</tr></thead>
-          <tbody>${lines}<tr class="total"><td>Total</td>${blind ? '' : `<td class="r">${money(total((l) => l.expected))}</td>`}<td class="r">${se.status === 'closed' ? money(total((l) => l.declared ?? 0)) : ''}</td>${
-            blind ? '' : `<td class="r">${z.difference === null ? '' : money(z.difference)}</td>`
-          }</tr></tbody></table>
+          <table><thead><tr><th>Moyen</th>${shown.map((c) => `<th class="r">${c.th}</th>`).join('')}</tr></thead>
+          <tbody>${lines}<tr class="total"><td>Total</td>${totals}</tr></tbody></table>
+          ${z.emoneyDeposit ? `<p>Versement <b>${esc(z.emoneyDeposit.number)}</b> vers ${esc(z.emoneyDeposit.centralName)}.</p>` : ''}
           ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b>${se.gap_approved_by_name ? `, justifié par ${esc(se.gap_approved_by_name)}` : ''}</p>` : !blind && s.pos.gapPending(se) ? '<p><b>Écart à justifier par le gérant.</b></p>' : ''}
-          <h3>Paiements reçus (${payments.length})</h3>
+          ${
+            j
+              ? `<h3>Entrées (${j.entries.length})</h3><table>${head}<tbody>${journalRows(j.entries)}</tbody></table>
+                 <h3>Sorties (${j.exits.length})</h3><table>${head}<tbody>${journalRows(j.exits)}</tbody></table>`
+              : `<h3>Paiements reçus (${payments.length})</h3>
           <table><thead><tr><th>Heure</th><th>Pièce</th><th>Moyen</th><th>Référence</th><th>Caissier</th><th class="r">Montant</th></tr></thead>
           <tbody>${payments
             .map((p) => `<tr><td>${dateFr(p.at).slice(-5)}</td><td>${esc(p.number)}</td><td>${esc(p.label)}</td><td>${esc(p.reference ?? '')}</td><td>${esc(p.user_name ?? '')}</td><td class="r">${money(p.amount)}</td></tr>`)
-            .join('')}</tbody></table>
+            .join('')}</tbody></table>`
+          }
           <div class="sign"><span>Le caissier : ……………………</span><span>Le gérant : ……………………</span></div>`);
         return;
       }

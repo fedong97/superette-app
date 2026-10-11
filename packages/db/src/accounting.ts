@@ -150,6 +150,7 @@ export class AccountingService extends Base {
       ...this.salesEntries(storeId, r, opts),
       ...this.cashEntries(storeId, r, opts),
       ...this.centralEntries(storeId, r, opts),
+      ...this.emoneyEntries(storeId, r, opts),
       ...this.customerPaymentEntries(storeId, r, opts),
       ...this.rebateEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
@@ -271,6 +272,33 @@ export class AccountingService extends Base {
         const lines = viaTransfer
           ? [side(r.central_cash, sign * m.amount, m.label), side(r.transfer, -sign * m.amount, m.label), side(r.transfer, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)]
           : [side(r.central_cash, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)];
+        return { journal: m.nature === 'bank' ? ('BQ' as const) : ('CA' as const), date: m.d, ref: m.number, label: m.label, source: 'auto' as const, lines };
+      });
+  }
+
+  /**
+   * Mouvements des caisses électroniques vers la banque, l'exploitant ou autre :
+   * le compte Mobile Money du moyen contre la banque (via 585), l'exploitant ou
+   * le compte d'attente. Un versement ou un transfert entre caisses électroniques
+   * reste sur le même compte Mobile Money : rien à passer.
+   */
+  private emoneyEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.number, m.method, m.direction, m.nature, m.amount, m.label, date(m.at, 'localtime') AS d FROM emoney_movements m
+         WHERE m.store_id = ? AND m.nature IN ('bank', 'owner', 'other') ORDER BY m.at`,
+      )
+      .all(storeId) as { number: string; method: string; direction: 'IN' | 'OUT'; nature: 'bank' | 'owner' | 'other'; amount: number; label: string; d: string }[];
+    return rows
+      .filter((m) => inRange(m.d, opts.from, opts.to))
+      .map((m) => {
+        const sign = m.direction === 'IN' ? 1 : -1;
+        const account = r[METHOD_ROLE[m.method] ?? 'mtn'];
+        const other = m.nature === 'bank' ? r.bank : m.nature === 'owner' ? r.owner : r.transfer;
+        const lines =
+          m.nature === 'bank'
+            ? [side(account, sign * m.amount, m.label), side(r.transfer, -sign * m.amount, m.label), side(r.transfer, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)]
+            : [side(account, sign * m.amount, m.label), side(other, -sign * m.amount, m.label)];
         return { journal: m.nature === 'bank' ? ('BQ' as const) : ('CA' as const), date: m.d, ref: m.number, label: m.label, source: 'auto' as const, lines };
       });
   }

@@ -53,6 +53,15 @@ export interface StoreSettings {
   /** Blocage de 15 minutes après ce nombre de codes faux de suite ; 0 : jamais. */
   maxLoginAttempts: number;
 
+  /**
+   * Caisses électroniques : « central », chaque caissier verse sa recette vers la
+   * caisse électronique centrale à la clôture ; « independent », chaque caisse
+   * garde son solde d'un jour à l'autre.
+   */
+  emoneyMode: 'central' | 'independent';
+  /** Caisse électronique centrale du magasin (Mobile Money du magasin) ; vide : pas encore choisie. */
+  emoneyCentralRegisterId: string;
+
   /** Préfixes ajoutés devant les numéros des pièces. */
   prefixSale: string;
   prefixReturn: string;
@@ -83,6 +92,8 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   idleMinutes: 0,
   pinMinLength: 4,
   maxLoginAttempts: 0,
+  emoneyMode: 'central',
+  emoneyCentralRegisterId: '',
   prefixSale: '',
   prefixReturn: '',
   prefixQuote: 'DV',
@@ -136,6 +147,7 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
         if (!/^[A-Z0-9]{0,6}$/.test(s)) throw new Error('Préfixe : 6 lettres ou chiffres au plus, sans espace');
       }
       if (k === 'logo' && s && !s.startsWith('data:image/')) throw new Error('Logo : image attendue');
+      if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);
       (next as unknown as Record<string, unknown>)[k] = s;

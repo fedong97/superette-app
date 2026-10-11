@@ -929,6 +929,11 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
   const [method, setMethod] = useState<keyof typeof PAY_METHODS>('CASH');
   const [amount, setAmount] = useState(String(invoice.balance));
   const [reference, setReference] = useState('');
+  // MoMo / Orange Money : le règlement sort d'une caisse électronique, la centrale par défaut.
+  const payout = invoice.kind === 'invoice' && (method === 'MTN_MOMO' || method === 'ORANGE_MONEY');
+  const emoney = useLoad(() => call('emoney.registers'), []);
+  const [registerId, setRegisterId] = useState('');
+  const chosen = registerId || emoney.data?.centralId || emoney.data?.registers[0]?.id || '';
   return (
     <Modal title={`Règlement ${invoice.supplier_name}, ${invoice.supplier_number}`} onClose={onClose}>
       <form
@@ -937,7 +942,7 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
           const v = parseAmount(amount);
           if (!v) return toast.error('Montant invalide');
           try {
-            await call('purchases.pay', { invoiceId: invoice.id, method, amount: v, reference: reference || null });
+            await call('purchases.pay', { invoiceId: invoice.id, method, amount: v, reference: reference || null, registerId: payout ? chosen || null : null });
             toast.ok('Règlement enregistré');
             onPaid();
           } catch (err) {
@@ -955,6 +960,18 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
         <Field label="Montant (FCFA)" hint={`Reste à payer : ${fcfa(invoice.balance)}`}>
           <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </Field>
+        {payout && Boolean(emoney.data?.registers.length) && (
+          <Field label="Payé depuis la caisse électronique" hint="Le règlement sort du solde de cette caisse électronique">
+            <select value={chosen} onChange={(e) => setRegisterId(e.target.value)}>
+              {emoney.data!.registers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                  {r.central ? ' (centrale)' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         {method !== 'CASH' && (
           <Field label={method === 'CHEQUE' ? 'N° de chèque' : 'Référence de la transaction'}>
             <input value={reference} onChange={(e) => setReference(e.target.value)} required />

@@ -56,12 +56,13 @@ const TABLES: Record<string, string> = {
   role_rights: 'role_rights',
   user_rights: 'user_rights',
   central_cash_movement: 'central_cash_movements',
+  emoney_movement: 'emoney_movements',
   inventory_entry: 'inventory_entries',
   rebate_entry: 'rebate_entries',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
-const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement', 'inventory_entry', 'rebate_entry']);
+const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement', 'emoney_movement', 'inventory_entry', 'rebate_entry']);
 
 /** Ordre des statuts : une version plus ancienne reçue d'un autre PC ne fait jamais reculer un document. */
 const STATUS_RANK: Record<string, Record<string, number>> = {

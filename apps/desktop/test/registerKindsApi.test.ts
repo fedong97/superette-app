@@ -47,7 +47,7 @@ describe('caisse électronique du caissier', () => {
     // Le gérant voit l'écart et le justifie.
     login('mireille', '2222');
     const z = s.pos.zReport(r.sessionId);
-    expect(z.declared).toEqual([
+    expect(z.declared).toMatchObject([
       { method: 'MTN_MOMO', label: 'MTN Mobile Money', expected: 5_000, declared: 4_000 },
       { method: 'ORANGE_MONEY', label: 'Orange Money', expected: 0, declared: 0 },
       { method: 'CARD', label: 'Carte bancaire', expected: 0, declared: 0 },

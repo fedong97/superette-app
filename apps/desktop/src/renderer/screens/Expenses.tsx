@@ -208,8 +208,16 @@ export function ExpenseDialog({
   const forcedDrawer = Boolean(!fromPos && user && sells && !has(user, 'central_cash'));
   const canChoose = Boolean(!fromPos && user && sells && has(user, 'central_cash'));
   const fromDrawer = !fromPos && method === 'CASH' && (forcedDrawer || (canChoose && drawerChosen));
-  const atRegister = fromPos || fromDrawer;
-  const needsSupervisor = posNeedsSupervisor || (fromDrawer && !has(user!, 'cashout'));
+  // MoMo / Orange Money : le caissier paie avec son compte (sa caisse électronique) ; le gérant choisit la caisse électronique, la centrale par défaut.
+  const ownEmoney = Boolean(user?.emoney_register_id);
+  const [posMethod, setPosMethod] = useState<'CASH' | 'MTN_MOMO' | 'ORANGE_MONEY'>('CASH');
+  const payout = method === 'MTN_MOMO' || method === 'ORANGE_MONEY';
+  const fromAccount = !fromPos && payout && forcedDrawer;
+  const atRegister = fromPos || fromDrawer || fromAccount;
+  const needsSupervisor = posNeedsSupervisor || ((fromDrawer || fromAccount) && !has(user!, 'cashout'));
+  const emoney = useLoad(() => (fromPos ? Promise.resolve(null) : call('emoney.registers')), [fromPos]);
+  const [registerId, setRegisterId] = useState<string>('');
+  const chosenRegister = registerId || emoney.data?.centralId || emoney.data?.registers[0]?.id || '';
 
   const submit = async (pin?: string) => {
     const v = vat ? parseAmount(vat) : 0;
@@ -222,10 +230,11 @@ export function ExpenseDialog({
         beneficiary: beneficiary || null,
         amount: value,
         vat: v,
-        method: atRegister ? 'CASH' : method,
+        method: fromPos ? posMethod : fromDrawer ? 'CASH' : method,
         reference: reference || null,
         date: atRegister ? null : date,
         atRegister,
+        registerId: !atRegister && payout ? chosenRegister || null : null,
         supervisorPin: pin,
         planId: preset?.planId ?? null,
         planPeriod: preset?.planPeriod ?? null,
@@ -238,7 +247,7 @@ export function ExpenseDialog({
   };
 
   return (
-    <Modal title={fromPos ? 'Dépense payée avec les espèces du tiroir' : preset ? `Constater : ${preset.label}` : 'Nouvelle dépense'} onClose={onClose} wide={!fromPos}>
+    <Modal title={fromPos ? 'Dépense payée en caisse' : preset ? `Constater : ${preset.label}` : 'Nouvelle dépense'} onClose={onClose} wide={!fromPos}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -291,6 +300,18 @@ export function ExpenseDialog({
                 </button>
               ))}
             </div>
+            {payout && !fromAccount && Boolean(emoney.data?.registers.length) && (
+              <Field label="Payée depuis la caisse électronique" hint="La dépense sort du solde de cette caisse électronique">
+                <select value={chosenRegister} onChange={(e) => setRegisterId(e.target.value)}>
+                  {emoney.data!.registers.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                      {r.central ? ' (centrale)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             {method === 'CASH' && canChoose && (
               <Field label="Payée avec">
                 <div className="seg">
@@ -306,7 +327,9 @@ export function ExpenseDialog({
             <Field
               label={method === 'CASH' ? 'N° de facture ou de reçu (facultatif)' : method === 'CHEQUE' ? 'N° de chèque' : 'Référence de la transaction'}
               hint={
-                method !== 'CASH'
+                fromAccount
+                  ? 'Payée avec votre compte : elle sort de votre caisse électronique et apparaît à sa clôture'
+                  : method !== 'CASH'
                   ? undefined
                   : fromDrawer
                     ? 'Payée avec les espèces du tiroir de votre caisse : elle apparaît dans vos sorties de caisse et sur le Z'
@@ -317,7 +340,29 @@ export function ExpenseDialog({
             </Field>
           </>
         )}
-        {fromPos && <p className="muted">Le montant sort du tiroir : il apparaît sur le Z et diminue les espèces attendues. Un bon de sortie s'imprime pour signature.</p>}
+        {fromPos && ownEmoney && (
+          <Field label="Payée avec">
+            <div className="seg">
+              {(['CASH', 'MTN_MOMO', 'ORANGE_MONEY'] as const).map((m) => (
+                <button type="button" key={m} className={posMethod === m ? 'active' : ''} onClick={() => setPosMethod(m)}>
+                  {m === 'CASH' ? 'Espèces du tiroir' : `Mon compte ${EXPENSE_METHODS[m]}`}
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
+        {fromPos && posMethod !== 'CASH' && (
+          <Field label="Référence de la transaction">
+            <input value={reference} onChange={(e) => setReference(e.target.value)} required />
+          </Field>
+        )}
+        {fromPos && (
+          <p className="muted">
+            {posMethod === 'CASH'
+              ? "Le montant sort du tiroir : il apparaît sur le Z et diminue les espèces attendues. Un bon de sortie s'imprime pour signature."
+              : 'Le montant sort de votre caisse électronique : il apparaît dans vos sorties à sa clôture et diminue le solde attendu. Un bon de sortie s’imprime pour signature.'}
+          </p>
+        )}
         <div className="actions">
           <button type="button" onClick={onClose}>
             Annuler

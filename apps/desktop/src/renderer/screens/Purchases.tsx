@@ -1192,10 +1192,12 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           </div>
           <table className="totals">
             <tbody>
-              <tr>
-                <td>{tx('Total des lignes HT')}</td>
-                <td className="r">{fcfa(sum)}</td>
-              </tr>
+              {(vat || global > 0) && (
+                <tr>
+                  <td>{tx('Total des lignes HT')}</td>
+                  <td className="r">{fcfa(sum)}</td>
+                </tr>
+              )}
               {global > 0 && (
                 <tr>
                   <td>Remise globale</td>

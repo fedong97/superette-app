@@ -721,3 +721,8 @@ input.qty.promo { width: 64px; }
 .direct-foot table.totals { width: 100%; }
 .direct-foot table.totals td { padding: 4px 8px; }
 .done-card { padding: 16px 20px; }
+
+/* 0.36.0 : stock multi-magasin. */
+.stock-mm td.neg button.link { color: var(--danger); font-weight: 600; }
+.stock-mm td.low button.link { color: var(--warn); }
+.stock-mm td small.block { font-size: 11px; }

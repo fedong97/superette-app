@@ -143,7 +143,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Stock multi-magasin (Stock MM)',
         steps: [
           'Une ligne par article, une colonne par magasin et le total : par exemple DOLAIT, 38 pièces à Akwa et 12 à Bastos.',
-          'Sous la quantité, l’équivalent en cartons. En rouge : rupture ou sous le stock d’alerte.',
+          'Sous la quantité, l’équivalent en cartons. En rouge : rupture ; en orange : sous le stock d’alerte.',
           'Cliquez une quantité pour voir le détail par dépôt de ce magasin.',
           'Le stock des autres magasins arrive par le serveur central à chaque synchronisation ; la date de leur dernier envoi est rappelée au-dessus du tableau.',
           'Filtrez par nom, code ou famille, ou sur les articles en rupture dans au moins un magasin. Imprimez en A4 ou exportez vers Excel.',

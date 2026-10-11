@@ -503,9 +503,10 @@ function StockByStore() {
                 </td>
                 {d.stores.map((st) => {
                   const v = r.byStore[st.id];
-                  const low = v !== undefined && (v <= 0 || (r.alert_qty !== null && v <= r.alert_qty));
+                  // Rouge : rupture ; orange : sous le stock d'alerte de l'article.
+                  const level = v === undefined ? '' : v <= 0 ? 'neg' : r.alert_qty !== null && v <= r.alert_qty ? 'low' : '';
                   return (
-                    <td key={st.id} className={`r ${low ? 'neg' : ''}`}>
+                    <td key={st.id} className={`r ${level}`}>
                       {v === undefined ? (
                         <span className="muted">—</span>
                       ) : (

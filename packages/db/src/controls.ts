@@ -519,8 +519,8 @@ export class ControlService extends Base {
           total: Object.values(st.byStore).reduce((t, q) => t + q, 0),
         };
       })
-      // En rupture dans au moins un magasin (stock nul ou négatif là où le magasin a du stock connu).
-      .filter((r) => !opts.shortage || stores.some((s) => (r.byStore[s.id] ?? 0) <= 0));
+      // En rupture dans au moins un magasin : stock nul ou négatif (un magasin qui n'a encore rien envoyé ne compte pas).
+      .filter((r) => !opts.shortage || stores.some((s) => (s.id === storeId || updated.has(s.id)) && (r.byStore[s.id] ?? 0) <= 0));
     return {
       stores: stores.map((s) => ({ ...s, own: s.id === storeId, updated_at: s.id === storeId ? null : (updated.get(s.id) ?? null) })),
       warehouses,

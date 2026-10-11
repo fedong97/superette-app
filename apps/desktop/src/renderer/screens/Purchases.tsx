@@ -7,6 +7,7 @@ import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, 
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { type RecLine, RecLinesTable, newRecLine, recLineInput } from './Stock';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
+import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
@@ -112,7 +113,7 @@ function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: bo
               <th>Fournisseur</th>
               <th>Dépôt</th>
               <th>Livraison prévue</th>
-              <th className="r">Total HT</th>
+              <th className="r">{tx('Total HT')}</th>
               <th>État</th>
             </tr>
           </thead>
@@ -273,10 +274,10 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
               <th>Article</th>
               <th>Quantité</th>
               <th>Conditionnement</th>
-              <th>PU HT</th>
+              <th>{tx('PU HT')}</th>
               <th>Remise %</th>
               <th>Promo N/M</th>
-              <th className="r">Total HT</th>
+              <th className="r">{tx('Total HT')}</th>
               <th />
             </tr>
           </thead>
@@ -312,7 +313,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         <input value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Field>
       <div className="actions">
-        <span className="big-total">{fcfa(total)} HT</span>
+        <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
         <button onClick={() => onDone(order?.id ?? null)}>Retour</button>
         <button disabled={!lines.length} onClick={() => void save(false)}>
           Enregistrer le brouillon
@@ -365,10 +366,10 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
             <th className="r">Commandé</th>
             <th className="r">Reçu</th>
             <th className="r">Reste</th>
-            <th className="r">PU HT</th>
+            <th className="r">{tx('PU HT')}</th>
             <th className="r">Remise</th>
             <th className="r">Gratuits</th>
-            <th className="r">Total HT</th>
+            <th className="r">{tx('Total HT')}</th>
           </tr>
         </thead>
         <tbody>
@@ -391,7 +392,7 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
             </tr>
           ))}
           <tr className="b">
-            <td colSpan={8}>Total HT</td>
+            <td colSpan={8}>{tx('Total HT')}</td>
             <td className="r">{fcfa(o.total_ht)}</td>
           </tr>
         </tbody>
@@ -524,12 +525,12 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
             <th className="r">Déjà reçu</th>
             <th>Reçu</th>
             <th>Conditionnement</th>
-            <th>PU HT</th>
+            <th>{tx('PU HT')}</th>
             <th>Remise %</th>
             <th>Promo N/M</th>
             <th>N° de lot</th>
             <th>Date limite</th>
-            <th className="r">Montant HT</th>
+            <th className="r">{tx('Montant HT')}</th>
           </tr>
         </thead>
         <tbody>
@@ -570,7 +571,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
         </tbody>
       </table>
       <div className="actions">
-        <span className="big-total">{fcfa(total)} HT</span>
+        <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
         <button onClick={onDone}>Retour</button>
         <button
           className="primary"
@@ -621,8 +622,8 @@ function Receptions() {
               <th>Fournisseur</th>
               <th>Commande</th>
               <th>BL fournisseur</th>
-              <th className="r">Total HT</th>
-              <th className="r">TTC</th>
+              <th className="r">{tx('Total HT')}</th>
+              <th className="r">{tx('TTC')}</th>
               <th>Facture</th>
             </tr>
           </thead>
@@ -650,7 +651,7 @@ function Receptions() {
           </p>
           <ReceivedLines lines={detail.data.lines} />
           <p className="b">
-            Total HT {fcfa(detail.data.total_ht)} · TVA {fcfa(detail.data.total_tva)} · TTC {fcfa(detail.data.total_ttc)}
+            {hasVat() ? `Total HT ${fcfa(detail.data.total_ht)} · TVA ${fcfa(detail.data.total_tva)} · TTC ${fcfa(detail.data.total_ttc)}` : `Total ${fcfa(detail.data.total_ttc)}`}
             {detail.data.discount ? ` · dont remise globale ${fcfa(detail.data.discount)}` : ''}
           </p>
         </Modal>
@@ -668,7 +669,7 @@ function ReceivedLines({ lines }: { lines: Result<'purchases.reception'>['lines'
         <tr>
           <th>Article</th>
           <th className="r">Quantité</th>
-          <th className="r">PU HT</th>
+          <th className="r">{tx('PU HT')}</th>
           {terms && (
             <>
               <th className="r">Remise</th>
@@ -678,7 +679,7 @@ function ReceivedLines({ lines }: { lines: Result<'purchases.reception'>['lines'
           )}
           <th>Lot</th>
           <th>Date limite</th>
-          <th className="r">Total HT</th>
+          <th className="r">{tx('Total HT')}</th>
         </tr>
       </thead>
       <tbody>
@@ -750,7 +751,7 @@ function InvoiceTable({ invoices, onOpen }: { invoices: Invoice[]; onOpen: (id: 
           <th>Facture fournisseur</th>
           <th>Date</th>
           <th>Échéance</th>
-          <th className="r">TTC</th>
+          <th className="r">{tx('TTC')}</th>
           <th className="r">Écart réception</th>
           <th className="r">Reste à payer</th>
           <th>État</th>
@@ -789,11 +790,11 @@ function InvoiceForm({ onClose }: { onClose: () => void }) {
   const receptions = useLoad(() => (supplierId ? call('purchases.receptions', { supplierId, uninvoiced: true }) : Promise.resolve([])), [supplierId]);
   const preview = useLoad(() => call('purchases.invoicePreview', picked), [picked.join(',')]);
   useEffect(() => {
-    if (preview.data && picked.length) setF((v) => ({ ...v, ht: String(preview.data!.total_ht), tva: String(preview.data!.total_tva) }));
+    if (preview.data && picked.length) setF((v) => (hasVat() ? { ...v, ht: String(preview.data!.total_ht), tva: String(preview.data!.total_tva) } : { ...v, ht: String(preview.data!.total_ttc), tva: '' }));
   }, [preview.data]);
   const ht = parseAmount(f.ht) ?? 0;
-  const tva = parseAmount(f.tva) ?? 0;
-  const gap = picked.length && preview.data ? ht - preview.data.total_ht : 0;
+  const tva = hasVat() ? (parseAmount(f.tva) ?? 0) : 0;
+  const gap = picked.length && preview.data ? ht - (hasVat() ? preview.data.total_ht : preview.data.total_ttc) : 0;
   return (
     <Modal title="Saisir une facture fournisseur" onClose={onClose} wide>
       <div className="grid3">
@@ -834,8 +835,8 @@ function InvoiceForm({ onClose }: { onClose: () => void }) {
                     <td>{r.number}</td>
                     <td>{dateTime(r.received_at)}</td>
                     <td>{r.delivery_note ? deliveryNote(r.delivery_note) : ''}</td>
-                    <td className="r">{fcfa(r.total_ht)} HT</td>
-                    <td className="r">{fcfa(r.total_ttc)} TTC</td>
+                    <td className="r">{fcfa(r.total_ht)}{tx(' HT')}</td>
+                    <td className="r">{fcfa(r.total_ttc)}{tx(' TTC')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -853,19 +854,23 @@ function InvoiceForm({ onClose }: { onClose: () => void }) {
         <Field label="Notes">
           <input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
         </Field>
-        <Field label="Total HT (FCFA)">
+        <Field label={tx('Total HT (FCFA)')}>
           <input inputMode="numeric" value={f.ht} onChange={(e) => setF({ ...f, ht: e.target.value })} />
         </Field>
-        <Field label="TVA (FCFA)">
-          <input inputMode="numeric" value={f.tva} onChange={(e) => setF({ ...f, tva: e.target.value })} />
-        </Field>
-        <Field label="Total TTC">
-          <input readOnly value={fcfa(ht + tva)} />
-        </Field>
+        {hasVat() && (
+          <>
+            <Field label="TVA (FCFA)">
+              <input inputMode="numeric" value={f.tva} onChange={(e) => setF({ ...f, tva: e.target.value })} />
+            </Field>
+            <Field label="Total TTC">
+              <input readOnly value={fcfa(ht + tva)} />
+            </Field>
+          </>
+        )}
       </div>
       {gap !== 0 && (
         <p className="neg">
-          Écart avec les réceptions : {fcfa(gap)} HT. Vérifiez les prix ou les quantités facturées avant de valider.
+          Écart avec les réceptions : {fcfa(gap)}{tx(' HT')}. Vérifiez les prix ou les quantités facturées avant de valider.
         </p>
       )}
       <div className="actions">
@@ -916,19 +921,19 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
       <table className="list compact">
         <tbody>
           <tr>
-            <th>Total HT</th>
+            <th>{tx('Total HT')}</th>
             <td className="r">{fcfa(i.total_ht)}</td>
-            <th>Réceptions rattachées HT</th>
+            <th>{tx('Réceptions rattachées HT')}</th>
             <td className={`r ${i.received_ht && i.received_ht !== i.total_ht ? 'neg' : ''}`}>{fcfa(i.received_ht)}</td>
           </tr>
           <tr>
-            <th>TVA</th>
-            <td className="r">{fcfa(i.total_tva)}</td>
+            <th>{hasVat() ? 'TVA' : ''}</th>
+            <td className="r">{hasVat() ? fcfa(i.total_tva) : ''}</td>
             <th>Déjà réglé</th>
             <td className="r">{fcfa(i.paid)}</td>
           </tr>
           <tr className="b">
-            <th>Total TTC</th>
+            <th>{tx('Total TTC')}</th>
             <td className="r">{fcfa(i.total_ttc)}</td>
             <th>Reste à payer</th>
             <td className="r">{fcfa(i.balance)}</td>
@@ -1097,7 +1102,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
       <div className="card done-card">
         <h2>Facture {done.number} enregistrée</h2>
         <p>
-          {done.supplier_name} · facture n° {done.supplier_number} · {fcfa(done.total_ttc)} TTC · {done.balance > 0 ? `reste à payer ${fcfa(done.balance)}, échéance le ${dateFr(done.due_date)}` : 'réglée'}
+          {done.supplier_name} · facture n° {done.supplier_number} · {fcfa(done.total_ttc)}{tx(' TTC')} · {done.balance > 0 ? `reste à payer ${fcfa(done.balance)}, échéance le ${dateFr(done.due_date)}` : 'réglée'}
         </p>
         <p className="muted">La marchandise est entrée en stock et le bon de réception est rattaché à la facture.</p>
         <div className="actions">
@@ -1188,7 +1193,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           <table className="totals">
             <tbody>
               <tr>
-                <td>Total des lignes HT</td>
+                <td>{tx('Total des lignes HT')}</td>
                 <td className="r">{fcfa(sum)}</td>
               </tr>
               {global > 0 && (
@@ -1197,10 +1202,12 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
                   <td className="r">-{fcfa(global)}</td>
                 </tr>
               )}
-              <tr>
-                <td>Total HT</td>
-                <td className="r">{fcfa(ht)}</td>
-              </tr>
+              {vat && (
+                <tr>
+                  <td>Total HT</td>
+                  <td className="r">{fcfa(ht)}</td>
+                </tr>
+              )}
               {vat && (
                 <tr>
                   <td>TVA (calculée par article)</td>
@@ -1208,7 +1215,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
                 </tr>
               )}
               <tr className="b">
-                <td>Total TTC</td>
+                <td>{tx('Total TTC')}</td>
                 <td className="r">{fcfa(ht + tva)}</td>
               </tr>
             </tbody>
@@ -1323,8 +1330,8 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
         { header: 'Point de commande', format: 'qty' },
         { header: 'À commander', format: 'qty' },
         { header: 'En conditionnements', width: 22 },
-        { header: 'PU HT', format: 'money' },
-        { header: 'Montant HT', format: 'money' },
+        { header: tx('PU HT'), format: 'money' },
+        { header: tx('Montant HT'), format: 'money' },
       ],
       rows: chosen.map((r) => {
         const q = parseQty(r.qtyText) ?? 0;
@@ -1404,8 +1411,8 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
               <th className="r">Point de commande</th>
               <th>À commander</th>
               <th>En conditionnements</th>
-              <th className="r">PU HT</th>
-              <th className="r">Montant HT</th>
+              <th className="r">{tx('PU HT')}</th>
+              <th className="r">{tx('Montant HT')}</th>
             </tr>
           </thead>
           <tbody>
@@ -1444,7 +1451,7 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
         </table>
       )}
       <div className="actions">
-        <span className="big-total">{fcfa(total)} HT</span>
+        <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
         <button
           className="primary"
           disabled={!chosen.length}

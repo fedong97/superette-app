@@ -45,6 +45,9 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
   let received = 0;
   let conflicts = 0;
   try {
+    // Stock du magasin pour l'écran « Stock multi-magasin » des autres magasins.
+    const station = s.admin.station();
+    if (station) s.sync.publishStock(station.store.id);
     for (;;) {
       const batch = s.sync.pending(500);
       if (batch.length === 0) break;

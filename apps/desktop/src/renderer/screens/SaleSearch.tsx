@@ -3,6 +3,7 @@ import { formatFcfa } from '@superette/core';
 import { type Result, call } from '../api';
 import { Field, Modal, fcfa, parseAmount, parseQty, qty, useToast } from '../ui';
 import { ArticlePhotoView } from './photo';
+import { tx } from '../tax';
 
 export type SaleRow = Result<'pos.search'>[number];
 
@@ -184,7 +185,7 @@ export function SaleSearchDialog({
               <th className="r">Stock</th>
               <th>Cond.</th>
               <th>Dépôt</th>
-              <th className="r">PV TTC</th>
+              <th className="r">{tx('PV TTC')}</th>
               <th className="r">Dernier prix</th>
             </tr>
           </thead>
@@ -304,7 +305,7 @@ export function QtyPrompt({
             <Field label={`Quantité (${row.pack_name.toLowerCase()})`}>
               <input autoFocus inputMode="decimal" value={value} onFocus={(e) => e.target.select()} onChange={(e) => setValue(e.target.value)} />
             </Field>
-            <Field label="Prix TTC" hint={canPrice ? `Pas moins de ${fcfa(row.cost)} (coût de revient)` : 'Prix du tarif'}>
+            <Field label={tx('Prix TTC')} hint={canPrice ? `Pas moins de ${fcfa(row.cost)} (coût de revient)` : 'Prix du tarif'}>
               <input inputMode="numeric" value={priceText} disabled={!canPrice} onFocus={(e) => e.target.select()} onChange={(e) => setPriceText(e.target.value)} />
             </Field>
           </div>

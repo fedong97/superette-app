@@ -5,6 +5,7 @@ import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLo
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 import { type ArticlePhoto, PhotoField } from './photo';
+import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -63,7 +64,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
               <th>Rayon</th>
               <th>Code-barres</th>
               <th className="r">Achat</th>
-              <th className="r">Vente TTC</th>
+              <th className="r">{tx('Vente TTC')}</th>
               <th className="r">Marge</th>
               <th />
             </tr>
@@ -316,15 +317,17 @@ export function ArticleForm({
               <option value="litre">Litre</option>
             </select>
           </Field>
-          <Field label="TVA" hint={noVat ? 'Magasin sans TVA : taux gardé pour le jour où la TVA sera activée' : undefined}>
-            <select value={vatId} onChange={set('vatRateId')}>
-              {(rates.data ?? []).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {!noVat && (
+            <Field label="TVA">
+              <select value={vatId} onChange={set('vatRateId')}>
+                {(rates.data ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
         <PhotoField articleId={article?.id ?? null} value={photo} onChange={setPhoto} />
         </div>
@@ -343,7 +346,7 @@ export function ArticleForm({
         <LevelGrid levels={levels} buy={buy} rate={rate} piece={piece} unitLabel={unitName.toUpperCase()} onLevels={onLevels} onBuy={setBuy} />
         {suggested.length > 0 && (
           <p className="muted small">
-            Marge de {settings.defaultMarginPct} % sur le revient : {suggested.map((x) => `${x.name} ${fcfa(x.sale)}`).join(', ')} TTC.{' '}
+            Marge de {settings.defaultMarginPct} % sur le revient : {suggested.map((x) => `${x.name} ${fcfa(x.sale)}`).join(', ')}{tx(' TTC')}.{' '}
             <button type="button" className="link" onClick={() => setLevels(levels.map((l, i) => (suggested.some((x) => x.i === i) ? { ...l, sale: String(suggested.find((x) => x.i === i)!.sale) } : l)))}>
               Appliquer aux prix vides
             </button>

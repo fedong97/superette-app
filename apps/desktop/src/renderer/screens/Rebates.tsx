@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, qty, today, useLoad, useToast } from '../ui';
+import { tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Rule = Result<'rebates.rules'>[number];
@@ -200,7 +201,7 @@ function StateDetail({ row, user, manage, from, to, onClose, onChanged }: { row:
               <th>Famille</th>
               <th>Réglage</th>
               <th className="r">Qté achetée</th>
-              <th className="r">Montant TTC</th>
+              <th className="r">{tx('Montant TTC')}</th>
               <th className="r">Taux</th>
               <th className="r">Par unité</th>
               <th className="r">Qté min.</th>

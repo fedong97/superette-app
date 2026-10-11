@@ -94,8 +94,13 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
   );
   const saveOptions = async (options: { vatEnabled?: boolean; ignoreStock?: boolean; cashGapThreshold?: number }, message: string) => {
     try {
-      await call('admin.storeOptions', options);
-      toast.ok(message);
+      const store = await call('admin.storeOptions', options);
+      toast.ok(store.articlesExempted ? `${message} : ${store.articlesExempted} article(s) passé(s) à « Exonéré »` : message);
+      // TVA réactivée : proposer de remettre les articles exonérés au taux normal.
+      if (options.vatEnabled === true && confirm('Mettre tous les articles exonérés à 19,25 % ? (Annuler : vous réglerez le taux article par article)')) {
+        const n = await call('admin.articlesStandardRate');
+        toast.ok(`${n} article(s) remis à 19,25 %`);
+      }
       state.reload();
       onChanged();
     } catch (e) {
@@ -169,7 +174,7 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
                   !confirm(
                     on
                       ? 'Activer la TVA ? Les prochaines ventes, factures, achats et dépenses porteront la TVA (19,25 % par défaut). Les pièces déjà enregistrées ne changent pas.'
-                      : 'Désactiver la TVA (régime simplifié) ? Les prochaines pièces seront sans TVA et porteront « TVA non applicable ». Les pièces déjà enregistrées ne changent pas.',
+                      : 'Désactiver la TVA (régime simplifié) ? Les prochaines pièces seront sans TVA, les articles passent à « Exonéré » et la TVA disparaît des écrans et des impressions. Les pièces déjà enregistrées ne changent pas.',
                   )
                 )
                   return;

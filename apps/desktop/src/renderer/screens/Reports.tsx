@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
+import { tx } from '../tax';
 
 type Report = Result<'reports.sales'>;
 type Row = Report['rows'][number];
@@ -184,15 +185,15 @@ export function Reports({ view }: { view?: string }) {
       {t && (
         <div className="kpis kpis-6">
           <div>
-            <small>Chiffre d'affaires TTC</small>
+            <small>{tx("Chiffre d'affaires TTC")}</small>
             <strong>{fcfa(t.revenueTtc)}</strong>
             <Trend now={t.revenueTtc} before={p?.revenueTtc} />
           </div>
           <div>
-            <small>Marge brute HT</small>
+            <small>{tx('Marge brute HT')}</small>
             <strong>{fcfa(t.margin)}</strong>
             <small>
-              {pct(t.revenueHt ? t.margin / t.revenueHt : null)} du CA HT <Trend now={t.margin} before={p?.margin} />
+              {pct(t.revenueHt ? t.margin / t.revenueHt : null)}{tx(' du CA HT ')}<Trend now={t.margin} before={p?.margin} />
             </small>
           </div>
           <div>
@@ -234,9 +235,9 @@ export function Reports({ view }: { view?: string }) {
               {th('label', DIMENSIONS.find(([d]) => d === dimension)![1], false)}
               {th('tickets', 'Tickets')}
               {dimension === 'article' && th('qty', 'Quantité')}
-              {th('revenueTtc', 'CA TTC')}
+              {th('revenueTtc', tx('CA TTC'))}
               <th className="r">Part</th>
-              {!isPayment && th('margin', 'Marge HT')}
+              {!isPayment && th('margin', tx('Marge HT'))}
               {!isPayment && th('rate', 'Taux')}
               {th('returnsTtc', 'Retours')}
               {showPrev && <th className="r">CA comparé</th>}
@@ -287,7 +288,7 @@ export function Reports({ view }: { view?: string }) {
         </table>
       )}
       <p className="muted small">
-        Marge = CA HT − coût d'achat moyen (CMUP) des articles au moment de la vente. Les retours sont déduits au coût de la vente d'origine.
+        Marge = {tx('CA HT')} − coût d'achat moyen (CMUP) des articles au moment de la vente. Les retours sont déduits au coût de la vente d'origine.
       </p>
     </div>
   );

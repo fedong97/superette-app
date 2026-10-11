@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
+import { hasVat } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Expense = Result<'expenses.get'>;
@@ -280,7 +281,7 @@ export function ExpenseDialog({
           <Field label="Montant payé (FCFA)">
             <input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} required />
           </Field>
-          {!fromPos && (
+          {!fromPos && hasVat() && (
             <Field label="TVA récupérable (FCFA)" hint="Seulement si la facture porte la TVA et votre NIU">
               <div className="inline">
                 <input inputMode="numeric" value={vat} onChange={(e) => setVat(e.target.value)} placeholder="0" />
@@ -511,10 +512,12 @@ function Summary() {
               <small>Total des dépenses</small>
               <strong>{fcfa(sum.total)}</strong>
             </div>
-            <div>
-              <small>dont TVA récupérable</small>
-              <strong>{fcfa(sum.vat)}</strong>
-            </div>
+            {hasVat() && (
+              <div>
+                <small>dont TVA récupérable</small>
+                <strong>{fcfa(sum.vat)}</strong>
+              </div>
+            )}
             <div>
               <small>Nombre de dépenses</small>
               <strong>{sum.byCategory.reduce((t, c) => t + c.count, 0)}</strong>

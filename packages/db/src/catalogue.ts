@@ -126,8 +126,9 @@ export interface ScanResult {
   pack?: ArticlePack;
 }
 
+/** Taux de TVA de l'article ; 0 dans un magasin sans TVA, quel que soit le taux de la fiche. */
 const ARTICLE_SELECT = `
-  SELECT a.*, v.rate_bp AS vat_rate_bp, f.name AS family_name, d.name AS department_name,
+  SELECT a.*, CASE WHEN (SELECT vat_enabled FROM stores WHERE id = @storeId) = 0 THEN 0 ELSE v.rate_bp END AS vat_rate_bp, f.name AS family_name, d.name AS department_name,
          COALESCE(sp.sale_price, a.sale_price) AS store_price, ph.thumb AS photo_thumb
   FROM articles a
   LEFT JOIN article_photos ph ON ph.article_id = a.id
@@ -550,6 +551,7 @@ export class CatalogueService extends Base {
   importArticles(
     userId: string,
     rows: { name: string; barcode?: string; salePrice: Fcfa; purchasePrice?: Fcfa; vatRateBp?: number; unit?: Unit; department?: string; family?: string }[],
+    opts: { noVat?: boolean } = {},
   ): { created: number; updated: number; errors: { row: number; message: string }[] } {
     const rates = this.db.prepare('SELECT id, rate_bp FROM vat_rates WHERE active = 1').all() as { id: string; rate_bp: number }[];
     const result = { created: 0, updated: 0, errors: [] as { row: number; message: string }[] };
@@ -565,7 +567,8 @@ export class CatalogueService extends Base {
     };
     rows.forEach((row, index) => {
       try {
-        const rate = rates.find((r) => r.rate_bp === (row.vatRateBp ?? 1925));
+        // Magasin sans TVA : tout article importé est exonéré, quelle que soit la colonne TVA.
+        const rate = rates.find((r) => r.rate_bp === (opts.noVat ? 0 : (row.vatRateBp ?? 1925)));
         if (!rate) throw new AppError(`Taux de TVA inconnu : ${row.vatRateBp}`, 'INVALID');
         const code = row.barcode ? normalizeBarcode(row.barcode) : null;
         const existingId = code

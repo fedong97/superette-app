@@ -1387,4 +1387,25 @@ INSERT OR IGNORE INTO accounts (id, label, role) VALUES
   ('4621', 'Associés, comptes courants', NULL);
 `,
   },
+  {
+    version: 30,
+    name: 'stock multi-magasin',
+    sql: `
+-- Stock des dépôts des autres magasins, reçu par la synchronisation (les mouvements, eux, restent dans leur magasin).
+CREATE TABLE stock_levels (
+  warehouse_id TEXT NOT NULL,
+  article_id TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (warehouse_id, article_id)
+);
+-- Dernier stock de ce magasin envoyé aux autres : seules les quantités qui ont changé repartent.
+CREATE TABLE stock_published (
+  warehouse_id TEXT NOT NULL,
+  article_id TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  PRIMARY KEY (warehouse_id, article_id)
+);
+`,
+  },
 ];

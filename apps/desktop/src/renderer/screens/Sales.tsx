@@ -4,6 +4,7 @@ import { type Result, call } from '../api';
 import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
 import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
 import { ZView } from './PosDialogs';
+import { tx } from '../tax';
 
 export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export';
 type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
@@ -65,7 +66,7 @@ function Tickets() {
             <th>Heure</th>
             <th>Caissier</th>
             <th>Type</th>
-            <th className="r">Total TTC</th>
+            <th className="r">{tx('Total TTC')}</th>
             <th>État</th>
           </tr>
         </thead>

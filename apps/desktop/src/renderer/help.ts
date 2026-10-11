@@ -138,6 +138,17 @@ export const HELP: Record<WinKind, PageHelp> = {
     intro: 'Quantités par dépôt, réceptions, pertes, transferts, inventaires et péremptions.',
     sections: [
       { tab: 'state', title: 'État du stock', steps: ['Le stock de chaque produit, en cartons, paquets et unités. Les couleurs signalent rupture, alerte et surstock.'] },
+      {
+        tab: 'multi',
+        title: 'Stock multi-magasin (Stock MM)',
+        steps: [
+          'Une ligne par article, une colonne par magasin et le total : par exemple DOLAIT, 38 pièces à Akwa et 12 à Bastos.',
+          'Sous la quantité, l’équivalent en cartons. En rouge : rupture ou sous le stock d’alerte.',
+          'Cliquez une quantité pour voir le détail par dépôt de ce magasin.',
+          'Le stock des autres magasins arrive par le serveur central à chaque synchronisation ; la date de leur dernier envoi est rappelée au-dessus du tableau.',
+          'Filtrez par nom, code ou famille, ou sur les articles en rupture dans au moins un magasin. Imprimez en A4 ou exportez vers Excel.',
+        ],
+      },
       { tab: 'receive', title: 'Réception sans commande', steps: ['Choisissez le dépôt, ajoutez les produits reçus avec la quantité, le prix et la date limite pour les périssables, puis validez.', 'Remise % et promo « N/M » (12/10 : 12 achetés, 10 payés) par ligne : le stock entre au coût net.'] },
       { tab: 'loss', title: 'Pertes et casse', steps: ['Produit, quantité et motif (casse, vol, péremption, consommation) : le stock baisse et la perte est tracée.'] },
       {

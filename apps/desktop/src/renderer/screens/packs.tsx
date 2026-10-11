@@ -2,6 +2,7 @@ import { containsFromDivisors, dividePrice, splitTtc } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { call } from '../api';
 import { fcfa, parseAmount, parseQty } from '../ui';
+import { tx } from '../tax';
 
 /**
  * Fiche article à la KONTROL. Bloc 1 : le conditionnement d'achat (PALETTE)
@@ -188,9 +189,9 @@ export function LevelGrid({
           <th className="n">N°</th>
           <th>Conditionnement</th>
           <th className="r">Diviseur</th>
-          <th className="r">Achat HT</th>
+          <th className="r">{tx('Achat HT')}</th>
           <th className="r">Revient</th>
-          <th className="r">Vente TTC</th>
+          <th className="r">{tx('Vente TTC')}</th>
           <th className="r">Gros</th>
           <th className="r">Sup. gros</th>
           <th>Code-barres</th>

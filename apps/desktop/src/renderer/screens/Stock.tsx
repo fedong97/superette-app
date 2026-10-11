@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
 import { LOSS_TYPES, MOVEMENT_TYPES, type MovementType, type Permission } from '@superette/core';
 import { type Result, call } from '../api';
-import { StockByWarehouse } from './Controls';
+import { StockByWarehouse, saveXlsx } from './Controls';
 import { Inventories } from './Inventories';
 import { Transfers } from './Transfers';
 import { Monitoring } from './Monitoring';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits } from './packs';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms } from './purchaseTerms';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
-import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
+import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring';
+type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
@@ -24,6 +25,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
   const allowed: Record<Tab, boolean> = {
     state: true,
     critical: true,
+    multi: true,
     warehouses: true,
     receive: has(user, 'stock_receive'),
     loss: has(user, 'stock_loss'),
@@ -37,6 +39,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
   const tabs = (
     [
       ['state', 'État du stock'],
+      ['multi', 'Stock multi-magasin'],
       ['warehouses', 'Articles par dépôt'],
       ['receive', 'Réception'],
       ['loss', 'Pertes et casse'],
@@ -56,6 +59,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
       {!allowed[tab] && <Empty>Vous n'avez pas accès à cet onglet.</Empty>}
       {tab === 'state' && <StockState critical={initialTab === 'critical'} />}
+      {tab === 'multi' && <StockByStore />}
       {tab === 'warehouses' && <StockByWarehouse />}
       {tab === 'receive' && allowed.receive && <Reception />}
       {tab === 'loss' && allowed.loss && <Loss />}
@@ -183,7 +187,7 @@ export function RecLinesTable({ lines, setLines }: { lines: RecLine[]; setLines:
           <th>Article</th>
           <th>Quantité</th>
           <th>Conditionnement</th>
-          <th>Coût unitaire HT</th>
+          <th>{tx('Coût unitaire HT')}</th>
           <th>Remise %</th>
           <th>Promo N/M</th>
           <th>N° de lot</th>
@@ -249,7 +253,7 @@ function Reception() {
       <ArticlePicker onPick={(a) => setLines([...lines, newRecLine(a)])} />
       <RecLinesTable lines={lines} setLines={setLines} />
       <div className="actions">
-        <span className="big-total">{fcfa(total)} HT</span>
+        <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
         <button
           className="primary"
           disabled={!lines.length}
@@ -402,6 +406,157 @@ function Expiry() {
 const ADJUSTMENT_TYPES: MovementType[] = ['BREAKAGE', 'THEFT', 'EXPIRY', 'INTERNAL_USE', 'INVENTORY_ADJUST'];
 
 /** Mouvements de stock ; `adjustments` : seulement les pertes et écarts d'inventaire. */
+/**
+ * Stock multi-magasin (onglet Stock MM) : chaque article avec son stock dans chaque magasin,
+ * en pièces avec l'équivalent en cartons ; un clic sur un magasin détaille ses dépôts.
+ */
+function StockByStore() {
+  const toast = useToast();
+  const [search, setSearch] = useState('');
+  const [familyId, setFamilyId] = useState('');
+  const [shortage, setShortage] = useState(false);
+  const [detail, setDetail] = useState<{ articleId: string; storeId: string } | null>(null);
+  const opts = { search: search || null, familyId: familyId || null, shortage };
+  const data = useLoad(() => call('stock.byStore', opts), [search, familyId, shortage]);
+  const deps = useLoad(() => call('catalogue.departments'), []);
+  const d = data.data;
+  const unitName = (r: { unit: 'piece' | 'kg' | 'litre'; unit_name: string | null }) => (r.unit === 'piece' ? (r.unit_name || 'pièce').toLowerCase() : r.unit === 'kg' ? 'kg' : 'l');
+  const shown = (v: number | undefined, r: { unit: 'piece' | 'kg' | 'litre'; unit_name: string | null }) => (v === undefined ? '' : `${qty(v, r.unit)} ${r.unit === 'piece' ? unitName(r) + (Math.abs(v) >= 2000 && !unitName(r).endsWith('s') ? 's' : '') : ''}`.trim());
+  /** « 3 cartons + 2 » : l'équivalent dans le plus grand conditionnement. */
+  const inPacks = (v: number | undefined, r: { pack: { name: string; units: number } | null }) => {
+    if (!v || v <= 0 || !r.pack || v < r.pack.units) return '';
+    const n = Math.floor(v / r.pack.units);
+    const rest = (v - n * r.pack.units) / 1000;
+    const name = r.pack.name.toLowerCase();
+    return `${n} ${name}${n > 1 && !name.endsWith('s') ? 's' : ''}${rest ? ` + ${rest.toLocaleString('fr-FR')}` : ''}`;
+  };
+  const row = detail && d?.rows.find((r) => r.article_id === detail.articleId);
+  const store = detail && d?.stores.find((x) => x.id === detail.storeId);
+  return (
+    <>
+      <div className="filters">
+        <input className="search" placeholder="Rechercher un article (nom ou code)" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+        <select value={familyId} onChange={(e) => setFamilyId(e.target.value)}>
+          <option value="">Toutes les familles</option>
+          {deps.data?.map((dep) => (
+            <optgroup key={dep.id} label={dep.name}>
+              {dep.families.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <label>
+          <input type="checkbox" checked={shortage} onChange={(e) => setShortage(e.target.checked)} /> En rupture dans au moins un magasin
+        </label>
+        <button disabled={!d} onClick={() => void call('stock.printByStore', opts).catch(toast.error)}>
+          Imprimer (A4)
+        </button>
+        <button
+          disabled={!d}
+          onClick={() =>
+            d &&
+            saveXlsx(`stock-multi-magasin-${today()}.xlsx`, {
+              name: 'Stock multi-magasin',
+              title: ['Stock multi-magasin', `Au ${dateFr(today())}`],
+              columns: [{ header: 'Code', width: 14 }, { header: 'Article', width: 32 }, { header: 'Famille', width: 18 }, ...d.stores.map((st) => ({ header: st.name, format: 'qty' as const, width: 14 })), { header: 'Total', format: 'qty' as const }],
+              rows: d.rows.map((r) => [r.code, r.name, r.family_name, ...d.stores.map((st) => (r.byStore[st.id] === undefined ? null : r.byStore[st.id]! / 1000)), r.total / 1000]),
+            })
+          }
+        >
+          Exporter vers Excel
+        </button>
+      </div>
+      {d && (
+        <p className="muted small">
+          {d.stores
+            .map((st) => `${st.name} : ${st.own ? 'stock de ce poste, en direct' : st.updated_at ? `à jour au ${dateTime(st.updated_at)}` : 'pas encore reçu (serveur central)'}`)
+            .join(' · ')}
+        </p>
+      )}
+      {d && d.rows.length === 0 ? (
+        <Empty>Aucun article ne correspond à ces filtres.</Empty>
+      ) : (
+        <table className="list compact stock-mm">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Article</th>
+              {d?.stores.map((st) => (
+                <th key={st.id} className="r">
+                  {st.name}
+                  {st.own && <small> (ici)</small>}
+                </th>
+              ))}
+              <th className="r">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {d?.rows.map((r) => (
+              <tr key={r.article_id}>
+                <td className="muted">{r.code}</td>
+                <td>
+                  {r.name}
+                  {r.family_name && <small className="muted"> · {r.family_name}</small>}
+                </td>
+                {d.stores.map((st) => {
+                  const v = r.byStore[st.id];
+                  const low = v !== undefined && (v <= 0 || (r.alert_qty !== null && v <= r.alert_qty));
+                  return (
+                    <td key={st.id} className={`r ${low ? 'neg' : ''}`}>
+                      {v === undefined ? (
+                        <span className="muted">—</span>
+                      ) : (
+                        <button type="button" className="link" title="Détail par dépôt" onClick={() => setDetail({ articleId: r.article_id, storeId: st.id })}>
+                          {shown(v, r)}
+                        </button>
+                      )}
+                      {inPacks(v, r) && <small className="muted block">{inPacks(v, r)}</small>}
+                    </td>
+                  );
+                })}
+                <td className="r b">
+                  {shown(r.total, r)}
+                  {inPacks(r.total, r) && <small className="muted block">{inPacks(r.total, r)}</small>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {row && store && d && (
+        <Modal title={`${row.name} · ${store.name}`} onClose={() => setDetail(null)}>
+          <table className="list compact">
+            <thead>
+              <tr>
+                <th>Dépôt</th>
+                <th className="r">Stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.warehouses
+                .filter((w) => w.store_id === store.id)
+                .map((w) => (
+                  <tr key={w.id}>
+                    <td>{w.name}</td>
+                    <td className={`r ${(row.byWarehouse[w.id] ?? 0) < 0 ? 'neg' : ''}`}>{row.byWarehouse[w.id] === undefined ? '—' : shown(row.byWarehouse[w.id], row)}</td>
+                  </tr>
+                ))}
+              <tr className="b">
+                <td>Total {store.name}</td>
+                <td className="r">{shown(row.byStore[store.id], row)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {!store.own && <p className="muted small">{store.updated_at ? `Stock envoyé par ${store.name}, à jour au ${dateTime(store.updated_at)}.` : ''}</p>}
+        </Modal>
+      )}
+    </>
+  );
+}
+
 function Moves({ adjustments = false }: { adjustments?: boolean }) {
   const moves = useLoad(() => call('stock.movements', undefined, adjustments ? ADJUSTMENT_TYPES : undefined), [adjustments]);
   return (

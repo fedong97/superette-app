@@ -398,4 +398,33 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
       expect(qtyIn(s, wh, pack)).toBe(2_000);
     }
   });
+
+  // --- 0.36.0 : stock multi-magasin ----------------------------------------------------------------
+
+  it('le stock de chaque magasin arrive dans « Stock multi-magasin » des autres magasins', async () => {
+    const bfn = pc1.admin.createStore(ctx1.userId, { storeCode: 'BFN1', storeName: 'Superette Bafoussam' });
+    const reg = pc1.admin.createRegister(ctx1.userId, bfn.id);
+    await syncOnce(pc1);
+    const pc4 = fresh();
+    await joinStore(pc4, url, reg.activation_code, 'PC Bafoussam');
+    const user = pc4.db.prepare("SELECT id FROM users WHERE role = 'admin'").pluck().get() as string;
+    const bfnWh = pc4.admin.salesWarehouse(bfn.id).id;
+    pc4.stock.receive({ storeId: bfn.id, registerId: reg.id, userId: user }, { warehouseId: bfnWh, lines: [{ articleId, qty: 12_000, unitCost: 450 }] });
+    await syncOnce(pc4);
+    await syncOnce(pc1);
+    await syncOnce(pc4);
+    // Akwa : tous ses dépôts (surface de vente, réserve…).
+    const akwa = pc1.db
+      .prepare('SELECT SUM(s.qty) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ? AND s.article_id = ?')
+      .pluck()
+      .get(ctx1.storeId, articleId) as number;
+    const onPc1 = pc1.controls.stockByStore(ctx1.storeId, {}).rows.find((r) => r.article_id === articleId)!;
+    expect(onPc1.byStore[bfn.id]).toBe(12_000);
+    expect(onPc1.byStore[ctx1.storeId]).toBe(akwa);
+    const onPc4 = pc4.controls.stockByStore(bfn.id, {});
+    expect(onPc4.rows.find((r) => r.article_id === articleId)!.byStore).toMatchObject({ [ctx1.storeId]: akwa, [bfn.id]: 12_000 });
+    expect(onPc4.stores.find((x) => x.id === ctx1.storeId)!.updated_at).not.toBeNull();
+    // Les mouvements, eux, restent dans leur magasin.
+    expect(pc4.db.prepare('SELECT COUNT(*) FROM stock_movements WHERE warehouse_id = ?').pluck().get(pc1.admin.salesWarehouse(ctx1.storeId).id)).toBe(0);
+  });
 });

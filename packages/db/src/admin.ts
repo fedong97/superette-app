@@ -211,7 +211,7 @@ export class AdminService extends Base {
    * TVA, vente sans stock et seuil d'écart de caisse. Changer la TVA ne vaut que
    * pour les ventes et achats suivants : les pièces passées gardent la leur.
    */
-  setStoreOptions(userId: string, id: string, options: StoreOptions): Store {
+  setStoreOptions(userId: string, id: string, options: StoreOptions): Store & { articlesExempted?: number } {
     const current = this.getStore(id);
     const threshold = options.cashGapThreshold ?? current.cash_gap_threshold;
     if (!Number.isSafeInteger(threshold) || threshold < 0) throw new AppError("Seuil d'écart invalide", 'INVALID');
@@ -225,7 +225,56 @@ export class AdminService extends Base {
       this.enqueue({ storeId: id, registerId: null }, 'store', id, 'upsert', this.getStore(id));
       this.audit(userId, 'store.options', 'store', id, options);
     });
+    // TVA désactivée : les articles passent à « Exonéré », sauf si un autre magasin reste assujetti
+    // (les articles sont communs à tous les magasins).
+    if (current.vat_enabled === 1 && next.vat_enabled === 0) {
+      const vatStores = this.db.prepare('SELECT COUNT(*) FROM stores WHERE active = 1 AND vat_enabled = 1').pluck().get() as number;
+      if (vatStores === 0) return { ...this.getStore(id), articlesExempted: this.setArticlesRate(userId, 'exempt') };
+    }
     return this.getStore(id);
+  }
+
+  /** Taux « Exonéré » (0 %), créé s'il manque. */
+  exemptRateId(): string {
+    const id = this.db.prepare('SELECT id FROM vat_rates WHERE rate_bp = 0 AND active = 1 ORDER BY id LIMIT 1').pluck().get() as string | undefined;
+    if (id) return id;
+    const created = newId();
+    this.db.prepare('INSERT INTO vat_rates (id, label, rate_bp) VALUES (?, ?, 0)').run(created, 'Exonéré');
+    this.enqueue(null, 'vat_rate', created, 'upsert', { id: created, label: 'Exonéré', rate_bp: 0 });
+    return created;
+  }
+
+  /** Vrai si le magasin vend sans TVA (régime simplifié). */
+  vatDisabled(storeId: string): boolean {
+    return this.getStore(storeId).vat_enabled !== 1;
+  }
+
+  /**
+   * Taux de tous les articles d'un coup : « exempt » met les articles taxés à Exonéré
+   * (TVA désactivée), « standard » remet les exonérés à 19,25 % (TVA réactivée).
+   */
+  setArticlesRate(userId: string, mode: 'exempt' | 'standard'): number {
+    return this.tx(() => {
+      const exempt = this.exemptRateId();
+      let target = exempt;
+      if (mode === 'standard') {
+        const standard = this.db.prepare('SELECT id FROM vat_rates WHERE rate_bp = ? AND active = 1 LIMIT 1').pluck().get(TVA_CAMEROUN_NORMAL) as string | undefined;
+        if (!standard) throw new AppError('Taux de TVA 19,25 % introuvable', 'NOT_FOUND');
+        target = standard;
+      }
+      const ids = this.db
+        .prepare(`SELECT a.id FROM articles a JOIN vat_rates r ON r.id = a.vat_rate_id WHERE ${mode === 'exempt' ? 'r.rate_bp <> 0' : 'r.rate_bp = 0'}`)
+        .pluck()
+        .all() as string[];
+      const now = this.now();
+      const update = this.db.prepare('UPDATE articles SET vat_rate_id = ?, updated_at = ? WHERE id = ?');
+      for (const articleId of ids) {
+        update.run(target, now, articleId);
+        this.enqueue(null, 'article', articleId, 'upsert', {});
+      }
+      this.audit(userId, mode === 'exempt' ? 'articles.vat_exempt' : 'articles.vat_standard', 'article', undefined, { count: ids.length });
+      return ids.length;
+    });
   }
 
   /** Paramètres du magasin, complétés par les valeurs par défaut. */

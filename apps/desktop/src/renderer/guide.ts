@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.36.0',
+    items: [
+      'TVA désactivée dans les paramètres : les articles passent à « Exonéré », un nouvel article est exonéré, et la TVA, le HT et le TTC disparaissent des écrans, des impressions et des exports. La déclaration de TVA est masquée.',
+      'TVA réactivée : un bouton propose de remettre d’un coup les articles exonérés à 19,25 %.',
+      'Stock MM devient « Stock multi-magasin » : le stock de chaque article dans chaque magasin, avec le total, le détail par dépôt, l’impression A4 et l’export Excel.',
+    ],
+  },
+  {
     version: '0.35.0',
     items: [
       'Photo de l’article sur sa fiche, en miniature dans la liste des produits et dans la recherche de la caisse.',

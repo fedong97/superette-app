@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useLoad, useToast } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, draftOf, inputOf } from './customerDialogs';
@@ -10,7 +10,7 @@ export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 're
 
 /** Clients : fiches, comptes à crédit, balance âgée et règlements reçus. */
 export function Customers({ user, initialTab = 'list' }: { user: User; initialTab?: CustomersTab }) {
-  const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
+  const accounting = has(user, 'receivables');
   const [tab, setTab] = useState<CustomersTab>(initialTab.startsWith('rebates') ? 'rebates' : initialTab);
   const rebateTab = (initialTab.startsWith('rebates-') ? initialTab.slice(8) : 'state') as RebatesTab;
   const tabs: [CustomersTab, string][] = [
@@ -24,7 +24,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       : []),
     ['recent', 'Soldes qui ont bougé'],
     ['payments', 'Règlements reçus'],
-    ['rebates', 'Ristournes'],
+    ...(has(user, 'rebates') ? ([['rebates', 'Ristournes']] as [CustomersTab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -38,7 +38,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       {tab === 'limits' && accounting && <CreditControl />}
       {tab === 'recent' && <RecentAccounts party="customer" />}
       {tab === 'payments' && <Payments />}
-      {tab === 'rebates' && <Rebates user={user} initialTab={rebateTab} />}
+      {tab === 'rebates' && has(user, 'rebates') && <Rebates user={user} initialTab={rebateTab} />}
     </div>
   );
 }

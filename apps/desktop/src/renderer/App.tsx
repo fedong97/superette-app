@@ -212,11 +212,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Règlements reçus', open: ['customers', 'payments'] },
       { label: 'Retours et avoirs clients', open: ['sales', 'returns'] },
       SEP,
-      { label: 'Ristournes : état des ristournes', open: ['customers', 'rebates-state'] },
-      { label: 'Ristournes : reports à nouveau', open: ['customers', 'rebates-carry'] },
-      { label: 'Ristournes : réglage de base', open: ['customers', 'rebates-base'] },
-      { label: 'Ristournes : réglage des clients spécifiques', open: ['customers', 'rebates-clients'] },
-      { label: 'Ristournes : régularisations et bons', open: ['customers', 'rebates-entries'] },
+      { label: 'Ristournes : état des ristournes', open: ['customers', 'rebates-state'], perm: 'rebates' },
+      { label: 'Ristournes : reports à nouveau', open: ['customers', 'rebates-carry'], perm: 'rebates' },
+      { label: 'Ristournes : réglage de base', open: ['customers', 'rebates-base'], perm: 'rebates' },
+      { label: 'Ristournes : réglage des clients spécifiques', open: ['customers', 'rebates-clients'], perm: 'rebates' },
+      { label: 'Ristournes : régularisations et bons', open: ['customers', 'rebates-entries'], perm: 'rebates' },
     ],
   ],
   [
@@ -378,10 +378,15 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (active === kind) setActive(rest[rest.length - 1]?.kind ?? first);
   };
 
-  /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
+  /**
+   * Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double.
+   * Comme dans KONTROL, ce qui n'est pas permis ne s'affiche pas du tout (pas de ligne grisée).
+   */
+  const supervisor = user.role === 'admin' || user.role === 'manager';
   const visibleItems = (items: MenuItem[]) =>
     items
       .filter((i) => (!i.perm || [i.perm].flat().some(can)) && (!i.adminOnly || user.role === 'admin'))
+      .filter((i) => (!i.open || canWin(i.open[0])) && (!i.soon || supervisor))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
 
@@ -409,7 +414,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   return (
     <div className="desk">
       <nav className="menubar">
-        {MENUS.map(([name, items]) => (
+        {MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep)).map(([name, items]) => (
           <div key={name} className="menu">
             <button
               className={menu === name ? 'open' : ''}
@@ -429,7 +434,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   i.sep ? (
                     <hr key={`sep-${n}`} />
                   ) : (
-                    <button key={i.label} disabled={i.soon || (i.open && !canWin(i.open[0]))} onClick={() => void run(i)}>
+                    <button key={i.label} disabled={i.soon} onClick={() => void run(i)}>
                       {i.label}
                       {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
                       {i.soon && <small>bientôt</small>}
@@ -442,7 +447,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ))}
       </nav>
       <nav className="quickbar">
-        {QUICK.map((q) => {
+        {QUICK.filter((q) => q.open && canWin(q.open[0])).map((q) => {
           // Plusieurs onglets rapides partagent la fenêtre Stock ou Ventes : seul celui de l'onglet affiché est en relief.
           const win = q.open && wins.find((w) => w.kind === q.open![0] && (!q.open![1] || w.tab === q.open![1]));
           const isOpen = Boolean(win);
@@ -451,7 +456,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             <button
               key={q.label}
               className={`${isActive ? 'active' : isOpen ? 'open' : ''} ${q.credit ? 'credit' : ''}`}
-              disabled={q.soon || (q.open && !canWin(q.open[0]))}
+              disabled={q.soon}
               title={q.soon ? 'Module à venir' : undefined}
               onClick={() => q.open && open(...q.open)}
             >
@@ -535,12 +540,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Utilisateur : {user.name} ({ROLE_LABELS[user.role]})
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
-        {backupLate.data && (
-          <button className="warn" disabled={!canWin('admin')} onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
+        {backupLate.data && canWin('admin') && (
+          <button className="warn" onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
           </button>
         )}
-        {Boolean(chargesLate.data?.count) && (
+        {Boolean(chargesLate.data?.count) && canWin('expenses') && (
           <button className="warn" onClick={() => open('expenses', 'schedule')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
             {chargesLate.data!.count} charge(s) en retard
           </button>

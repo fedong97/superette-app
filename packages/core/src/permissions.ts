@@ -43,7 +43,7 @@ export const PERMISSIONS = {
   discount: { label: 'Accorder une remise sans le code du gérant', group: 'Caisse', roles: MANAGE },
   cashout: { label: 'Prélèvement et dépense en caisse sans le code du gérant', group: 'Caisse', roles: MANAGE },
   cash_amounts: { label: 'Voir les montants de la caisse (attendu, entrées, ventes, journées)', group: 'Caisse', roles: ACCOUNTING },
-  cash_open: { label: 'Ouvrir une caisse et valider un écart de clôture sans le code du gérant', group: 'Caisse', roles: MANAGE },
+  cash_open: { label: 'Compléter le fond de caisse depuis la centrale et valider un écart de clôture sans le code du gérant', group: 'Caisse', roles: MANAGE },
   central_cash: { label: 'Caisse centrale : apports, dépôts en banque, sorties', group: 'Gestion', roles: MANAGE },
   ignore_stock: { label: 'Activer « Ignorer la gestion des stocks » (vente sans stock)', group: 'Gestion', roles: MANAGE },
   purchase_orders: { label: 'Bons de commande et propositions de commande', group: 'Gestion', roles: STOCK },

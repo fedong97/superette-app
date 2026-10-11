@@ -570,10 +570,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         movements: s.treasury.sessionMovements(sessionId),
       };
     },
-    /** Ouverture : gérant, ou code d'un gérant. */
+    /**
+     * Ouverture : le caissier ouvre sa caisse seul avec le fond laissé la veille
+     * (ou moins). Un complément pris dans la caisse centrale demande le gérant.
+     */
     'treasury.open': (openingFloat: Fcfa, supervisorPin?: string, registerId?: string) => {
       const c = sameRegister(ctx(TREASURY), registerId);
-      if (!can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
+      const carried = c.registerId ? s.pos.carriedFloat(c.registerId) : null;
+      if (carried !== null && openingFloat > carried && !can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
       const session = s.pos.openSession(c, openingFloat);
       // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
       const voucher = s.treasury.sessionMovements(session.id).find((m) => !m.cash_operation_id);

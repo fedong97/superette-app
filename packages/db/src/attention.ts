@@ -31,6 +31,9 @@ export interface AttentionItem {
   tone: 'danger' | 'warning' | 'info';
 }
 
+/** 2026-09-30 → 30/09/2026. */
+const frDate = (d: string) => d.split('-').reverse().join('/');
+
 /** Les premiers noms d'une liste, pour la ligne d'explication d'une tuile. */
 const firstNames = (names: string[], max = 3) => (names.length > max ? `${names.slice(0, max).join(', ')}…` : names.join(', '));
 
@@ -134,7 +137,7 @@ export class AttentionService extends Base {
           label: 'Ristournes à constater',
           count: rows.length,
           amount: rows.reduce((t, r) => t + r.pending, 0),
-          detail: rows.length ? `Mois du ${period.from} au ${period.to} : ${firstNames(rows.map((r) => r.customer_name))}` : 'Le mois dernier est constaté',
+          detail: rows.length ? `Du ${frDate(period.from)} au ${frDate(period.to)} : ${firstNames(rows.map((r) => r.customer_name))}` : 'Le mois dernier est constaté',
           tone: 'info',
         });
       }

@@ -64,3 +64,20 @@ describe('caisse électronique du caissier', () => {
     expect(() => api['treasury.closeDeclared']!(mobile, { MTN_MOMO: 0 })).toThrow(/pas la vôtre/);
   });
 });
+
+describe('préférences de l’utilisateur', () => {
+  it('garde les onglets rapides et la dernière version vue de chacun', () => {
+    login('awa', '5555');
+    const tabs = [{ label: 'Ma caisse', open: ['treasury', 'day'] }];
+    api['prefs.set']!('quickTabs', tabs);
+    api['prefs.set']!('seenVersion', '0.31.0');
+    expect((api['app.state']!() as { prefs: Record<string, unknown> }).prefs).toEqual({ quickTabs: tabs, seenVersion: '0.31.0' });
+    // Un autre utilisateur garde les siens.
+    login('mireille', '2222');
+    expect((api['app.state']!() as { prefs: Record<string, unknown> }).prefs).toEqual({});
+    login('awa', '5555');
+    api['prefs.set']!('quickTabs', null);
+    expect((api['app.state']!() as { prefs: Record<string, unknown> }).prefs).toEqual({ seenVersion: '0.31.0' });
+    expect(() => api['prefs.set']!('1 mauvaise clé', true)).toThrow(/Préférence/);
+  });
+});

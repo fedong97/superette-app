@@ -215,7 +215,9 @@ function FullTreasury({
                 onJustified={reload}
               />
             ) : (
-              <Empty>Aucune journée pour cette caisse. {here ? 'Ouvrez la caisse pour commencer la journée.' : ''}</Empty>
+              <Empty action={here && !open ? { label: 'Ouvrir la caisse…', onClick: () => setDialog('open') } : undefined}>
+                Aucune journée pour cette caisse. {here ? 'Ouvrez la caisse pour commencer la journée : le fond laissé la veille est proposé.' : 'Elle s’ouvre depuis le poste de son caissier.'}
+              </Empty>
             ))}
           {tab === 'history' && Boolean(gaps.data?.length) && (
             <section className="tre-gaps">
@@ -972,7 +974,9 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
               )}
             </div>
           ) : (
-            <Empty>Aucune journée pour votre caisse. Ouvrez la caisse pour commencer la journée.</Empty>
+            <Empty action={!open ? { label: 'Ouvrir la caisse…', onClick: () => setDialog('open') } : undefined}>
+              Aucune journée pour votre caisse. Ouvrez la caisse pour commencer la journée : le fond laissé la veille est proposé.
+            </Empty>
           )}
           {linked}
         </>

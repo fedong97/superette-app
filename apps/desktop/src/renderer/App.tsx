@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Permission } from '@superette/core';
 import { type Result, call } from './api';
+import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
@@ -20,17 +21,19 @@ import { Setup } from './screens/Setup';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
+import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
+import { ROLE_TILES } from './guide';
 import { Field, Modal, ToastProvider, fcfa, useLoad, useToast } from './ui';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
-/** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'treasury' | 'dashboard' | 'admin' | 'production';
 interface Win {
   kind: WinKind;
   tab?: string;
+  /** Chemin affiché en haut de la page : « Trésorerie › Opérations de trésorerie ». */
+  crumb?: string;
   /** Change à chaque réouverture sur un autre onglet, pour repartir de cet onglet. */
   nonce: number;
 }
@@ -62,7 +65,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice';
+  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs';
   /** Trait de séparation entre deux groupes, comme dans KONTROL. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -78,7 +81,15 @@ interface MenuItem {
 const SEP: MenuItem = { label: '', sep: true };
 
 const MENUS: [string, MenuItem[]][] = [
-  ['Fichier', [{ label: 'Synchroniser maintenant', action: 'sync' }, { label: "Changer d'utilisateur", action: 'logout' }, { label: 'Quitter', action: 'quit' }]],
+  [
+    'Fichier',
+    [
+      { label: 'Synchroniser maintenant', action: 'sync' },
+      { label: 'Personnaliser les onglets rapides', action: 'tabs' },
+      { label: "Changer d'utilisateur", action: 'logout' },
+      { label: 'Quitter', action: 'quit' },
+    ],
+  ],
   [
     'Facturation',
     [
@@ -271,11 +282,22 @@ const MENUS: [string, MenuItem[]][] = [
       { label: "Journal d'audit", open: ['admin', 'audit'] },
     ],
   ],
-  ['Aide', [{ label: 'Raccourcis clavier', action: 'shortcuts' }, { label: 'À propos', action: 'about' }]],
+  [
+    'Aide',
+    [
+      { label: 'Aide sur cette page (F1)', action: 'help' },
+      { label: 'Rechercher un écran (Ctrl+K)', action: 'palette' },
+      { label: 'Guide de démarrage', action: 'guide' },
+      { label: 'Quoi de neuf', action: 'news' },
+      SEP,
+      { label: 'Raccourcis clavier', action: 'shortcuts' },
+      { label: 'À propos', action: 'about' },
+    ],
+  ],
 ];
 
-/** Barre d'onglets rapides, comme celle de KONTROL. */
-const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?: boolean }[] = [
+/** Barre d'onglets rapides, comme celle de KONTROL : les onglets d'origine, que chacun peut personnaliser. */
+const QUICK: QuickTab[] = [
   { label: 'V. cash 1', open: ['cash1'] },
   { label: 'V. cash 2', open: ['cash2'] },
   { label: 'V. crédit', open: ['credit'], credit: true },
@@ -330,17 +352,45 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const canWin = (kind: WinKind) => can(WINDOWS[kind].perm) || (kind === 'sales' && (can('cash') || can('credit')));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
   // Le caissier et le vendeur arrivent sur leur fiche de facturation ; les autres sur la page d'accueil.
-  const [wins, setWins] = useState<Win[]>(() => (['cashier', 'seller'].includes(user.role) ? [{ kind: first, nonce: 0 }] : []));
-  const [active, setActive] = useState<WinKind>(first);
+  const startOnPos = ['cashier', 'seller'].includes(user.role);
+  const [wins, setWins] = useState<Win[]>(() => (startOnPos ? [{ kind: first, nonce: 0, crumb: 'Facturation › Vente au comptant 1' }] : []));
+  // null : la page d'accueil.
+  const [active, setActive] = useState<WinKind | null>(startOnPos ? first : null);
   const [menu, setMenu] = useState<string | null>(null);
   const [chooseRegister, setChooseRegister] = useState(false);
-  const [help, setHelp] = useState<'shortcuts' | 'about' | null>(null);
+  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | null>(null);
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
+  // Menu du clic droit : sur un onglet rapide (le déplacer, le retirer) ou sur un écran d'un menu (l'épingler).
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; tab?: number; pin?: QuickTab } | null>(null);
+  const [prefs, setPrefs] = useState<Record<string, unknown>>(state.prefs ?? {});
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
   const chargesLate = useLoad(() => call('charges.late'), []);
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
+
+  const savePref = (key: string, value: unknown) => {
+    setPrefs((p) => ({ ...p, [key]: value }));
+    call('prefs.set', key, value).catch(toast.error);
+  };
+  const quickTabs = ((prefs.quickTabs as QuickTab[] | undefined) ?? QUICK).filter((q) => canWin(q.open[0]));
+  const saveTabs = (tabs: QuickTab[] | null) => {
+    savePref('quickTabs', tabs);
+    setHelp(null);
+  };
+  const pin = (t: QuickTab) => {
+    const key = (q: QuickTab) => `${q.open[0]}:${q.open[1] ?? ''}`;
+    if (quickTabs.some((q) => key(q) === key(t))) return toast.ok(`« ${t.label} » est déjà dans les onglets`);
+    saveTabs([...quickTabs, t]);
+    toast.ok(`« ${t.label} » ajouté aux onglets rapides`);
+  };
+
+  // Après une mise à jour, « Quoi de neuf » s'affiche une fois ; à la première connexion, le guide de démarrage.
+  useEffect(() => {
+    if (prefs.seenVersion === state.version) return;
+    setHelp(prefs.seenVersion ? 'news' : 'guide');
+    savePref('seenVersion', state.version);
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -355,27 +405,46 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
+    if (!menu && !ctxMenu) return;
+    const close = () => {
+      setMenu(null);
+      setCtxMenu(null);
+    };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
-  }, [menu]);
+  }, [menu, ctxMenu]);
+  // Ctrl+K cherche un écran ; F1 ouvre l'aide de la page (sauf à la caisse, où F1 cherche un produit).
+  const onPos = active === 'cash1' || active === 'cash2' || active === 'credit';
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setHelp('palette');
+      } else if (e.key === 'F1' && !onPos) {
+        e.preventDefault();
+        setHelp('page');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onPos]);
 
-  const open = (kind: WinKind, tab?: string) => {
+  const open = (kind: WinKind, tab?: string, crumb?: string) => {
     if (!canWin(kind)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
     setWins((ws) => {
       const existing = ws.find((w) => w.kind === kind);
-      if (!existing) return [...ws, { kind, tab, nonce: 0 }];
-      if (tab && tab !== existing.tab) return ws.map((w) => (w === existing ? { ...w, tab, nonce: w.nonce + 1 } : w));
-      return ws;
+      if (!existing) return [...ws, { kind, tab, nonce: 0, crumb }];
+      if (tab && tab !== existing.tab) return ws.map((w) => (w === existing ? { ...w, tab, crumb, nonce: w.nonce + 1 } : w));
+      return crumb ? ws.map((w) => (w === existing ? { ...w, crumb } : w)) : ws;
     });
     setActive(kind);
   };
-  const close = (kind: WinKind) => {
+  const close = (kind: WinKind | null) => {
+    if (!kind) return;
     const rest = wins.filter((w) => w.kind !== kind);
     setWins(rest);
     // Sans fenêtre ouverte, la page d'accueil s'affiche.
-    if (active === kind) setActive(rest[rest.length - 1]?.kind ?? first);
+    if (active === kind) setActive(rest[rest.length - 1]?.kind ?? null);
   };
 
   /**
@@ -389,14 +458,16 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       .filter((i) => (!i.open || canWin(i.open[0])) && (!i.soon || supervisor))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
+  const visibleMenus = MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep));
 
-  const run = async (item: MenuItem) => {
+  const run = async (item: MenuItem, menuName: string) => {
     setMenu(null);
     if (item.soon) return;
-    if (item.open) return open(...item.open);
+    if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'quit') return window.close();
-    if (item.action === 'shortcuts' || item.action === 'about') return setHelp(item.action);
+    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs') return setHelp(item.action);
+    if (item.action === 'help') return setHelp('page');
     if (item.action === 'openInvoice') return setFinding(true);
     if (item.action === 'sync') {
       try {
@@ -409,12 +480,25 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     }
   };
 
+  // Tous les écrans permis, pour la recherche Ctrl+K.
+  const paletteEntries: PaletteEntry[] = [
+    ...visibleMenus.flatMap(([name, items]) =>
+      visibleItems(items)
+        .filter((i) => !i.sep && !i.soon && i.action !== 'palette')
+        .map((i) => ({ menu: name, label: i.label, run: () => void run(i, name) })),
+    ),
+    { menu: 'Accueil', label: "Page d'accueil", run: () => setActive(null) },
+  ];
+
   const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : `Serveur : connecté (${sync.data.pending} en attente)`;
+  const activeWin = wins.find((w) => w.kind === active);
+  const showHome = !activeWin;
+  const tiles = ROLE_TILES[user.role].filter((t) => canWin(t.open[0]));
 
   return (
     <div className="desk">
       <nav className="menubar">
-        {MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep)).map(([name, items]) => (
+        {visibleMenus.map(([name, items]) => (
           <div key={name} className="menu">
             <button
               className={menu === name ? 'open' : ''}
@@ -434,7 +518,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   i.sep ? (
                     <hr key={`sep-${n}`} />
                   ) : (
-                    <button key={i.label} disabled={i.soon} onClick={() => void run(i)}>
+                    <button
+                      key={i.label}
+                      disabled={i.soon}
+                      onClick={() => void run(i, name)}
+                      onContextMenu={(e) => {
+                        if (!i.open) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setCtxMenu({ x: e.clientX, y: e.clientY, pin: { label: i.label, open: i.open } });
+                      }}
+                    >
                       {i.label}
                       {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
                       {i.soon && <small>bientôt</small>}
@@ -445,31 +539,62 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             )}
           </div>
         ))}
+        <button className="menu-search" title="Rechercher un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
+          🔍 Rechercher un écran <kbd>Ctrl+K</kbd>
+        </button>
       </nav>
       <nav className="quickbar">
-        {QUICK.filter((q) => q.open && canWin(q.open[0])).map((q) => {
+        <div className="quick-tabs">
+        <button className={`home-tab ${showHome ? 'active' : ''}`} title="Page d'accueil" onClick={() => setActive(null)}>
+          🏠 Accueil
+        </button>
+        {quickTabs.map((q, idx) => {
           // Plusieurs onglets rapides partagent la fenêtre Stock ou Ventes : seul celui de l'onglet affiché est en relief.
-          const win = q.open && wins.find((w) => w.kind === q.open![0] && (!q.open![1] || w.tab === q.open![1]));
+          const win = wins.find((w) => w.kind === q.open[0] && (!q.open[1] || w.tab === q.open[1]));
           const isOpen = Boolean(win);
-          const isActive = isOpen && active === q.open![0];
+          const isActive = isOpen && active === q.open[0];
           return (
             <button
-              key={q.label}
+              key={`${q.label}-${idx}`}
               className={`${isActive ? 'active' : isOpen ? 'open' : ''} ${q.credit ? 'credit' : ''}`}
-              disabled={q.soon}
-              title={q.soon ? 'Module à venir' : undefined}
-              onClick={() => q.open && open(...q.open)}
+              title="Clic droit : déplacer ou retirer cet onglet"
+              onClick={() => open(q.open[0], q.open[1], q.label)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setCtxMenu({ x: e.clientX, y: e.clientY, tab: idx });
+              }}
             >
               {q.label}
             </button>
           );
         })}
-        <button className="win-close" title="Fermer la fenêtre active" onClick={() => close(active)}>
+        </div>
+        <button className="help-btn" title="Aide sur cette page (F1)" onClick={() => setHelp('page')}>
+          ?
+        </button>
+        <button className="win-close" title="Fermer la fenêtre active" disabled={showHome} onClick={() => close(active)}>
           ✕
         </button>
       </nav>
+      <div className="crumbs">
+        <button className="link" onClick={() => setActive(null)}>
+          Accueil
+        </button>
+        {activeWin &&
+          (activeWin.crumb ?? WINDOWS[activeWin.kind].label).split(' › ').map((part, i) => (
+            <span key={`${part}-${i}`}>
+              <span className="crumb-sep">›</span>
+              {part}
+            </span>
+          ))}
+        <span className="spacer" />
+        <button className="link" onClick={() => setHelp('page')}>
+          Comment utiliser cette page ?
+        </button>
+      </div>
       <main className="windows">
-        {!wins.length && (
+        {showHome && (
           <section className="home">
             <div className="home-card">
               <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
@@ -477,14 +602,31 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               {(state.station?.store.address || state.station?.store.phone) && (
                 <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
               )}
-              <p className="home-sub">Superette Gestion · bonjour {user.name.split(' ')[0]}</p>
-              <div className="home-tiles">
-                {QUICK.filter((q) => q.open && canWin(q.open[0])).slice(0, 8).map((q) => (
-                  <button key={q.label} className={q.credit ? 'credit' : ''} onClick={() => open(...q.open!)}>
-                    {q.label}
+              <p className="home-sub">
+                Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
+              </p>
+              <div className="role-tiles">
+                {tiles.map((t) => (
+                  <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
+                    <span className="tile-icon" aria-hidden>
+                      {t.icon}
+                    </span>
+                    <strong>{t.label}</strong>
+                    <small>{t.desc}</small>
                   </button>
                 ))}
               </div>
+              <p className="home-links">
+                <button className="link" onClick={() => setHelp('palette')}>
+                  Chercher un autre écran (Ctrl+K)
+                </button>
+                <button className="link" onClick={() => setHelp('guide')}>
+                  Guide de démarrage
+                </button>
+                <button className="link" onClick={() => setHelp('news')}>
+                  Quoi de neuf
+                </button>
+              </p>
             </div>
           </section>
         )}
@@ -503,8 +645,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 active={w.kind === active}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
-                onListing={() => open('sales', 'tickets')}
-                onTreasury={() => open('treasury', 'day')}
+                onListing={() => open('sales', 'tickets', 'Facturation › Mes factures')}
+                onTreasury={() => open('treasury', 'day', 'Trésorerie › Opérations de trésorerie')}
               />
             )}
             {w.kind === 'articles' && <Articles user={user} view={w.tab as ArticlesView | undefined} />}
@@ -541,17 +683,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
         {backupLate.data && canWin('admin') && (
-          <button className="warn" onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
+          <button className="warn" onClick={() => open('admin', 'backups', 'Administration › Sauvegardes')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
           </button>
         )}
         {Boolean(chargesLate.data?.count) && canWin('expenses') && (
-          <button className="warn" onClick={() => open('expenses', 'schedule')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
+          <button className="warn" onClick={() => open('expenses', 'schedule', 'Charge › Constats de charges')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
             {chargesLate.data!.count} charge(s) en retard
           </button>
         )}
         {Boolean(gaps.data?.length) && (
-          <button className="warn" onClick={() => open('treasury', 'history')} title="Clôtures dont l'écart attend votre motif">
+          <button className="warn" onClick={() => open('treasury', 'history', 'Trésorerie › Historique des journées de caisse')} title="Clôtures dont l'écart attend votre motif">
             {gaps.data!.length} écart(s) de caisse à justifier
           </button>
         )}
@@ -559,6 +701,63 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Changer d'utilisateur
         </button>
       </footer>
+      {ctxMenu && (
+        <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+          {ctxMenu.pin && (
+            <button
+              onClick={() => {
+                pin(ctxMenu.pin!);
+                setCtxMenu(null);
+                setMenu(null);
+              }}
+            >
+              📌 Épingler dans les onglets rapides
+            </button>
+          )}
+          {ctxMenu.tab !== undefined && (
+            <>
+              {(
+                [
+                  ['◀ Déplacer à gauche', -1],
+                  ['Déplacer à droite ▶', 1],
+                ] as const
+              ).map(([label, d]) => (
+                <button
+                  key={label}
+                  disabled={ctxMenu.tab! + d < 0 || ctxMenu.tab! + d >= quickTabs.length}
+                  onClick={() => {
+                    const next = [...quickTabs];
+                    const i = ctxMenu.tab!;
+                    [next[i], next[i + d]] = [next[i + d]!, next[i]!];
+                    saveTabs(next);
+                    setCtxMenu(null);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                className="danger"
+                onClick={() => {
+                  saveTabs(quickTabs.filter((_, n) => n !== ctxMenu.tab));
+                  setCtxMenu(null);
+                }}
+              >
+                ✕ Retirer « {quickTabs[ctxMenu.tab]?.label} »
+              </button>
+              <hr />
+              <button
+                onClick={() => {
+                  setCtxMenu(null);
+                  setHelp('tabs');
+                }}
+              >
+                Personnaliser les onglets…
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {chooseRegister && (
         <Modal title="Choisir ma caisse" onClose={() => setChooseRegister(false)}>
           <RegisterChooser
@@ -570,11 +769,27 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           />
         </Modal>
       )}
+      {help === 'page' && <HelpDialog kind={activeWin?.kind ?? null} tab={activeWin?.tab} rights={user.rights} onClose={() => setHelp(null)} onGuide={() => setHelp('guide')} />}
+      {help === 'palette' && <CommandPalette entries={paletteEntries} onClose={() => setHelp(null)} />}
+      {help === 'guide' && <GettingStarted role={user.role} canOpen={canWin} onOpen={([kind, tab]) => open(kind, tab)} onClose={() => setHelp(null)} />}
+      {help === 'news' && <WhatsNew version={state.version} onClose={() => setHelp(null)} />}
+      {help === 'tabs' && (
+        <QuickTabsEditor
+          current={quickTabs}
+          available={[...QUICK, ...MENUS.flatMap(([, items]) => visibleItems(items).flatMap((i) => (i.open && !i.sep ? [{ label: i.label, open: i.open }] : [])))].filter(
+            (t, n, all) => canWin(t.open[0]) && all.findIndex((x) => x.open[0] === t.open[0] && x.open[1] === t.open[1]) === n,
+          )}
+          onSave={saveTabs}
+          onClose={() => setHelp(null)}
+        />
+      )}
       {help === 'shortcuts' && (
         <Modal title="Raccourcis clavier" onClose={() => setHelp(null)}>
           <table className="list compact">
             <tbody>
               {[
+                ['Ctrl+K', 'Rechercher un écran par son nom'],
+                ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
                 ['F4 ou Entrée sur saisie vide', 'Valider la fiche (espèces si l’encaissé couvre le total)'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],

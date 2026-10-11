@@ -1063,7 +1063,7 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
       </div>
       <h3>Sauvegardes de ce dossier</h3>
       {st.backups.length === 0 ? (
-        <Empty>Aucune sauvegarde pour l'instant</Empty>
+        <Empty>Aucune sauvegarde pour l'instant. Cliquez sur « Sauvegarder maintenant » ci-dessus ; ensuite, une sauvegarde se fait chaque jour.</Empty>
       ) : (
         <table className="list compact">
           <thead>

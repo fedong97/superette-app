@@ -224,7 +224,7 @@ export function Reports({ view }: { view?: string }) {
       </div>
 
       {r && rows.length === 0 ? (
-        <Empty>Aucune vente sur cette période.</Empty>
+        <Empty>Aucune vente sur cette période. Choisissez une autre période en haut.</Empty>
       ) : (
         <table className="list compact report">
           <thead>

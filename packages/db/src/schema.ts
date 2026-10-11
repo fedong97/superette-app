@@ -1191,4 +1191,17 @@ ALTER TABLE sale_payments ADD COLUMN session_id TEXT;
 CREATE INDEX sale_payments_session ON sale_payments(session_id);
 `,
   },
+  {
+    version: 24,
+    name: 'préférences des utilisateurs',
+    sql: `
+-- Préférences propres à chaque utilisateur sur ce PC : onglets rapides épinglés, dernière version vue.
+CREATE TABLE user_prefs (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+`,
+  },
 ];

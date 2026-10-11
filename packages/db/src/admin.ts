@@ -268,6 +268,26 @@ export class AdminService extends Base {
     return reg;
   }
 
+  /** Préférences de l'utilisateur sur ce PC (onglets rapides, dernière version vue), en JSON. */
+  prefs(userId: string): Record<string, unknown> {
+    const rows = this.db.prepare('SELECT key, value FROM user_prefs WHERE user_id = ?').all(userId) as { key: string; value: string }[];
+    return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value) as unknown]));
+  }
+
+  /** Enregistre une préférence ; null l'efface. */
+  setPref(userId: string, key: string, value: unknown): void {
+    if (!/^[a-zA-Z][\w.-]{0,40}$/.test(key)) throw new AppError('Préférence inconnue', 'INVALID');
+    if (value === null || value === undefined) {
+      this.db.prepare('DELETE FROM user_prefs WHERE user_id = ? AND key = ?').run(userId, key);
+      return;
+    }
+    const json = JSON.stringify(value);
+    if (json.length > 20_000) throw new AppError('Préférence trop longue', 'INVALID');
+    this.db
+      .prepare('INSERT INTO user_prefs (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value')
+      .run(userId, key, json);
+  }
+
   /** Caisse 3, ou Mobile 1 et Banque 1 : les caisses électroniques et banque se numérotent entre elles. */
   private defaultRegisterName(storeId: string, number: number, kind: RegisterKind): string {
     if (kind === 'cash') return `Caisse ${number}`;

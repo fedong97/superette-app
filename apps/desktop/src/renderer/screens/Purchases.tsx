@@ -574,7 +574,7 @@ function Receptions() {
   return (
     <>
       {list.data?.length === 0 ? (
-        <Empty>Aucune réception.</Empty>
+        <Empty>Aucune réception. Réceptionnez un bon de commande, ou saisissez une réception sans commande dans Stock › Réception.</Empty>
       ) : (
         <table className="list">
           <thead>
@@ -675,7 +675,7 @@ function Invoices() {
 }
 
 function InvoiceTable({ invoices, onOpen }: { invoices: Invoice[]; onOpen: (id: string) => void }) {
-  if (!invoices.length) return <Empty>Aucune facture.</Empty>;
+  if (!invoices.length) return <Empty>Aucune facture. Saisissez la facture du fournisseur à partir de ses bons de réception.</Empty>;
   return (
     <table className="list">
       <thead>

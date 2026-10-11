@@ -210,7 +210,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         const named = (id: string | null) => (id ? { id, name: s.admin.getRegister(id).name } : null);
         return { electronic: named(ids.electronic), bank: named(ids.bank) };
       })(),
+      /** Préférences de l'utilisateur : onglets rapides épinglés, dernière version vue. */
+      prefs: user ? s.admin.prefs(user.id) : {},
     }),
+    'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
     'setup.bootstrap': (input: BootstrapInput) => {
       const result = s.admin.bootstrap(input);
       user = result.admin;

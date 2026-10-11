@@ -116,7 +116,7 @@ function Day() {
               ))}
             </div>
           ) : (
-            <Empty>Aucune vente ce jour.</Empty>
+            <Empty>Aucune vente ce jour pour l’instant. Les chiffres s’affichent ici dès le premier ticket validé à la caisse.</Empty>
           )}
         </section>
         <section className="card">

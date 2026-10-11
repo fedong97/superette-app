@@ -178,7 +178,7 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
         </div>
       )}
       {r && r.rows.length === 0 ? (
-        <Empty>Aucun ticket ne correspond.</Empty>
+        <Empty>Aucun ticket ne correspond. Vérifiez le numéro ou élargissez la période.</Empty>
       ) : (
         <table className="list compact">
           <thead>
@@ -341,7 +341,7 @@ export function CashOperations() {
         </div>
       )}
       {d && d.rows.length === 0 ? (
-        <Empty>Aucune opération de caisse sur cette période.</Empty>
+        <Empty>Aucune opération de caisse sur cette période. Changez les dates en haut.</Empty>
       ) : (
         <table className="list compact">
           <thead>
@@ -558,7 +558,7 @@ export function StockByWarehouse() {
         </label>
       </div>
       {d && d.articles.length === 0 ? (
-        <Empty>Aucun article.</Empty>
+        <Empty>Aucun article ne correspond à ces filtres.</Empty>
       ) : (
         <table className="list compact">
           <thead>

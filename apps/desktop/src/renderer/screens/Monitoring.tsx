@@ -119,7 +119,7 @@ export function Monitoring({ user }: { user: User }) {
             <h3>Modifications effectives</h3>
           </div>
           {rows.length === 0 ? (
-            <Empty>Aucun mouvement sur cette période.</Empty>
+            <Empty>Aucun mouvement sur cette période. Élargissez les dates ou choisissez un autre dépôt.</Empty>
           ) : (
             <div className="mon-scroll">
               <table className="list compact">

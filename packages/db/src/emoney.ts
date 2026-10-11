@@ -37,7 +37,9 @@ export interface EmoneyMovement {
 
 /** Ligne du journal d'une caisse électronique : entrée ou sortie, par moyen de paiement. */
 export interface EmoneyRow {
-  source: 'sale' | 'refund' | 'customer_payment' | 'expense' | 'supplier_payment' | 'rebate' | 'movement';
+  source: 'sale' | 'refund' | 'customer_payment' | 'expense' | 'supplier_payment' | 'rebate' | 'movement' | 'entry';
+  /** Nature d'une pièce d'« Encaisser » ou « Décaisser » (avance, salaire, autre…). */
+  kind?: string | null;
   id: string;
   at: string;
   number: string;
@@ -60,6 +62,16 @@ export interface EmoneyLedgerRow extends EmoneyRow {
   signed: Fcfa;
   balance: Fcfa;
 }
+
+/** Natures des pièces d'« Encaisser » et « Décaisser » qui ne sont ni vente, ni règlement, ni dépense. */
+export type EntryKind = 'staff_advance' | 'staff_salary' | 'staff_repayment' | 'customer_refund' | 'other';
+export const ENTRY_KINDS: Record<EntryKind, string> = {
+  staff_advance: 'Avance au personnel',
+  staff_salary: 'Salaire',
+  staff_repayment: 'Remboursement du personnel',
+  customer_refund: 'Remboursement client',
+  other: 'Autre',
+};
 
 const NATURE_LABEL: Record<EmoneyNature, string> = {
   deposit: 'Versement',
@@ -134,6 +146,23 @@ export class EmoneyService extends Base {
     return { registerId: id, sessionId: this.openSessionId(id) };
   }
 
+  /**
+   * Journée ouverte où se fait un paiement saisi à la caisse (« Encaisser »,
+   * « Décaisser ») : espèces pour une caisse espèces, MoMo/OM pour une caisse
+   * électronique. Renvoie sa caisse et sa journée.
+   */
+  openSession(storeId: string, sessionId: string, method: string): { registerId: string; sessionId: string } {
+    const se = this.db
+      .prepare('SELECT s.id, s.status, s.store_id, r.id AS register_id, r.kind, r.name FROM cash_sessions s JOIN registers r ON r.id = s.register_id WHERE s.id = ?')
+      .get(sessionId) as { id: string; status: string; store_id: string; register_id: string; kind: string; name: string } | undefined;
+    if (!se || se.store_id !== storeId) throw new AppError('Journée de caisse introuvable', 'NOT_FOUND');
+    if (se.status !== 'open') throw new AppError(`La journée de ${se.name} est clôturée`, 'SESSION_CLOSED');
+    if (se.kind === 'cash' ? method !== 'CASH' : se.kind !== 'electronic' || !isPayout(method)) {
+      throw new AppError(se.kind === 'cash' ? `${se.name} est une caisse espèces : choisissez Espèces` : `${se.name} paie par MTN MoMo ou Orange Money`, 'INVALID');
+    }
+    return { registerId: se.register_id, sessionId: se.id };
+  }
+
   // --- Journal d'une journée ------------------------------------------------------
 
   /** Entrées d'une journée électronique : ventes, règlements clients et mouvements reçus. */
@@ -157,7 +186,36 @@ export class EmoneyService extends Base {
       ...sales.map((x) => this.row('sale', x, 'Vente', `Ticket ${x.number}`)),
       ...receipts.map((x) => this.row('customer_payment', x, 'Règlement client', `Reçu ${x.number}`)),
       ...moves.map((m) => this.moveRow(m)),
+      ...this.received({ sessionId }),
     ].sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  /** Pièces de trésorerie (« Encaisser », « Décaisser ») d'une journée ou d'une caisse hors journée, dans un sens. */
+  private pieces(where: { sessionId: string } | { registerId: string; after: string }, direction: 'IN' | 'OUT'): EmoneyRow[] {
+    const bySession = 'sessionId' in where;
+    const rows = this.db
+      .prepare(
+        `SELECT x.id, x.at, x.number, x.kind, x.method, x.amount, COALESCE(x.reference, x.piece) AS reference, x.label,
+                COALESCE(s.name, c.name, x.party) AS party, u.name AS user_name, x.user_id
+         FROM treasury_entries x LEFT JOIN staff s ON s.id = x.staff_id LEFT JOIN customers c ON c.id = x.customer_id LEFT JOIN users u ON u.id = x.user_id
+         WHERE ${bySession ? 'x.session_id = @sessionId' : 'x.register_id = @registerId AND x.session_id IS NULL AND x.at > @after'}
+           AND x.status = 'active' AND x.direction = @direction AND x.method <> 'CASH'`,
+      )
+      .all({ ...where, direction }) as { id: string; at: string; number: string; kind: string; method: PaymentMethod; amount: number; reference: string | null; label: string; party: string | null; user_name: string | null; user_id: string | null }[];
+    return rows.map((x) => ({ ...this.row('entry', x, ENTRY_KINDS[x.kind as EntryKind] ?? 'Autre', `${x.number} ${x.label}`), kind: x.kind }));
+  }
+
+  /** Entrées hors ventes : avoirs remboursés par un fournisseur et pièces d'« Encaisser ». */
+  private received(where: { sessionId: string } | { registerId: string; after: string }): EmoneyRow[] {
+    const bySession = 'sessionId' in where;
+    const suppliers = this.db
+      .prepare(
+        `SELECT x.id, x.paid_at AS at, i.number, i.supplier_number, x.method, x.amount, x.reference, f.name AS party, u.name AS user_name, x.user_id
+         FROM supplier_payments x JOIN supplier_invoices i ON i.id = x.invoice_id JOIN suppliers f ON f.id = x.supplier_id LEFT JOIN users u ON u.id = x.user_id
+         WHERE ${bySession ? 'x.session_id = @sessionId' : 'x.register_id = @registerId AND x.session_id IS NULL AND x.paid_at > @after'} AND i.kind = 'credit_note' AND x.method <> 'CASH'`,
+      )
+      .all(where) as { id: string; at: string; number: string; supplier_number: string; method: PaymentMethod; amount: number; reference: string | null; party: string; user_name: string | null; user_id: string | null }[];
+    return [...suppliers.map((x) => this.row('supplier_payment', x, 'Fournisseur', `Avoir ${x.supplier_number} remboursé`)), ...this.pieces(where, 'IN')];
   }
 
   /** Sorties d'une journée électronique : remboursements, dépenses, fournisseurs, transferts et versement de clôture. */
@@ -191,7 +249,7 @@ export class EmoneyService extends Base {
       .prepare(
         `SELECT x.id, x.paid_at AS at, i.number, x.method, x.amount, x.reference, f.name AS party, u.name AS user_name, x.user_id
          FROM supplier_payments x JOIN supplier_invoices i ON i.id = x.invoice_id JOIN suppliers f ON f.id = x.supplier_id LEFT JOIN users u ON u.id = x.user_id
-         WHERE ${cond} ${bySession ? '' : 'AND x.paid_at > @after'}`,
+         WHERE ${cond} AND i.kind = 'invoice' AND x.method <> 'CASH' ${bySession ? '' : 'AND x.paid_at > @after'}`,
       )
       .all(params) as { id: string; at: string; number: string; method: PaymentMethod; amount: number; reference: string | null; party: string; user_name: string | null; user_id: string | null }[];
     const rebates = this.db
@@ -208,6 +266,7 @@ export class EmoneyService extends Base {
       ...expenses.map((x) => this.row('expense', x, 'Dépense', `${x.number} ${x.label}`)),
       ...suppliers.map((x) => this.row('supplier_payment', x, 'Fournisseur', `Facture ${x.number}`)),
       ...rebates.map((x) => this.row('rebate', x, 'Ristourne', `Bon ${x.number}`)),
+      ...this.pieces(where, 'OUT'),
       ...moves.map((m) => this.moveRow(m)),
     ];
   }
@@ -267,6 +326,7 @@ export class EmoneyService extends Base {
     const inflows = zero();
     for (const r of this.paidOut({ sessionId })) if (isEmoney(r.method) && !r.closing) outflows[r.method] += r.amount;
     for (const m of this.movements({ sessionId, direction: 'IN' })) inflows[m.method] += m.amount;
+    for (const r of this.received({ sessionId })) if (isEmoney(r.method)) inflows[r.method] += r.amount;
     return { outflows, inflows };
   }
 
@@ -291,13 +351,17 @@ export class EmoneyService extends Base {
     }
     const after = last?.closed_at ?? '';
     for (const m of this.movements({ registerId, after, outsideSession: true, direction: 'IN' })) out[m.method] += m.amount;
+    for (const r of this.received({ registerId, after })) if (isEmoney(r.method)) out[r.method] += r.amount;
     for (const r of this.paidOut({ registerId, after })) if (isEmoney(r.method)) out[r.method] -= r.amount;
     return out;
   }
 
   /** Livre de la caisse électronique centrale (ou de toute caisse hors journée) : mouvements, dépenses et fournisseurs, avec le solde par moyen. */
   ledger(registerId: string, opts: { from?: string; to?: string } = {}): { rows: EmoneyLedgerRow[]; balance: Record<EmoneyMethod, Fcfa> } {
-    const entries = this.movements({ registerId, outsideSession: true, direction: 'IN' }).map((m) => ({ ...this.moveRow(m), signed: m.amount }));
+    const entries = [...this.movements({ registerId, outsideSession: true, direction: 'IN' }).map((m) => this.moveRow(m)), ...this.received({ registerId, after: '' })].map((r) => ({
+      ...r,
+      signed: r.amount,
+    }));
     const exits = this.paidOut({ registerId, after: '' }).map((r) => ({ ...r, signed: -r.amount }));
     const running = zero();
     const rows = [...entries, ...exits]

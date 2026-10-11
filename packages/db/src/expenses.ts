@@ -64,6 +64,8 @@ export interface ExpenseInput {
   atRegister?: boolean;
   /** Payée par MoMo/OM au bureau : caisse électronique d'où elle sort (la centrale par défaut). */
   registerId?: string | null;
+  /** Payée dans cette journée ouverte (« Décaisser » de l'écran de trésorerie) : espèces du tiroir ou compte MoMo/OM de la caisse. */
+  sessionId?: string | null;
   /** Gérant qui a autorisé une sortie de caisse faite par un caissier. */
   authorizedBy?: string | null;
   /** Échéance de charge fixe que la dépense constate (charge et mois AAAA-MM). */
@@ -133,7 +135,10 @@ export class ExpenseService extends Base {
     let registerId: string | null = null;
     let date = input.date || this.today();
     const emoney = new EmoneyService(this.db, this.clock);
-    if (input.atRegister) {
+    if (input.sessionId) {
+      ({ registerId, sessionId } = emoney.openSession(ctx.storeId, input.sessionId, input.method));
+      date = this.today();
+    } else if (input.atRegister) {
       if (isPayout(input.method)) {
         // Payée avec le compte MoMo/OM du caissier : elle sort de sa caisse électronique.
         const own = emoney.userRegister(ctx.userId);

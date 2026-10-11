@@ -1,4 +1,5 @@
 import { type Fcfa, splitTtc } from '@superette/core';
+import { STAFF_WAGES_ACCOUNT } from './staff';
 import { AppError, Base, type Context, newId } from './util';
 
 export const JOURNALS = {
@@ -156,6 +157,8 @@ export class AccountingService extends Base {
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
       ...this.expenseEntries(storeId, r, opts),
+      ...this.staffSalaryEntries(storeId, opts),
+      ...this.treasuryPieceEntries(storeId, r, opts),
       ...this.manualEntries(storeId, opts),
     ].filter((e) => (!opts.journal || e.journal === opts.journal) && inRange(e.date, opts.from, opts.to) && e.lines.length > 0);
     return all.sort((a, b) => a.date.localeCompare(b.date) || a.journal.localeCompare(b.journal) || a.ref.localeCompare(b.ref));
@@ -436,6 +439,96 @@ export class AccountingService extends Base {
         ),
       };
     });
+  }
+
+  /**
+   * Salaires constatés : le brut en charge (661) contre le sous-compte de
+   * rémunérations du collaborateur (4211…) ; les avances retenues passent de son
+   * sous-compte d'avances (4251…) à son sous-compte de rémunérations.
+   */
+  private staffSalaryEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT x.number, x.gross, x.deducted, x.label, date(x.at, 'localtime') AS d, s.code, s.name, s.salary_account, s.advance_account
+         FROM staff_salaries x JOIN staff s ON s.id = x.staff_id WHERE x.store_id = ? AND x.status = 'active'`,
+      )
+      .all(storeId) as { number: string; gross: number; deducted: number; label: string; d: string; code: string; name: string; salary_account: string; advance_account: string }[];
+    return rows
+      .filter((x) => inRange(x.d, opts.from, opts.to))
+      .map((x) => {
+        const label = `${x.label}, ${x.name}`;
+        const aux = { code: x.code, name: x.name };
+        return {
+          journal: 'OD' as const,
+          date: x.d,
+          ref: x.number,
+          label,
+          source: 'auto' as const,
+          lines: [
+            side(STAFF_WAGES_ACCOUNT, x.gross, label),
+            side(x.salary_account, -x.gross, label, aux),
+            side(x.salary_account, x.deducted, `Avances retenues, ${x.name}`, aux),
+            side(x.advance_account, -x.deducted, `Avances retenues, ${x.name}`, aux),
+          ].filter((l) => l.debit || l.credit),
+        };
+      });
+  }
+
+  /**
+   * Pièces d'« Encaisser » et « Décaisser » : la trésorerie (caisse, centrale,
+   * Mobile Money, banque) contre le sous-compte du collaborateur (avance,
+   * salaire), le client (avoir remboursé) ou le compte choisi.
+   */
+  private treasuryPieceEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.number, e.direction, e.kind, e.amount, e.method, e.label, e.reference, e.account_id, e.from_central, date(e.at, 'localtime') AS d,
+                s.code AS staff_code, s.name AS staff_name, s.salary_account, s.advance_account, c.code AS customer_code, c.name AS customer_name
+         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id
+         WHERE e.store_id = ? AND e.status = 'active'`,
+      )
+      .all(storeId) as {
+      number: string;
+      direction: 'IN' | 'OUT';
+      kind: string;
+      amount: number;
+      method: string;
+      label: string;
+      reference: string | null;
+      account_id: string | null;
+      from_central: number;
+      d: string;
+      staff_code: string | null;
+      staff_name: string | null;
+      salary_account: string | null;
+      advance_account: string | null;
+      customer_code: string | null;
+      customer_name: string | null;
+    }[];
+    return rows
+      .filter((e) => inRange(e.d, opts.from, opts.to))
+      .map((e) => {
+        const sign = e.direction === 'IN' ? 1 : -1;
+        const label = `${e.label}${e.reference ? ` (${e.reference})` : ''}`;
+        const treasury = e.from_central ? r.central_cash : r[METHOD_ROLE[e.method] ?? 'bank'];
+        const staff = e.staff_code ? { code: e.staff_code, name: e.staff_name ?? '' } : null;
+        const other =
+          e.kind === 'staff_salary'
+            ? side(e.salary_account!, -sign * e.amount, label, staff)
+            : e.kind === 'staff_advance' || e.kind === 'staff_repayment'
+              ? side(e.advance_account!, -sign * e.amount, label, staff)
+              : e.kind === 'customer_refund'
+                ? side(r.customers, -sign * e.amount, label, { code: e.customer_code ?? '', name: e.customer_name ?? '' })
+                : side(e.account_id ?? r.transfer, -sign * e.amount, label);
+        return {
+          journal: e.from_central ? ('CA' as const) : METHOD_JOURNAL(e.method),
+          date: e.d,
+          ref: e.number,
+          label,
+          source: 'auto' as const,
+          lines: [side(treasury, sign * e.amount, label), other],
+        };
+      });
   }
 
   private manualEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {

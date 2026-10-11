@@ -31,7 +31,7 @@ import type { PromotionService } from './promotions';
 import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
 import type { TreasuryService } from './treasury';
-import { type EmoneyRow, type EmoneyService, isEmoney } from './emoney';
+import { ENTRY_KINDS, type EmoneyRow, type EmoneyService, type EntryKind, isEmoney } from './emoney';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
 
@@ -67,7 +67,27 @@ export interface CashSession {
 }
 
 /** Ligne d'entrée ou de sortie d'espèces d'une journée de caisse. */
+/** Pièce d'où vient une ligne d'entrée ou de sortie de caisse. */
+export type JournalSource =
+  | 'sale'
+  | 'refund'
+  | 'customer_payment'
+  | 'cash_operation'
+  | 'expense'
+  | 'central'
+  | 'entry'
+  | 'supplier_payment'
+  | 'movement'
+  | 'rebate';
+
 export interface CashJournalRow {
+  source: JournalSource;
+  id: string;
+  number?: string;
+  /** Nature d'une pièce d'« Encaisser » ou « Décaisser » (avance, salaire, autre…). */
+  kind?: string | null;
+  method_label?: string;
+  reference?: string | null;
   at: string;
   amount: Fcfa;
   nature: string;
@@ -215,7 +235,7 @@ export interface ZReport {
   customerReceipts: { method: string; label: string; amount: Fcfa }[];
   /** Dépenses payées avec les espèces du tiroir. */
   expenses: { number: string; label: string; amount: Fcfa }[];
-  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expenses: Fcfa; expected: Fcfa };
+  cash: { openingFloat: Fcfa; cashSales: Fcfa; cashRefunds: Fcfa; cashIn: Fcfa; cashOut: Fcfa; customerReceipts: Fcfa; expenses: Fcfa; otherIn: Fcfa; otherOut: Fcfa; expected: Fcfa };
   counted: Fcfa | null;
   difference: Fcfa | null;
   /** Type de la caisse : une caisse électronique ou banque n'a ni tiroir ni fond. */
@@ -441,12 +461,12 @@ export class PosService extends Base {
    * Apport (IN) ou prélèvement (OUT) d'espèces en cours de journée : l'apport
    * vient de la caisse centrale, le prélèvement y est versé.
    */
-  cashOperation(ctx: Context, type: 'IN' | 'OUT', amount: Fcfa, reason: string): void {
+  cashOperation(ctx: Context, type: 'IN' | 'OUT', amount: Fcfa, reason: string): string {
     const session = this.requireOpenSession(ctx);
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     if (!reason.trim()) throw new AppError('Le motif est obligatoire', 'INVALID');
     const register = this.admin.getRegister(session.register_id);
-    this.tx(() => {
+    return this.tx(() => {
       const id = newId();
       const row = { id, session_id: session.id, type, amount, reason: reason.trim(), user_id: ctx.userId, at: this.now() };
       this.db
@@ -463,6 +483,7 @@ export class PosService extends Base {
         cashOperationId: id,
       });
       this.audit(ctx.userId, type === 'IN' ? 'cash.in' : 'cash.out', 'cash_session', session.id, { amount, reason });
+      return id;
     });
   }
 
@@ -1013,6 +1034,16 @@ export class PosService extends Base {
     const expenses = this.db
       .prepare("SELECT number, label, amount FROM expenses WHERE session_id = ? AND status = 'active' AND method = 'CASH' ORDER BY created_at")
       .all(sessionId) as ZReport['expenses'];
+    // « Encaisser » et « Décaisser » : pièces de trésorerie, fournisseurs payés ou remboursés en espèces à cette caisse.
+    const other = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount END), 0) AS inflow, COALESCE(SUM(CASE WHEN direction = 'OUT' THEN amount END), 0) AS outflow FROM (
+           SELECT direction, amount FROM treasury_entries WHERE session_id = @id AND status = 'active' AND method = 'CASH'
+           UNION ALL
+           SELECT CASE WHEN i.kind = 'invoice' THEN 'OUT' ELSE 'IN' END, p.amount FROM supplier_payments p JOIN supplier_invoices i ON i.id = p.invoice_id
+           WHERE p.session_id = @id AND p.method = 'CASH')`,
+      )
+      .get({ id: sessionId }) as { inflow: number; outflow: number };
     const cash = {
       openingFloat: session.opening_float,
       cashSales,
@@ -1021,6 +1052,8 @@ export class PosService extends Base {
       cashOut,
       customerReceipts: receiptsCash,
       expenses: expenses.reduce((t, e) => t + e.amount, 0),
+      otherIn: other.inflow,
+      otherOut: other.outflow,
     };
     const { expected } = closingDifference(cash, {});
     return {
@@ -1297,32 +1330,40 @@ export class PosService extends Base {
   cashJournal(sessionId: string): { entries: CashJournalRow[]; exits: CashJournalRow[]; creditSales: Fcfa } {
     const sales = this.db
       .prepare(
-        `SELECT s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name, s.user_id,
+        `SELECT s.id, s.created_at AS at, s.number, s.kind, COALESCE(c.name, s.client_name) AS party, u.name AS user_name, s.user_id,
                 SUM(p.amount) - s.change_given AS amount
          FROM sales s JOIN sale_payments p ON p.sale_id = s.id AND p.method = 'CASH' JOIN users u ON u.id = s.user_id
          LEFT JOIN customers c ON c.id = s.customer_id
          WHERE s.session_id = ? AND s.status = 'completed' GROUP BY s.id ORDER BY s.created_at`,
       )
-      .all(sessionId) as { at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; user_id: string; amount: number }[];
+      .all(sessionId) as { id: string; at: string; number: string; kind: 'sale' | 'return'; party: string | null; user_name: string; user_id: string; amount: number }[];
     const receipts = this.db
       .prepare(
-        `SELECT p.paid_at AS at, p.number, c.name AS party, u.name AS user_name, p.user_id, p.amount FROM customer_payments p
+        `SELECT p.id, p.paid_at AS at, p.number, p.reference, c.name AS party, u.name AS user_name, p.user_id, p.amount FROM customer_payments p
          JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.user_id
          WHERE p.session_id = ? AND p.method = 'CASH' ORDER BY p.paid_at`,
       )
-      .all(sessionId) as { at: string; number: string; party: string; user_name: string | null; user_id: string | null; amount: number }[];
+      .all(sessionId) as { id: string; at: string; number: string; reference: string | null; party: string; user_name: string | null; user_id: string | null; amount: number }[];
     const ops = this.db
-      .prepare('SELECT o.at, o.type, o.amount, o.reason, u.name AS user_name, o.user_id FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
-      .all(sessionId) as { at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null; user_id: string | null }[];
+      .prepare('SELECT o.id, o.at, o.type, o.amount, o.reason, u.name AS user_name, o.user_id FROM cash_operations o LEFT JOIN users u ON u.id = o.user_id WHERE o.session_id = ? ORDER BY o.at')
+      .all(sessionId) as { id: string; at: string; type: 'IN' | 'OUT'; amount: number; reason: string; user_name: string | null; user_id: string | null }[];
     const expenses = this.db
       .prepare(
-        `SELECT e.created_at AS at, e.number, e.label, e.beneficiary, e.amount, u.name AS user_name, e.user_id FROM expenses e LEFT JOIN users u ON u.id = e.user_id
+        `SELECT e.id, e.created_at AS at, e.number, e.label, e.beneficiary, e.reference, e.amount, u.name AS user_name, e.user_id FROM expenses e LEFT JOIN users u ON u.id = e.user_id
          WHERE e.session_id = ? AND e.status = 'active' AND e.method = 'CASH' ORDER BY e.created_at`,
       )
-      .all(sessionId) as { at: string; number: string; label: string; beneficiary: string | null; amount: number; user_name: string | null; user_id: string | null }[];
+      .all(sessionId) as { id: string; at: string; number: string; label: string; beneficiary: string | null; reference: string | null; amount: number; user_name: string | null; user_id: string | null }[];
+    const suppliers = this.db
+      .prepare(
+        `SELECT p.id, p.paid_at AS at, i.number, i.kind, i.supplier_number, p.reference, f.name AS party, p.amount, u.name AS user_name, p.user_id
+         FROM supplier_payments p JOIN supplier_invoices i ON i.id = p.invoice_id JOIN suppliers f ON f.id = p.supplier_id LEFT JOIN users u ON u.id = p.user_id
+         WHERE p.session_id = ? AND p.method = 'CASH' ORDER BY p.paid_at`,
+      )
+      .all(sessionId) as { id: string; at: string; number: string; kind: 'invoice' | 'credit_note'; supplier_number: string; reference: string | null; party: string; amount: number; user_name: string | null; user_id: string | null }[];
+    const pieces = this.desk(sessionId, 'CASH');
     const closing = this.db
-      .prepare("SELECT at, number, amount, label FROM central_cash_movements WHERE session_id = ? AND kind = 'DEPOSIT' AND cash_operation_id IS NULL ORDER BY at")
-      .all(sessionId) as { at: string; number: string; amount: number; label: string }[];
+      .prepare("SELECT id, at, number, amount, label FROM central_cash_movements WHERE session_id = ? AND kind = 'DEPOSIT' AND cash_operation_id IS NULL ORDER BY at")
+      .all(sessionId) as { id: string; at: string; number: string; amount: number; label: string }[];
     const credit = this.db
       .prepare(
         `SELECT COALESCE(SUM(p.amount), 0) FROM sale_payments p JOIN sales s ON s.id = p.sale_id
@@ -1330,18 +1371,67 @@ export class PosService extends Base {
       )
       .pluck()
       .get(sessionId) as number;
+    const cash = PAYMENT_METHODS.CASH;
     const entries: CashJournalRow[] = [
-      ...sales.filter((x) => x.amount > 0).map((x) => ({ at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
-      ...receipts.map((x) => ({ at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
-      ...ops.filter((x) => x.type === 'IN').map((x) => ({ at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
-    ].sort((a, b) => a.at.localeCompare(b.at));
+      ...sales.filter((x) => x.amount > 0).map((x) => ({ source: 'sale' as const, id: x.id, number: x.number, at: x.at, amount: x.amount, nature: 'Vente', label: `Ticket ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...receipts.map((x) => ({ source: 'customer_payment' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Règlement client', label: `Reçu ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...ops.filter((x) => x.type === 'IN').map((x) => ({ source: 'cash_operation' as const, id: x.id, at: x.at, amount: x.amount, nature: 'Apport', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
+      ...suppliers.filter((x) => x.kind === 'credit_note').map((x) => ({ source: 'supplier_payment' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Fournisseur', label: `Avoir ${x.supplier_number} remboursé`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...pieces.entries,
+    ]
+      .map((r) => ({ method_label: cash, ...r }))
+      .sort((a, b) => a.at.localeCompare(b.at));
     const exits: CashJournalRow[] = [
-      ...sales.filter((x) => x.amount < 0).map((x) => ({ at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
-      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
-      ...expenses.map((x) => ({ at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name, user_id: x.user_id })),
-      ...closing.map((x) => ({ at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, user_id: null, closing: true })),
-    ].sort((a, b) => a.at.localeCompare(b.at));
+      ...sales.filter((x) => x.amount < 0).map((x) => ({ source: 'refund' as const, id: x.id, number: x.number, at: x.at, amount: -x.amount, nature: 'Remboursement', label: `Retour ${x.number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...ops.filter((x) => x.type === 'OUT').map((x) => ({ source: 'cash_operation' as const, id: x.id, at: x.at, amount: x.amount, nature: 'Prélèvement', label: x.reason, party: 'Caisse centrale', user_name: x.user_name, user_id: x.user_id })),
+      ...expenses.map((x) => ({ source: 'expense' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Dépense', label: `${x.number} ${x.label}`, party: x.beneficiary, user_name: x.user_name, user_id: x.user_id })),
+      ...suppliers.filter((x) => x.kind === 'invoice').map((x) => ({ source: 'supplier_payment' as const, id: x.id, number: x.number, reference: x.reference, at: x.at, amount: x.amount, nature: 'Règlement fournisseur', label: `Facture ${x.supplier_number}`, party: x.party, user_name: x.user_name, user_id: x.user_id })),
+      ...pieces.exits,
+      ...closing.map((x) => ({ source: 'central' as const, id: x.id, number: x.number, at: x.at, amount: x.amount, nature: 'Versement', label: `${x.number} ${x.label}`, party: 'Caisse centrale', user_name: null, user_id: null, closing: true })),
+    ]
+      .map((r) => ({ method_label: cash, ...r }))
+      .sort((a, b) => a.at.localeCompare(b.at));
     return { entries, exits, creditSales: credit };
+  }
+
+  /**
+   * Pièces d'« Encaisser » et « Décaisser » d'une journée (avances, salaires,
+   * remboursements, autres), en espèces ou par MoMo/OM selon la caisse.
+   */
+  desk(sessionId: string, method: 'CASH' | 'EMONEY'): { entries: CashJournalRow[]; exits: CashJournalRow[] } {
+    const rows = this.db
+      .prepare(
+        `SELECT e.id, e.at, e.number, e.direction, e.kind, e.amount, e.method, e.reference, e.piece, e.label,
+                COALESCE(s.name, c.name, e.party) AS party, u.name AS user_name, e.user_id
+         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.session_id = ? AND e.status = 'active' AND ${method === 'CASH' ? "e.method = 'CASH'" : "e.method <> 'CASH'"} ORDER BY e.at`,
+      )
+      .all(sessionId) as { id: string; at: string; number: string; direction: 'IN' | 'OUT'; kind: EntryKind; amount: number; method: PaymentMethod; reference: string | null; piece: string | null; label: string; party: string | null; user_name: string | null; user_id: string | null }[];
+    const map = (x: (typeof rows)[number]): CashJournalRow => ({
+      source: 'entry',
+      id: x.id,
+      number: x.number,
+      kind: x.kind,
+      method_label: PAYMENT_METHODS[x.method] ?? x.method,
+      reference: x.reference ?? x.piece,
+      at: x.at,
+      amount: x.amount,
+      nature: ENTRY_KINDS[x.kind],
+      label: `${x.number} ${x.label}`,
+      party: x.party,
+      user_name: x.user_name,
+      user_id: x.user_id,
+    });
+    return { entries: rows.filter((x) => x.direction === 'IN').map(map), exits: rows.filter((x) => x.direction === 'OUT').map(map) };
+  }
+
+  /** Entrées et sorties d'une journée, quelle que soit la caisse : espèces, ou comptes MoMo/OM d'une caisse électronique. */
+  journal(sessionId: string): { entries: CashJournalRow[]; exits: CashJournalRow[] } {
+    const se = this.getSession(sessionId);
+    const kind = this.admin.getRegister(se.register_id).kind;
+    if (kind !== 'electronic') return this.cashJournal(sessionId);
+    const map = (r: EmoneyRow): CashJournalRow => ({ ...r, label: r.label, source: r.source === 'sale' ? 'sale' : r.source });
+    return { entries: this.emoney.sessionEntries(sessionId).map(map), exits: this.emoney.sessionExits(sessionId).map(map) };
   }
 
   /** Écart au-delà du seuil, pas encore justifié par un gérant. */

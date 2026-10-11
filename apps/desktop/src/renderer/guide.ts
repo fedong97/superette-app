@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.34.0',
+    items: [
+      'Opérations de trésorerie : boutons « Encaisser » et « Décaisser » sur chaque volet, comme dans KONTROL, avec le type (client, fournisseur, personnel, charge, reversement, autre), le n° de pièce et le motif.',
+      'Bouton « Action » : imprimer le reçu (ticket ou A4), décharge à faire signer, antidater, convertir une sortie en règlement fournisseur ou en remboursement client, supprimer.',
+      '« Totaux par nature d’entrée / sortie » sous les volets de la journée.',
+      'Charge › Collaborateurs : fiche de chaque employé, avec ses sous-comptes 4211… (salaires dus) et 4251… (avances) créés en comptabilité.',
+      'Salaires du mois : constater le salaire, retenir les avances, payer le net au bureau ou à la caisse, imprimer le bulletin et l’extrait de compte.',
+    ],
+  },
+  {
     version: '0.33.0',
     items: [
       'Le journal d’une caisse électronique montre enfin ses entrées et ses sorties, avec la référence de chaque transfert.',

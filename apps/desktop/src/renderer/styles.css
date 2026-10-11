@@ -679,3 +679,27 @@ label.button.disabled { opacity: 0.45; cursor: default; }
 
 /* 0.32.0 : grande taille de texte (Paramètres › Affichage) */
 html.large-text { zoom: 1.15; }
+
+/* 0.34.0 : Encaisser, Décaisser, Action, collaborateurs */
+.tre-pane h3.desk-title { display: flex; align-items: center; gap: 8px; }
+.desk-buttons { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.desk-buttons button { padding: 4px 12px; font-size: 13px; }
+.desk-action > button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font-weight: 700; color: var(--text, #14213d); }
+.menu-drop.right { left: auto; right: 0; min-width: 270px; }
+.menu-drop .menu-title { padding: 6px 10px 2px; font-style: normal; font-weight: 800; color: var(--muted); }
+.menu-drop button:disabled { color: #a3abb8; }
+form.desk { min-width: 640px; }
+.desk-head { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 10px; }
+.desk-head.two { grid-template-columns: 1fr 1fr; }
+.desk-types { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.desk-types label { display: flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-weight: 700; }
+.desk-types label:has(input:checked) { background: #e6f2ef; border-color: var(--brand); }
+.desk-types input { width: auto; margin: 0; }
+.desk-types.sub label { font-weight: 600; font-size: 13px; }
+.desk-totals-box { margin-top: 8px; }
+.desk-totals { max-width: 640px; margin-top: 6px; }
+.staff-cards { display: flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.staff-cards > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 180px; }
+.staff-cards small { display: block; color: var(--muted); }
+.staff-cards b { font-size: 18px; }
+table.list tr.cancelled td { text-decoration: line-through; color: var(--muted); }

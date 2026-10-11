@@ -494,6 +494,7 @@ export function createPrinter(s: Services): Printer {
           ${row('Fond à l’ouverture', z.cash.openingFloat)}${se.carried_float !== null ? row('dont fond laissé la veille', se.carried_float) : ''}
           ${row('Ventes en espèces', z.cash.cashSales)}${row('Règlements clients en espèces', z.cash.customerReceipts)}${row('Apports', z.cash.cashIn)}
           ${row('Remboursements', -z.cash.cashRefunds)}${row('Prélèvements versés à la centrale', -z.cash.cashOut)}${row('Dépenses payées', -z.cash.expenses)}
+          ${z.cash.otherIn ? row('Autres entrées (Encaisser)', z.cash.otherIn) : ''}${z.cash.otherOut ? row('Autres sorties (Décaisser)', -z.cash.otherOut) : ''}
           ${row('Attendu à la clôture', z.cash.expected, true)}${row('Relevé à la clôture', z.counted)}${se.first_counted !== null && se.first_counted !== z.counted ? row('Premier comptage', se.first_counted) : ''}
           ${row('Différentiel', z.difference, true)}${se.deposit !== null ? row('Versé à la caisse centrale', se.deposit) + row('Fond laissé dans le tiroir', se.float_left) : ''}
         </table><table class="totals" style="width:50%;margin:0">
@@ -681,6 +682,95 @@ export function createPrinter(s: Services): Printer {
 
     async rebateVoucher(entryId) {
       await printReceipt(s.receipts.rebateVoucher(entryId), false);
+    },
+
+    async deskTicket(sessionId, source, id, opts) {
+      await printReceipt(s.receipts.deskTicket({ ...s.cashdesk.row(sessionId, source, id), duplicate: opts?.duplicate, authorizedBy: opts?.authorizedBy }), false);
+    },
+
+    async officeVoucher(entryId) {
+      const e = s.cashdesk.get(entryId);
+      await printReceipt(s.receipts.deskTicket({ ...s.cashdesk.entryRow(entryId), authorizedBy: e.authorized_by_name }), false);
+    },
+
+    async deskA4(sessionId, source, id, opts) {
+      const { row: x, direction, register } = s.cashdesk.row(sessionId, source, id);
+      const store = s.admin.getStore(s.pos.getSession(sessionId).store_id);
+      await printA4(`${a4Head(store)}
+        <h1>${direction === 'IN' ? 'Reçu de caisse' : 'Bon de sortie de caisse'}${opts?.duplicate ? ' · DUPLICATA' : ''}</h1>
+        <table class="totals" style="width:100%">
+          <tr><td>Pièce</td><td>${esc(x.number ?? '')}</td></tr>
+          <tr><td>Date</td><td>${dateFr(x.at)}</td></tr>
+          <tr><td>Caisse</td><td>${esc(register)}${x.user_name ? ` · ${esc(x.user_name)}` : ''}</td></tr>
+          <tr><td>Nature</td><td>${esc(x.nature)}</td></tr>
+          <tr><td>Motif</td><td>${esc(x.label)}</td></tr>
+          <tr><td>${direction === 'IN' ? 'Reçu de' : 'Bénéficiaire'}</td><td>${esc(x.party ?? '')}</td></tr>
+          <tr><td>Mode</td><td>${esc(x.method_label ?? PAYMENT_METHODS.CASH)}${x.reference ? ` · Réf. ${esc(x.reference)}` : ''}</td></tr>
+          <tr class="total"><td>Montant</td><td>${money(x.amount)} FCFA</td></tr>
+        </table>
+        <p>Arrêté à la somme de <b>${esc(numberToWordsFr(x.amount))} francs CFA</b>.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:18mm"><div>${direction === 'IN' ? 'Le client' : 'Le bénéficiaire'}</div><div>Le caissier</div></div>`);
+    },
+
+    async discharge(sessionId, source, id) {
+      const { row: x, register } = s.cashdesk.row(sessionId, source, id);
+      const store = s.admin.getStore(s.pos.getSession(sessionId).store_id);
+      const day = new Date(x.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      await printA4(`${a4Head(store)}
+        <h1 style="text-align:center;margin-top:10mm">DÉCHARGE</h1>
+        <p style="text-align:center" class="muted">Pièce ${esc(x.number ?? '')} · ${esc(register)}</p>
+        <p style="font-size:12pt;line-height:2;margin-top:10mm">
+          Je soussigné(e), <b>${x.party ? esc(x.party) : '..............................................................'}</b>,
+          CNI n° ..............................., reconnais avoir reçu de <b>${esc(store.name)}</b>
+          la somme de <b>${money(x.amount)} FCFA</b> (${esc(numberToWordsFr(x.amount))} francs CFA),
+          ${x.method_label && x.method_label !== PAYMENT_METHODS.CASH ? `par ${esc(x.method_label)}${x.reference ? ` (réf. ${esc(x.reference)})` : ''}, ` : 'en espèces, '}
+          au titre de : <b>${esc(x.nature)}, ${esc(x.label)}</b>.
+        </p>
+        <p style="font-size:12pt">Fait à ....................................., le ${esc(day)}.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:14mm;font-size:11pt">
+          <div style="text-align:center">Le bénéficiaire<br><span class="muted">(lu et approuvé)</span></div>
+          <div style="text-align:center">Le caissier<br><span class="muted">${esc(x.user_name ?? '')}</span></div>
+          <div style="text-align:center">Le responsable</div>
+        </div>`);
+    },
+
+    async salarySlip(salaryId) {
+      const { salary: x, staff: st, payments, periodLabel } = s.staff.slip(salaryId);
+      const store = s.admin.getStore(x.store_id);
+      const pays = payments
+        .map((p) => `<tr><td>${dateFr(p.at)}</td><td>${esc(p.number)}</td><td>${esc(PAYMENT_METHODS[p.method as 'CASH'] ?? p.method)}${p.reference ? ` · ${esc(p.reference)}` : ''}${p.register_name ? ` · ${esc(p.register_name)}` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Bulletin de paie, ${esc(periodLabel)}</h1>
+        <div class="box" style="margin-bottom:6mm"><b>${esc(st.name)}</b>${st.position ? ` · ${esc(st.position)}` : ''}<br>
+          Matricule ${esc(st.code)}${st.id_card ? ` · CNI ${esc(st.id_card)}` : ''}${st.phone ? ` · ${esc(st.phone)}` : ''}${st.hired_on ? `<br>Entré(e) le ${dayFr(st.hired_on)}` : ''}</div>
+        <table class="totals" style="width:100%">
+          <tr><td>Salaire brut du mois</td><td class="r">${money(x.gross)}</td></tr>
+          <tr><td>Avances et acomptes retenus</td><td class="r">${x.deducted ? `-${money(x.deducted)}` : '0'}</td></tr>
+          <tr class="total"><td>Net à payer</td><td class="r">${money(x.net)}</td></tr>
+          <tr><td>Déjà payé</td><td class="r">${money(x.paid)}</td></tr>
+          <tr class="total"><td>Reste à payer</td><td class="r">${money(x.rest)}</td></tr>
+        </table>
+        ${pays ? `<h3>Paiements</h3><table><thead><tr><th>Date</th><th>Pièce</th><th>Mode</th><th class="r">Montant</th></tr></thead><tbody>${pays}</tbody></table>` : ''}
+        <p class="muted">Avances restant à rembourser : ${money(Math.max(0, st.advances))} FCFA. Retenues CNPS et IRPP non calculées dans cette version.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:16mm"><div>Le collaborateur</div><div>L'employeur</div></div>`);
+    },
+
+    async staffStatement(staffId, from, to) {
+      const st = s.staff.statement(staffId, { from: from ?? undefined, to: to ?? undefined });
+      const store = s.admin.getStore(st.staff.store_id);
+      const rows = st.lines
+        .map(
+          (l) =>
+            `<tr><td>${dateFr(l.at)}</td><td>${esc(l.number)}</td><td>${esc(l.label)}</td><td class="r">${l.due ? money(l.due) : ''}</td><td class="r">${money(l.dueBalance)}</td><td class="r">${l.advance ? money(l.advance) : ''}</td><td class="r">${money(l.advanceBalance)}</td></tr>`,
+        )
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Extrait de compte, ${esc(st.staff.name)}</h1>
+        <p>${periodFr(from, to)} · comptes ${esc(st.staff.salary_account)} (rémunérations dues) et ${esc(st.staff.advance_account)} (avances)</p>
+        <table><thead><tr><th>Date</th><th>Pièce</th><th>Libellé</th><th class="r">Salaire</th><th class="r">Dû au collaborateur</th><th class="r">Avance</th><th class="r">Avances à rembourser</th></tr></thead>
+        <tbody>${from ? `<tr><td colspan="4">Soldes au ${dayFr(from)}</td><td class="r">${money(st.opening.due)}</td><td></td><td class="r">${money(st.opening.advances)}</td></tr>` : ''}${rows}
+        <tr class="total"><td colspan="4">Soldes</td><td class="r">${money(st.staff.due)}</td><td></td><td class="r">${money(st.staff.advances)}</td></tr></tbody></table>`);
     },
 
     async vatReturn(storeId, month) {

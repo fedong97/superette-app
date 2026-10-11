@@ -1272,4 +1272,85 @@ ALTER TABLE rebate_entries ADD COLUMN register_id TEXT;
 ALTER TABLE rebate_entries ADD COLUMN session_id TEXT;
 `,
   },
+  {
+    version: 28,
+    name: 'collaborateurs, salaires, encaisser et décaisser',
+    sql: `
+-- Collaborateurs (employés, livreurs, gérants…) : chacun a deux sous-comptes de tiers,
+-- ses rémunérations dues (4211…) et ses avances (4251…).
+CREATE TABLE staff (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  position TEXT,
+  phone TEXT,
+  id_card TEXT,
+  base_salary INTEGER NOT NULL DEFAULT 0 CHECK (base_salary >= 0),
+  hired_on TEXT,
+  user_id TEXT,
+  salary_account TEXT NOT NULL,
+  advance_account TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- Salaire du mois constaté : le brut au 661 contre le sous-compte du collaborateur,
+-- les avances retenues passent de son compte d'avances à son compte de rémunérations.
+CREATE TABLE staff_salaries (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  staff_id TEXT NOT NULL REFERENCES staff(id),
+  period TEXT NOT NULL,
+  gross INTEGER NOT NULL CHECK (gross > 0),
+  deducted INTEGER NOT NULL DEFAULT 0 CHECK (deducted >= 0),
+  label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  user_id TEXT,
+  at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX staff_salaries_staff ON staff_salaries(staff_id, period);
+-- Entrées et sorties saisies par « Encaisser » et « Décaisser » qui ne sont ni une vente,
+-- ni un règlement client ou fournisseur, ni une dépense : avance, salaire ou remboursement
+-- d'un collaborateur, remboursement d'un client, autre entrée ou sortie (compte choisi).
+-- Faites à une caisse ouverte (session_id), au bureau en espèces (from_central) ou par MoMo/OM, banque.
+CREATE TABLE treasury_entries (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  direction TEXT NOT NULL CHECK (direction IN ('IN', 'OUT')),
+  kind TEXT NOT NULL CHECK (kind IN ('staff_advance', 'staff_salary', 'staff_repayment', 'customer_refund', 'other')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  method TEXT NOT NULL,
+  reference TEXT,
+  piece TEXT,
+  label TEXT NOT NULL,
+  party TEXT,
+  staff_id TEXT,
+  salary_id TEXT,
+  customer_id TEXT,
+  account_id TEXT,
+  register_id TEXT,
+  session_id TEXT,
+  from_central INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  cancelled_by TEXT,
+  authorized_by TEXT,
+  printed INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX treasury_entries_session ON treasury_entries(session_id);
+CREATE INDEX treasury_entries_staff ON treasury_entries(staff_id);
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES
+  ('4251', 'Personnel, avances et acomptes', NULL),
+  ('4711', 'Débiteurs et créditeurs divers (compte d''attente)', NULL);
+`,
+  },
 ];

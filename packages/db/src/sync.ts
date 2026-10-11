@@ -59,6 +59,9 @@ const TABLES: Record<string, string> = {
   emoney_movement: 'emoney_movements',
   inventory_entry: 'inventory_entries',
   rebate_entry: 'rebate_entries',
+  staff: 'staff',
+  staff_salary: 'staff_salaries',
+  treasury_entry: 'treasury_entries',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */

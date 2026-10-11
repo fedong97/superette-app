@@ -3,7 +3,7 @@ import type { AdminService } from './admin';
 import { CUSTOMER_PAYMENT_METHODS, type CustomerService } from './customers';
 import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
 import type { Db } from './database';
-import type { PosService } from './pos';
+import type { CashJournalRow, PosService } from './pos';
 import type { TreasuryService } from './treasury';
 import type { InventoryService } from './inventories';
 import { REBATE_KINDS, type RebateService } from './rebates';
@@ -158,6 +158,8 @@ export class ReceiptService extends Base {
     r.push(row('Remboursements', -z.cash.cashRefunds), row('Apports', z.cash.cashIn), row('Prélèvements', -z.cash.cashOut));
     if (z.cash.customerReceipts) r.push(row('Règlements clients', z.cash.customerReceipts));
     if (z.cash.expenses) r.push(row('Dépenses payées', -z.cash.expenses));
+    if (z.cash.otherIn) r.push(row('Autres entrées (Encaisser)', z.cash.otherIn));
+    if (z.cash.otherOut) r.push(row('Autres sorties (Décaisser)', -z.cash.otherOut));
     r.push({ ...row('Théorique', z.cash.expected), bold: true });
     if (z.counted !== null) r.push(row('Compté', z.counted), { ...row('Écart', z.difference ?? 0), bold: true });
     if (z.session.gap_reason) r.push({ t: 'text', text: `Motif de l'écart : ${z.session.gap_reason}` });
@@ -344,6 +346,39 @@ export class ReceiptService extends Base {
     r.push({ t: 'text', text: `${EXPENSE_PAYMENT_METHODS[e.method]}${e.reference ? ` ${e.reference}` : ''}` });
     if (e.authorized_by_name) r.push({ t: 'text', text: `Autorisé par ${e.authorized_by_name}` });
     r.push({ t: 'rule' }, { t: 'row', left: 'Le bénéficiaire', right: 'Le responsable' }, { t: 'feed' }, { t: 'feed' }, { t: 'feed' });
+    return r;
+  }
+
+  /**
+   * Reçu d'une entrée ou bon d'une sortie de caisse, tels que les montrent les
+   * Opérations de trésorerie (« Imprimer le reçu », bon de « Décaisser »).
+   */
+  deskTicket(input: { row: CashJournalRow; direction: 'IN' | 'OUT'; register: string; duplicate?: boolean; authorizedBy?: string | null }): Receipt {
+    const { row: x, direction } = input;
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: direction === 'IN' ? 'REÇU DE CAISSE' : 'BON DE SORTIE DE CAISSE', align: 'center', bold: true },
+      ...(input.duplicate ? [{ t: 'text' as const, text: 'DUPLICATA', align: 'center' as const, bold: true }] : []),
+      ...(x.number ? [{ t: 'text' as const, text: x.number }] : []),
+      { t: 'text', text: [dateFr(x.at), input.register, x.user_name].filter(Boolean).join(' · ') },
+      { t: 'rule' },
+      { t: 'text', text: x.nature },
+      { t: 'text', text: x.label, bold: true },
+    ];
+    if (x.party) r.push({ t: 'text', text: `${direction === 'IN' ? 'Reçu de' : 'Bénéficiaire'} : ${x.party}` });
+    r.push(
+      { t: 'rule' },
+      { t: 'row', left: 'Montant FCFA', right: money(x.amount), bold: true, big: true },
+      { t: 'text', text: `${x.method_label ?? PAYMENT_METHODS.CASH}${x.reference ? ` · Réf. ${x.reference}` : ''}` },
+    );
+    if (input.authorizedBy) r.push({ t: 'text', text: `Autorisé par ${input.authorizedBy}` });
+    r.push(
+      { t: 'rule' },
+      { t: 'row', left: direction === 'IN' ? 'Le client' : 'Le bénéficiaire', right: 'Le caissier' },
+      { t: 'feed' },
+      { t: 'feed' },
+      { t: 'feed' },
+    );
     return r;
   }
 

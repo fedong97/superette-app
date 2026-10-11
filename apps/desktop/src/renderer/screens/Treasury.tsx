@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BANK_METHODS, DENOMINATIONS_FCFA, ELECTRONIC_METHODS, PAYMENT_METHODS, type PaymentMethod, type RegisterKind, countedTotal } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { CashInDialog, CashOutDialog, DeskActions, type DeskProps, type DeskRow, NatureTotals } from './CashDesk';
 import { EmoneyCentral } from './EmoneyCentral';
 import { ZView } from './PosDialogs';
 
@@ -350,8 +351,24 @@ function Day({
   // Caisse électronique : entrées et sorties du compte, avec le moyen et la référence.
   const ej = z.emoneyJournal;
   const ejRows = (rows: NonNullable<typeof ej>['entries']): CashRow[] =>
-    rows.map((r) => ({ at: r.at, amount: r.amount, nature: r.nature, label: `${r.label} · ${r.method_label}${r.reference ? ` ${r.reference}` : ''}`, party: r.party, user_name: r.user_name, user_id: r.user_id, closing: r.closing }));
+    rows.map((r) => ({
+      source: r.source,
+      id: r.id,
+      number: r.number,
+      kind: r.kind,
+      at: r.at,
+      amount: r.amount,
+      nature: r.nature,
+      label: `${r.label} · ${r.method_label}${r.reference ? ` ${r.reference}` : ''}`,
+      party: r.party,
+      user_name: r.user_name,
+      user_id: r.user_id,
+      closing: r.closing,
+    }));
   const [eview, setEview] = useState<'journal' | 'z'>('journal');
+  // Encaisser, Décaisser et le bouton Action de chaque volet, comme dans KONTROL.
+  const desk: DeskProps | null = can('cash_desk') ? { sessionId: se.id, open: se.status === 'open', onChanged: onJustified } : null;
+  const [totals, setTotals] = useState(false);
   return (
     <div className="tre-day">
       <div className="tre-head">
@@ -406,10 +423,11 @@ function Day({
           </div>
           {eview === 'journal' && (
             <div className="tre-panes">
-              <CashPane title="Entrées" rows={ejRows(ej.entries)} party="Tiers" total={sum(ejRows(ej.entries))} />
-              <CashPane title="Sorties" rows={ejRows(ej.exits)} party="Bénéficiaire" total={sum(ejRows(ej.exits))} />
+              <CashPane title="Entrées" direction="IN" desk={desk} rows={ejRows(ej.entries)} party="Tiers" total={sum(ejRows(ej.entries))} />
+              <CashPane title="Sorties" direction="OUT" desk={desk} rows={ejRows(ej.exits)} party="Bénéficiaire" total={sum(ejRows(ej.exits))} />
             </div>
           )}
+          {eview === 'journal' && <Totals open={totals} onToggle={() => setTotals(!totals)} entries={ejRows(ej.entries)} exits={ejRows(ej.exits)} />}
           {eview === 'z' && <ZView z={z} />}
           {eview === 'journal' && <ZView z={z} compact />}
         </>
@@ -430,10 +448,11 @@ function Day({
           </div>
           {view === 'cash' && (
             <div className="tre-panes">
-              <CashPane title="Entrées de caisse" rows={cash.entries} party="Tiers" total={sum(cash.entries)} />
-              <CashPane title="Sorties de caisse" rows={cash.exits} party="Bénéficiaire" total={sum(cash.exits)} />
+              <CashPane title="Entrées de caisse" direction="IN" desk={desk} rows={cash.entries} party="Tiers" total={sum(cash.entries)} />
+              <CashPane title="Sorties de caisse" direction="OUT" desk={desk} rows={cash.exits} party="Bénéficiaire" total={sum(cash.exits)} />
             </div>
           )}
+          {view === 'cash' && <Totals open={totals} onToggle={() => setTotals(!totals)} entries={cash.entries} exits={cash.exits} />}
           {view === 'sales' && <SalesList sales={sales} />}
           {view === 'z' && <ZView z={z} />}
         </>
@@ -505,10 +524,55 @@ function Day({
   );
 }
 
-function CashPane({ title, rows, party, total }: { title: string; rows: CashRow[]; party: string; total: number }) {
+function Totals({ open, onToggle, entries, exits }: { open: boolean; onToggle: () => void; entries: DeskRow[]; exits: DeskRow[] }) {
+  return (
+    <div className="desk-totals-box">
+      <button className="link" onClick={onToggle}>
+        {open ? '▾' : '▸'} Totaux par nature d'entrée / sortie
+      </button>
+      {open && <NatureTotals entries={entries} exits={exits} />}
+    </div>
+  );
+}
+
+/** Volet des entrées ou des sorties : un clic choisit la ligne, « Action » agit dessus. */
+function CashPane({ title, rows, party, total, direction, desk }: { title: string; rows: CashRow[]; party: string; total: number; direction: 'IN' | 'OUT'; desk: DeskProps | null }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const row = rows.find((r) => `${r.source}-${r.id}` === picked) ?? null;
   return (
     <section className="tre-pane">
-      <h3>{title}</h3>
+      <h3 className="desk-title">
+        {title}
+        {desk && (
+          <span className="desk-buttons">
+            <button className="primary" disabled={!desk.open} title={desk.open ? undefined : 'La journée est clôturée'} onClick={() => setAdding(true)}>
+              {direction === 'IN' ? 'Encaisser' : 'Décaisser'}
+            </button>
+            <DeskActions direction={direction} row={row} desk={desk} />
+          </span>
+        )}
+      </h3>
+      {adding && desk && direction === 'IN' && (
+        <CashInDialog
+          sessionId={desk.sessionId}
+          onClose={() => setAdding(false)}
+          onDone={() => {
+            setAdding(false);
+            desk.onChanged();
+          }}
+        />
+      )}
+      {adding && desk && direction === 'OUT' && (
+        <CashOutDialog
+          sessionId={desk.sessionId}
+          onClose={() => setAdding(false)}
+          onDone={() => {
+            setAdding(false);
+            desk.onChanged();
+          }}
+        />
+      )}
       <div className="tre-scroll">
         <table className="list compact">
           <thead>
@@ -521,8 +585,13 @@ function CashPane({ title, rows, party, total }: { title: string; rows: CashRow[
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className={r.closing ? 'muted' : ''} title={r.user_name ?? ''}>
+            {rows.map((r) => (
+              <tr
+                key={`${r.source}-${r.id}`}
+                className={`${r.closing ? 'muted' : ''} ${desk ? 'clickable' : ''} ${picked === `${r.source}-${r.id}` ? 'selected' : ''}`}
+                title={r.user_name ?? ''}
+                onClick={() => desk && setPicked(`${r.source}-${r.id}`)}
+              >
                 <td>{dayTime(r.at)}</td>
                 <td className="r">{fcfa(r.amount)}</td>
                 <td>{r.nature}</td>
@@ -946,7 +1015,11 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
   const open = register?.session ?? null;
   const d = day.data && day.data.session.register_id === register?.id ? day.data : null;
   const exits = d?.exits ?? [];
+  const entries = d?.entries ?? [];
+  const desk: DeskProps | null = d && user.rights.includes('cash_desk') ? { sessionId: d.session.id, open: d.session.status === 'open', onChanged: reload } : null;
   const emoneyExits: CashRow[] = (d?.emoneyExits ?? []).map((r) => ({
+    source: r.source,
+    id: r.id,
     at: r.at,
     amount: r.amount,
     nature: r.nature,
@@ -1007,10 +1080,11 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
                   ))}
                 </div>
               </div>
-              <div className={`tre-panes ${emoneyExits.length ? '' : 'single'}`}>
-                <CashPane title="Mes sorties de caisse" rows={exits} party="Bénéficiaire" total={exits.reduce((t, r) => t + r.amount, 0)} />
+              <div className="tre-panes">
+                <CashPane title="Mes encaissements" direction="IN" desk={desk} rows={entries} party="Tiers" total={entries.reduce((t, r) => t + r.amount, 0)} />
+                <CashPane title="Mes sorties de caisse" direction="OUT" desk={desk} rows={exits} party="Bénéficiaire" total={exits.reduce((t, r) => t + r.amount, 0)} />
                 {emoneyExits.length > 0 && (
-                  <CashPane title="Mes sorties MoMo / OM" rows={emoneyExits} party="Bénéficiaire" total={emoneyExits.reduce((t, r) => t + r.amount, 0)} />
+                  <CashPane title="Mes sorties MoMo / OM" direction="OUT" desk={null} rows={emoneyExits} party="Bénéficiaire" total={emoneyExits.reduce((t, r) => t + r.amount, 0)} />
                 )}
               </div>
               {d.session.deposit !== null && (

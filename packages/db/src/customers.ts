@@ -78,7 +78,7 @@ export interface CustomerAccount {
 
 export interface StatementLine {
   date: string;
-  kind: 'sale' | 'return' | 'payment' | 'rebate';
+  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund';
   ref_id: string;
   number: string;
   label: string;
@@ -217,7 +217,8 @@ export class CustomerService extends Base {
     const paid = this.db
       .prepare(
         `SELECT (SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE store_id = @s AND customer_id = @c)
-              + (SELECT COALESCE(SUM(amount), 0) FROM rebate_entries WHERE store_id = @s AND customer_id = @c AND kind = 'credit')`,
+              + (SELECT COALESCE(SUM(amount), 0) FROM rebate_entries WHERE store_id = @s AND customer_id = @c AND kind = 'credit')
+              - (SELECT COALESCE(SUM(amount), 0) FROM treasury_entries WHERE store_id = @s AND customer_id = @c AND kind = 'customer_refund' AND status = 'active')`,
       )
       .pluck()
       .get({ s: storeId, c: customerId }) as number;
@@ -291,6 +292,8 @@ export class CustomerService extends Base {
          SELECT paid_at, 'payment', id, number, -amount FROM customer_payments WHERE store_id = @storeId AND customer_id = @customerId
          UNION ALL
          SELECT at, 'rebate', id, number, -amount FROM rebate_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'credit'
+         UNION ALL
+         SELECT at, 'refund', id, number, amount FROM treasury_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'customer_refund' AND status = 'active'
          ORDER BY 1, 4`,
       )
       .all({ storeId, customerId }) as { date: string; kind: StatementLine['kind']; ref_id: string; number: string; amount: number }[];
@@ -319,7 +322,9 @@ export class CustomerService extends Base {
             ? 'Retour de marchandise'
             : r.kind === 'rebate'
               ? 'Ristourne accordée en avoir'
-            : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
+              : r.kind === 'refund'
+                ? 'Avoir remboursé au client'
+                : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }
     return { opening, lines, closing: running };
@@ -356,7 +361,7 @@ export class CustomerService extends Base {
           this.number('RC', 'customer_payment'),
           input.customerId,
           ctx.storeId,
-          input.sessionId ? ctx.registerId : null,
+          input.sessionId ? ((this.db.prepare('SELECT register_id FROM cash_sessions WHERE id = ?').pluck().get(input.sessionId) as string | undefined) ?? ctx.registerId) : null,
           input.sessionId ?? null,
           input.method,
           input.amount,

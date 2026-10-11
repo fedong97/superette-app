@@ -699,7 +699,16 @@ export class PurchaseService extends Base {
   /** Règlement (total ou partiel) d'une facture fournisseur ; pour un avoir, c'est un remboursement reçu. */
   paySupplier(
     ctx: Context,
-    input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null; paidAt?: string; registerId?: string | null },
+    input: {
+      invoiceId: string;
+      method: SupplierPaymentMethod;
+      amount: Fcfa;
+      reference?: string | null;
+      paidAt?: string;
+      registerId?: string | null;
+      /** Payé ou remboursé dans une caisse ouverte (« Décaisser », « Encaisser ») : espèces du tiroir ou compte MoMo/OM de la caisse. */
+      sessionId?: string | null;
+    },
   ): SupplierInvoice {
     const invoice = this.getInvoice(input.invoiceId);
     if (!(input.method in SUPPLIER_PAYMENT_METHODS)) throw new AppError('Mode de règlement inconnu', 'INVALID');
@@ -707,7 +716,11 @@ export class PurchaseService extends Base {
     if (input.amount > invoice.balance) throw new AppError(`Le montant dépasse le reste à payer (${invoice.balance} FCFA)`, 'INVALID');
     if (input.method !== 'CASH' && !input.reference?.trim()) throw new AppError('La référence du règlement est obligatoire', 'INVALID');
     // Payé par MoMo/OM : il sort de la caisse électronique choisie, sinon de la centrale (un avoir remboursé n'y est pas rattaché).
-    const src = invoice.kind === 'invoice' ? new EmoneyService(this.db, this.clock).source(ctx.storeId, input.method, input.registerId) : { registerId: null, sessionId: null };
+    const src = input.sessionId
+      ? new EmoneyService(this.db, this.clock).openSession(ctx.storeId, input.sessionId, input.method)
+      : invoice.kind === 'invoice'
+        ? new EmoneyService(this.db, this.clock).source(ctx.storeId, input.method, input.registerId)
+        : { registerId: null, sessionId: null };
     return this.tx(() => {
       const id = newId();
       this.db
@@ -726,7 +739,7 @@ export class PurchaseService extends Base {
           input.reference?.trim() || null,
           input.paidAt ?? this.now(),
           ctx.userId,
-          input.method === 'CASH' ? 1 : 0,
+          input.method === 'CASH' && !src.sessionId ? 1 : 0,
           src.registerId,
           src.sessionId,
         );

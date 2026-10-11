@@ -485,6 +485,8 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
                 <td className="r">{fcfa(-z.cash.expenses)}</td>
               </tr>
             )}
+            {z.cash.otherIn > 0 && <tr><td>Autres entrées (Encaisser)</td><td className="r">{fcfa(z.cash.otherIn)}</td></tr>}
+            {z.cash.otherOut > 0 && <tr><td>Autres sorties (Décaisser)</td><td className="r">{fcfa(-z.cash.otherOut)}</td></tr>}
             <tr><td>Compté</td><td className="r">{z.counted === null ? '—' : fcfa(z.counted)}</td></tr>
             {z.session.deposit !== null && <tr><td>Versé à la caisse centrale</td><td className="r">{fcfa(z.session.deposit)}</td></tr>}
             {z.session.float_left !== null && <tr><td>Fond laissé dans le tiroir</td><td className="r">{fcfa(z.session.float_left)}</td></tr>}

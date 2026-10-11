@@ -267,6 +267,18 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
       {
         tab: 'day',
+        title: 'Encaisser et décaisser',
+        perm: 'cash_desk',
+        steps: [
+          '« Encaisser » (volet Entrées) : client qui règle, fournisseur qui rembourse un avoir, collaborateur qui rend une avance, ou autre recette sur un compte. Un reçu s’imprime.',
+          '« Décaisser » (volet Sorties) : reversement à la caisse centrale, règlement d’une facture fournisseur, charge, avance ou salaire d’un collaborateur, avoir remboursé à un client, ou autre. Le code du gérant est demandé et un bon s’imprime.',
+          'Sur une caisse électronique, le mode est MTN MoMo ou Orange Money, avec la référence de la transaction.',
+          'Cliquez une ligne puis « Action » : imprimer le reçu (ticket ou A4), décharge à faire signer, antidater, convertir une sortie « Autre » en règlement fournisseur ou remboursement client, supprimer.',
+          '« Totaux par nature d’entrée / sortie », sous les volets, résume la journée.',
+        ],
+      },
+      {
+        tab: 'day',
         title: 'Journal d’une caisse électronique',
         perm: 'cash_amounts',
         steps: [
@@ -346,6 +358,31 @@ export const HELP: Record<WinKind, PageHelp> = {
     sections: [
       { tab: 'recipes', title: 'Recette', steps: ['Le produit fini et ses composants pour un lot ; le coût de revient et la marge s’affichent.'] },
       { tab: 'orders', title: 'Ordre de fabrication', steps: ['« Nouvel ordre » : recette et quantité, puis « Fabriquer » : les composants sortent du stock, le produit fini entre.'] },
+    ],
+  },
+  staff: {
+    title: 'Collaborateurs et salaires',
+    intro: 'Vos employés, leurs sous-comptes en comptabilité, leurs salaires et leurs avances.',
+    sections: [
+      {
+        tab: 'list',
+        title: 'Ajouter un collaborateur',
+        steps: [
+          '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée.',
+          'Deux sous-comptes sont créés à son nom : 4211… pour ses salaires dus, 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
+          '« Avance… » paie une avance au bureau ; à la caisse, utilisez Décaisser › Remboursement / Prêt.',
+        ],
+      },
+      {
+        tab: 'salaries',
+        title: 'Salaires du mois',
+        steps: [
+          'Choisissez le mois : le salaire de base et les avances à retenir sont proposés. Corrigez si besoin, puis « Constater les salaires ».',
+          '« Payer… » règle le net au bureau (caisse centrale, MoMo/OM ou banque). À la caisse : Décaisser › Remboursement / Prêt › Salaire.',
+          '« Bulletin » imprime le bulletin de paie simplifié. Les retenues CNPS et IRPP ne sont pas calculées dans cette version.',
+        ],
+      },
+      { tab: 'statement', title: 'Extrait de compte', steps: ['Salaires constatés et payés, avances versées, remboursées ou retenues, avec les deux soldes après chaque ligne.'] },
     ],
   },
 };

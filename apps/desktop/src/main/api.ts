@@ -49,6 +49,9 @@ import {
   type SupplierInput,
   type SupplierPaymentMethod,
   type CentralNature,
+  type CashInInput,
+  type CashOutInput,
+  type StaffInput,
   type InventoryInput,
   type InventorySheetModel,
   type TransferInput,
@@ -97,6 +100,16 @@ export interface Printer {
   notes(storeId: string, year: number): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
   rebateVoucher(entryId: string): Promise<void>;
+  /** Reçu d'une entrée ou bon d'une sortie de caisse (ticket), tels que l'écran de trésorerie les montre. */
+  deskTicket(sessionId: string, source: string, id: string, opts?: { duplicate?: boolean; authorizedBy?: string | null }): Promise<void>;
+  /** Même reçu ou bon, sur une page A4. */
+  deskA4(sessionId: string, source: string, id: string, opts?: { duplicate?: boolean }): Promise<void>;
+  /** Décharge A4 à faire signer par le bénéficiaire d'une sortie. */
+  discharge(sessionId: string, source: string, id: string): Promise<void>;
+  salarySlip(salaryId: string): Promise<void>;
+  staffStatement(staffId: string, from?: string | null, to?: string | null): Promise<void>;
+  /** Bon d'une avance, d'un salaire ou d'un remboursement fait au bureau. */
+  officeVoucher(entryId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
@@ -210,6 +223,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     throw new AppError('Vous ne pouvez revoir que vos trois dernières factures', 'FORBIDDEN');
   };
   const SUPPLIERS: Permission[] = ['purchases', 'suppliers', 'purchase_invoices', 'supplier_statement'];
+  const STAFF: Permission[] = ['staff', 'staff_edit', 'staff_salaries'];
+  /**
+   * Encaisser et décaisser dans une journée ouverte : celle de sa caisse (espèces ou
+   * électronique), ou de toute caisse pour le gérant. Le contexte prend la caisse de la journée.
+   */
+  const deskCtx = (sessionId: string): Context => {
+    const c = ctx(['cash_desk']);
+    const se = s.pos.getSession(sessionId);
+    const mine = se.register_id === c.registerId || Object.values(s.pos.linkedRegisters(user!.id)).includes(se.register_id);
+    if (!mine && !can(user!, ['cash_open'])) throw new AppError("Seuls le caissier de cette caisse et le gérant y encaissent ou décaissent", 'FORBIDDEN');
+    return { ...c, registerId: se.register_id };
+  };
   const CUSTOMERS: Permission[] = ['customers', 'receivables'];
   /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
   const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
@@ -731,6 +756,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         },
         stale: !closed && s.pos.isStale(last),
         exits: s.pos.cashJournal(last.id).exits.filter((r) => !r.closing && r.user_id === u.id),
+        /** Ses encaissements hors ventes (règlements, « Encaisser ») : jamais le total des ventes. */
+        entries: s.pos.cashJournal(last.id).entries.filter((r) => r.user_id === u.id && r.source !== 'sale'),
         /** Sorties faites par le compte MoMo/OM du caissier dans sa journée électronique. */
         emoneyExits: (() => {
           const reg = s.pos.linkedRegisters(u.id).electronic;
@@ -853,6 +880,95 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'emoney.record': (input: Parameters<Services['emoney']['record']>[1]) => s.emoney.record(ctx(['central_cash']), input),
     'emoney.print': (movementId: string) => (requireUser([...TREASURY, 'central_cash']), printer.emoneyVoucher(movementId)),
+
+    // --- Encaisser, Décaisser (Opérations de trésorerie) ----------------------------
+    /**
+     * Ce qu'il faut aux fenêtres « Encaisser » et « Décaisser » d'une journée :
+     * la caisse et ses moyens, les clients, factures et avoirs fournisseurs,
+     * collaborateurs, salaires à payer, types de charge et comptes.
+     */
+    'cashdesk.options': (sessionId: string) => {
+      const c = deskCtx(sessionId);
+      const desk = s.cashdesk.desk(sessionId);
+      return {
+        ...desk,
+        needsPin: !can(user!, ['cashout']),
+        canEdit: can(user!, ['cash_desk_edit']),
+        customers: s.customers.listCustomers(c.storeId, { withBalance: true }).map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
+        invoices: s.purchases
+          .listInvoices(c.storeId, { unpaid: true })
+          .map((i) => ({ id: i.id, kind: i.kind, supplier_name: i.supplier_name, supplier_number: i.supplier_number, number: i.number, balance: i.balance })),
+        staff: s.staff.list(c.storeId).map((x) => ({ id: x.id, name: x.name, position: x.position, due: x.due, advances: x.advances })),
+        salaries: s.staff.salaries(c.storeId, { unpaid: true }).map((x) => ({ id: x.id, staff_id: x.staff_id, staff_name: x.staff_name, period: x.period, label: x.label, rest: x.rest })),
+        categories: s.expenses.listCategories().map((x) => ({ id: x.id, name: x.name })),
+        accounts: s.accounting.listAccounts().filter((a) => !a.id.startsWith('5')).map((a) => ({ id: a.id, label: a.label })),
+        emoneyRegisters: s.admin
+          .listRegisters(c.storeId)
+          .filter((r) => r.active && r.kind === 'electronic' && r.id !== desk.register.id)
+          .map((r) => ({ id: r.id, name: r.name, central: r.id === desk.emoneyCentralId })),
+      };
+    },
+    'cashdesk.in': (sessionId: string, input: CashInInput) => s.cashdesk.cashIn(deskCtx(sessionId), sessionId, input),
+    /** Une sortie par un caissier demande le code du gérant, comme un prélèvement ou une dépense. */
+    'cashdesk.out': (sessionId: string, input: CashOutInput, supervisorPin?: string) => {
+      const c = deskCtx(sessionId);
+      const by = can(user!, ['cashout']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      return s.cashdesk.cashOut(c, sessionId, input, by);
+    },
+    /** Reçu (entrée) ou bon (sortie) d'une ligne de la journée : ticket ou A4. Le reçu réimprimé porte « DUPLICATA ». */
+    'cashdesk.print': async (sessionId: string, source: string, id: string, format: 'ticket' | 'a4' = 'ticket') => {
+      requireUser(TREASURY);
+      if (source === 'customer_payment' && format === 'ticket') return printer.customerReceipt(id);
+      if (source === 'expense' && format === 'ticket') return printer.expenseVoucher(id);
+      const entry = source === 'entry' ? s.cashdesk.get(id) : null;
+      const duplicate = entry ? entry.printed > 0 : false;
+      if (format === 'a4') await printer.deskA4(sessionId, source, id, { duplicate });
+      else await printer.deskTicket(sessionId, source, id, { duplicate, authorizedBy: entry?.authorized_by_name ?? null });
+      if (entry) s.cashdesk.markPrinted(id);
+    },
+    'cashdesk.discharge': (sessionId: string, source: string, id: string) => (requireUser(TREASURY), printer.discharge(sessionId, source, id)),
+    'cashdesk.unprint': (id: string, supervisorPin?: string) => {
+      const c = ctx(TREASURY);
+      if (!can(user!, ['cash_desk_edit'])) supervisor(supervisorPin ?? '');
+      s.cashdesk.unprint(c, id);
+    },
+    /** Antidater ou supprimer : le gérant, ou son code. */
+    'cashdesk.backdate': (source: 'entry' | 'expense', id: string, at: string, supervisorPin?: string) => {
+      const c = ctx(TREASURY);
+      if (!can(user!, ['cash_desk_edit'])) supervisor(supervisorPin ?? '');
+      s.cashdesk.backdate(c, source, id, at);
+    },
+    'cashdesk.cancel': (source: 'entry' | 'expense', id: string, reason: string, supervisorPin?: string) => {
+      const c = ctx(TREASURY);
+      const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      if (source === 'expense') return void s.expenses.cancel(c, id, by, reason);
+      s.cashdesk.cancel(c, id, by, reason);
+    },
+    'cashdesk.convert': (id: string, target: { type: 'supplier'; invoiceId: string } | { type: 'customer'; customerId: string }, supervisorPin?: string) => {
+      const c = ctx(TREASURY);
+      const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      return s.cashdesk.convert(c, id, target, by);
+    },
+
+    // --- Collaborateurs et paie ------------------------------------------------------
+    'staff.list': (includeInactive?: boolean) => s.staff.list(ctx(STAFF).storeId, { includeInactive }),
+    'staff.users': () => (requireUser(['staff_edit']), s.admin.listUsers().filter((u) => u.active).map((u) => ({ id: u.id, name: u.name, role: u.role }))),
+    'staff.save': (input: StaffInput, id?: string | null) => s.staff.save(ctx(['staff_edit']), input, id ?? undefined),
+    'staff.statement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), s.staff.statement(id, { from: from ?? undefined, to: to ?? undefined })),
+    'staff.printStatement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), printer.staffStatement(id, from, to)),
+    'staff.month': (period: string) => s.staff.month(ctx(['staff_salaries']).storeId, period),
+    'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa }[]) => s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
+    'staff.cancelSalary': (id: string, reason: string) => s.staff.cancelSalary(ctx(['staff_salaries']), id, reason),
+    'staff.salaries': (opts?: { period?: string | null; staffId?: string | null; unpaid?: boolean }) => s.staff.salaries(ctx(STAFF).storeId, opts ?? {}),
+    'staff.printSlip': (salaryId: string) => (requireUser(STAFF), printer.salarySlip(salaryId)),
+    'staff.entries': (staffId?: string | null) => s.cashdesk.officeEntries(ctx(STAFF).storeId, { staffId: staffId ?? null }),
+    /** Au bureau : salaire, avance ou remboursement en espèces (caisse centrale), MoMo/OM ou banque. */
+    'staff.pay': (input: { kind: 'staff_salary' | 'staff_advance' | 'staff_repayment'; staffId?: string | null; salaryId?: string | null; amount: Fcfa; method: string; reference?: string | null; piece?: string | null; registerId?: string | null }) => {
+      const c = ctx(['staff_salaries']);
+      if (input.method === 'CASH' && !can(user!, ['central_cash'])) throw new AppError('Payer en espèces au bureau demande le droit de la caisse centrale', 'FORBIDDEN');
+      return s.cashdesk.record(c, { ...input, direction: input.kind === 'staff_repayment' ? 'IN' : 'OUT', sessionId: null, authorizedBy: c.userId });
+    },
+    'staff.printEntry': (id: string) => (requireUser(STAFF), printer.officeVoucher(id)),
     'treasury.printReport': (sessionId: string) => {
       const u = requireUser(TREASURY);
       if (can(u, AMOUNTS)) return printer.sessionReport(sessionId);

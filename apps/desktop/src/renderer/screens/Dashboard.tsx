@@ -1,8 +1,73 @@
 import { useState } from 'react';
-import { call } from '../api';
-import { Empty, fcfa, qty, today, useLoad } from '../ui';
+import { type Result, call } from '../api';
+import { Empty, Tabs, fcfa, qty, today, useLoad } from '../ui';
 
-export function Dashboard() {
+export type DashboardTab = 'day' | 'attention';
+type Item = Result<'attention.list'>[number];
+/** Fenêtre et onglet qui traitent chaque point d'attention. */
+export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production', string];
+
+const TARGET: Record<Item['key'], AttentionTarget> = {
+  rupture: ['stock', 'critical'],
+  alerte: ['stock', 'critical'],
+  cash_gaps: ['treasury', 'history'],
+  transfers: ['stock', 'transfer'],
+  stock_requests: ['stock', 'monitoring'],
+  rebates_pending: ['customers', 'rebates-state'],
+  rebates_balance: ['customers', 'rebates-state'],
+  inventories: ['stock', 'inventory'],
+  supplier_invoices: ['purchases', 'due'],
+  late_customers: ['customers', 'receivables'],
+  production: ['production', 'orders'],
+};
+
+/** Tableau de bord : la journée en chiffres, et les points d'attention du gérant. */
+export function Dashboard({ initialTab = 'day', onOpen }: { initialTab?: DashboardTab; onOpen: (target: AttentionTarget) => void }) {
+  const [tab, setTab] = useState<DashboardTab>(initialTab);
+  return (
+    <div className="page">
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          ['day', 'La journée'],
+          ['attention', "Points d'attention"],
+        ]}
+      />
+      {tab === 'day' ? <Day /> : <Attention onOpen={onOpen} />}
+    </div>
+  );
+}
+
+function Attention({ onOpen }: { onOpen: (target: AttentionTarget) => void }) {
+  const list = useLoad(() => call('attention.list'), []);
+  const items = list.data ?? [];
+  // Ce qui demande une action d'abord ; les points en ordre restent visibles, en retrait.
+  const sorted = [...items.filter((i) => i.count > 0), ...items.filter((i) => i.count === 0)];
+  return (
+    <>
+      <header className="page-head">
+        <h1>Points d'attention</h1>
+        <button onClick={list.reload}>Actualiser</button>
+      </header>
+      <p className="muted">Ce qui attend une action dans le magasin. Cliquez une tuile pour ouvrir la fenêtre qui la traite.</p>
+      {list.data && (
+        <div className="attention">
+          {sorted.map((i) => (
+            <button key={i.key} className={`tile ${i.count ? i.tone : 'calm'}`} onClick={() => onOpen(TARGET[i.key])}>
+              <span className="tile-count">{i.count}</span>
+              <span className="tile-label">{i.label}</span>
+              {i.amount ? <strong>{fcfa(i.amount)}</strong> : null}
+              <small>{i.detail}</small>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function Day() {
   const [date, setDate] = useState(today());
   const day = useLoad(() => call('reports.daily', date), [date]);
   const alerts = useLoad(() => call('stock.list', { level: 'rupture' }), []);
@@ -11,7 +76,7 @@ export function Dashboard() {
   const d = day.data;
   const maxHour = Math.max(1, ...(d?.byHour ?? []).map((h) => h.revenueTtc));
   return (
-    <div className="page">
+    <>
       <header className="page-head">
         <h1>Tableau de bord</h1>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -97,6 +162,6 @@ export function Dashboard() {
           </ul>
         </section>
       </div>
-    </div>
+    </>
   );
 }

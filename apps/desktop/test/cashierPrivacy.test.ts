@@ -46,6 +46,15 @@ describe('caissier sans les montants de la caisse', () => {
     expect(() => api['treasury.close']!({ 10000: 1 }, { floatLeft: 0 })).toThrow(/droits/);
   });
 
+  it("ouvre sa caisse sans le code du gérant ; seul un complément de fond le demande", () => {
+    login('awa', '5555');
+    api['treasury.open']!(10_000);
+    sell(2);
+    api['treasury.closeBlind']!({ 10000: 2 }, { floatLeft: 10_000 });
+    expect(() => api['treasury.open']!(15_000)).toThrow(/code/i);
+    expect(api['treasury.open']!(10_000)).toMatchObject({ opening_float: 10_000, voucherId: null });
+  });
+
   it('ne revoit et ne réimprime que ses trois dernières factures', async () => {
     login('awa', '5555');
     api['treasury.open']!(10_000, '2222');

@@ -149,7 +149,6 @@ export function SaleSearchDialog({
     listRef.current?.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' });
   }, [active]);
   const current = rows[Math.min(active, rows.length - 1)];
-  const noCreate = canCreate ? undefined : 'Réservé au gérant et au magasinier';
   return (
     <Modal title="Rechercher / Facturer des marchandises" onClose={onClose} wide>
       <div className="filters">
@@ -211,14 +210,15 @@ export function SaleSearchDialog({
         </table>
       </div>
       <div className="actions spread">
-        <div className="inline">
-          <button type="button" disabled={!canCreate} title={noCreate} onClick={() => onCreateArticle(q)}>
+        {canCreate && (
+          <div className="inline">
+          <button type="button" onClick={() => onCreateArticle(q)}>
             Créer un article absent
           </button>
-          <button type="button" disabled={!canCreate || !current} title={noCreate} onClick={() => current && onCreateLevel(current.article_id, 'top')}>
+          <button type="button" disabled={!current} onClick={() => current && onCreateLevel(current.article_id, 'top')}>
             Créer un conditionnement supérieur absent
           </button>
-          <button type="button" disabled={!canCreate || !current} title={noCreate} onClick={() => {
+          <button type="button" disabled={!current} onClick={() => {
               if (!current) return;
               // Le stock est compté dans l'unité de détail : elle ne change plus une fois l'article en stock.
               if (current.stock !== 0) return toast.error(`${current.name} est en stock : son unité de stock ne peut plus changer. Créez un nouvel article.`);
@@ -227,6 +227,7 @@ export function SaleSearchDialog({
             Créer un conditionnement inférieur absent
           </button>
         </div>
+        )}
         <button type="button" className="primary" disabled={!current} onClick={() => current && onPick(current)}>
           Choisir <kbd>Entrée</kbd>
         </button>

@@ -20,6 +20,7 @@ import {
   inspectBackup,
   STAFF_CATEGORIES,
   type ArticleInput,
+  type AttentionKey,
   type BootstrapInput,
   type Context,
   type CustomerInput,
@@ -50,6 +51,8 @@ import {
   type TransferStatus,
   type StockRequestStatus,
   type RebateRuleInput,
+  type RecipeInput,
+  type ProductionStatus,
   type StoreOptions,
   type User,
 } from '@superette/db';
@@ -99,6 +102,8 @@ export interface Printer {
   inventoryResult(inventoryId: string): Promise<void>;
   /** Bon de transfert A4 : bon de route (expédition) ou bon de réception. */
   transferNote(transferId: string): Promise<void>;
+  productionNote(orderId: string): Promise<void>;
+  reorderSheet(storeId: string, lines: { articleId: string; supplierId: string | null; qty: Milli; unitCost: Fcfa }[]): Promise<void>;
 }
 
 /**
@@ -331,6 +336,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.transfers.receive(ctx(STOCK), id, input),
     'transfers.cancel': (id: string) => s.transfers.cancel(ctx(STOCK), id),
     'transfers.movements': (id: string) => (requireUser(STOCK), s.transfers.movements(id)),
+    // --- Fabrication -------------------------------------------------------------
+    'production.recipes': (includeInactive?: boolean) => (requireUser(['production', ...STOCK]), s.production.recipes({ includeInactive })),
+    'production.saveRecipe': (input: RecipeInput, id?: string | null) => s.production.saveRecipe(ctx(['production']), input, id ?? undefined),
+    'production.archiveRecipe': (id: string) => s.production.archiveRecipe(ctx(['production']), id),
+    'production.orders': (status?: ProductionStatus | null) => s.production.orders(ctx(['production', ...STOCK]).storeId, { status }),
+    'production.order': (id: string) => (requireUser(['production', ...STOCK]), s.production.getOrder(id)),
+    'production.create': (input: { recipeId: string; warehouseId: string; qty: Milli; label?: string | null; expiry?: string | null }) => s.production.create(ctx(['production']), input),
+    'production.produce': (id: string) => s.production.produce(ctx(['production']), id),
+    'production.cancel': (id: string) => s.production.cancel(ctx(['production']), id),
+    'production.print': (id: string) => (requireUser(['production', ...STOCK]), printer.productionNote(id)),
     'transfers.print': async (id: string) => {
       requireUser(STOCK);
       await printer.transferNote(id);
@@ -414,6 +429,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.purchases.paySupplier(ctx(ACCOUNTING), input),
     'purchases.due': () => s.purchases.dueSchedule(ctx(ACCOUNTING).storeId),
     'purchases.reorder': (coverDays?: number) => s.purchases.reorderProposal(ctx(BUY).storeId, { coverDays }),
+    'purchases.printReorder': (lines: { articleId: string; supplierId: string | null; qty: Milli; unitCost: Fcfa }[]) => printer.reorderSheet(ctx(BUY).storeId, lines),
     'purchases.createOrders': (input: { warehouseId: string; lines: (PurchaseOrderLineInput & { supplierId: string })[] }) =>
       s.purchases.createOrdersFromProposal(ctx(BUY), input),
 
@@ -554,10 +570,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         movements: s.treasury.sessionMovements(sessionId),
       };
     },
-    /** Ouverture : gérant, ou code d'un gérant. */
+    /**
+     * Ouverture : le caissier ouvre sa caisse seul avec le fond laissé la veille
+     * (ou moins). Un complément pris dans la caisse centrale demande le gérant.
+     */
     'treasury.open': (openingFloat: Fcfa, supervisorPin?: string, registerId?: string) => {
       const c = sameRegister(ctx(TREASURY), registerId);
-      if (!can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
+      const carried = c.registerId ? s.pos.carriedFloat(c.registerId) : null;
+      if (carried !== null && openingFloat > carried && !can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
       const session = s.pos.openSession(c, openingFloat);
       // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
       const voucher = s.treasury.sessionMovements(session.id).find((m) => !m.cash_operation_id);
@@ -787,6 +807,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'charges.late': () => (user && can(user, ['expenses']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
 
     'reports.daily': (date: string) => s.reports.daily(ctx(['dashboard']).storeId, date),
+    /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
+    'attention.list': () => {
+      const c = ctx(['dashboard']);
+      const u = user!;
+      const rules: [AttentionKey, boolean][] = [
+        ['rupture', can(u, STOCK)],
+        ['alerte', can(u, STOCK)],
+        ['cash_gaps', can(u, AMOUNTS) && can(u, ['cash_open'])],
+        ['transfers', can(u, STOCK)],
+        ['stock_requests', can(u, ['inventory'])],
+        ['rebates_pending', can(u, ['rebates'])],
+        ['rebates_balance', can(u, ['rebates'])],
+        ['inventories', can(u, INVENTORY)],
+        ['supplier_invoices', can(u, ['purchase_invoices'])],
+        ['late_customers', can(u, ['receivables'])],
+        ['production', can(u, ['production'])],
+      ];
+      return s.attention.list(c.storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
+    },
     'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['reports', 'sales']).storeId, input),
     /** Classeur .xlsx : octets envoyés tels quels à l'écran, qui propose l'enregistrement. */
     'reports.salesXlsx': (input: SalesReportInput) => xlsxWorkbook(s.reports.salesWorkbook(ctx(['reports', 'sales']).storeId, input)),

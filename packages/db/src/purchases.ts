@@ -183,6 +183,13 @@ export interface ReorderRow {
   reorder_point: Milli;
   target: Milli;
   qty: Milli;
+  /** Rayon et famille, pour filtrer la proposition. */
+  department_id: string | null;
+  department_name: string | null;
+  family_name: string | null;
+  unit_name: string | null;
+  /** Conditionnements de l'article (carton, casier…), pour lire la quantité en cartons et pièces. */
+  packs: { name: string; units: Milli }[];
 }
 
 /**
@@ -729,8 +736,8 @@ export class PurchaseService extends Base {
     const since = new Date(this.clock().getTime() - historyDays * 86_400_000).toISOString();
     const rows = this.db
       .prepare(
-        `SELECT a.id AS article_id, a.code AS article_code, a.name AS article_name, a.unit, a.min_qty, a.alert_qty, a.max_qty,
-                a.purchase_price,
+        `SELECT a.id AS article_id, a.code AS article_code, a.name AS article_name, a.unit, a.unit_name, a.min_qty, a.alert_qty, a.max_qty,
+                a.purchase_price, f.name AS family_name, d.id AS department_id, d.name AS department_name,
                 COALESCE((SELECT SUM(s.qty) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id
                            WHERE s.article_id = a.id AND w.store_id = @storeId), 0) AS stock,
                 COALESCE((SELECT SUM(MAX(l.qty - COALESCE((SELECT SUM(rl.qty) FROM reception_lines rl WHERE rl.order_line_id = l.id), 0), 0))
@@ -738,7 +745,7 @@ export class PurchaseService extends Base {
                            WHERE l.article_id = a.id AND o.store_id = @storeId AND o.status IN ('draft', 'sent')), 0) AS on_order,
                 COALESCE((SELECT -SUM(m.qty) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
                            WHERE m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @since), 0) AS sold
-         FROM articles a WHERE a.active = 1`,
+         FROM articles a LEFT JOIN families f ON f.id = a.family_id LEFT JOIN departments d ON d.id = f.department_id WHERE a.active = 1`,
       )
       .all({ storeId, since }) as {
       article_id: string;
@@ -749,6 +756,10 @@ export class PurchaseService extends Base {
       alert_qty: number | null;
       max_qty: number | null;
       purchase_price: number;
+      unit_name: string | null;
+      family_name: string | null;
+      department_id: string | null;
+      department_name: string | null;
       stock: number;
       on_order: number;
       sold: number;
@@ -758,6 +769,7 @@ export class PurchaseService extends Base {
        FROM supplier_articles sa JOIN suppliers s ON s.id = sa.supplier_id
        WHERE sa.article_id = ? AND s.active = 1 ORDER BY sa.is_main DESC, sa.unit_cost LIMIT 1`,
     );
+    const packsOf = this.db.prepare('SELECT name, units FROM article_packs WHERE article_id = ? ORDER BY units DESC');
     const result: ReorderRow[] = [];
     for (const r of rows) {
       const sup = mainSupplier.get(r.article_id) as
@@ -792,6 +804,11 @@ export class PurchaseService extends Base {
         reorder_point: s.reorderPoint,
         target: s.target,
         qty: s.qty,
+        department_id: r.department_id,
+        department_name: r.department_name,
+        family_name: r.family_name,
+        unit_name: r.unit_name,
+        packs: packsOf.all(r.article_id) as { name: string; units: Milli }[],
       });
     }
     return result.sort((a, b) => (a.supplier_name ?? '~').localeCompare(b.supplier_name ?? '~') || a.article_name.localeCompare(b.article_name));

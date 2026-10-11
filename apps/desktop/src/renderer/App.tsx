@@ -5,11 +5,12 @@ import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
-import { Dashboard } from './screens/Dashboard';
+import { Dashboard, type DashboardTab } from './screens/Dashboard';
 import { Expenses, type ExpensesTab } from './screens/Expenses';
 import { Login } from './screens/Login';
 import { Pos, RegisterChooser } from './screens/Pos';
 import { Labels } from './screens/Labels';
+import { Production, type ProductionTab } from './screens/Production';
 import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
 import { Quotes } from './screens/Quotes';
@@ -26,7 +27,7 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 /** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
-type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'treasury' | 'dashboard' | 'admin';
+type WinKind = 'cash1' | 'cash2' | 'credit' | 'sales' | 'articles' | 'stock' | 'purchases' | 'suppliers' | 'customers' | 'expenses' | 'quotes' | 'promotions' | 'labels' | 'reports' | 'accounting' | 'treasury' | 'dashboard' | 'admin' | 'production';
 interface Win {
   kind: WinKind;
   tab?: string;
@@ -55,6 +56,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission }> = {
   treasury: { label: 'Opérations de trésorerie', perm: 'treasury' },
   dashboard: { label: 'Tableau de bord', perm: 'dashboard' },
   admin: { label: 'Administration', perm: 'admin' },
+  production: { label: 'Fabrication', perm: 'production' },
 };
 
 interface MenuItem {
@@ -107,7 +109,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       { label: 'Situation des ventes', open: ['reports', 'department'], perm: 'reports' },
       { label: 'Évolution périodique', open: ['reports', 'evolution'], perm: 'reports' },
-      { label: 'Tableau de bord', open: ['dashboard'] },
+      { label: 'Tableau de bord', open: ['dashboard', 'day'] },
+      { label: "Points d'attention", open: ['dashboard', 'attention'] },
     ],
   ],
   [
@@ -129,7 +132,14 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_invoices' },
     ],
   ],
-  ['Fabrication', [{ label: 'Recettes et ordres de fabrication', soon: true }]],
+  [
+    'Fabrication',
+    [
+      { label: 'Nouvel ordre de fabrication', open: ['production', 'new'] },
+      { label: 'Ordres de fabrication', open: ['production', 'orders'] },
+      { label: 'Recettes (produits fabriqués)', open: ['production', 'recipes'] },
+    ],
+  ],
   [
     'Trésorerie',
     [
@@ -202,11 +212,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Règlements reçus', open: ['customers', 'payments'] },
       { label: 'Retours et avoirs clients', open: ['sales', 'returns'] },
       SEP,
-      { label: 'Ristournes : état des ristournes', open: ['customers', 'rebates-state'] },
-      { label: 'Ristournes : reports à nouveau', open: ['customers', 'rebates-carry'] },
-      { label: 'Ristournes : réglage de base', open: ['customers', 'rebates-base'] },
-      { label: 'Ristournes : réglage des clients spécifiques', open: ['customers', 'rebates-clients'] },
-      { label: 'Ristournes : régularisations et bons', open: ['customers', 'rebates-entries'] },
+      { label: 'Ristournes : état des ristournes', open: ['customers', 'rebates-state'], perm: 'rebates' },
+      { label: 'Ristournes : reports à nouveau', open: ['customers', 'rebates-carry'], perm: 'rebates' },
+      { label: 'Ristournes : réglage de base', open: ['customers', 'rebates-base'], perm: 'rebates' },
+      { label: 'Ristournes : réglage des clients spécifiques', open: ['customers', 'rebates-clients'], perm: 'rebates' },
+      { label: 'Ristournes : régularisations et bons', open: ['customers', 'rebates-entries'], perm: 'rebates' },
     ],
   ],
   [
@@ -279,7 +289,8 @@ const QUICK: { label: string; open?: [WinKind, string?]; soon?: boolean; credit?
   { label: 'Dépenses', open: ['expenses', 'list'] },
   { label: 'Achats', open: ['purchases', 'orders'] },
   { label: 'Trésorerie', open: ['treasury', 'day'] },
-  { label: 'TABORD', open: ['dashboard'] },
+  { label: 'TABORD', open: ['dashboard', 'day'] },
+  { label: 'Attention', open: ['dashboard', 'attention'] },
 ];
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -367,10 +378,15 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (active === kind) setActive(rest[rest.length - 1]?.kind ?? first);
   };
 
-  /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
+  /**
+   * Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double.
+   * Comme dans KONTROL, ce qui n'est pas permis ne s'affiche pas du tout (pas de ligne grisée).
+   */
+  const supervisor = user.role === 'admin' || user.role === 'manager';
   const visibleItems = (items: MenuItem[]) =>
     items
       .filter((i) => (!i.perm || [i.perm].flat().some(can)) && (!i.adminOnly || user.role === 'admin'))
+      .filter((i) => (!i.open || canWin(i.open[0])) && (!i.soon || supervisor))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
 
@@ -398,7 +414,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   return (
     <div className="desk">
       <nav className="menubar">
-        {MENUS.map(([name, items]) => (
+        {MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep)).map(([name, items]) => (
           <div key={name} className="menu">
             <button
               className={menu === name ? 'open' : ''}
@@ -418,7 +434,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   i.sep ? (
                     <hr key={`sep-${n}`} />
                   ) : (
-                    <button key={i.label} disabled={i.soon || (i.open && !canWin(i.open[0]))} onClick={() => void run(i)}>
+                    <button key={i.label} disabled={i.soon} onClick={() => void run(i)}>
                       {i.label}
                       {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
                       {i.soon && <small>bientôt</small>}
@@ -431,7 +447,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ))}
       </nav>
       <nav className="quickbar">
-        {QUICK.map((q) => {
+        {QUICK.filter((q) => q.open && canWin(q.open[0])).map((q) => {
           // Plusieurs onglets rapides partagent la fenêtre Stock ou Ventes : seul celui de l'onglet affiché est en relief.
           const win = q.open && wins.find((w) => w.kind === q.open![0] && (!q.open![1] || w.tab === q.open![1]));
           const isOpen = Boolean(win);
@@ -440,7 +456,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             <button
               key={q.label}
               className={`${isActive ? 'active' : isOpen ? 'open' : ''} ${q.credit ? 'credit' : ''}`}
-              disabled={q.soon || (q.open && !canWin(q.open[0]))}
+              disabled={q.soon}
               title={q.soon ? 'Module à venir' : undefined}
               onClick={() => q.open && open(...q.open)}
             >
@@ -497,6 +513,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'purchases' && <Purchases user={user} initialTab={w.tab as PurchasesTab | undefined} />}
             {w.kind === 'suppliers' && <Suppliers user={user} initialTab={w.tab as SuppliersTab | undefined} />}
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
+            {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
@@ -504,7 +521,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
-            {w.kind === 'dashboard' && <Dashboard />}
+            {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>
         ))}
@@ -523,12 +540,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Utilisateur : {user.name} ({ROLE_LABELS[user.role]})
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
-        {backupLate.data && (
-          <button className="warn" disabled={!canWin('admin')} onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
+        {backupLate.data && canWin('admin') && (
+          <button className="warn" onClick={() => open('admin', 'backups')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
           </button>
         )}
-        {Boolean(chargesLate.data?.count) && (
+        {Boolean(chargesLate.data?.count) && canWin('expenses') && (
           <button className="warn" onClick={() => open('expenses', 'schedule')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
             {chargesLate.data!.count} charge(s) en retard
           </button>

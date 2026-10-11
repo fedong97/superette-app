@@ -629,6 +629,8 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
   const [pin, setPin] = useState('');
   const value = count ? countedTotal(count) : parseAmount(amount || '0');
   const delta = carried === null || value === null ? 0 : value - carried;
+  // Le caissier ouvre seul ; seul un complément pris dans la caisse centrale demande le gérant.
+  const needsPin = !canOpen && delta > 0;
   return (
     <Modal title={`Ouvrir ${register.name}`} onClose={onClose} wide={Boolean(count)}>
       <form
@@ -636,7 +638,7 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
           e.preventDefault();
           if (value === null) return toast.error('Montant invalide');
           try {
-            const opened = await call('treasury.open', value, canOpen ? undefined : pin, register.id);
+            const opened = await call('treasury.open', value, needsPin ? pin : undefined, register.id);
             toast.ok(`${register.name} ouverte avec un fond de ${fcfa(value)}`);
             // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
             if (opened.voucherId) call('treasury.printVoucher', opened.voucherId).catch(toast.error);
@@ -663,14 +665,14 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
         </button>
         {delta > 0 && <p className="warn-text">Complément de {fcfa(delta)} pris dans la caisse centrale (bon de remise de fond).</p>}
         {delta < 0 && <p className="warn-text">{fcfa(-delta)} rendus à la caisse centrale.</p>}
-        {!canOpen && (
-          <Field label="Code du gérant" hint="L'ouverture de la caisse est validée par le gérant">
+        {needsPin && (
+          <Field label="Code du gérant" hint="Le complément de fond pris dans la caisse centrale est validé par le gérant">
             <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
           </Field>
         )}
         <div className="actions">
           {value !== null && <span className="big-total">{fcfa(value)}</span>}
-          <button type="submit" className="primary" disabled={value === null || (!canOpen && !pin)}>
+          <button type="submit" className="primary" disabled={value === null || (needsPin && !pin)}>
             Ouvrir la caisse
           </button>
         </div>

@@ -299,4 +299,103 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     expect(pc3.db.prepare('SELECT COUNT(*) FROM expenses').pluck().get()).toBe(0);
     expect(pc3.expenses.listCategories().find((c) => c.id === 'cat-divers')?.name).toBe('Divers et imprévus');
   });
+
+  // --- 0.29.0 : inventaires, transferts, corrections, ristournes et fabrication entre PC ---------------
+
+  const both = async () => {
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    await syncOnce(pc1);
+  };
+  const qtyIn = (s: Services, warehouseId: string, id = articleId) => s.stock.list(ctx1.storeId, { warehouseId }).find((r) => r.article_id === id)?.qty ?? 0;
+
+  it('une ristourne accordée sur le PC 1 ne bloque plus la synchronisation et arrive sur le PC 2', async () => {
+    const client = pc1.customers.listCustomers(ctx1.storeId).find((c) => c.name === 'Restaurant Chez Mballa')!;
+    pc1.rebates.saveRules(ctx1, client.id, [{ familyId: null, rateBp: 500, unitAmount: 0, minQty: 0, pickupFee: 0 }]);
+    pc1.rebates.setCustomer(ctx1, client.id, { enabled: true, delivered: true });
+    pc1.rebates.adjust(ctx1, client.id, 1_000, 'Reprise de l’ancien logiciel');
+    pc1.rebates.grant(ctx1, client.id, 1_000, 'credit');
+    await both();
+    expect(pc1.sync.state()).toMatchObject({ pending: 0, lastError: null });
+    expect(pc2.rebates.balance(ctx1.storeId, client.id)).toBe(0);
+    expect(pc2.rebates.entries(ctx1.storeId, { customerId: client.id }).map((e) => e.kind)).toEqual(['credit', 'adjust']);
+    expect(pc2.rebates.rules({ customerId: client.id })).toMatchObject([{ rate_bp: 500 }]);
+    expect(pc2.rebates.customers().find((c) => c.id === client.id)).toMatchObject({ rebate_enabled: 1, rebate_delivered: 1 });
+    for (const s of [pc1, pc2]) expect(s.customers.account(ctx1.storeId, client.id).balance).toBe(1_500);
+  });
+
+  it('un inventaire ouvert sur le PC 1 se compte à deux et se clôture sur le PC 2', async () => {
+    const wh = pc1.admin.salesWarehouse(ctx1.storeId).id;
+    const tva = pc1.admin.listVatRates()[0]!.id;
+    const eau = pc1.catalogue.saveArticle(ctx1.userId, { name: 'Eau 1,5 L', unit: 'piece', vatRateId: tva, purchasePrice: 250, salePrice: 400 }).id;
+    pc1.stock.receive(ctx1, { warehouseId: wh, lines: [{ articleId: eau, qty: 30_000, unitCost: 250 }] });
+    const inv = pc1.inventories.create(ctx1, { warehouseId: wh, kind: 'partial', articleIds: [articleId, eau] });
+    await both();
+    const before = qtyIn(pc1, wh);
+    pc1.inventories.setCount(ctx1, inv.id, articleId, before - 2_000);
+    pc2.inventories.setCount(ctx2, inv.id, eau, 28_000);
+    await both();
+    for (const s of [pc1, pc2]) expect(s.inventories.get(inv.id).lines.map((l) => l.counted)).toEqual(expect.arrayContaining([before - 2_000, 28_000]));
+    expect(pc2.inventories.history(inv.id).reduce((t, h) => t + h.count, 0)).toBe(2);
+    pc2.inventories.close(ctx2, inv.id);
+    await both();
+    for (const s of [pc1, pc2]) {
+      expect(s.inventories.get(inv.id).inventory.status).toBe('closed');
+      expect(qtyIn(s, wh)).toBe(before - 2_000);
+      expect(qtyIn(s, wh, eau)).toBe(28_000);
+    }
+    expect(() => pc1.inventories.setCount(ctx1, inv.id, eau, 1_000)).toThrow();
+  });
+
+  it('un transfert expédié sur le PC 1 est réceptionné sur le PC 2, avec des numéros propres à chaque poste', async () => {
+    const shop = pc1.admin.salesWarehouse(ctx1.storeId).id;
+    const reserve = pc1.admin.listWarehouses(ctx1.storeId).find((w) => w.id !== shop)!.id;
+    pc1.stock.receive(ctx1, { warehouseId: reserve, lines: [{ articleId, qty: 24_000, unitCost: 450 }] });
+    const t = pc1.transfers.create(ctx1, { fromWarehouseId: reserve, toWarehouseId: shop, lines: [{ articleId, qty: 12_000 }] });
+    const t2 = pc2.transfers.create(ctx2, { fromWarehouseId: reserve, toWarehouseId: shop, lines: [{ articleId, qty: 1_000 }] });
+    expect(String(t.number)).toMatch(/^DLA11-/);
+    expect(String(t2.number)).toMatch(/^DLA12-/);
+    pc1.transfers.ship(ctx1, t.id, 'BR-1');
+    const shopBefore = qtyIn(pc1, shop);
+    await both();
+    expect(pc2.transfers.get(t.id).transfer.status).toBe('shipped');
+    pc2.transfers.receive(ctx2, t.id, { receptionNumber: 'RC-1', lines: [{ articleId, receivedQty: 11_000 }] });
+    await both();
+    for (const s of [pc1, pc2]) {
+      expect(s.transfers.get(t.id).transfer).toMatchObject({ status: 'received', reception_number: 'RC-1' });
+      expect(qtyIn(s, reserve)).toBe(12_000);
+      expect(qtyIn(s, shop)).toBe(shopBefore + 11_000);
+    }
+  });
+
+  it('une correction demandée sur le PC 2 est validée sur le PC 1, et le stock bouge partout', async () => {
+    const wh = pc1.admin.salesWarehouse(ctx1.storeId).id;
+    const before = qtyIn(pc2, wh);
+    const r = pc2.monitoring.request(ctx2, { articleId, warehouseId: wh, newQty: before - 1_000, reason: 'Bouteille cassée' });
+    await both();
+    expect(pc1.monitoring.requests(ctx1.storeId, { status: 'pending' }).map((x) => x.id)).toContain(r.id);
+    pc1.monitoring.decide(ctx1, r.id, true, null);
+    await both();
+    for (const s of [pc1, pc2]) {
+      expect(s.monitoring.requests(ctx1.storeId, { id: r.id })[0]!.status).toBe('approved');
+      expect(qtyIn(s, wh)).toBe(before - 1_000);
+    }
+  });
+
+  it('une recette créée sur le PC 1 sert à fabriquer sur le PC 2', async () => {
+    const wh = pc1.admin.salesWarehouse(ctx1.storeId).id;
+    const tva = pc1.admin.listVatRates()[0]!.id;
+    const pack = pc1.catalogue.saveArticle(ctx1.userId, { name: 'Pack fête 6 bières', unit: 'piece', vatRateId: tva, purchasePrice: 0, salePrice: 4_500 }).id;
+    const recipe = pc1.production.saveRecipe(ctx1, { articleId: pack, yieldQty: 1_000, lines: [{ articleId, qty: 6_000 }] });
+    await both();
+    const before = qtyIn(pc2, wh);
+    const order = pc2.production.create(ctx2, { recipeId: recipe.id, warehouseId: wh, qty: 2_000 });
+    pc2.production.produce(ctx2, order.id);
+    await both();
+    for (const s of [pc1, pc2]) {
+      expect(s.production.getOrder(order.id).status).toBe('done');
+      expect(qtyIn(s, wh)).toBe(before - 12_000);
+      expect(qtyIn(s, wh, pack)).toBe(2_000);
+    }
+  });
 });

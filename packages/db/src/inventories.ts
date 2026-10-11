@@ -8,7 +8,8 @@ export type InventoryStatus = 'open' | 'closed' | 'cancelled';
 
 export interface Inventory {
   id: string;
-  number: number;
+  /** « DLA11-4 » (ancien format : entier). */
+  number: string | number;
   store_id: string;
   warehouse_id: string;
   warehouse_name: string;
@@ -131,7 +132,7 @@ export class InventoryService extends Base {
                 (SELECT COUNT(*) FROM inventory_lines l WHERE l.inventory_id = i.id AND l.counted IS NOT NULL) AS counted_count
          FROM inventories i JOIN warehouses w ON w.id = i.warehouse_id JOIN users o ON o.id = i.opened_by LEFT JOIN users c ON c.id = i.closed_by
          WHERE (@storeId IS NULL OR i.store_id = @storeId) AND (@id IS NULL OR i.id = @id)
-         ORDER BY i.number DESC`,
+         ORDER BY i.opened_at DESC`,
       )
       .all({ storeId, id: id ?? null }) as (Omit<Inventory, 'departments'> & { counted_value: number | null; gap_value: number | null })[];
     const names = new Map((this.db.prepare('SELECT id, name FROM departments').all() as { id: string; name: string }[]).map((d) => [d.id, d.name]));
@@ -179,9 +180,7 @@ export class InventoryService extends Base {
     }
     return this.tx(() => {
       const id = newId();
-      const last = this.db.prepare('SELECT MAX(number) FROM inventories WHERE store_id = ?').pluck().get(ctx.storeId) as number | null;
-      if (last) this.raiseCounter(`inventory:${ctx.storeId}`, last);
-      const number = this.nextCounter(`inventory:${ctx.storeId}`);
+      const number = this.docNumber('inventories', `inventory:${ctx.storeId}`, ctx.storeId);
       const now = this.now();
       this.db
         .prepare(
@@ -192,6 +191,7 @@ export class InventoryService extends Base {
       const cutoff = this.cutoff({ inventory_date: date, backdated });
       for (const articleId of articleIds) this.insertLine(id, wh.id, articleId, cutoff);
       this.audit(ctx.userId, 'inventory.open', 'inventory', id, { number, kind: input.kind, date, lines: articleIds.length });
+      this.enqueue(ctx, 'inventory', id, 'upsert', {});
       return this.header(id);
     });
   }
@@ -274,6 +274,10 @@ export class InventoryService extends Base {
     return { inventory: this.header(id), lines: this.lines(id) };
   }
 
+  private lineId(inventoryId: string, articleId: string): string | undefined {
+    return this.db.prepare('SELECT id FROM inventory_lines WHERE inventory_id = ? AND article_id = ?').pluck().get(inventoryId, articleId) as string | undefined;
+  }
+
   /** Ajoute un produit à un inventaire partiel (ou un produit oublié). */
   addArticle(ctx: Context, id: string, articleId: string): void {
     const inv = this.requireOpen(id);
@@ -281,14 +285,17 @@ export class InventoryService extends Base {
     if (exists) throw new AppError('Ce produit est déjà dans l’inventaire', 'INVALID');
     this.insertLine(id, inv.warehouse_id, articleId, this.cutoff(inv));
     this.audit(ctx.userId, 'inventory.add', 'inventory', id, { articleId });
+    this.enqueue(ctx, 'inventory_line', this.lineId(id, articleId)!, 'upsert', {});
   }
 
   /** Retire un produit pas encore compté. */
   removeArticle(ctx: Context, id: string, articleId: string): void {
     this.requireOpen(id);
+    const lineId = this.lineId(id, articleId);
     const r = this.db.prepare('DELETE FROM inventory_lines WHERE inventory_id = ? AND article_id = ? AND counted IS NULL').run(id, articleId);
     if (!r.changes) throw new AppError('Seul un produit pas encore compté peut être retiré', 'INVALID');
     this.audit(ctx.userId, 'inventory.remove', 'inventory', id, { articleId });
+    this.enqueue(ctx, 'inventory_line', lineId!, 'delete', {});
   }
 
   /**
@@ -304,7 +311,11 @@ export class InventoryService extends Base {
         .prepare('UPDATE inventory_lines SET counted = ?, counted_detail = ?, counted_at = ?, counted_by = ? WHERE inventory_id = ? AND article_id = ?')
         .run(counted, counted === null || !detail ? null : JSON.stringify(detail), counted === null ? null : now, counted === null ? null : ctx.userId, id, articleId);
       if (!r.changes) throw new AppError('Ce produit n’est pas dans l’inventaire', 'NOT_FOUND');
-      this.db.prepare('INSERT INTO inventory_entries (id, inventory_id, article_id, user_id, counted, at) VALUES (?, ?, ?, ?, ?, ?)').run(newId(), id, articleId, ctx.userId, counted, now);
+      const entryId = newId();
+      this.db.prepare('INSERT INTO inventory_entries (id, inventory_id, article_id, user_id, counted, at) VALUES (?, ?, ?, ?, ?, ?)').run(entryId, id, articleId, ctx.userId, counted, now);
+      // Plusieurs PC comptent le même inventaire : chaque saisie part au serveur central.
+      this.enqueue(ctx, 'inventory_line', this.lineId(id, articleId)!, 'upsert', {});
+      this.enqueue(ctx, 'inventory_entry', entryId, 'upsert', {});
     });
   }
 
@@ -384,6 +395,7 @@ export class InventoryService extends Base {
         .prepare("UPDATE inventories SET status = 'closed', closed_at = ?, closed_by = ?, counted_value = ?, gap_value = ? WHERE id = ?")
         .run(now, ctx.userId, countedValue, gapValue, id);
       this.audit(ctx.userId, 'inventory.close', 'inventory', id, { number: inv.number, lines: lines.length, countedValue, gapValue });
+      this.enqueue(ctx, 'inventory', id, 'upsert', {});
       return this.header(id);
     });
   }
@@ -393,6 +405,7 @@ export class InventoryService extends Base {
     const inv = this.requireOpen(id);
     this.db.prepare("UPDATE inventories SET status = 'cancelled', cancelled_at = ?, cancelled_by = ? WHERE id = ?").run(this.now(), ctx.userId, id);
     this.audit(ctx.userId, 'inventory.cancel', 'inventory', id, { number: inv.number });
+    this.enqueue(ctx, 'inventory', id, 'upsert', {});
     return this.header(id);
   }
 }

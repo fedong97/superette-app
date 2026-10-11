@@ -4,6 +4,7 @@ import {
   PAYMENT_METHODS,
   type Codepage,
   type Receipt,
+  describeInPacks,
   drawerKick,
   formatFcfa,
   formatQty,
@@ -282,6 +283,64 @@ export function createPrinter(s: Services): Printer {
         <tbody>${rows}<tr class="total"><td colspan="${received ? 7 : 6}">Valeur transférée</td><td class="r">${money(tr.value)}</td></tr>
         ${received && tr.gap_value ? `<tr class="total"><td colspan="7">Écart à la réception</td><td class="r">${money(tr.gap_value)}</td></tr>` : ''}</tbody></table>
         <div class="sign"><span>Expédié par : ……………………</span><span>Transporté par : ……………………</span><span>Reçu par : ……………………</span></div>`);
+    },
+
+    async reorderSheet(storeId, lines) {
+      const store = s.admin.getStore(storeId);
+      const art = s.db.prepare('SELECT code, name, unit, unit_name FROM articles WHERE id = ?');
+      const packs = s.db.prepare('SELECT name, units FROM article_packs WHERE article_id = ? ORDER BY units DESC');
+      const ref = s.db.prepare('SELECT supplier_ref FROM supplier_articles WHERE article_id = ? AND supplier_id = ?').pluck();
+      const supName = s.db.prepare('SELECT name FROM suppliers WHERE id = ?').pluck();
+      const groups = new Map<string, typeof lines>();
+      for (const l of lines) groups.set(l.supplierId ?? '', [...(groups.get(l.supplierId ?? '') ?? []), l]);
+      let grand = 0;
+      const sections = [...groups]
+        .map(([supplierId, ls]) => {
+          let sub = 0;
+          const rows = ls
+            .map((l) => {
+              const a = art.get(l.articleId) as { code: string; name: string; unit: Parameters<typeof formatQty>[1]; unit_name: string | null };
+              const amount = Math.round((l.qty * l.unitCost) / 1000);
+              sub += amount;
+              const inPacks = describeInPacks(l.qty, packs.all(l.articleId) as { name: string; units: number }[], a.unit_name || 'Pièce');
+              return `<tr><td>${esc(a.code)}</td><td>${esc((supplierId && (ref.get(l.articleId, supplierId) as string | null)) || '')}</td><td>${esc(a.name)}</td>
+                <td class="r">${formatQty(l.qty, a.unit)}</td><td>${esc(inPacks)}</td><td class="r">${money(l.unitCost)}</td><td class="r">${money(amount)}</td></tr>`;
+            })
+            .join('');
+          grand += sub;
+          return `<h3>${esc(supplierId ? ((supName.get(supplierId) as string | undefined) ?? '') : 'Sans fournisseur')}</h3>
+            <table><thead><tr><th>Code</th><th>Réf. fournisseur</th><th>Article</th><th class="r">Quantité</th><th>En conditionnements</th><th class="r">PU HT</th><th class="r">Montant HT</th></tr></thead>
+            <tbody>${rows}<tr class="total"><td colspan="6">Total fournisseur</td><td class="r">${money(sub)}</td></tr></tbody></table>`;
+        })
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Proposition de commande</h1>
+        <p>Établie le ${new Date().toLocaleString('fr-FR')} · ${lines.length} article(s) · total ${money(grand)} FCFA HT</p>
+        ${sections}`);
+    },
+
+    async productionNote(orderId) {
+      const o = s.production.getOrder(orderId);
+      const store = s.admin.getStore(s.db.prepare('SELECT store_id FROM production_orders WHERE id = ?').pluck().get(orderId) as string);
+      const done = o.status === 'done';
+      const rows = o.components
+        .map(
+          (c) => `<tr><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td class="r">${formatQty(c.qty, c.unit as Parameters<typeof formatQty>[1])}</td>
+            <td class="r">${money(c.unit_cost)}</td><td class="r">${money(Math.round((c.qty * c.unit_cost) / 1000))}</td></tr>`,
+        )
+        .join('');
+      const total = o.total_cost ?? o.components.reduce((t, c) => t + Math.round((c.qty * c.unit_cost) / 1000), 0);
+      await printA4(`${a4Head(store)}
+        <h1>Ordre de fabrication ${esc(o.number)}${done ? '' : o.status === 'draft' ? ' (brouillon)' : ' (annulé)'}</h1>
+        <p>Produit : <b>${esc(o.article_name)}</b> · quantité : <b>${formatQty(o.qty, o.unit as Parameters<typeof formatQty>[1])}</b> · dépôt : ${esc(o.warehouse_name)}${o.label ? ` · ${esc(o.label)}` : ''}${
+          o.expiry ? ` · à consommer avant le ${new Date(`${o.expiry}T12:00:00`).toLocaleDateString('fr-FR')}` : ''
+        }</p>
+        <p>Créé le ${new Date(o.created_at).toLocaleString('fr-FR')} par ${esc(o.created_by_name)}${done ? ` · fabriqué le ${new Date(o.done_at!).toLocaleString('fr-FR')} par ${esc(o.done_by_name ?? '')}` : ''}</p>
+        <h3>Composants ${done ? 'sortis du stock' : 'à sortir'}</h3>
+        <table><thead><tr><th>Code</th><th>Composant</th><th class="r">Quantité</th><th class="r">CMUP</th><th class="r">Valeur</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="4">Coût de revient total</td><td class="r">${money(total)}</td></tr>
+        <tr class="total"><td colspan="4">Coût de revient unitaire</td><td class="r">${money(o.unit_cost ?? Math.round((total * 1000) / o.qty))}</td></tr></tbody></table>
+        <div class="sign"><span>Préparé par : ……………………</span><span>Contrôlé par : ……………………</span></div>`);
     },
 
     async inventoryResult(inventoryId) {

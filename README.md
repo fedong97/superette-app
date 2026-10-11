@@ -15,7 +15,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Remises par ligne, validées par le code d'un gérant si le caissier n'en a pas le droit.
 - Tickets en attente (F10 rappelle un ticket, le nombre en attente s'affiche sur le bouton), annulation et retour client sous code gérant, apports et prélèvements d'espèces.
 - Aucune vente tant que la caisse n'est pas ouverte. Ouverture et clôture dans Trésorerie › Opérations de trésorerie (comme KONTROL) : choix de la caisse, journée en cours, entrées et sorties d'espèces avec heure, montant, nature, motif et tiers, ventes à crédit, attendu, relevé et différentiel à la clôture, historique des journées.
-- Fond de caisse : à l'ouverture, le fond laissé la veille est proposé ; un complément vient de la caisse centrale, un surplus y retourne. L'ouverture demande le code du gérant (droit « Ouvrir une caisse »).
+- Fond de caisse : à l'ouverture, le fond laissé la veille est proposé ; un complément vient de la caisse centrale, un surplus y retourne. Le caissier ou le vendeur ouvre sa caisse seul avec le fond laissé la veille (ou moins) ; seul un complément pris dans la caisse centrale demande le code du gérant (droit « Compléter le fond de caisse »).
 - Clôture à l'aveugle : le caissier compte par coupure avant de voir l'attendu ; au-delà du seuil d'écart (500 FCFA par défaut, Administration › Paramètres) il faut un motif et le code du gérant, et le premier comptage reste tracé. Le caissier choisit le fond laissé dans le tiroir ; le reste est versé à la caisse centrale avec un bon de versement à signer. Rapport Z et rapport de clôture A4 (entrées, sorties, historique des ventes, signatures) réimprimables. Une caisse restée ouverte d'un jour sur l'autre est signalée.
 - Caissier sans les montants : sans le droit « Voir les montants de la caisse » (donné par défaut au gérant et au comptable), le caissier ou le vendeur ne voit dans Trésorerie que l'état de sa caisse, l'ouverture, la clôture et les sorties d'espèces qu'il a faites lui-même : ni entrées, ni ventes, ni attendu, ni historique des journées, ni Z. Il compte à l'aveugle et ne reçoit que le bon de versement ; un écart au-delà du seuil est validé sur place par le gérant, qui saisit son code, voit l'écart et en donne le motif. Sans le droit « Voir tout le registre des factures », Mes factures et Registre montrent ses trois dernières factures, à réimprimer. Le serveur de l'application applique ces règles, pas seulement l'écran.
 - Dépenses et écarts de caisse : une dépense en espèces saisie par un caissier ou un vendeur sort toujours de sa caisse (fenêtre Dépenses comme fiche de facturation) et apparaît dans ses sorties ; le gérant choisit entre la caisse centrale (par défaut) et sa caisse. Le caissier clôture sans code du gérant : son comptage est enregistré tel quel. Un écart au-delà du seuil reste « à justifier » : le gérant le voit dans la barre d'état et l'historique des journées, interpelle le caissier puis saisit le motif (« Justifier l'écart »).
@@ -37,6 +37,11 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Fiche d'inventaire : stock à l'ouverture, mouvements de la période, stock attendu, compté, écart, CMUP, montant de l'écart et valeur comptée, en rose les déficitaires, en bleu les excédentaires, en vert les produits sans écart. Filtres, historique des saisies, export Excel et CSV, import d'un CSV de comptage, impression du résultat A4 avec signatures.
 - Date d'inventaire antidatée possible (31/12) : le stock est arrêté à la fin de ce jour. La clôture corrige le stock (mouvements « Inventaire n° X ») ; dans un inventaire global les produits non comptés passent à zéro après confirmation, dans un partiel ils ne changent pas. Droits séparés « compter » (magasinier) et « créer, clôturer, annuler » (gérant).
 - Alertes de péremption (J-7, J-3, J-1, périmé), niveaux rupture/alerte/surstock.
+- Inventaires à plusieurs PC : chaque PC compte sa partie et voit les comptages des autres ; pour un même produit, la saisie la plus récente l'emporte. Transferts, demandes de correction et leur validation passent aussi d'un PC à l'autre. Les numéros portent le code du poste (DLA11-4, DLA12-1) pour ne jamais se doubler.
+
+**Fabrication**
+- Recettes (menu Fabrication) : un produit fini fait de composants, pour un lot de N unités, avec le coût de revient estimé au CMUP actuel et la marge sur le prix de vente.
+- Ordres de fabrication (OF-…) : brouillon avec les composants nécessaires et le stock disponible, puis « Fabriquer » sort les composants du stock et entre le produit fini au coût de revient (somme des CMUP). Refus si un composant manque, sauf avec « Ignorer la gestion des stocks ». Bon de fabrication A4 avec signatures, liste des ordres, droit « Fabrication » pour le gérant et le magasinier. Recettes et ordres se synchronisent.
 
 **Fournisseurs et achats**
 - Fiches fournisseurs (NIU, délais de paiement et de livraison, franco), articles référencés avec référence fournisseur, prix négocié, colisage et fournisseur principal.
@@ -44,7 +49,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Réception libre sans commande toujours possible depuis le Stock ; chaque réception produit un bon de réception (BR-…).
 - Factures et avoirs fournisseurs (FF-…/AF-…) rapprochés des bons de réception, refus des doublons, échéance calculée sur le délai de paiement.
 - Règlements en espèces, virement, chèque, MTN Mobile Money ou Orange Money (référence obligatoire hors espèces), échéancier avec retards, solde dû par fournisseur.
-- Proposition de commande : ventes moyennes des 4 dernières semaines, délai de livraison, stock d'alerte et colisage ; un bon par fournisseur en un clic.
+- Proposition de commande : ventes moyennes des 4 dernières semaines, délai de livraison, stock d'alerte et colisage ; filtres par rayon, par fournisseur et « ruptures seulement », quantité en cartons et pièces, export Excel et impression A4 par fournisseur ; un bon par fournisseur en un clic.
 - Commandes, réceptions et factures se synchronisent entre les PC du magasin ; les fiches fournisseurs sont communes à tous les magasins.
 
 **Clients et vente à crédit**
@@ -130,9 +135,11 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 **Pilotage et administration**
 - Page d'accueil au nom du magasin avec les fenêtres les plus utilisées ; écrans en couleurs (bandeaux verts, lignes alternées, champs clés en jaune, tuiles de chiffres colorées).
 - Tableau de bord du jour : CA, tickets, panier moyen, marge par rayon, ventes par heure, meilleures ventes.
+- Points d'attention (Vente › Points d'attention, ou l'onglet rapide « Attention ») : une tuile par point qui attend une action, ruptures et alertes de stock, écarts de caisse à justifier, transferts expédiés non reçus, demandes de correction, ristournes à constater ou à accorder, inventaires en cours, factures fournisseurs et clients en retard, ordres de fabrication. Chaque tuile ouvre la fenêtre qui la traite ; chaque utilisateur ne voit que les points de ses droits.
 - Export CSV des ventes.
 - Caisses attribuées aux utilisateurs : l'administrateur crée, renomme et désactive autant de caisses qu'il veut (Administration › Caisses) et attribue une caisse à chaque utilisateur (Administration › Utilisateurs). Le caissier ou le vendeur vend sur sa caisse depuis n'importe quel PC du magasin ; sans caisse attribuée il ne peut pas vendre. Le gérant et l'administrateur sans caisse choisissent la leur au moment de vendre (barre d'état ou Trésorerie). La numérotation des tickets et des Z reprend après les numéros reçus des autres PC. À la mise à jour, chaque caissier garde la caisse de sa dernière vente.
 - Magasins, caisses (code d'activation), dépôts, utilisateurs et rôles (administrateur, gérant, caissier, vendeur, responsable d'achat (appro), magasinier, comptable), paramètres, journal d'audit.
+- Chaque utilisateur ne voit que ce qu'il a le droit de faire, comme dans KONTROL : les menus, lignes de menu, onglets rapides, onglets et boutons non autorisés ne s'affichent pas du tout (pas de ligne grisée). Un menu sans aucune fenêtre permise disparaît.
 - Droits par rôle (Administration › Droits par rôle) : l'administrateur coche pour le gérant, le caissier, le vendeur, le responsable d'achat, le magasinier et le comptable les fenêtres qu'ils ouvrent et les actions de caisse et de gestion qu'ils font (changer un prix, remise sans code, sortie de caisse, inventaire, import…). L'administrateur garde tous les droits. Les réglages partent au serveur central et valent sur tous les PC.
 
 **Rapports de ventes**
@@ -217,7 +224,7 @@ PORT=3000 \
 npm start -w @superette/server
 ```
 
-Les tables sont créées au premier démarrage. `ENROLLMENT_KEY` (12 caractères minimum) protège l'enrôlement du premier PC ; les PC suivants n'en ont pas besoin, le code d'activation de leur caisse suffit. Sur Internet, placez le serveur derrière un proxy HTTPS (Caddy, Nginx).
+Les tables sont créées au premier démarrage. À chaque nouvelle version qui synchronise de nouvelles données (0.29.0 : inventaires, transferts, demandes de correction, ristournes, fabrication), mettez à jour le serveur central avant les PC. `ENROLLMENT_KEY` (12 caractères minimum) protège l'enrôlement du premier PC ; les PC suivants n'en ont pas besoin, le code d'activation de leur caisse suffit. Sur Internet, placez le serveur derrière un proxy HTTPS (Caddy, Nginx).
 
 ## Données
 

@@ -150,10 +150,20 @@ export function HeldDialog({ onClose, onResume }: { onClose: () => void; onResum
   const held = useLoad(() => call('pos.held'));
   return (
     <Modal title="Tickets en attente" onClose={onClose}>
+      {Boolean(held.data?.length) && <p className="muted">Entrée reprend le ticket sélectionné, ↑ ↓ pour changer.</p>}
       {held.data?.length === 0 && <Empty>Aucun ticket en attente.</Empty>}
-      <div className="pick-list">
-        {(held.data ?? []).map((h) => (
-          <button key={h.id} onClick={() => onResume(h.id)}>
+      <div
+        className="pick-list"
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+          e.preventDefault();
+          const b = [...e.currentTarget.querySelectorAll('button')];
+          const at = b.indexOf(document.activeElement as HTMLButtonElement);
+          b[Math.max(0, Math.min(b.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+        }}
+      >
+        {(held.data ?? []).map((h, i) => (
+          <button key={h.id} autoFocus={i === 0} onClick={() => onResume(h.id)}>
             <span>{h.label}</span>
             <span>{h.line_count} ligne(s)</span>
           </button>

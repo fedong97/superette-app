@@ -4,6 +4,7 @@ import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
+import { Statement } from './Customers';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, useSaleRows } from './SaleSearch';
@@ -78,7 +79,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'pay' | 'close' | 'held' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
+type Dialog = null | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'extra';
 
@@ -139,6 +140,10 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   /** Devis ou proforma chargé : ses prix garantis valent accord de remise. */
   const [quote, setQuote] = useState<{ id: string; number: string; validUntil: string } | null>(null);
   const account = useLoad(() => (customer ? call('customers.account', customer.id) : Promise.resolve(null)), [customer?.id]);
+  // Tickets en attente sur cette caisse : leur nombre s'affiche sur le bouton « Ouvrir ».
+  const held = useLoad(() => call('pos.held'), []);
+  // Clients existants proposés pendant la frappe du nom (évite les doublons).
+  const namesake = useLoad(() => (clientName.trim().length >= 2 ? call('customers.list', { search: clientName.trim() }) : Promise.resolve([])), [clientName]);
   /** Vente bloquée en attente du code gérant (remise ou dépassement du plafond). */
   const [pending, setPending] = useState<{ payments: SellPayments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string } | null>(null);
   const credit = mode === 'credit';
@@ -352,6 +357,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     try {
       await call('pos.hold', label, saleInput());
       clear();
+      held.reload();
       toast.ok('Ticket mis en attente');
     } catch (err) {
       toast.error(err);
@@ -362,6 +368,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     try {
       setLines(await reload(await call('pos.resume', id)));
       setDialog(null);
+      held.reload();
     } catch (err) {
       toast.error(err);
     }
@@ -406,6 +413,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         F7: onListing,
         F8: () => setDialog('customer'),
         F9: printA4,
+        F10: () => setDialog('held'),
       };
       if (fn[e.key]) {
         e.preventDefault();
@@ -503,6 +511,21 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             <span className="count">
               {totals.itemCount} art.
             </span>
+            {customer && account.data && (
+              <div className="solde">
+                <span
+                  className={`solde-chip ${account.data.balance > 0 ? 'neg' : account.data.balance < 0 ? 'pos' : 'zero'}`}
+                  title={account.data.balance > 0 ? 'Le client doit cette somme' : account.data.balance < 0 ? 'Avoir du client, utilisable en payant « sur compte »' : 'Compte soldé'}
+                >
+                  Solde : {account.data.balance > 0 ? '−' : account.data.balance < 0 ? '+' : ''}
+                  {amount(Math.abs(account.data.balance))} FCFA
+                  <small>{account.data.balance > 0 ? ' (doit)' : account.data.balance < 0 ? ' (avoir)' : ''}</small>
+                </span>
+                <button className="client-clear" title="Extrait de compte du client" onClick={() => setDialog('statement')}>
+                  J..
+                </button>
+              </div>
+            )}
             <div className={`fiche-total ${!lines.length && lastSale ? 'done' : ''}`}>
               {amount(shownTotal)}
               <small>TTC</small>
@@ -519,6 +542,27 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                 placeholder="Nom du client (facultatif)"
                 title="Imprimé sur le ticket et la facture"
               />
+            )}
+            {!customer && !credit && (namesake.data?.length ?? 0) > 0 && (
+              <div className="namesake">
+                <small>Client déjà enregistré ?</small>
+                {namesake.data!.slice(0, 4).map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      setCustomer(c);
+                      setClientName('');
+                    }}
+                  >
+                    {c.name}
+                    <span className={c.balance > 0 ? 'neg' : c.balance < 0 ? 'pos' : 'muted'}>
+                      {' '}
+                      {c.balance > 0 ? '−' : c.balance < 0 ? '+' : ''}
+                      {amount(Math.abs(c.balance))}
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
@@ -770,7 +814,13 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           <button disabled={!lines.length} onClick={() => void hold()}>
             Mise en attente <kbd>F3</kbd>
           </button>
-          <button onClick={() => setDialog('held')}>Ouvrir (en attente)</button>
+          <button onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente">
+            <span>
+              Ouvrir (en attente)
+              {(held.data?.length ?? 0) > 0 && <b className="held-count">{held.data!.length}</b>}
+            </span>
+            <kbd>F10</kbd>
+          </button>
           <button disabled={!lines.length} onClick={() => setDialog('pay')}>
             Encaisser <kbd>Ctrl+E</kbd>
           </button>
@@ -839,6 +889,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         </span>
         <span>
           <kbd>F9</kbd> Facture A4
+        </span>
+        <span>
+          <kbd>F10</kbd> Rappel ticket
         </span>
       </div>
 
@@ -981,7 +1034,20 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           }}
         />
       )}
-      {dialog === 'held' && <HeldDialog onClose={() => setDialog(null)} onResume={resume} />}
+      {dialog === 'held' && (
+        <HeldDialog
+          onClose={() => {
+            setDialog(null);
+            held.reload();
+          }}
+          onResume={resume}
+        />
+      )}
+      {dialog === 'statement' && customer && (
+        <Modal title={`Extrait de compte : ${customer.name}`} onClose={() => setDialog(null)} wide>
+          <Statement customer={customer} />
+        </Modal>
+      )}
       {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
       {dialog === 'return' && <ReturnDialog onClose={() => setDialog(null)} />}
       {(dialog === 'cashIn' || dialog === 'cashOut') && (

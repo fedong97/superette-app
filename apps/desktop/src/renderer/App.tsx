@@ -66,9 +66,11 @@ interface MenuItem {
   /** Module pas encore développé : affiché grisé. */
   soon?: boolean;
   /** Droit nécessaire en plus de celui de la fenêtre (Administration › Droits). */
-  perm?: Permission;
+  perm?: Permission | Permission[];
   /** Réservé au rôle Administrateur. */
   adminOnly?: boolean;
+  /** Compteur affiché à côté du libellé. */
+  badge?: 'gaps';
 }
 
 const SEP: MenuItem = { label: '', sep: true };
@@ -132,7 +134,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Trésorerie',
     [
       { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
-      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_amounts' },
+      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_amounts', badge: 'gaps' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
       SEP,
       { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
@@ -164,8 +166,9 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Stocks', open: ['stock', 'state'] },
       { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
+      { label: "Monitoring de l'évolution du stock", open: ['stock', 'monitoring'] },
       SEP,
-      { label: 'Inventaires', open: ['stock', 'inventory'], perm: 'inventory' },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
       { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'] },
       SEP,
       { label: 'Stocks critiques', open: ['stock', 'critical'] },
@@ -198,6 +201,12 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Règlements reçus', open: ['customers', 'payments'] },
       { label: 'Retours et avoirs clients', open: ['sales', 'returns'] },
+      SEP,
+      { label: 'Ristournes : état des ristournes', open: ['customers', 'rebates-state'] },
+      { label: 'Ristournes : reports à nouveau', open: ['customers', 'rebates-carry'] },
+      { label: 'Ristournes : réglage de base', open: ['customers', 'rebates-base'] },
+      { label: 'Ristournes : réglage des clients spécifiques', open: ['customers', 'rebates-clients'] },
+      { label: 'Ristournes : régularisations et bons', open: ['customers', 'rebates-entries'] },
     ],
   ],
   [
@@ -219,8 +228,9 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'État du stock', open: ['stock', 'state'] },
       { label: 'Mouvements de stock', open: ['stock', 'moves'] },
+      { label: 'Monitoring du stock', open: ['stock', 'monitoring'] },
       { label: 'Pertes et casse', open: ['stock', 'loss'] },
-      { label: 'Inventaire', open: ['stock', 'inventory'], perm: 'inventory' },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
       { label: 'Péremptions', open: ['stock', 'expiry'] },
       { label: 'Étiquettes de rayon', open: ['labels'] },
     ],
@@ -308,7 +318,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // Sans tout le registre, le caissier garde « Mes factures » pour ses trois dernières.
   const canWin = (kind: WinKind) => can(WINDOWS[kind].perm) || (kind === 'sales' && (can('cash') || can('credit')));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
-  const [wins, setWins] = useState<Win[]>([{ kind: first, nonce: 0 }]);
+  // Le caissier et le vendeur arrivent sur leur fiche de facturation ; les autres sur la page d'accueil.
+  const [wins, setWins] = useState<Win[]>(() => (['cashier', 'seller'].includes(user.role) ? [{ kind: first, nonce: 0 }] : []));
   const [active, setActive] = useState<WinKind>(first);
   const [menu, setMenu] = useState<string | null>(null);
   const [chooseRegister, setChooseRegister] = useState(false);
@@ -318,12 +329,14 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
   const chargesLate = useLoad(() => call('charges.late'), []);
+  const gaps = useLoad(() => call('treasury.pendingGaps'), []);
 
   useEffect(() => {
     const t = setInterval(() => {
       sync.reload();
       backupLate.reload();
       chargesLate.reload();
+      gaps.reload();
     }, 15000);
     return () => clearInterval(t);
   }, []);
@@ -350,14 +363,14 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const close = (kind: WinKind) => {
     const rest = wins.filter((w) => w.kind !== kind);
     setWins(rest);
+    // Sans fenêtre ouverte, la page d'accueil s'affiche.
     if (active === kind) setActive(rest[rest.length - 1]?.kind ?? first);
-    if (!rest.length) setWins([{ kind: first, nonce: 0 }]);
   };
 
   /** Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double. */
   const visibleItems = (items: MenuItem[]) =>
     items
-      .filter((i) => (!i.perm || can(i.perm)) && (!i.adminOnly || user.role === 'admin'))
+      .filter((i) => (!i.perm || [i.perm].flat().some(can)) && (!i.adminOnly || user.role === 'admin'))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
 
@@ -393,6 +406,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 e.stopPropagation();
                 setMenu(menu === name ? null : name);
                 chargesLate.reload();
+                gaps.reload();
               }}
               onMouseEnter={() => menu && setMenu(name)}
             >
@@ -406,6 +420,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   ) : (
                     <button key={i.label} disabled={i.soon || (i.open && !canWin(i.open[0]))} onClick={() => void run(i)}>
                       {i.label}
+                      {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
                       {i.soon && <small>bientôt</small>}
                     </button>
                   ),
@@ -438,6 +453,25 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </button>
       </nav>
       <main className="windows">
+        {!wins.length && (
+          <section className="home">
+            <div className="home-card">
+              <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
+              <h1>{state.station?.store.name}</h1>
+              {(state.station?.store.address || state.station?.store.phone) && (
+                <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
+              )}
+              <p className="home-sub">Superette Gestion · bonjour {user.name.split(' ')[0]}</p>
+              <div className="home-tiles">
+                {QUICK.filter((q) => q.open && canWin(q.open[0])).slice(0, 8).map((q) => (
+                  <button key={q.label} className={q.credit ? 'credit' : ''} onClick={() => open(...q.open!)}>
+                    {q.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
         {wins.map((w) => (
           <section key={`${w.kind}-${w.nonce}`} className="window" hidden={w.kind !== active}>
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
@@ -469,7 +503,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
-            {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={refresh} />}
+            {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard />}
             {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
           </section>
@@ -499,6 +533,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {chargesLate.data!.count} charge(s) en retard
           </button>
         )}
+        {Boolean(gaps.data?.length) && (
+          <button className="warn" onClick={() => open('treasury', 'history')} title="Clôtures dont l'écart attend votre motif">
+            {gaps.data!.length} écart(s) de caisse à justifier
+          </button>
+        )}
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
         </button>
@@ -522,6 +561,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['F4 ou Entrée sur saisie vide', 'Valider la fiche (espèces si l’encaissé couvre le total)'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],
+                ['F10', 'Rappeler un ticket en attente'],
                 ['F2', 'Réimprimer le dernier ticket'],
                 ['F6', 'Remise sur la ligne sélectionnée'],
                 ['F7', 'Listing des factures'],

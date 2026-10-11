@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, today, useLoad, useToast } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
+import { Rebates, type RebatesTab } from './Rebates';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, draftOf, inputOf } from './customerDialogs';
 
 type User = NonNullable<Result<'app.state'>['user']>;
-export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments';
+export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | `rebates-${RebatesTab}`;
 
 /** Clients : fiches, comptes à crédit, balance âgée et règlements reçus. */
 export function Customers({ user, initialTab = 'list' }: { user: User; initialTab?: CustomersTab }) {
   const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
-  const [tab, setTab] = useState<CustomersTab>(initialTab);
+  const [tab, setTab] = useState<CustomersTab>(initialTab.startsWith('rebates') ? 'rebates' : initialTab);
+  const rebateTab = (initialTab.startsWith('rebates-') ? initialTab.slice(8) : 'state') as RebatesTab;
   const tabs: [CustomersTab, string][] = [
     ['list', 'Liste'],
     ['statement', 'Extrait de compte'],
@@ -22,6 +24,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       : []),
     ['recent', 'Soldes qui ont bougé'],
     ['payments', 'Règlements reçus'],
+    ['rebates', 'Ristournes'],
   ];
   return (
     <div className="page">
@@ -35,6 +38,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       {tab === 'limits' && accounting && <CreditControl />}
       {tab === 'recent' && <RecentAccounts party="customer" />}
       {tab === 'payments' && <Payments />}
+      {tab === 'rebates' && <Rebates user={user} initialTab={rebateTab} />}
     </div>
   );
 }
@@ -268,7 +272,7 @@ function StatementPicker() {
   );
 }
 
-function Statement({ customer }: { customer: Customer }) {
+export function Statement({ customer }: { customer: Customer }) {
   const toast = useToast();
   const [from, setFrom] = useState(() => `${today().slice(0, 8)}01`);
   const [to, setTo] = useState(today);

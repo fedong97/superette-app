@@ -1,4 +1,5 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, dialog } from 'electron';
+import { writeFile } from 'node:fs/promises';
 import {
   PAYMENT_METHODS,
   type Codepage,
@@ -13,7 +14,7 @@ import {
   receiptToEscPos,
   splitTtc,
 } from '@superette/core';
-import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, JOURNALS } from '@superette/db';
+import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
 import { sendNetwork, sendWindowsRaw } from './rawPrint';
@@ -148,6 +149,21 @@ export function createPrinter(s: Services): Printer {
     }
   }
 
+  /** Document A4 enregistré en PDF : la fenêtre « Enregistrer sous » s'ouvre. Renvoie false si annulé. */
+  async function saveA4Pdf(body: string, fileName: string): Promise<boolean> {
+    const target = await dialog.showSaveDialog({ defaultPath: fileName, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (target.canceled || !target.filePath) return false;
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    try {
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${body}</body></html>`;
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await writeFile(target.filePath, await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true }));
+      return true;
+    } finally {
+      win.destroy();
+    }
+  }
+
   /** Planche d'étiquettes : la fenêtre d'impression s'ouvre au format de la planche ou du rouleau. Renvoie false si annulé. */
   async function printLabelsHtml(html: string, format: LabelFormatId): Promise<boolean> {
     const f = LABEL_FORMATS[format];
@@ -200,6 +216,97 @@ export function createPrinter(s: Services): Printer {
         <div class="sign"><span>Compté par : ……………………</span><span>Heure de fin : ……………</span><span>Signature : ……………………</span></div>`);
     },
 
+    async inventorySheet(inventoryId, opts) {
+      const model: InventorySheetModel = opts?.model ?? 'blind';
+      const output = opts?.output ?? 'a4';
+      if (output === 'ticket') return void (await printReceipt(s.receipts.inventorySheet(inventoryId, model), false, true));
+      const { inventory: inv, lines } = s.inventories.get(inventoryId);
+      const store = s.admin.getStore(inv.store_id);
+      const q = (v: number | null, unit: Parameters<typeof formatQty>[1]) => (v === null ? '' : formatQty(v, unit));
+      const cols: Record<InventorySheetModel, string[]> = {
+        blind: ['Compté'],
+        withStock: ['Attendu', 'Compté'],
+        control: ['Attendu', 'Compté', 'Écart'],
+        counted: ['Compté'],
+      };
+      let dept: string | null | undefined;
+      const rows = lines
+        .map((l) => {
+          const levels = l.unit === 'piece' ? [...l.packs.map((p) => p.name), l.unit_name || 'Pièce'] : [l.unit === 'kg' ? 'kg' : 'litres'];
+          const blanks = `<td class="count">${levels.map((v) => `<span>……… ${esc(v)}</span>`).join('')}</td>`;
+          const cells: Record<InventorySheetModel, string> = {
+            blind: blanks,
+            withStock: `<td class="r">${q(l.expected, l.unit)}</td>${blanks}`,
+            control: `<td class="r">${q(l.expected, l.unit)}</td><td class="r">${q(l.counted, l.unit) || '—'}</td><td class="r">${q(l.difference, l.unit)}</td>`,
+            counted: `<td class="r">${q(l.counted, l.unit) || '—'}</td>`,
+          };
+          const head = l.department_name !== dept ? `<tr><th colspan="${2 + cols[model].length}">${esc((dept = l.department_name) ?? 'Sans rayon')}</th></tr>` : '';
+          return `${head}<tr><td>${esc(l.code)}</td><td>${esc(l.name)}</td>${cells[model]}</tr>`;
+        })
+        .join('');
+      const body = `${a4Head(store)}
+        <h1>Inventaire n° ${inv.number} : feuille de comptage</h1>
+        <p>Dépôt : <b>${esc(inv.warehouse_name)}</b> · date d'inventaire ${new Date(`${inv.inventory_date}T12:00:00`).toLocaleDateString('fr-FR')} · ${lines.length} produits · ${esc(INVENTORY_SHEET_MODELS[model].toLowerCase())}</p>
+        ${model === 'blind' || model === 'withStock' ? `<p class="muted">Comptez chaque produit en cartons, paquets et unités ; notez l'heure de fin de chaque rayon.</p>` : ''}
+        <style>.count span { display: inline-block; min-width: 30mm; } th[colspan] { background: #e8eef7; text-align: left; }</style>
+        <table><tr><th style="width:22mm">Code</th><th>Produit</th>${cols[model].map((c) => `<th${c === 'Compté' && (model === 'blind' || model === 'withStock') ? ' style="width:95mm"' : ' class="r"'}>${c}</th>`).join('')}</tr>${rows}</table>
+        <div class="sign"><span>Compté par : ……………………</span><span>Heure de fin : ……………</span><span>Signature : ……………………</span></div>`;
+      if (output === 'pdf') return void (await saveA4Pdf(body, `inventaire-${inv.number}-fiche.pdf`));
+      await printA4(body);
+    },
+
+    async transferNote(transferId) {
+      const { transfer: tr, lines } = s.transfers.get(transferId);
+      const store = s.admin.getStore(tr.store_id);
+      const received = tr.status === 'received';
+      const title = received ? 'Bon de réception' : tr.status === 'draft' ? 'Bon de transfert (brouillon)' : 'Bon de route';
+      const packText = (l: (typeof lines)[number]) => {
+        const p = l.packs.find((x) => x.position === l.pack_position);
+        return p && l.qty % p.units === 0 ? `${l.qty / p.units} ${esc(p.name)}` : '';
+      };
+      const rows = lines
+        .map(
+          (l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="r">${formatQty(l.qty, l.unit)}</td><td>${packText(l)}</td>
+            ${received ? `<td class="r">${formatQty(l.received_qty ?? 0, l.unit)}</td><td class="r">${formatQty((l.received_qty ?? 0) - l.qty, l.unit)}</td>` : '<td></td>'}
+            <td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.value)}</td></tr>`,
+        )
+        .join('');
+      const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('fr-FR') : '');
+      await printA4(`${a4Head(store)}
+        <h1>${title} · transfert n° ${tr.number}</h1>
+        <p>De <b>${esc(tr.from_name)}</b> vers <b>${esc(tr.to_name)}</b>${tr.label ? ` · ${esc(tr.label)}` : ''}</p>
+        <p>Créé le ${when(tr.created_at)} par ${esc(tr.created_by_name)}${tr.shipped_at ? ` · expédié le ${when(tr.shipped_at)} par ${esc(tr.shipped_by_name ?? '')}` : ''}${
+          tr.received_at ? ` · réceptionné le ${when(tr.received_at)} par ${esc(tr.received_by_name ?? '')}` : ''
+        }${tr.route_number ? ` · bon de route ${esc(tr.route_number)}` : ''}${tr.reception_number ? ` · bon de réception ${esc(tr.reception_number)}` : ''}</p>
+        <table><thead><tr><th>Code</th><th>Produit</th><th class="r">Expédié</th><th>Conditionnement</th>${received ? '<th class="r">Reçu</th><th class="r">Écart</th>' : '<th style="width:30mm">Reçu</th>'}<th class="r">CMUP</th><th class="r">Valeur</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="${received ? 7 : 6}">Valeur transférée</td><td class="r">${money(tr.value)}</td></tr>
+        ${received && tr.gap_value ? `<tr class="total"><td colspan="7">Écart à la réception</td><td class="r">${money(tr.gap_value)}</td></tr>` : ''}</tbody></table>
+        <div class="sign"><span>Expédié par : ……………………</span><span>Transporté par : ……………………</span><span>Reçu par : ……………………</span></div>`);
+    },
+
+    async inventoryResult(inventoryId) {
+      const { inventory: inv, lines } = s.inventories.get(inventoryId);
+      const store = s.admin.getStore(inv.store_id);
+      const counted = lines.filter((l) => l.counted !== null);
+      const rows = counted
+        .map(
+          (l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="r">${formatQty(l.expected, l.unit)}</td><td class="r">${formatQty(l.counted!, l.unit)}</td>
+            <td class="r">${formatQty(l.difference ?? 0, l.unit)}</td><td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.gap_value ?? 0)}</td><td class="r">${money(l.counted_value ?? 0)}</td></tr>`,
+        )
+        .join('');
+      const gap = inv.gap_value;
+      const status = inv.status === 'closed' ? `clôturé le ${new Date(inv.closed_at!).toLocaleString('fr-FR')} par ${esc(inv.closed_by_name ?? '')}` : inv.status === 'open' ? 'en cours (résultat provisoire)' : 'annulé';
+      await printA4(`${a4Head(store)}
+        <h1>Résultat de l'inventaire n° ${inv.number}</h1>
+        <p>${inv.kind === 'global' ? 'Inventaire global' : `Inventaire partiel${inv.departments.length ? ` : ${esc(inv.departments.join(', '))}` : ''}`} · dépôt <b>${esc(inv.warehouse_name)}</b> ·
+          date d'inventaire ${new Date(`${inv.inventory_date}T12:00:00`).toLocaleDateString('fr-FR')} · ${status}</p>
+        <p>${counted.length} produits comptés sur ${lines.length}. Valeur du stock compté : <b>${money(inv.counted_value)} FCFA</b>.
+          L'inventaire est <b>${gap < 0 ? `déficitaire de ${money(-gap)} FCFA` : gap > 0 ? `excédentaire de ${money(gap)} FCFA` : 'sans écart'}</b>.</p>
+        <table><thead><tr><th>Code</th><th>Produit</th><th class="r">Attendu</th><th class="r">Compté</th><th class="r">Écart</th><th class="r">CMUP</th><th class="r">Montant écart</th><th class="r">Valeur comptée</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="6">Totaux</td><td class="r">${money(gap)}</td><td class="r">${money(inv.counted_value)}</td></tr></tbody></table>
+        <div class="sign"><span>Le magasinier : ……………………</span><span>Le gérant : ……………………</span></div>`);
+    },
+
     async ticket(saleId, opts) {
       const cfg = config();
       let kick = false;
@@ -249,7 +356,7 @@ export function createPrinter(s: Services): Printer {
           ${row('Chiffre d’affaires net TTC', z.netTtc, true)}${row('Remises', z.discounts)}${row('Promotions', z.promotions)}${row('Ventes à crédit', journal.creditSales)}
           ${z.byMethod.map((m) => row(esc(m.label), m.amount)).join('')}
         </table></div>
-        ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b></p>` : ''}
+        ${se.gap_reason ? `<p>Motif de l'écart : <b>${esc(se.gap_reason)}</b>${se.gap_approved_by_name ? `, justifié par ${esc(se.gap_approved_by_name)}` : ''}</p>` : s.pos.gapPending(se) ? '<p><b>Écart à justifier par le gérant.</b></p>' : ''}
         <h3>Entrées d'espèces</h3>
         <table><thead><tr><th>Heure</th><th>Nature</th><th>Pièce / motif</th><th>Tiers</th><th class="r">Montant</th></tr></thead>
         <tbody>${cashRows(journal.entries)}<tr class="total"><td colspan="4">Total des entrées</td><td class="r">${money(sum(journal.entries))}</td></tr></tbody></table>
@@ -424,6 +531,10 @@ export function createPrinter(s: Services): Printer {
 
     async expenseVoucher(expenseId) {
       await printReceipt(s.receipts.expenseVoucher(expenseId), false);
+    },
+
+    async rebateVoucher(entryId) {
+      await printReceipt(s.receipts.rebateVoucher(entryId), false);
     },
 
     async vatReturn(storeId, month) {

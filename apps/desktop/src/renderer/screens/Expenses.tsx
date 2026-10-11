@@ -49,6 +49,7 @@ export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab
 }
 
 function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean }) {
+  const toast = useToast();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [category, setCategory] = useState('');
@@ -131,10 +132,13 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
         <ExpenseDialog
           atRegister={false}
           needsSupervisor={false}
+          user={user}
           onClose={() => setAdding(false)}
-          onSaved={() => {
+          onSaved={(e) => {
             setAdding(false);
             list.reload();
+            // Sortie du tiroir : bon à faire signer, comme à la caisse.
+            if (e.session_id) call('expenses.print', e.id).catch(toast.error);
           }}
         />
       )}
@@ -165,14 +169,20 @@ export interface ChargePreset {
 
 /** Saisie d'une dépense. À la caisse, elle est payée avec les espèces du tiroir et sort du Z. */
 export function ExpenseDialog({
-  atRegister,
-  needsSupervisor,
+  atRegister: fromPos,
+  needsSupervisor: posNeedsSupervisor,
+  user,
   preset,
   onClose,
   onSaved,
 }: {
   atRegister: boolean;
   needsSupervisor: boolean;
+  /**
+   * Utilisateur de la fenêtre Dépenses : le caissier ou le vendeur paie en
+   * espèces avec sa caisse ; le gérant choisit entre la caisse centrale et sa caisse.
+   */
+  user?: User;
   /** Échéance de charge fixe à constater : la saisie part de la charge prévue. */
   preset?: ChargePreset;
   onClose: () => void;
@@ -189,7 +199,14 @@ export function ExpenseDialog({
   const [reference, setReference] = useState('');
   const [date, setDate] = useState(today());
   const [askPin, setAskPin] = useState(false);
+  const [drawerChosen, setDrawerChosen] = useState(false);
   const value = parseAmount(amount);
+  const sells = Boolean(user && (has(user, 'cash') || has(user, 'credit')));
+  const forcedDrawer = Boolean(!fromPos && user && sells && !has(user, 'central_cash'));
+  const canChoose = Boolean(!fromPos && user && sells && has(user, 'central_cash'));
+  const fromDrawer = !fromPos && method === 'CASH' && (forcedDrawer || (canChoose && drawerChosen));
+  const atRegister = fromPos || fromDrawer;
+  const needsSupervisor = posNeedsSupervisor || (fromDrawer && !has(user!, 'cashout'));
 
   const submit = async (pin?: string) => {
     const v = vat ? parseAmount(vat) : 0;
@@ -218,7 +235,7 @@ export function ExpenseDialog({
   };
 
   return (
-    <Modal title={atRegister ? 'Dépense payée avec les espèces du tiroir' : preset ? `Constater : ${preset.label}` : 'Nouvelle dépense'} onClose={onClose} wide={!atRegister}>
+    <Modal title={fromPos ? 'Dépense payée avec les espèces du tiroir' : preset ? `Constater : ${preset.label}` : 'Nouvelle dépense'} onClose={onClose} wide={!fromPos}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -226,7 +243,7 @@ export function ExpenseDialog({
           else void submit();
         }}
       >
-        <div className={atRegister ? '' : 'grid2'}>
+        <div className={fromPos ? '' : 'grid2'}>
           <Field label="Catégorie">
             <select autoFocus value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
               <option value="">Choisir…</option>
@@ -238,7 +255,7 @@ export function ExpenseDialog({
             </select>
           </Field>
           <Field label="Objet">
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={atRegister ? 'Taxi livraison, sacs, crédit téléphone…' : 'Loyer d’octobre, facture ENEO…'} required />
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={fromPos ? 'Taxi livraison, sacs, crédit téléphone…' : 'Loyer d’octobre, facture ENEO…'} required />
           </Field>
           <Field label="Bénéficiaire">
             <input value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="Nom, société" />
@@ -251,7 +268,7 @@ export function ExpenseDialog({
           <Field label="Montant payé (FCFA)">
             <input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} required />
           </Field>
-          {!atRegister && (
+          {!fromPos && (
             <Field label="TVA récupérable (FCFA)" hint="Seulement si la facture porte la TVA et votre NIU">
               <div className="inline">
                 <input inputMode="numeric" value={vat} onChange={(e) => setVat(e.target.value)} placeholder="0" />
@@ -262,7 +279,7 @@ export function ExpenseDialog({
             </Field>
           )}
         </div>
-        {!atRegister && (
+        {!fromPos && (
           <>
             <div className="methods six">
               {(Object.keys(EXPENSE_METHODS) as Method[]).map((m) => (
@@ -271,15 +288,33 @@ export function ExpenseDialog({
                 </button>
               ))}
             </div>
+            {method === 'CASH' && canChoose && (
+              <Field label="Payée avec">
+                <div className="seg">
+                  <button type="button" className={!drawerChosen ? 'active' : ''} onClick={() => setDrawerChosen(false)}>
+                    Caisse centrale
+                  </button>
+                  <button type="button" className={drawerChosen ? 'active' : ''} onClick={() => setDrawerChosen(true)}>
+                    Ma caisse (tiroir)
+                  </button>
+                </div>
+              </Field>
+            )}
             <Field
               label={method === 'CASH' ? 'N° de facture ou de reçu (facultatif)' : method === 'CHEQUE' ? 'N° de chèque' : 'Référence de la transaction'}
-              hint={method === 'CASH' ? 'Espèces du coffre ou de la caisse du bureau : le tiroir de la caisse ne bouge pas' : undefined}
+              hint={
+                method !== 'CASH'
+                  ? undefined
+                  : fromDrawer
+                    ? 'Payée avec les espèces du tiroir de votre caisse : elle apparaît dans vos sorties de caisse et sur le Z'
+                    : 'Payée avec les espèces de la caisse centrale : le tiroir de la caisse ne bouge pas'
+              }
             >
               <input value={reference} onChange={(e) => setReference(e.target.value)} required={method !== 'CASH'} />
             </Field>
           </>
         )}
-        {atRegister && <p className="muted">Le montant sort du tiroir : il apparaît sur le Z et diminue les espèces attendues. Un bon de sortie s'imprime pour signature.</p>}
+        {fromPos && <p className="muted">Le montant sort du tiroir : il apparaît sur le Z et diminue les espèces attendues. Un bon de sortie s'imprime pour signature.</p>}
         <div className="actions">
           <button type="button" onClick={onClose}>
             Annuler

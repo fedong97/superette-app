@@ -970,4 +970,162 @@ UPDATE users SET register_id = (
 ) WHERE role IN ('cashier', 'seller');
 `,
   },
+  {
+    version: 19,
+    name: 'écart de clôture justifié après coup par le gérant',
+    sql: `
+-- Le caissier clôture sans code du gérant ; le gérant justifie l'écart ensuite, depuis son compte.
+ALTER TABLE cash_sessions ADD COLUMN gap_justified_at TEXT;
+UPDATE cash_sessions SET gap_justified_at = closed_at WHERE gap_reason IS NOT NULL;
+`,
+  },
+  {
+    version: 20,
+    name: 'inventaires enregistrés (global ou partiel)',
+    sql: `
+-- Inventaire : la liste des produits est figée à l'ouverture, on saisit les quantités comptées
+-- au fil de l'eau, puis la clôture corrige le stock (mouvements « Inventaire n° X »).
+CREATE TABLE inventories (
+  id TEXT PRIMARY KEY,
+  number INTEGER NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  kind TEXT NOT NULL CHECK (kind IN ('global', 'partial')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'cancelled')),
+  label TEXT,
+  department_ids TEXT,
+  -- Date d'inventaire : aujourd'hui, ou une date passée (fin d'exercice) à laquelle le stock est arrêté.
+  inventory_date TEXT NOT NULL,
+  backdated INTEGER NOT NULL DEFAULT 0,
+  opened_at TEXT NOT NULL,
+  opened_by TEXT NOT NULL REFERENCES users(id),
+  closed_at TEXT,
+  closed_by TEXT REFERENCES users(id),
+  cancelled_at TEXT,
+  cancelled_by TEXT REFERENCES users(id),
+  counted_value INTEGER,
+  gap_value INTEGER
+);
+CREATE TABLE inventory_lines (
+  id TEXT PRIMARY KEY,
+  inventory_id TEXT NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  opening_qty INTEGER NOT NULL,
+  counted INTEGER,
+  counted_detail TEXT,
+  counted_at TEXT,
+  counted_by TEXT REFERENCES users(id),
+  -- À la clôture : stock attendu à l'heure du comptage, écart et coût unitaire retenus.
+  expected INTEGER,
+  difference INTEGER,
+  unit_cost INTEGER,
+  UNIQUE (inventory_id, article_id)
+);
+-- Historique des saisies : qui a compté quoi et quand.
+CREATE TABLE inventory_entries (
+  id TEXT PRIMARY KEY,
+  inventory_id TEXT NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  article_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  counted INTEGER,
+  at TEXT NOT NULL
+);
+CREATE INDEX inventory_entries_inventory ON inventory_entries(inventory_id, at);
+`,
+  },
+  {
+    version: 21,
+    name: 'bons de transfert, demandes de correction de stock, ristournes',
+    sql: `
+-- Bon de transfert entre dépôts : brouillon, expédié (le stock quitte le départ), réceptionné.
+CREATE TABLE transfers (
+  id TEXT PRIMARY KEY,
+  number INTEGER NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  from_warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  to_warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'shipped', 'received', 'cancelled')),
+  label TEXT,
+  route_number TEXT,
+  reception_number TEXT,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  shipped_at TEXT,
+  shipped_by TEXT REFERENCES users(id),
+  printed_at TEXT,
+  received_at TEXT,
+  received_by TEXT REFERENCES users(id),
+  cancelled_at TEXT,
+  cancelled_by TEXT REFERENCES users(id)
+);
+CREATE TABLE transfer_lines (
+  id TEXT PRIMARY KEY,
+  transfer_id TEXT NOT NULL REFERENCES transfers(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  qty INTEGER NOT NULL CHECK (qty > 0),
+  -- Conditionnement choisi à la saisie (affichage) : 0 = unité, sinon la position du conditionnement.
+  pack_position INTEGER NOT NULL DEFAULT 0,
+  received_qty INTEGER,
+  unit_cost INTEGER,
+  -- Lots sortis à l'expédition (numéro, péremption, date d'entrée), recréés à l'arrivée.
+  lots TEXT
+);
+CREATE INDEX transfer_lines_transfer ON transfer_lines(transfer_id, position);
+
+-- Demande de correction de stock : le magasinier propose, le gérant valide ou refuse.
+CREATE TABLE stock_requests (
+  id TEXT PRIMARY KEY,
+  number INTEGER NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  article_id TEXT NOT NULL REFERENCES articles(id),
+  before_qty INTEGER NOT NULL,
+  requested_qty INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  requested_at TEXT NOT NULL,
+  requested_by TEXT NOT NULL REFERENCES users(id),
+  decided_at TEXT,
+  decided_by TEXT REFERENCES users(id),
+  decision_note TEXT,
+  applied_delta INTEGER
+);
+CREATE INDEX stock_requests_article ON stock_requests(article_id, requested_at);
+
+-- Ristournes : réglage de base (customer_id NULL) ou propre à un client, par famille (NULL = toutes).
+ALTER TABLE customers ADD COLUMN rebate_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE customers ADD COLUMN rebate_delivered INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE rebate_rules (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT REFERENCES customers(id),
+  family_id TEXT REFERENCES families(id),
+  rate_bp INTEGER NOT NULL DEFAULT 0 CHECK (rate_bp >= 0),
+  unit_amount INTEGER NOT NULL DEFAULT 0 CHECK (unit_amount >= 0),
+  min_qty INTEGER NOT NULL DEFAULT 0 CHECK (min_qty >= 0),
+  pickup_fee INTEGER NOT NULL DEFAULT 0 CHECK (pickup_fee >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- Compte de ristourne du client : acquise (période constatée), régularisation, accordée en avoir ou en espèces.
+CREATE TABLE rebate_entries (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  kind TEXT NOT NULL CHECK (kind IN ('earned', 'adjust', 'credit', 'cash')),
+  amount INTEGER NOT NULL,
+  period_from TEXT,
+  period_to TEXT,
+  label TEXT NOT NULL,
+  at TEXT NOT NULL,
+  user_id TEXT REFERENCES users(id)
+);
+CREATE INDEX rebate_entries_customer ON rebate_entries(customer_id, at);
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES ('4198', 'Clients, rabais, remises et ristournes à accorder', 'rebates_due');
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES ('7019', 'Rabais, remises et ristournes accordés', 'rebates');
+UPDATE accounts SET role = 'rebates_due' WHERE id = '4198' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'rebates_due');
+UPDATE accounts SET role = 'rebates' WHERE id = '7019' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'rebates');
+`,
+  },
 ];

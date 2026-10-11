@@ -5,9 +5,20 @@ import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
 import type { Db } from './database';
 import type { PosService } from './pos';
 import type { TreasuryService } from './treasury';
+import type { InventoryService } from './inventories';
+import { REBATE_KINDS, type RebateService } from './rebates';
 import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
+
+/** Modèles de fiche de comptage (comme dans KONTROL). */
+export const INVENTORY_SHEET_MODELS = {
+  blind: 'Modèle classique, sans stock',
+  withStock: 'Modèle classique, avec le stock attendu',
+  control: 'Stock compté + stock attendu (contrôle)',
+  counted: 'Stock compté uniquement',
+} as const;
+export type InventorySheetModel = keyof typeof INVENTORY_SHEET_MODELS;
 const dateFr = (iso: string) =>
   new Date(iso).toLocaleString('fr-FR', { timeZone: 'Africa/Douala', dateStyle: 'short', timeStyle: 'short' });
 const dayFr = (ymd: string) => new Date(`${ymd.slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR');
@@ -25,6 +36,8 @@ export class ReceiptService extends Base {
     private readonly customers: CustomerService,
     private readonly expenses: ExpenseService,
     private readonly treasury: TreasuryService,
+    private readonly inventories?: InventoryService,
+    private readonly rebates?: RebateService,
   ) {
     super(db, clock);
   }
@@ -122,6 +135,36 @@ export class ReceiptService extends Base {
    * Bon de versement à la caisse centrale (recette du jour, prélèvement) ou
    * bon de remise de fond : à signer par celui qui remet et celui qui reçoit.
    */
+  /** Fiche de comptage d'inventaire sur l'imprimante de tickets (80 mm), selon le modèle choisi. */
+  inventorySheet(inventoryId: string, model: InventorySheetModel): Receipt {
+    if (!this.inventories) return [];
+    const { inventory: inv, lines } = this.inventories.get(inventoryId);
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: `INVENTAIRE N° ${inv.number}`, align: 'center', bold: true },
+      { t: 'text', text: `${INVENTORY_SHEET_MODELS[model]}`, align: 'center' },
+      { t: 'text', text: `${inv.warehouse_name} · ${dayFr(inv.inventory_date)} · ${lines.length} produits` },
+      { t: 'rule' },
+    ];
+    let dept: string | null | undefined;
+    for (const l of lines) {
+      if (l.department_name !== dept) {
+        dept = l.department_name;
+        r.push({ t: 'text', text: (dept ?? 'Sans rayon').toUpperCase(), bold: true });
+      }
+      r.push({ t: 'text', text: `${l.code} ${l.name}` });
+      const levels = l.unit === 'piece' ? [...l.packs.map((p) => p.name), l.unit_name || 'Pièce'] : [l.unit === 'kg' ? 'kg' : 'litres'];
+      const blanks = levels.map((v) => `....${v}`).join(' ');
+      const q = (v: number | null) => (v === null ? '' : formatQty(v, l.unit));
+      if (model === 'blind') r.push({ t: 'text', text: `  ${blanks}` });
+      else if (model === 'withStock') r.push({ t: 'row', left: `  ${blanks}`, right: `att. ${q(l.expected)}` });
+      else if (model === 'control') r.push({ t: 'row', left: `  att. ${q(l.expected)} cpt. ${q(l.counted) || '-'}`, right: l.difference === null ? '' : `écart ${q(l.difference)}` });
+      else r.push({ t: 'row', left: '  Compté', right: q(l.counted) || '-' });
+    }
+    r.push({ t: 'rule' }, { t: 'feed' }, { t: 'row', left: 'Compté par', right: 'Signature' }, { t: 'feed' }, { t: 'feed' }, { t: 'row', left: '................', right: '................' });
+    return r;
+  }
+
   centralVoucher(movementId: string): Receipt {
     const m = this.treasury.getMovement(movementId);
     const titles = { DEPOSIT: 'BON DE VERSEMENT', FLOAT: 'BON DE REMISE DE FOND', IN: 'ENTRÉE EN CAISSE CENTRALE', OUT: 'SORTIE DE CAISSE CENTRALE' } as const;
@@ -168,6 +211,33 @@ export class ReceiptService extends Base {
       { t: 'rule' },
       { t: 'text', text: 'Merci !', align: 'center' },
     ];
+  }
+
+  /** Bon de ristourne : avoir sur le compte du client ou paiement en espèces, à faire signer. */
+  rebateVoucher(entryId: string): Receipt {
+    if (!this.rebates) throw new Error('Ristournes indisponibles');
+    const e = this.rebates.getEntry(entryId);
+    const left = this.rebates.balance(this.db.prepare('SELECT store_id FROM rebate_entries WHERE id = ?').pluck().get(entryId) as string, e.customer_id);
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: 'BON DE RISTOURNE', align: 'center', bold: true },
+      { t: 'text', text: e.number },
+      { t: 'text', text: `${dateFr(e.at)}${e.user_name ? ` · ${e.user_name}` : ''}` },
+      { t: 'text', text: `Client : ${e.customer_name}` },
+      { t: 'rule' },
+      { t: 'text', text: e.label },
+    ];
+    if (e.period_from && e.period_to) r.push({ t: 'text', text: `Période du ${dayFr(e.period_from)} au ${dayFr(e.period_to)}` });
+    r.push(
+      { t: 'row', left: `${REBATE_KINDS[e.kind]} FCFA`, right: money(e.amount), bold: true, big: true },
+      { t: 'row', left: 'Reste de ristourne à accorder', right: money(left) },
+      { t: 'rule' },
+      { t: 'row', left: 'Le client', right: 'Le responsable' },
+      { t: 'feed' },
+      { t: 'feed' },
+      { t: 'feed' },
+    );
+    return r;
   }
 
   /** Bon de sortie de caisse ou pièce de dépense, à faire signer. */

@@ -73,8 +73,7 @@ describe('tickets de caisse', () => {
   it('rapport Z et page de test', () => {
     sell();
     const session = s.pos.currentSession(ctx.registerId!)!;
-    // Écart de 5 100 au-delà du seuil (500) : motif et gérant obligatoires.
-    expect(() => s.pos.closeSession(ctx, { 10000: 3, 500: 1 })).toThrow(/motif/);
+    // Écart de 5 100 au-delà du seuil (500), justifié par le gérant à la clôture.
     s.pos.closeSession(ctx, { 10000: 3, 500: 1 }, { floatLeft: 10_000, gapReason: 'Recomptage demandé', gapApprovedBy: ctx.userId });
     const z = receiptToText(s.receipts.zReport(session.id), 48);
     expect(z).toContain('RAPPORT Z N° 1');

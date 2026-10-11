@@ -57,6 +57,14 @@ export interface ExpiringLot {
   alert: ExpiryAlert;
 }
 
+/** Lot sorti par un transfert, recréé à l'arrivée avec ses dates. */
+export interface TransferLot {
+  qty: Milli;
+  lot_number: string | null;
+  expiry: string | null;
+  received_at: string;
+}
+
 interface MovementInput {
   type: MovementType;
   articleId: string;
@@ -69,6 +77,8 @@ interface MovementInput {
   reason?: string | null;
   refType?: string | null;
   refId?: string | null;
+  /** Date du mouvement, si ce n'est pas maintenant (inventaire arrêté à une date passée). */
+  at?: string;
 }
 
 export class StockService extends Base {
@@ -101,7 +111,7 @@ export class StockService extends Base {
       ref_type: m.refType ?? null,
       ref_id: m.refId ?? null,
       user_id: ctx.userId,
-      at: this.now(),
+      at: m.at ?? this.now(),
     };
     this.db
       .prepare(
@@ -393,46 +403,42 @@ export class StockService extends Base {
     return this.tx(() => {
       const transferId = newId();
       for (const line of input.lines) {
-        const out = this.issue(ctx, {
-          type: 'TRANSFER_OUT',
-          articleId: line.articleId,
-          warehouseId: input.fromWarehouseId,
-          qty: line.qty,
-          refType: 'transfer',
-          refId: transferId,
-        });
-        for (const part of out.lots) {
-          const source = part.lotId
-            ? (this.db.prepare('SELECT lot_number, expiry, received_at FROM lots WHERE id = ?').get(part.lotId) as {
-                lot_number: string | null;
-                expiry: string | null;
-                received_at: string;
-              })
-            : { lot_number: null, expiry: null, received_at: this.now() };
-          const lotId = newId();
-          this.insertLot(ctx, {
-            id: lotId,
-            articleId: line.articleId,
-            warehouseId: input.toWarehouseId,
-            lotNumber: source.lot_number,
-            expiry: source.expiry,
-            qty: part.qty,
-            receivedAt: source.received_at,
-          });
-          this.applyMovement(ctx, {
-            type: 'TRANSFER_IN',
-            articleId: line.articleId,
-            warehouseId: input.toWarehouseId,
-            qty: part.qty,
-            unitCost: out.unitCost,
-            lotId,
-            refType: 'transfer',
-            refId: transferId,
-          });
-        }
+        const out = this.transferOut(ctx, { articleId: line.articleId, warehouseId: input.fromWarehouseId, qty: line.qty, refId: transferId });
+        this.transferIn(ctx, { articleId: line.articleId, warehouseId: input.toWarehouseId, qty: line.qty, unitCost: out.unitCost, lots: out.lots, refId: transferId });
       }
       this.audit(ctx.userId, 'stock.transfer', 'transfer', transferId, input);
       return { id: transferId };
+    });
+  }
+
+  /** Sortie d'un transfert : FEFO, et les lots sortis (numéro, péremption, date d'entrée) pour les recréer à l'arrivée. */
+  transferOut(
+    ctx: Context,
+    m: { articleId: string; warehouseId: string; qty: Milli; refId: string; reason?: string | null },
+  ): { unitCost: Fcfa; lots: TransferLot[] } {
+    const out = this.issue(ctx, { type: 'TRANSFER_OUT', articleId: m.articleId, warehouseId: m.warehouseId, qty: m.qty, refType: 'transfer', refId: m.refId, reason: m.reason ?? null });
+    const lotOf = this.db.prepare('SELECT lot_number, expiry, received_at FROM lots WHERE id = ?');
+    const lots = out.lots.map((part) => {
+      const src = part.lotId ? (lotOf.get(part.lotId) as { lot_number: string | null; expiry: string | null; received_at: string }) : null;
+      return { qty: part.qty, lot_number: src?.lot_number ?? null, expiry: src?.expiry ?? null, received_at: src?.received_at ?? this.now() };
+    });
+    return { unitCost: out.unitCost, lots };
+  }
+
+  /** Entrée d'un transfert : `qty` répartie sur les lots sortis, dans l'ordre ; le surplus éventuel dans le dernier lot. */
+  transferIn(
+    ctx: Context,
+    m: { articleId: string; warehouseId: string; qty: Milli; unitCost: Fcfa; lots: TransferLot[]; refId: string; reason?: string | null },
+  ): void {
+    let left = m.qty;
+    const lots = m.lots.length ? m.lots : [{ qty: m.qty, lot_number: null, expiry: null, received_at: this.now() }];
+    lots.forEach((src, i) => {
+      const qty = i === lots.length - 1 ? left : Math.min(left, src.qty);
+      if (qty <= 0) return;
+      left -= qty;
+      const lotId = newId();
+      this.insertLot(ctx, { id: lotId, articleId: m.articleId, warehouseId: m.warehouseId, lotNumber: src.lot_number, expiry: src.expiry, qty, receivedAt: src.received_at });
+      this.applyMovement(ctx, { type: 'TRANSFER_IN', articleId: m.articleId, warehouseId: m.warehouseId, qty, unitCost: m.unitCost, lotId, refType: 'transfer', refId: m.refId, reason: m.reason ?? null });
     });
   }
 
@@ -481,19 +487,39 @@ export class StockService extends Base {
     });
   }
 
-  private restockAdjust(ctx: Context, articleId: string, warehouseId: string, qty: Milli, inventoryId: string): void {
+  private restockAdjust(ctx: Context, articleId: string, warehouseId: string, qty: Milli, inventoryId: string, reason = 'Inventaire', at?: string, refType = 'inventory'): void {
     const lotId = newId();
-    this.insertLot(ctx, { id: lotId, articleId, warehouseId, qty });
+    this.insertLot(ctx, { id: lotId, articleId, warehouseId, qty, receivedAt: at });
     this.applyMovement(ctx, {
       type: 'INVENTORY_ADJUST',
       articleId,
       warehouseId,
       qty,
       lotId,
-      reason: 'Inventaire',
-      refType: 'inventory',
+      reason,
+      refType,
       refId: inventoryId,
+      at,
     });
+  }
+
+  /**
+   * Correction d'inventaire d'un article : entrée (lot sans date) ou sortie
+   * FEFO de l'écart constaté. À appeler dans une transaction.
+   */
+  adjustForInventory(ctx: Context, m: { articleId: string; warehouseId: string; difference: Milli; inventoryId: string; reason: string; at?: string; refType?: string }): void {
+    if (m.difference > 0) this.restockAdjust(ctx, m.articleId, m.warehouseId, m.difference, m.inventoryId, m.reason, m.at, m.refType);
+    else if (m.difference < 0)
+      this.issue(ctx, {
+        type: 'INVENTORY_ADJUST',
+        articleId: m.articleId,
+        warehouseId: m.warehouseId,
+        qty: -m.difference,
+        reason: m.reason,
+        refType: m.refType ?? 'inventory',
+        refId: m.inventoryId,
+        at: m.at,
+      });
   }
 
   /** État du stock d'un magasin (tous dépôts) ou d'un dépôt. */

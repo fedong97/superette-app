@@ -44,6 +44,12 @@ import {
   type SupplierInput,
   type SupplierPaymentMethod,
   type CentralNature,
+  type InventoryInput,
+  type InventorySheetModel,
+  type TransferInput,
+  type TransferStatus,
+  type StockRequestStatus,
+  type RebateRuleInput,
   type StoreOptions,
   type User,
 } from '@superette/db';
@@ -80,12 +86,19 @@ export interface Printer {
   taxAssessment(storeId: string, year: number): Promise<void>;
   notes(storeId: string, year: number): Promise<void>;
   expenseVoucher(expenseId: string): Promise<void>;
+  rebateVoucher(entryId: string): Promise<void>;
   quote(quoteId: string): Promise<void>;
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
   /** Planche d'étiquettes déjà mise en page ; false si l'utilisateur annule. */
   labels(html: string, format: LabelFormatId): Promise<boolean>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
+  /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
+  inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
+  /** Résultat d'un inventaire : écarts valorisés, totaux et signatures. */
+  inventoryResult(inventoryId: string): Promise<void>;
+  /** Bon de transfert A4 : bon de route (expédition) ou bon de réception. */
+  transferNote(transferId: string): Promise<void>;
 }
 
 /**
@@ -146,6 +159,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const STOCK: Permission[] = ['articles', 'stock', 'labels'];
   const POS: Permission[] = ['cash', 'credit'];
   const TREASURY: Permission[] = ['treasury'];
+  const INVENTORY: Permission[] = ['inventory', 'inventory_count'];
   const SALES: Permission[] = ['sales', 'reports', 'receivables'];
   /** Montants de la caisse : attendu, entrées, ventes de la journée, historique des journées et Z. */
   const AMOUNTS: Permission[] = ['cash_amounts'];
@@ -307,6 +321,46 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.stock.recordLoss(ctx(STOCK), input),
     'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
       s.stock.transfer(ctx(STOCK), input),
+    // --- Bons de transfert entre dépôts --------------------------------------------
+    'transfers.list': (status?: TransferStatus | null) => s.transfers.list(ctx(STOCK).storeId, { status }),
+    'transfers.get': (id: string) => (requireUser(STOCK), s.transfers.get(id)),
+    'transfers.create': (input: TransferInput) => s.transfers.create(ctx(STOCK), input),
+    'transfers.update': (id: string, input: TransferInput) => s.transfers.update(ctx(STOCK), id, input),
+    'transfers.ship': (id: string, routeNumber?: string | null) => s.transfers.ship(ctx(STOCK), id, routeNumber),
+    'transfers.receive': (id: string, input?: { receptionNumber?: string | null; lines?: { articleId: string; receivedQty: Milli }[] }) =>
+      s.transfers.receive(ctx(STOCK), id, input),
+    'transfers.cancel': (id: string) => s.transfers.cancel(ctx(STOCK), id),
+    'transfers.movements': (id: string) => (requireUser(STOCK), s.transfers.movements(id)),
+    'transfers.print': async (id: string) => {
+      requireUser(STOCK);
+      await printer.transferNote(id);
+      s.transfers.markPrinted(id);
+    },
+    // --- Monitoring de l'évolution du stock --------------------------------------
+    'monitoring.changes': (articleId: string, warehouseId: string | null, from: string, to: string) =>
+      s.monitoring.changes(ctx(STOCK).storeId, { articleId, warehouseId, from, to }),
+    'monitoring.requests': (opts?: { articleId?: string | null; status?: StockRequestStatus | null; from?: string | null; to?: string | null }) =>
+      s.monitoring.requests(ctx([...STOCK, ...INVENTORY]).storeId, opts),
+    // Le gérant corrige directement ; le magasinier fait une demande que le gérant valide.
+    'monitoring.request': (input: { articleId: string; warehouseId: string; newQty: Milli; reason: string }) => {
+      const c = ctx(INVENTORY);
+      return s.monitoring.request(c, input, can(user!, ['inventory']));
+    },
+    'monitoring.decide': (id: string, approve: boolean, note?: string | null) => s.monitoring.decide(ctx(['inventory']), id, approve, note ?? null),
+    // --- Inventaires enregistrés -------------------------------------------------
+    'inventories.list': () => s.inventories.list(ctx(INVENTORY).storeId),
+    'inventories.get': (id: string) => (requireUser(INVENTORY), s.inventories.get(id)),
+    'inventories.history': (id: string) => (requireUser(INVENTORY), s.inventories.history(id)),
+    'inventories.create': (input: InventoryInput) => s.inventories.create(ctx(['inventory']), input),
+    'inventories.addArticle': (id: string, articleId: string) => s.inventories.addArticle(ctx(INVENTORY), id, articleId),
+    'inventories.removeArticle': (id: string, articleId: string) => s.inventories.removeArticle(ctx(['inventory']), id, articleId),
+    'inventories.setCount': (id: string, articleId: string, counted: Milli | null, detail?: number[] | null) =>
+      s.inventories.setCount(ctx(INVENTORY), id, articleId, counted, detail),
+    'inventories.import': (id: string, rows: { code: string; qty: number }[]) => s.inventories.importCounts(ctx(INVENTORY), id, rows),
+    'inventories.close': (id: string) => s.inventories.close(ctx(['inventory']), id),
+    'inventories.cancel': (id: string) => s.inventories.cancel(ctx(['inventory']), id),
+    'inventories.printSheet': (id: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }) => (requireUser(INVENTORY), printer.inventorySheet(id, opts)),
+    'inventories.printResult': (id: string) => (requireUser(INVENTORY), printer.inventoryResult(id)),
     'stock.inventory': (input: { warehouseId: string; counts: { articleId: string; counted: Milli; countedAt: string }[] }) =>
       s.stock.applyInventory(ctx(['inventory']), input),
     'stock.printCountSheet': (warehouseId: string, departmentId?: string | null) => {
@@ -523,20 +577,31 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.close': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
       requireAmounts();
-      const approvedBy = can(user!, ['cash_open']) ? user!.id : opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
+      // Sans code du gérant : un motif saisi par un gérant à la clôture vaut justification, sinon l'écart reste à justifier.
+      const approvedBy = can(user!, ['cash_open']) ? user!.id : null;
       return s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
     },
     /**
      * Clôture par le caissier sans le droit des montants : ni Z ni attendu en
-     * retour, seulement son bon de versement. Un écart au-delà du seuil est
-     * toujours validé par le gérant, qui saisit son code et le motif.
+     * retour, seulement son bon de versement. Le comptage est enregistré tel
+     * quel ; le gérant justifie un éventuel écart ensuite, depuis son compte.
      */
-    'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; gapReason?: string | null; supervisorPin?: string; registerId?: string }) => {
+    'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
-      const approvedBy = opts.supervisorPin ? supervisor(opts.supervisorPin).id : null;
-      const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy }).session;
+      const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft }).session;
       const voucher = s.treasury.sessionMovements(se.id).find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
       return { sessionId: se.id, counted: se.counted_cash ?? 0, floatLeft: se.float_left ?? 0, deposit: se.deposit ?? 0, voucherId: voucher?.id ?? null, voucherNumber: voucher?.number ?? null };
+    },
+    /** Écarts de clôture qui attendent le motif du gérant. */
+    'treasury.pendingGaps': () => {
+      const u = requireUser();
+      if (!can(u, AMOUNTS) || !can(u, ['cash_open'])) return [];
+      return s.pos.pendingGaps(ctx().storeId);
+    },
+    'treasury.justifyGap': (sessionId: string, reason: string) => {
+      const c = ctx(AMOUNTS);
+      if (!can(user!, ['cash_open'])) throw new AppError("Seul le gérant justifie un écart de caisse", 'FORBIDDEN');
+      return s.pos.justifyGap(c, sessionId, reason);
     },
     'treasury.central': (opts?: { from?: string; to?: string }) => {
       const c = ctx(['central_cash', 'accounting']);
@@ -577,6 +642,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx().storeId, id, from, to),
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
 
+    // --- Ristournes des clients spécifiques ------------------------------------
+    'rebates.rules': (customerId?: string | null) => (requireUser(CUSTOMERS), s.rebates.rules({ customerId: customerId ?? null })),
+    'rebates.allRules': () => (requireUser(CUSTOMERS), s.rebates.rules({ all: true })),
+    'rebates.saveRules': (customerId: string | null, rules: RebateRuleInput[]) => s.rebates.saveRules(ctx(['rebates']), customerId, rules),
+    'rebates.setCustomer': (customerId: string, opts: { enabled: boolean; delivered: boolean }) => s.rebates.setCustomer(ctx(['rebates']), customerId, opts),
+    'rebates.customers': () => (requireUser(CUSTOMERS), s.rebates.customers()),
+    'rebates.compute': (customerId: string, from: string, to: string) => s.rebates.compute(ctx(CUSTOMERS).storeId, customerId, from, to),
+    'rebates.state': (from: string, to: string) => s.rebates.state(ctx(CUSTOMERS).storeId, from, to),
+    'rebates.close': (from: string, to: string, customerIds?: string[] | null) => s.rebates.close(ctx(['rebates']), from, to, customerIds ?? undefined),
+    'rebates.adjust': (customerId: string, amount: Fcfa, reason: string) => s.rebates.adjust(ctx(['rebates']), customerId, amount, reason),
+    'rebates.grant': (customerId: string, amount: Fcfa, mode: 'credit' | 'cash') => {
+      const c = ctx(['rebates']);
+      if (mode === 'cash' && !can(user!, ['central_cash'])) throw new AppError("Payer en espèces demande le droit de la caisse centrale", 'FORBIDDEN');
+      return s.rebates.grant(c, customerId, amount, mode);
+    },
+    'rebates.entries': (opts?: { customerId?: string | null; from?: string | null; to?: string | null }) => s.rebates.entries(ctx(CUSTOMERS).storeId, opts ?? {}),
+    'rebates.carryForward': (date: string) => s.rebates.carryForward(ctx(CUSTOMERS).storeId, date),
+    'rebates.print': (entryId: string) => (requireUser(CUSTOMERS), printer.rebateVoucher(entryId)),
+
     // --- Devis et proformas ----------------------------------------------------
     'quotes.list': (opts?: { state?: QuoteState; customerId?: string; search?: string }) => s.quotes.list(ctx().storeId, opts),
     'quotes.get': (id: string) => (requireUser(), s.quotes.get(id)),
@@ -597,9 +681,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Au bureau : gérant ou comptable. À la caisse (espèces du tiroir) : un caissier a besoin du code d'un gérant. */
     'expenses.record': (input: Omit<ExpenseInput, 'authorizedBy'> & { supervisorPin?: string }) => {
       const { supervisorPin, ...rest } = input;
-      const c = ctx(input.atRegister ? POS : ACCOUNTING);
-      const authorizedBy = input.atRegister && !can(user!, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
-      return s.expenses.record(c, { ...rest, authorizedBy });
+      const u = requireUser();
+      // Le caissier ou le vendeur n'a pas la main sur la caisse centrale : ses dépenses en espèces sortent de sa caisse.
+      const atRegister = Boolean(input.atRegister) || (input.method === 'CASH' && !can(u, ['central_cash']) && can(u, POS));
+      const c = ctx(atRegister ? POS : ACCOUNTING);
+      const authorizedBy = atRegister && !can(u, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
+      return s.expenses.record(c, { ...rest, atRegister, date: atRegister ? null : rest.date, authorizedBy });
     },
     'expenses.cancel': (id: string, reason: string, supervisorPin?: string) => {
       const c = ctx([...POS, 'customers', 'quotes']);

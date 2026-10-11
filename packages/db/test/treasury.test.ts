@@ -104,14 +104,21 @@ describe('caisse centrale et journées de caisse', () => {
     expect(t['571']).toBe(0);
   });
 
-  it("exige motif et gérant pour un écart au-delà du seuil, et imprime le bon de versement", () => {
+  it("clôture sans code du gérant ; l'écart reste à justifier jusqu'au motif du gérant", () => {
     s.admin.setStoreOptions(ctx.userId, ctx.storeId, { cashGapThreshold: 1_000 });
     s.pos.openSession(ctx, 0);
     s.pos.completeSale(ctx, { lines: [{ articleId: riz, qty: 2000 }], payments: [{ method: 'CASH', amount: 10_000 }] });
     expect(s.pos.countPreview(ctx, { 5000: 1 })).toMatchObject({ difference: -5_000, needsApproval: true, threshold: 1_000 });
-    expect(() => s.pos.closeSession(ctx, { 5000: 1 }, { floatLeft: 0, gapReason: 'Billet manquant' })).toThrow(/gérant/);
-    const z = s.pos.closeSession(ctx, { 5000: 1 }, { floatLeft: 0, gapReason: 'Billet manquant', gapApprovedBy: ctx.userId });
-    expect(z.session).toMatchObject({ gap_reason: 'Billet manquant', gap_approved_by: ctx.userId, deposit: 5_000 });
+    // Motif saisi sans gérant : ignoré, l'écart reste à justifier.
+    const z = s.pos.closeSession(ctx, { 5000: 1 }, { floatLeft: 0, gapReason: 'Billet manquant' });
+    expect(z.session).toMatchObject({ gap_reason: null, gap_approved_by: null, deposit: 5_000, difference: -5_000 });
+    expect(s.pos.gapPending(z.session)).toBe(true);
+    expect(s.pos.pendingGaps(ctx.storeId).map((x) => x.id)).toEqual([z.session.id]);
+    expect(() => s.pos.justifyGap(ctx, z.session.id, ' ')).toThrow(/motif/);
+    const justified = s.pos.justifyGap(ctx, z.session.id, 'Billet manquant, caissier interpellé');
+    expect(justified).toMatchObject({ gap_reason: 'Billet manquant, caissier interpellé', gap_approved_by: ctx.userId, gap_approved_by_name: 'Steve' });
+    expect(justified.gap_justified_at).not.toBeNull();
+    expect(s.pos.pendingGaps(ctx.storeId)).toEqual([]);
     const [deposit] = s.treasury.sessionMovements(z.session.id);
     const text = receiptToText(s.receipts.centralVoucher(deposit!.id), 48);
     expect(text).toContain('BON DE VERSEMENT');

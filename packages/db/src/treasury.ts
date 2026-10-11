@@ -33,7 +33,7 @@ export interface CentralMovement {
 /** Ligne du livre de la caisse centrale, avec le solde après l'opération. */
 export interface CentralLedgerRow {
   /** Mouvement de la centrale, ou pièce payée en espèces au bureau. */
-  source: 'movement' | 'expense' | 'supplier_payment' | 'customer_payment';
+  source: 'movement' | 'expense' | 'supplier_payment' | 'customer_payment' | 'rebate';
   id: string;
   number: string;
   at: string;
@@ -121,6 +121,10 @@ export class TreasuryService extends Base {
          SELECT 'customer_payment', p.id, p.number, p.paid_at, 'Règlement client', c.name, u.name, p.amount
          FROM customer_payments p JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.user_id
          WHERE p.store_id = @storeId AND p.from_central = 1
+         UNION ALL
+         SELECT 'rebate', e.id, e.number, e.at, e.label, c.name, u.name, -e.amount
+         FROM rebate_entries e JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.store_id = @storeId AND e.kind = 'cash'
          ORDER BY 4, 3`,
       )
       .all({ storeId }) as Omit<CentralLedgerRow, 'balance'>[];

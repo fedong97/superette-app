@@ -20,6 +20,7 @@ import {
   settle,
   splitTtc,
   formatFcfa,
+  roundCash,
   levelCost,
   tariffPrice,
 } from '@superette/core';
@@ -164,6 +165,8 @@ export interface Sale {
   total_promo: Fcfa;
   price_level: PriceLevel;
   change_given: Fcfa;
+  /** Arrondi des espèces accordé (compris dans les remises). */
+  rounding: Fcfa;
   original_sale_id: string | null;
   cancel_reason: string | null;
   customer_id: string | null;
@@ -436,12 +439,15 @@ export class PosService extends Base {
 
   // --- Ventes ---------------------------------------------------------------
 
-  private nextTicketNumber(ctx: Context): string {
+  private nextTicketNumber(ctx: Context, kind: 'sale' | 'return' = 'sale'): string {
     const store = this.admin.getStore(ctx.storeId);
     const register = this.admin.getRegister(this.requireRegister(ctx));
+    // Préfixe des factures ou des avoirs, réglé dans les paramètres (vide par défaut).
+    const set = this.admin.storeSettings(ctx.storeId);
+    const doc = kind === 'sale' ? set.prefixSale : set.prefixReturn;
     // La caisse suit l'utilisateur d'un PC à l'autre : la suite reprend après le plus
     // grand numéro connu pour cette caisse (ventes reçues des autres PC comprises).
-    const prefix = `${store.code}-${register.number}-`;
+    const prefix = `${doc ? `${doc}-` : ''}${store.code}-${register.number}-`;
     const known = this.db
       .prepare('SELECT MAX(CAST(substr(number, ?) AS INTEGER)) FROM sales WHERE register_id = ? AND number LIKE ?')
       .pluck()
@@ -476,7 +482,8 @@ export class PosService extends Base {
       if (price !== null) {
         if (!Number.isSafeInteger(price) || price <= 0) throw new AppError(`Prix invalide : ${article.name}`, 'INVALID');
         const floor = levelCost(article, pack?.units ?? 1000);
-        if (price < floor) {
+        // Paramètre « vente sous le prix de revient » : permise si le magasin l'autorise (tracée dans le journal).
+        if (price < floor && !this.admin.storeSettings(storeId).allowBelowCost) {
           throw new AppError(`${article.name} : le prix ne peut pas descendre sous le coût de revient (${formatFcfa(floor)} ${pack ? `par ${pack.name.toLowerCase()}` : 'par unité'})`, 'BELOW_COST');
         }
       }
@@ -602,17 +609,33 @@ export class PosService extends Base {
     if (input.lines.length === 0) throw new AppError('Ticket vide', 'EMPTY');
     if (input.lines.some((l) => l.qty < 0)) throw new AppError('Quantité négative : utilisez le retour client', 'INVALID');
     const level = input.customerId ? this.customers.getCustomer(input.customerId).price_level : 'retail';
+    const set = this.admin.storeSettings(ctx.storeId);
     const lines = this.priceLines(ctx.storeId, input.lines, level);
+    // Arrondi des espèces : un ticket payé tout en espèces descend au multiple inférieur, en remise sur la dernière ligne.
+    const allCash = input.payments.length > 0 && input.payments.every((p) => p.method === 'CASH');
+    const rounding = allCash ? computeTotals(lines).totalTtc - roundCash(computeTotals(lines).totalTtc, set.cashRounding) : 0;
+    if (rounding > 0) {
+      // Sur la ligne la plus chère : elle ne passe jamais sous zéro.
+      const i = lines.reduce((best, l, n) => (lineTotal(l) > lineTotal(lines[best]!) ? n : best), 0);
+      lines[i] = { ...lines[i]!, discount: lines[i]!.discount + rounding };
+    }
     const totals = computeTotals(lines);
+    if (set.customerRequiredAbove > 0 && totals.totalTtc > set.customerRequiredAbove && !input.customerId && !input.clientName?.trim()) {
+      throw new AppError(`Au-delà de ${formatFcfa(set.customerRequiredAbove)}, le nom du client est obligatoire`, 'CUSTOMER_REQUIRED');
+    }
     const quote = input.quoteId ? this.quotes.authorizeSaleDiscounts(ctx.storeId, input.quoteId, lines) : null;
     let discountBy = input.discountAuthorizedBy ?? null;
     if (quote) discountBy ??= quote.by;
-    if (totals.totalDiscount > 0 && !quote) {
+    // L'arrondi des espèces n'est pas une remise à valider.
+    const granted = totals.totalDiscount - rounding;
+    if (granted > 0 && !quote) {
       const user = this.admin.getUser(ctx.userId);
       const authorizer = input.discountAuthorizedBy ? this.admin.getUser(input.discountAuthorizedBy) : null;
-      // Droit « remise sans code » du vendeur, ou code d'un gérant.
+      // Droit « remise sans code » du vendeur, code d'un gérant, ou remise sous le maximum fixé dans les paramètres.
       const supervisor = authorizer !== null && (authorizer.role === 'admin' || authorizer.role === 'manager');
-      if (!this.admin.hasRight(user, 'discount') && !supervisor) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
+      const underMax = set.maxDiscountPct > 0 && granted * 100 <= set.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
+      if (!this.admin.hasRight(user, 'discount') && !supervisor && !underMax) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
+      if (underMax && !supervisor) discountBy ??= ctx.userId;
     }
     for (const p of input.payments) {
       if (!(p.method in PAYMENT_METHODS)) throw new AppError(`Moyen de paiement inconnu : ${p.method}`, 'INVALID');
@@ -629,7 +652,9 @@ export class PosService extends Base {
     if (onCredit > 0 && !input.customerId) throw new AppError('Choisissez le client pour une vente à crédit', 'CUSTOMER_REQUIRED');
     const customer = input.customerId
       ? onCredit > 0
-        ? this.customers.assertCredit(ctx.storeId, input.customerId, onCredit, input.creditAuthorizedBy ? this.admin.getUser(input.creditAuthorizedBy) : null)
+        ? this.customers.assertCredit(ctx.storeId, input.customerId, onCredit, input.creditAuthorizedBy ? this.admin.getUser(input.creditAuthorizedBy) : null, {
+            blockLate: set.creditBlockLate,
+          })
         : this.customers.getCustomer(input.customerId)
       : null;
     const due = customer && onCredit > 0 ? this.customers.dueDateFor(customer) : null;
@@ -642,8 +667,8 @@ export class PosService extends Base {
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht,
-             total_tva, total_discount, total_promo, price_level, change_given, customer_id, client_name, due_date, created_at)
-           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             total_tva, total_discount, total_promo, price_level, change_given, customer_id, client_name, due_date, created_at, rounding)
+           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           saleId,
@@ -663,6 +688,7 @@ export class PosService extends Base {
           customer ? null : input.clientName?.trim().slice(0, 80) || null,
           due,
           now,
+          rounding,
         );
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id,
@@ -684,9 +710,10 @@ export class PosService extends Base {
       });
       const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id) VALUES (?, ?, ?, ?, ?, ?)');
       input.payments.forEach((p, i) => insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null, paymentSessions[i]));
-      if (totals.totalDiscount > 0) {
-        this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: totals.totalDiscount, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
+      if (granted > 0) {
+        this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: granted, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
       }
+      if (rounding > 0) this.audit(ctx.userId, 'sale.rounding', 'sale', saleId, { amount: rounding, step: set.cashRounding });
       const changed = lines.filter((l) => l.priceSet);
       if (changed.length) {
         this.audit(ctx.userId, 'sale.price_set', 'sale', saleId, {
@@ -825,7 +852,7 @@ export class PosService extends Base {
 
     return this.tx(() => {
       const id = newId();
-      const number = this.nextTicketNumber(ctx);
+      const number = this.nextTicketNumber(ctx, 'return');
       const total = returned.reduce((s, r) => s + r.amount, 0);
       const byRate = new Map<number, number>();
       for (const r of returned) byRate.set(r.line.vat_rate_bp, (byRate.get(r.line.vat_rate_bp) ?? 0) + r.amount);

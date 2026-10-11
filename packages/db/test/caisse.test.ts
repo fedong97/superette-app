@@ -83,7 +83,7 @@ describe('droits par rôle', () => {
     expect(s.admin.rights('cashier')).toEqual(expect.arrayContaining(['cash', 'credit', 'customers', 'quotes', 'price']));
     expect(s.admin.rights('cashier')).not.toContain('discount');
     expect(s.admin.rights('admin')).toContain('admin');
-    const cashier = { role: 'cashier' as const };
+    const cashier = { id: 'inconnu', role: 'cashier' as const };
     s.admin.saveRights(ctx.userId, 'cashier', ['cash', 'discount']);
     expect(s.admin.rights('cashier')).toEqual(['cash', 'discount']);
     expect(s.admin.hasRight(cashier, 'price')).toBe(false);

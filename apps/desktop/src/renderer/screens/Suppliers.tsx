@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 
@@ -12,7 +12,7 @@ export type SuppliersTab = 'list' | 'statement' | 'situation' | 'recent';
 /** Fournisseurs : fiches, extrait de compte, situation et comptes qui ont bougé. */
 export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTab?: SuppliersTab }) {
   const [tab, setTab] = useState<SuppliersTab>(initialTab);
-  const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
+  const accounting = has(user, 'supplier_statement');
   return (
     <div className="page">
       <header className="page-head">
@@ -23,14 +23,14 @@ export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTa
         onChange={setTab}
         tabs={[
           ['list', 'Liste des fournisseurs'],
-          ['statement', 'Extrait de compte'],
+          ...(accounting ? ([['statement', 'Extrait de compte']] as [SuppliersTab, string][]) : []),
           ...(accounting ? ([['situation', 'Situation des fournisseurs']] as [SuppliersTab, string][]) : []),
           ['recent', 'Soldes qui ont bougé'],
         ]}
       />
       {tab === 'list' && <SupplierList user={user} />}
-      {tab === 'statement' && <SupplierStatement />}
-      {tab === 'situation' && <SupplierSituation />}
+      {tab === 'statement' && accounting && <SupplierStatement />}
+      {tab === 'situation' && accounting && <SupplierSituation />}
       {tab === 'recent' && <RecentAccounts party="supplier" />}
     </div>
   );
@@ -42,7 +42,8 @@ function SupplierList({ user }: { user: User }) {
   const [inactive, setInactive] = useState(false);
   const list = useLoad(() => call('suppliers.list', { search: search || undefined, includeInactive: inactive }), [search, inactive]);
   const [open, setOpen] = useState<Supplier | 'new' | null>(null);
-  const canEdit = has(user, 'purchase_orders');
+  const canEdit = has(user, 'supplier_edit');
+  const canArticles = has(user, 'supplier_articles');
   return (
     <>
       <div className="filters">
@@ -92,6 +93,7 @@ function SupplierList({ user }: { user: User }) {
         <SupplierDialog
           supplier={open === 'new' ? null : open}
           canEdit={canEdit}
+          canArticles={canArticles}
           onClose={() => setOpen(null)}
           onSaved={(f) => {
             list.reload();
@@ -103,7 +105,17 @@ function SupplierList({ user }: { user: User }) {
   );
 }
 
-function SupplierDialog({ supplier, canEdit, onClose, onSaved }: { supplier: Supplier | null; canEdit: boolean; onClose: () => void; onSaved: (s: Supplier) => void }) {
+function SupplierDialog({
+  supplier,
+  canEdit,
+  canArticles,
+  onClose,
+  onSaved,
+}: {
+  supplier: Supplier | null;
+  canEdit: boolean;
+  canArticles: boolean;
+  onClose: () => void; onSaved: (s: Supplier) => void }) {
   const [tab, setTab] = useState<'card' | 'articles' | 'account'>('card');
   return (
     <Modal title={supplier ? `${supplier.code} · ${supplier.name}` : 'Nouveau fournisseur'} onClose={onClose} wide>
@@ -119,7 +131,7 @@ function SupplierDialog({ supplier, canEdit, onClose, onSaved }: { supplier: Sup
         />
       )}
       {tab === 'card' && <SupplierForm supplier={supplier} canEdit={canEdit} onSaved={onSaved} />}
-      {tab === 'articles' && supplier && <SupplierArticles supplierId={supplier.id} canEdit={canEdit} />}
+      {tab === 'articles' && supplier && <SupplierArticles supplierId={supplier.id} canEdit={canArticles} />}
       {tab === 'account' && supplier && <SupplierAccount supplierId={supplier.id} />}
     </Modal>
   );
@@ -127,6 +139,7 @@ function SupplierDialog({ supplier, canEdit, onClose, onSaved }: { supplier: Sup
 
 function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | null; canEdit: boolean; onSaved: (s: Supplier) => void }) {
   const toast = useToast();
+  const settings = useStoreSettings();
   const [f, setF] = useState({
     name: supplier?.name ?? '',
     contact: supplier?.contact ?? '',
@@ -134,7 +147,7 @@ function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | nul
     email: supplier?.email ?? '',
     address: supplier?.address ?? '',
     taxpayerNumber: supplier?.taxpayer_number ?? '',
-    paymentTermsDays: String(supplier?.payment_terms_days ?? 0),
+    paymentTermsDays: String(supplier?.payment_terms_days ?? settings.supplierDefaultDays),
     leadTimeDays: String(supplier?.lead_time_days ?? 2),
     franco: supplier?.franco ? String(supplier.franco) : '',
     notes: supplier?.notes ?? '',

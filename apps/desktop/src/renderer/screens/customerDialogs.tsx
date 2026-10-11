@@ -1,7 +1,7 @@
 import { PRICE_LEVELS, type PriceLevel } from '@superette/core';
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Field, Modal, fcfa, parseAmount, useLoad, useToast } from '../ui';
+import { Field, Modal, fcfa, has, parseAmount, useLoad, useStoreSettings, useToast } from '../ui';
 
 export type Customer = Result<'customers.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -20,10 +20,12 @@ export function CustomerFields({
   value,
   onChange,
   canSetCredit,
+  canSetLevel = canSetCredit,
 }: {
   value: CustomerDraft;
   onChange: (v: CustomerDraft) => void;
   canSetCredit: boolean;
+  canSetLevel?: boolean;
 }) {
   const set = (patch: Partial<CustomerDraft>) => onChange({ ...value, ...patch });
   return (
@@ -53,10 +55,10 @@ export function CustomerFields({
           <input inputMode="numeric" value={value.creditLimit} disabled={!canSetCredit} onChange={(e) => set({ creditLimit: e.target.value })} />
         </Field>
         <Field label="Délai de paiement (jours)">
-          <input inputMode="numeric" value={value.terms} onChange={(e) => set({ terms: e.target.value })} />
+          <input inputMode="numeric" value={value.terms} disabled={!canSetCredit} onChange={(e) => set({ terms: e.target.value })} />
         </Field>
-        <Field label="Tarif" hint={canSetCredit ? 'Prix appliqués en caisse : détail, gros (revendeurs) ou super gros' : 'Fixé par le gérant ou le comptable'}>
-          <select value={value.priceLevel} disabled={!canSetCredit} onChange={(e) => set({ priceLevel: e.target.value as PriceLevel })}>
+        <Field label="Tarif" hint={canSetLevel ? 'Prix appliqués en caisse : détail, gros (revendeurs) ou super gros' : 'Fixé par le gérant ou le comptable'}>
+          <select value={value.priceLevel} disabled={!canSetLevel} onChange={(e) => set({ priceLevel: e.target.value as PriceLevel })}>
             {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
               <option key={k} value={k}>
                 {PRICE_LEVELS[k]}
@@ -86,15 +88,16 @@ export interface CustomerDraft {
   priceLevel: PriceLevel;
 }
 
-export const draftOf = (c: Customer | null): CustomerDraft => ({
+/** Brouillon de la fiche ; un nouveau client prend le plafond et le délai des paramètres du magasin. */
+export const draftOf = (c: Customer | null, defaults?: { creditDefaultLimit: number; creditDefaultDays: number }): CustomerDraft => ({
   name: c?.name ?? '',
   phone: c?.phone ?? '',
   contact: c?.contact ?? '',
   address: c?.address ?? '',
   taxpayerNumber: c?.taxpayer_number ?? '',
   email: c?.email ?? '',
-  creditLimit: String(c?.credit_limit ?? 0),
-  terms: String(c?.payment_terms_days ?? 30),
+  creditLimit: String(c?.credit_limit ?? defaults?.creditDefaultLimit ?? 0),
+  terms: String(c?.payment_terms_days ?? defaults?.creditDefaultDays ?? 30),
   notes: c?.notes ?? '',
   active: c ? c.active === 1 : true,
   priceLevel: c?.price_level ?? 'retail',
@@ -119,11 +122,15 @@ export function inputOf(d: CustomerDraft) {
   };
 }
 
-export const canSetCredit = (user: User) => user.role === 'admin' || user.role === 'manager' || user.role === 'accountant';
+/** Plafond de crédit et délai de paiement : droit « Situation des comptes clients ». */
+export const canSetCredit = (user: User) => has(user, 'receivables');
+/** Tarif du client (détail, gros, super gros). */
+export const canSetLevel = (user: User) => has(user, 'customer_price_level');
 
 /** Choix du client depuis la fiche de facturation, avec création rapide. */
 export function CustomerPickDialog({ user, onClose, onPick }: { user: User; onClose: () => void; onPick: (c: Customer) => void }) {
   const toast = useToast();
+  const settings = useStoreSettings();
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState<CustomerDraft | null>(null);
   const list = useLoad(() => call('customers.list', { search }), [search]);
@@ -141,7 +148,7 @@ export function CustomerPickDialog({ user, onClose, onPick }: { user: User; onCl
             }
           }}
         >
-          <CustomerFields value={creating} onChange={setCreating} canSetCredit={canSetCredit(user)} />
+          <CustomerFields value={creating} onChange={setCreating} canSetCredit={canSetCredit(user)} canSetLevel={canSetLevel(user)} />
           <div className="actions">
             <button type="button" onClick={() => setCreating(null)}>
               Retour
@@ -159,9 +166,11 @@ export function CustomerPickDialog({ user, onClose, onPick }: { user: User; onCl
     <Modal title="Choisir le client" onClose={onClose} wide>
       <div className="toolbar">
         <input autoFocus placeholder="Nom, code ou téléphone" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="primary" onClick={() => setCreating({ ...draftOf(null), name: search })}>
-          Nouveau client
-        </button>
+        {has(user, 'customer_create') && (
+          <button className="primary" onClick={() => setCreating({ ...draftOf(null, settings), name: search })}>
+            Nouveau client
+          </button>
+        )}
       </div>
       <table className="list compact">
         <thead>

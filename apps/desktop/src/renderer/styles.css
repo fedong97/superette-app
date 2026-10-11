@@ -380,6 +380,8 @@ table.list.compact.levels th { padding: 6px 5px; }
 table.rights th.c, table.rights td.c { text-align: center; width: 120px; }
 table.rights td.c input { width: auto; }
 table.rights tr.group th { background: var(--bg); color: var(--ink); text-align: left; padding-top: 10px; }
+table.rights tr.group th.c { text-align: center; }
+table.rights th.c input { width: auto; }
 .tag.epuise { background: var(--danger-soft); color: var(--danger); font-weight: 700; margin-left: 6px; }
 .sale-rows button.out { color: var(--muted); }
 .sale-rows button.out .cond { color: var(--muted); }
@@ -646,3 +648,34 @@ table.rebate-rules select { min-width: 240px; }
 .role-tiles small { color: var(--muted); font-size: 13px; font-weight: 600; }
 .home-links { display: flex; justify-content: center; gap: 18px; margin-top: 16px !important; }
 .empty-action { margin-top: 12px; }
+
+/* 0.32.0 : droits par rôle et privilèges par utilisateur, comme la fenêtre des privilèges de KONTROL */
+.rights-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+.rights-groups { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
+.rights-search { width: 100%; }
+.rights-group-list { display: flex; flex-direction: column; border: 1px solid #9fb2cf; border-radius: 6px; overflow: hidden; background: #fff; }
+.rights-group-head { background: #c9d6ea; text-align: center; padding: 6px; font-weight: 800; color: #14213d; }
+.rights-group-list button { border: none; border-radius: 0; border-top: 1px solid #e3e8f1; text-align: left; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.rights-group-list button:nth-child(odd) { background: #f3f6fb; }
+.rights-group-list button.active { background: #9cc4ef; color: #0b2545; font-weight: 800; }
+.rights-main { min-width: 0; overflow-x: auto; }
+table.rights tr.selected td { background: #dde7f5; }
+.rights-holders { margin-top: 12px; max-width: 520px; }
+.rights-holders h3 { margin-top: 6px; }
+
+/* 0.32.0 : paramètres rangés par section */
+.settings { max-width: 980px; }
+.settings .sticky-actions { position: sticky; top: 0; z-index: 2; background: #fff; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.settings .spacer { flex: 1; }
+.settings-section { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 10px; margin: 14px 0; background: var(--panel); }
+.settings-section > p { margin: 0 0 6px; }
+.settings-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: center; padding: 8px 0; border-top: 1px solid #f0f2f6; }
+.settings-row:first-of-type { border-top: none; }
+.settings-row input:not([type='checkbox']):not(.qty), .settings-row select { width: 100%; }
+.settings-row small { display: block; font-weight: 600; }
+.logo-preview { max-height: 56px; max-width: 160px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+label.button { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+label.button.disabled { opacity: 0.45; cursor: default; }
+
+/* 0.32.0 : grande taille de texte (Paramètres › Affichage) */
+html.large-text { zoom: 1.15; }

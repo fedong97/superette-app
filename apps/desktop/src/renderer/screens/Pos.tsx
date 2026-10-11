@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, tariffPrice } from '@superette/core';
+import { type CartLine, type Permission, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
@@ -131,7 +131,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const [picked, setPicked] = useState<{ row: SaleRow; initial?: string } | null>(null);
   /** Fiche article ouverte depuis la recherche : article absent, ou conditionnement à ajouter. */
   const [creating, setCreating] = useState<{ article: Article | null; name?: string; addLevel?: 'top' | 'bottom' } | null>(null);
-  const canCreate = has(user, 'articles');
+  const canCreate = has(user, 'article_create') || has(user, 'sale_new_article');
+  const settings = useStoreSettings();
+  const can = (p: Permission) => has(user, p);
   const [weightFor, setWeightFor] = useState<Article | null>(null);
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -156,6 +158,11 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     [lines, promoRules.data, level],
   );
   const totals = useMemo(() => computeTotals(priced), [priced]);
+  /** Total à payer si tout est réglé en espèces (arrondi des paramètres). */
+  const cashDue = roundCash(totals.totalTtc, settings.cashRounding);
+  // Une remise sous le maximum des paramètres passe sans le code du gérant.
+  const underMax = settings.maxDiscountPct > 0 && totals.totalDiscount * 100 <= settings.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
+  const discountNeedsCode = totals.totalDiscount > 0 && !has(user, 'discount') && !underMax;
 
   const focusScan = useCallback(() => setTimeout(() => scanRef.current?.focus(), 0), []);
   useEffect(() => {
@@ -343,8 +350,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
       await sell(payments);
       return;
     }
-    const needsSupervisor = totals.totalDiscount > 0 && !has(user, 'discount') && !quote;
-    if (cashGiven >= totals.totalTtc && !needsSupervisor) {
+    const needsSupervisor = discountNeedsCode && !quote;
+    // Payé tout en espèces : le total descend à l'arrondi réglé dans les paramètres.
+    if (cashGiven >= cashDue && !needsSupervisor) {
       await sell([{ method: 'CASH', amount: cashGiven }]);
       return;
     }
@@ -352,7 +360,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   };
 
   const hold = async () => {
-    if (!lines.length) return;
+    if (!lines.length || !can('sale_hold')) return;
     const label = `Ticket de ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} (${fcfa(totals.totalTtc)})`;
     try {
       await call('pos.hold', label, saleInput());
@@ -391,11 +399,13 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   };
 
   const reprint = () => {
+    if (!can('sale_reprint')) return toast.error("Vous n'avez pas le droit de réimprimer un ticket");
     if (lastSale) call('pos.printTicket', lastSale.id).catch(toast.error);
     else toast.error('Aucun ticket à réimprimer');
   };
 
   const openDrawer = () => {
+    if (!can('drawer_open')) return toast.error("Vous n'avez pas le droit d'ouvrir le tiroir sans vente");
     call('pos.openDrawer').then(() => toast.ok('Tiroir ouvert'), toast.error);
   };
 
@@ -413,7 +423,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         F7: onListing,
         F8: () => setDialog('customer'),
         F9: printA4,
-        F10: () => setDialog('held'),
+        F10: () => can('sale_resume') && setDialog('held'),
       };
       if (fn[e.key]) {
         e.preventDefault();
@@ -453,7 +463,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const salesWarehouse = (warehouses.data ?? []).find((w) => w.is_sales_default) ?? warehouses.data?.[0];
   const withDiscount = showDiscount || totals.totalDiscount > 0;
   const shownTotal = lines.length ? totals.totalTtc : (lastSale?.total_ttc ?? 0);
-  const change = lines.length ? Math.max(0, cashGiven - totals.totalTtc) : (lastSale?.change_given ?? 0);
+  const change = lines.length ? Math.max(0, cashGiven - cashDue) : (lastSale?.change_given ?? 0);
   // Après validation : espèces réellement reçues (rien pour une vente entièrement à crédit).
   const given = lines.length ? cashGiven : lastSale ? lastSale.payments.filter((p) => p.method === 'CASH').reduce((t, p) => t + p.amount, 0) : 0;
   const rows = Math.max(12, lines.length);
@@ -782,6 +792,11 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                   <div key={v.rate}>TVA {(v.rate / 100).toLocaleString('fr-FR')} % : {amount(v.tva)}</div>
                 ))}
               </div>
+            ) : cashDue < totals.totalTtc ? (
+              <div className="taxes">
+                <div>Espèces : {amount(cashDue)}</div>
+                <div className="muted">arrondi −{amount(totals.totalTtc - cashDue)}</div>
+              </div>
             ) : (
               <div className="taxes" />
             )}
@@ -791,7 +806,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                   {amount(b)}
                 </button>
               ))}
-              <button type="button" className="exact" disabled={!lines.length} onClick={() => setCashGiven(totals.totalTtc)} title="Montant exact">
+              <button type="button" className="exact" disabled={!lines.length} onClick={() => setCashGiven(cashDue)} title="Montant exact (arrondi espèces compris)">
                 =
               </button>
               <button type="button" className="exact" disabled={!cashGiven} onClick={() => setCashGiven(0)} title="Remettre l'encaissé à zéro">
@@ -811,10 +826,10 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           <button className="main" disabled={!lines.length} onClick={() => void validate()}>
             Valider / Nouv. <kbd>F4</kbd>
           </button>
-          <button disabled={!lines.length} onClick={() => void hold()}>
+          <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()}>
             Mise en attente <kbd>F3</kbd>
           </button>
-          <button onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente">
+          <button disabled={!can('sale_resume')} onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente">
             <span>
               Ouvrir (en attente)
               {(held.data?.length ?? 0) > 0 && <b className="held-count">{held.data!.length}</b>}
@@ -828,13 +843,13 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           <button onClick={onListing}>
             Listing <kbd>F7</kbd>
           </button>
-          <button disabled={!lastSale} onClick={reprint}>
+          <button disabled={!lastSale || !can('sale_reprint')} onClick={reprint}>
             Ticket <kbd>F2</kbd>
           </button>
           <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
             Facture A4 <kbd>F9</kbd>
           </button>
-          <button onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
+          <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
             Tiroir <kbd>F5</kbd>
           </button>
           <hr />
@@ -898,7 +913,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
       {dialog === 'pay' && (
         <PaymentDialog
           total={totals.totalTtc}
-          needsSupervisor={totals.totalDiscount > 0 && !has(user, 'discount')}
+          needsSupervisor={discountNeedsCode}
+          cashRounding={settings.cashRounding}
           allowCredit={Boolean(customer)}
           onClose={() => setDialog(null)}
           onPaid={async (payments, supervisorPin) => {

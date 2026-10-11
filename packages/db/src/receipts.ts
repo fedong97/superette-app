@@ -46,10 +46,15 @@ export class ReceiptService extends Base {
     const station = this.admin.station();
     if (!station) return [];
     const st = station.store;
+    const set = this.admin.storeSettings(st.id);
+    const centered = (text: string) => ({ t: 'text' as const, text, align: 'center' as const });
     return [
+      ...(set.logo ? [{ t: 'image' as const, src: set.logo }] : []),
       { t: 'text', text: st.name, align: 'center', bold: true, big: true },
-      ...[st.address, st.phone].filter((v): v is string => Boolean(v)).map((text) => ({ t: 'text' as const, text, align: 'center' as const })),
-      ...(st.taxpayer_number ? [{ t: 'text' as const, text: `NIU : ${st.taxpayer_number}`, align: 'center' as const }] : []),
+      ...(set.ticketHeader ? [centered(set.ticketHeader)] : []),
+      ...[st.address, st.phone].filter((v): v is string => Boolean(v)).map(centered),
+      ...(st.taxpayer_number ? [centered(`NIU : ${st.taxpayer_number}`)] : []),
+      ...(set.rccm ? [centered(`RCCM : ${set.rccm}`)] : []),
       { t: 'rule' },
     ];
   }
@@ -73,6 +78,7 @@ export class ReceiptService extends Base {
       if (l.promo) r.push({ t: 'row', left: `Promo ${l.promotion_name ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
     }
     r.push({ t: 'rule' }, { t: 'row', left: 'TOTAL FCFA', right: money(sale.total_ttc), bold: true, big: true });
+    if (sale.rounding) r.push({ t: 'row', left: 'dont arrondi espèces', right: `-${money(sale.rounding)}`, indent: 2 });
     if (sale.total_promo > 0) r.push({ t: 'row', left: 'Vous avez économisé', right: money(sale.total_promo), bold: true });
     for (const p of sale.payments) r.push({ t: 'row', left: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, right: money(p.amount) });
     if (sale.change_given) r.push({ t: 'row', left: 'Rendu monnaie', right: money(sale.change_given), bold: true });

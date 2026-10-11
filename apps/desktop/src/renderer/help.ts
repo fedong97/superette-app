@@ -281,9 +281,41 @@ export const HELP: Record<WinKind, PageHelp> = {
     intro: 'Magasins, caisses, utilisateurs, droits, paramètres et sauvegardes.',
     sections: [
       { tab: 'registers', title: 'Caisses', steps: ['Choisissez le type (Espèces, Électronique, Banque) puis « Ajouter une caisse ».', 'Le code d’activation d’une caisse espèces rattache un nouveau PC.'] },
-      { tab: 'users', title: 'Utilisateurs', steps: ['« Ajouter un utilisateur » : nom, identifiant, code à 4 chiffres, rôle, et ses caisses espèces, électronique et banque.'] },
-      { tab: 'rights', title: 'Droits par rôle', steps: ['Cochez ce que chaque rôle peut faire. Ce qui n’est pas permis disparaît des menus.'] },
-      { tab: 'settings', title: 'Paramètres', steps: ['TVA, vente sans stock, seuil d’écart de caisse, imprimante de tickets et tiroir (page de test).'] },
+      {
+        tab: 'users',
+        title: 'Utilisateurs',
+        steps: [
+          '« Ajouter un utilisateur » : nom, identifiant, code, rôle, et ses caisses espèces, électronique et banque.',
+          'La colonne Privilèges montre ce qui est ajouté (+) ou retiré (−) à son rôle. Un utilisateur « bloqué » après trop de codes faux se débloque avec « Débloquer ».',
+        ],
+      },
+      {
+        tab: 'rights',
+        title: 'Droits par rôle',
+        steps: [
+          'Choisissez un rôle, puis un groupe à gauche (Facturation, Trésorerie, Gestion des stocks…). Cherchez un droit par son nom.',
+          'Chaque droit indique son type : Menu (ouvre un écran), Bouton (une action), Fonction (une règle). « Tout cocher » coche le groupe entier.',
+          'Ce qui n’est pas permis disparaît des menus et des boutons.',
+        ],
+      },
+      {
+        tab: 'privileges',
+        title: 'Privilèges par utilisateur',
+        steps: [
+          'Choisissez un utilisateur : « Via son rôle » montre ce que son rôle lui donne.',
+          'Cochez « Attribué » pour lui donner un droit en plus, ou « Retiré » pour lui enlever un droit de son rôle, sans toucher aux autres utilisateurs du même rôle.',
+          'En bas, « Autres utilisateurs ayant ce privilège » liste qui a déjà le droit sélectionné.',
+        ],
+      },
+      {
+        tab: 'settings',
+        title: 'Paramètres',
+        steps: [
+          'Les paramètres sont rangés par section : identité du magasin (logo, RCCM, message du ticket), ventes et caisse, crédit clients, stock, achats, sécurité, numérotation des pièces, imprimante, balance, affichage.',
+          'Tapez un mot dans la recherche pour retrouver un paramètre, puis « Enregistrer ».',
+          'Les sections « (ce PC) » ne valent que pour ce poste ; les autres valent pour tout le magasin.',
+        ],
+      },
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
       { tab: 'server', title: 'Serveur central', steps: ['Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.'] },
     ],

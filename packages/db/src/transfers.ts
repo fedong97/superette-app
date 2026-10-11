@@ -22,6 +22,8 @@ export interface Transfer {
   created_at: string;
   created_by_name: string;
   shipped_at: string | null;
+  /** Utilisateur qui a expédié : avec le paramètre « deux utilisateurs », un autre réceptionne. */
+  shipped_by: string | null;
   shipped_by_name: string | null;
   printed_at: string | null;
   received_at: string | null;

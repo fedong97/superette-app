@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog } from 'electron';
+import { BrowserWindow, dialog, nativeImage } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import {
   PAYMENT_METHODS,
@@ -45,6 +45,7 @@ function receiptHtml(receipt: Receipt): string {
     .map((l) => {
       if (l.t === 'rule') return '<hr>';
       if (l.t === 'feed') return '<br>';
+      if (l.t === 'image') return `<div class="c"><img src="${esc(l.src)}" style="max-width:60%;max-height:30mm"></div>`;
       const cls = [l.bold ? 'b' : '', l.big ? 'big' : ''];
       if (l.t === 'text') return `<div class="${[...cls, l.align === 'center' ? 'c' : l.align === 'right' ? 'r' : ''].join(' ').trim()}">${esc(l.text)}</div>`;
       const pad = l.indent ? ` style="padding-left:${l.indent}ch"` : '';
@@ -120,6 +121,31 @@ export function createPrinter(s: Services): Printer {
    * Imprime un ticket selon le mode du poste et ouvre le tiroir si demandé.
    * Le tiroir s'ouvre même quand l'impression automatique est coupée.
    */
+  /** Logo en noir et blanc pour l'impression ESC/POS : 384 points de large en 58 mm, 512 en 80 mm. */
+  function withRaster(receipt: Receipt, columns: number): Receipt {
+    return receipt.map((l) => {
+      if (l.t !== 'image' || l.raster) return l;
+      const img = nativeImage.createFromDataURL(l.src);
+      if (img.isEmpty()) return l;
+      const max = columns <= 32 ? 384 : 512;
+      const size = img.getSize();
+      const scaled = size.width > max ? img.resize({ width: max }) : img;
+      const { width, height } = scaled.getSize();
+      const px = scaled.toBitmap(); // BGRA
+      const bytes = Math.ceil(width / 8);
+      const data = new Uint8Array(bytes * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          const alpha = px[i + 3]!;
+          const lum = 0.114 * px[i]! + 0.587 * px[i + 1]! + 0.299 * px[i + 2]!;
+          if (alpha >= 128 && lum < 128) data[y * bytes + (x >> 3)]! |= 0x80 >> (x & 7);
+        }
+      }
+      return { ...l, raster: { width, height, data } };
+    });
+  }
+
   async function printReceipt(receipt: Receipt, kick: boolean, force = false): Promise<void> {
     const cfg = config();
     const print = cfg.enabled || force;
@@ -130,7 +156,7 @@ export function createPrinter(s: Services): Printer {
       if (errors.length) throw errors[0];
       return;
     }
-    if (print) await sendRaw(cfg, receiptToEscPos(receipt, { columns: cfg.columns, codepage: cfg.codepage, cut: cfg.cut, kick }));
+    if (print) await sendRaw(cfg, receiptToEscPos(withRaster(receipt, cfg.columns), { columns: cfg.columns, codepage: cfg.codepage, cut: cfg.cut, kick }));
     else if (kick) await sendRaw(cfg, drawerKick());
   }
 
@@ -182,9 +208,18 @@ export function createPrinter(s: Services): Printer {
     }
   }
 
-  function a4Head(store: { name: string; address: string | null; phone: string | null; taxpayer_number: string | null }): string {
-    return `<div class="head"><div><h1>${esc(store.name)}</h1>${[store.address, store.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
-      ${store.taxpayer_number ? `<div class="box">NIU : ${esc(store.taxpayer_number)}</div>` : ''}</div>`;
+  /** En-tête des documents A4 : logo, nom, adresse, NIU et RCCM du magasin. */
+  function a4Head(store: { id: string; name: string; address: string | null; phone: string | null; taxpayer_number: string | null }): string {
+    const set = s.admin.storeSettings(store.id);
+    const ids = [store.taxpayer_number ? `NIU : ${esc(store.taxpayer_number)}` : '', set.rccm ? `RCCM : ${esc(set.rccm)}` : ''].filter(Boolean);
+    return `<div class="head"><div style="display:flex;gap:12px;align-items:center">${set.logo ? `<img src="${esc(set.logo)}" style="max-height:22mm;max-width:45mm">` : ''}<div><h1>${esc(store.name)}</h1>${[
+      store.address,
+      store.phone,
+    ]
+      .filter(Boolean)
+      .map((v) => esc(v!))
+      .join('<br>')}</div></div>
+      ${ids.length ? `<div class="box">${ids.join('<br>')}</div>` : ''}</div>`;
   }
   const periodFr = (from?: string | null, to?: string | null) =>
     `${from ? `Du ${dayFr(from)} ` : 'Depuis le début '}${to ? `au ${dayFr(to)}` : `au ${new Date().toLocaleDateString('fr-FR')}`}`;
@@ -373,7 +408,9 @@ export function createPrinter(s: Services): Printer {
         const sale = s.pos.getSale(saleId);
         kick = cfg.drawer === 'always' || sale.change_given > 0 || sale.payments.some((p) => p.method === 'CASH');
       }
-      await printReceipt(s.receipts.ticket(saleId), kick);
+      const receipt = s.receipts.ticket(saleId);
+      // Exemplaires réglés dans les paramètres : le tiroir ne s'ouvre qu'au premier.
+      for (let i = 0; i < Math.max(1, opts?.copies ?? 1); i++) await printReceipt(receipt, kick && i === 0);
     },
 
     async zReport(sessionId) {

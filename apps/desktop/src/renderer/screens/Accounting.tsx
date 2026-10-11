@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { type StatementLine, parseStatementCsv } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -48,7 +48,20 @@ const amount = (v: number) => (v ? fcfa(v) : '');
 
 /** Comptabilité SYSCOHADA : écritures tirées des caisses, achats et règlements, plus les saisies manuelles. */
 export function Accounting({ user, initialTab = 'journals' }: { user: User; initialTab?: AccountingTab }) {
-  const [tab, setTab] = useState<AccountingTab>(initialTab);
+  const can = useCan();
+  const allowed: Record<AccountingTab, boolean> = {
+    journals: can('accounting'),
+    ledger: can('accounting'),
+    balance: can('accounting'),
+    statements: can('statements'),
+    dsf: can('tax', 'tax_settings'),
+    vat: can('vat_return'),
+    tax: can('tax', 'tax_settings'),
+    treasury: can('accounting'),
+    bank: can('bank_reconciliation'),
+    accounts: true,
+  };
+  const [tab, setTab] = useState<AccountingTab>(allowed[initialTab] ? initialTab : ((Object.keys(allowed) as AccountingTab[]).find((k) => allowed[k]) ?? 'accounts'));
   const [ledgerAccount, setLedgerAccount] = useState('571');
   const openLedger = (account: string) => {
     setLedgerAccount(account);
@@ -63,28 +76,31 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       <Tabs
         value={tab}
         onChange={setTab}
-        tabs={[
-          ['journals', 'Journaux'],
-          ['ledger', 'Grand livre'],
-          ['balance', 'Balance'],
-          ['statements', 'États financiers'],
-          ['dsf', 'Notes déclaratives'],
-          ['vat', 'Déclaration de TVA'],
-          ['tax', 'Impôt sur le résultat'],
-          ['treasury', 'Trésorerie'],
-          ['bank', 'Rapprochement bancaire'],
-          ['accounts', 'Plan comptable'],
-        ]}
+        tabs={(
+          [
+            ['journals', 'Journaux'],
+            ['ledger', 'Grand livre'],
+            ['balance', 'Balance'],
+            ['statements', 'États financiers'],
+            ['dsf', 'Notes déclaratives'],
+            ['vat', 'Déclaration de TVA'],
+            ['tax', 'Impôt sur le résultat'],
+            ['treasury', 'Trésorerie'],
+            ['bank', 'Rapprochement bancaire'],
+            ['accounts', 'Plan comptable'],
+          ] as [AccountingTab, string][]
+        ).filter(([k]) => allowed[k])}
       />
-      {tab === 'journals' && <Journals />}
-      {tab === 'ledger' && <Ledger account={ledgerAccount} onAccount={setLedgerAccount} />}
-      {tab === 'balance' && <Balance onOpen={openLedger} />}
-      {tab === 'statements' && <Statements onOpen={openLedger} />}
-      {tab === 'dsf' && <Disclosures />}
-      {tab === 'vat' && <VatReturn />}
-      {tab === 'tax' && <TaxReturn />}
-      {tab === 'treasury' && <Treasury onOpen={openLedger} />}
-      {tab === 'bank' && <BankReconciliation />}
+      {!allowed[tab] && <Empty>Vous n'avez pas accès à cet onglet.</Empty>}
+      {tab === 'journals' && allowed.journals && <Journals />}
+      {tab === 'ledger' && allowed.ledger && <Ledger account={ledgerAccount} onAccount={setLedgerAccount} />}
+      {tab === 'balance' && allowed.balance && <Balance onOpen={openLedger} />}
+      {tab === 'statements' && allowed.statements && <Statements onOpen={openLedger} />}
+      {tab === 'dsf' && allowed.dsf && <Disclosures />}
+      {tab === 'vat' && allowed.vat && <VatReturn />}
+      {tab === 'tax' && allowed.tax && <TaxReturn />}
+      {tab === 'treasury' && allowed.treasury && <Treasury onOpen={openLedger} />}
+      {tab === 'bank' && allowed.bank && <BankReconciliation />}
       {tab === 'accounts' && <Accounts user={user} />}
     </div>
   );
@@ -105,6 +121,7 @@ function Period({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: 
 
 function Journals() {
   const toast = useToast();
+  const can = useCan();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [journal, setJournal] = useState<JournalCode | ''>('');
@@ -128,6 +145,7 @@ function Journals() {
           Imprimer
         </button>
         <button
+          disabled={!can('accounting_export')}
           onClick={async () => {
             try {
               downloadText(`ecritures_${from}_${to}.csv`, `﻿${await call('accounting.exportCsv', { from: from || undefined, to: to || undefined })}`);
@@ -138,9 +156,11 @@ function Journals() {
         >
           Export CSV (cabinet comptable)
         </button>
-        <button className="primary" onClick={() => setAdding(true)}>
-          Saisir une écriture
-        </button>
+        {can('journal_entry') && (
+          <button className="primary" onClick={() => setAdding(true)}>
+            Saisir une écriture
+          </button>
+        )}
       </div>
       {list.error ? (
         <Empty>{String((list.error as Error).message ?? list.error)}</Empty>
@@ -466,6 +486,7 @@ type StatementRow = Statements['income'][number];
 /** Bilan et compte de résultat SYSCOHADA de l'exercice (année civile), avec l'exercice précédent. */
 function Statements({ onOpen }: { onOpen: (account: string) => void }) {
   const toast = useToast();
+  const can = useCan();
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear);
   const [view, setView] = useState<'sheet' | 'income' | 'flows' | 'notes'>('sheet');
@@ -526,6 +547,7 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
           {view === 'notes' ? 'Imprimer les notes (A4)' : 'Imprimer (A4)'}
         </button>
         <button
+          disabled={!can('accounting_export')}
           onClick={() =>
             (view === 'notes' ? call('accounting.notesCsv', year) : call('accounting.statementsCsv', { from, to }))
               .then((csv) => downloadText(view === 'notes' ? `notes-annexes-${year}.csv` : `etats-financiers-${year}.csv`, csv))
@@ -817,6 +839,8 @@ const pctFr = (bp: number) => `${(bp / 100).toLocaleString('fr-FR')} %`;
 /** Impôt sur le résultat : du résultat comptable au résultat fiscal, liquidation et acomptes mensuels. */
 function TaxReturn() {
   const toast = useToast();
+  const can = useCan();
+  const canSet = can('tax_settings');
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear);
   const st = useLoad(() => call('tax.assessment', year), [year]);
@@ -825,7 +849,7 @@ function TaxReturn() {
   const [label, setLabel] = useState('');
   const [amount, setAmount] = useState('');
   const save = (input: Parameters<typeof call<'tax.saveSettings'>>[2], ok?: string) =>
-    call('tax.saveSettings', year, input).then(() => {
+    (canSet ? call('tax.saveSettings', year, input) : Promise.reject(new Error("Vous n'avez pas le droit de modifier les paramètres de l'impôt"))).then(() => {
       if (ok) toast.ok(ok);
       st.reload();
     }, toast.error);
@@ -875,7 +899,7 @@ function TaxReturn() {
         </button>
         <button
           className="primary"
-          disabled={!a || a.provisional || !a.toBook}
+          disabled={!canSet || !a || a.provisional || !a.toBook}
           title={a?.provisional ? "L'impôt se constate une fois l'exercice clos" : undefined}
           onClick={() =>
             call('tax.book', year).then((n) => {
@@ -1495,7 +1519,7 @@ function BookDialog({ line, onClose, onSave }: { line: BankLine; onClose: () => 
 }
 
 function Accounts({ user }: { user: User }) {
-  const canEdit = ['admin', 'manager', 'accountant'].includes(user.role);
+  const canEdit = user.rights.includes('chart_accounts');
   const [inactive, setInactive] = useState(false);
   const [search, setSearch] = useState('');
   const list = useLoad(() => call('accounting.accounts', inactive), [inactive]);

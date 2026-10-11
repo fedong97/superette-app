@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PAYMENT_METHODS } from '@superette/core';
 import { type Result, call } from '../api';
-import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useLoad, useToast } from '../ui';
+import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
 import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
 import { ZView } from './PosDialogs';
 
@@ -13,33 +13,32 @@ type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
  * les trois dernières factures de l'utilisateur, pour les réimprimer.
  */
 export function Sales({ initialTab = 'tickets', rights }: { initialTab?: SalesTab; rights: string[] }) {
-  return rights.includes('sales') ? <AllSales initialTab={initialTab} amounts={rights.includes('cash_amounts')} /> : <MyLastInvoices />;
+  const wide = ['sales', 'sales_alerts', 'cash_operations', 'cash_z', 'accounting_export', 'report_export'].some((r) => rights.includes(r));
+  return wide ? <AllSales initialTab={initialTab} rights={rights} /> : <MyLastInvoices />;
 }
 
-function AllSales({ initialTab, amounts }: { initialTab: SalesTab; amounts: boolean }) {
+function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string[] }) {
+  const can = (...r: string[]) => r.some((x) => rights.includes(x));
+  // Chaque onglet suit son droit ; « Mes dernières factures » reste à tous.
+  const tabs: [ShownTab, string][] = [
+    ['tickets', can('sales') ? 'Factures du jour' : 'Mes dernières factures'],
+    ...(can('sales') ? ([['register', 'Registre des ventes']] as [ShownTab, string][]) : []),
+    ...(can('sales_alerts') ? ([['alerts', 'Alertes sur les ventes']] as [ShownTab, string][]) : []),
+    ...(can('cash_operations') ? ([['cashops', 'Opérations de caisse']] as [ShownTab, string][]) : []),
+    ...(can('cash_amounts') && can('cash_z') ? ([['z', 'Clôtures Z']] as [ShownTab, string][]) : []),
+    ...(can('accounting_export', 'report_export') ? ([['export', 'Export comptable']] as [ShownTab, string][]) : []),
+  ];
   // Retours, annulés et recherche s'ouvrent sur le registre, déjà filtré.
   const preset: RegisterPreset = initialTab === 'returns' ? 'returns' : initialTab === 'cancelled' ? 'cancelled' : 'all';
-  const [tab, setTab] = useState<ShownTab>(
-    initialTab === 'returns' || initialTab === 'cancelled' || initialTab === 'find' ? 'register' : initialTab === 'z' && !amounts ? 'tickets' : initialTab,
-  );
+  const wanted: ShownTab = initialTab === 'returns' || initialTab === 'cancelled' || initialTab === 'find' ? 'register' : initialTab;
+  const [tab, setTab] = useState<ShownTab>(tabs.some(([t]) => t === wanted) ? wanted : 'tickets');
   return (
     <div className="page">
       <header className="page-head">
         <h1>Ventes et caisses</h1>
       </header>
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          ['tickets', 'Mes dernières factures'],
-          ['register', 'Registre des ventes'],
-          ['alerts', 'Alertes sur les ventes'],
-          ['cashops', 'Opérations de caisse'],
-          ...(amounts ? ([['z', 'Clôtures Z']] as [ShownTab, string][]) : []),
-          ['export', 'Export comptable'],
-        ]}
-      />
-      {tab === 'tickets' && <Tickets />}
+      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      {tab === 'tickets' && (can('sales') ? <Tickets /> : <MyLastInvoices embedded />)}
       {tab === 'register' && <SalesRegister preset={preset} focusSearch={initialTab === 'find'} />}
       {tab === 'alerts' && <SalesAlerts />}
       {tab === 'cashops' && <CashOperations />}
@@ -89,15 +88,17 @@ function Tickets() {
 }
 
 /** Les trois dernières factures du caissier, à réimprimer au besoin. */
-function MyLastInvoices() {
+function MyLastInvoices({ embedded }: { embedded?: boolean }) {
   const toast = useToast();
   const [open, setOpen] = useState<Result<'pos.sale'> | null>(null);
   const sales = useLoad(() => call('pos.sales', {}));
   return (
-    <div className="page">
-      <header className="page-head">
-        <h1>Mes dernières factures</h1>
-      </header>
+    <div className={embedded ? '' : 'page'}>
+      {!embedded && (
+        <header className="page-head">
+          <h1>Mes dernières factures</h1>
+        </header>
+      )}
       <p className="muted">Vos trois dernières factures, à réimprimer si le client le demande.</p>
       <table className="list">
         <thead>
@@ -215,6 +216,7 @@ function Export() {
 /** Détail d'un ticket ou d'une facture, avec réimpression. */
 export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClose: () => void }) {
   const toast = useToast();
+  const can = useCan();
   return (
     <Modal title={`Ticket ${sale.number}`} onClose={() => onClose()}>
       <p className="muted">
@@ -247,8 +249,11 @@ export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClos
         </tbody>
       </table>
       <div className="actions">
-        <button onClick={() => call('pos.printInvoice', sale.id).then(() => toast.ok('Facture imprimée'), toast.error)}>Facture A4</button>
-        <button className="primary" onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
+        {!can('sale_reprint') && <span className="muted">Réimpression non permise (droit « Réimprimer un ticket ou une facture »).</span>}
+        <button disabled={!can('sale_reprint')} onClick={() => call('pos.printInvoice', sale.id).then(() => toast.ok('Facture imprimée'), toast.error)}>
+          Facture A4
+        </button>
+        <button className="primary" disabled={!can('sale_reprint')} onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
           Réimprimer le ticket
         </button>
       </div>

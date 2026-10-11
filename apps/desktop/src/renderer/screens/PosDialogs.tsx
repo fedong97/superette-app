@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DENOMINATIONS_FCFA, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, paymentRegisterKind, requiresReference, settle } from '@superette/core';
+import { DENOMINATIONS_FCFA, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, paymentRegisterKind, requiresReference, roundCash, settle } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, dateTime, fcfa, parseAmount, qty, useLoad, useToast } from '../ui';
 
@@ -24,12 +24,15 @@ function useMethods(): { methods: PaymentMethod[]; target: (m: PaymentMethod) =>
 export function PaymentDialog({
   total,
   needsSupervisor,
+  cashRounding = 1,
   allowCredit = false,
   onClose,
   onPaid,
 }: {
   total: number;
   needsSupervisor: boolean;
+  /** Arrondi des ventes payées tout en espèces (Paramètres › Ventes et caisse). */
+  cashRounding?: number;
   /** Un client est choisi : le reste peut aller à son compte. */
   allowCredit?: boolean;
   onClose: () => void;
@@ -43,7 +46,10 @@ export function PaymentDialog({
   const [busy, setBusy] = useState(false);
   const [askPin, setAskPin] = useState(false);
   const { methods, target } = useMethods();
-  const state = settle(total, payments);
+  // Tant que tout est payé en espèces, le total descend à l'arrondi réglé.
+  const allCash = payments.every((p) => p.method === 'CASH') && (payments.length > 0 || method === 'CASH');
+  const due = allCash ? roundCash(total, cashRounding) : total;
+  const state = settle(due, payments);
   const suggestions = [...new Set([state.remaining, ...[1000, 2000, 5000, 10000].map((n) => Math.ceil(state.remaining / n) * n)])].filter((v) => v > 0).slice(0, 5);
 
   const add = (value?: number) => {
@@ -52,7 +58,7 @@ export function PaymentDialog({
     if (requiresReference(method) && !reference.trim()) return toast.error(`Saisissez la référence de la transaction ${PAYMENT_METHODS[method]}`);
     const next = [...payments, { method, amount: v, reference: reference.trim() || undefined }];
     try {
-      settle(total, next);
+      settle(next.every((p) => p.method === 'CASH') ? roundCash(total, cashRounding) : total, next);
     } catch (e) {
       return toast.error(e);
     }
@@ -76,7 +82,8 @@ export function PaymentDialog({
     <Modal title="Encaissement" onClose={onClose} wide>
       <div className="pay-grid">
         <div>
-          <div className="big-total">{fcfa(total)}</div>
+          <div className="big-total">{fcfa(due)}</div>
+          {due < total && <p className="muted">Arrondi espèces : {fcfa(total - due)} de moins (total exact {fcfa(total)})</p>}
           <div className="methods">
             {[...methods, ...(allowCredit ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
               <button key={m} className={method === m ? 'active' : ''} onClick={() => setMethod(m)}>

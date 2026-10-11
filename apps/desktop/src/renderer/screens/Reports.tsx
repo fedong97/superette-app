@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, fcfa, qty, today, useLoad, useToast } from '../ui';
+import { Empty, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
 
 type Report = Result<'reports.sales'>;
 type Row = Report['rows'][number];
@@ -79,6 +79,7 @@ type SortKey = 'label' | 'tickets' | 'qty' | 'revenueTtc' | 'margin' | 'rate' | 
  */
 export function Reports({ view }: { view?: string }) {
   const toast = useToast();
+  const can = useCan();
   // « evolution » : mois par mois depuis janvier, comparé à l'an dernier.
   const yearly = view === 'evolution';
   const [period, setPeriod] = useState(() => preset(yearly ? 'year' : 'month'));
@@ -130,7 +131,7 @@ export function Reports({ view }: { view?: string }) {
         <h1>Rapports de ventes</h1>
         <button
           className="primary"
-          disabled={!r}
+          disabled={!r || !can('report_export')}
           onClick={async () => {
             try {
               const bytes = await call('reports.salesXlsx', input);

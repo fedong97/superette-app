@@ -1,4 +1,4 @@
-import type { Permission } from '@superette/core';
+import { DEFAULT_STORE_SETTINGS, type Permission, type StoreSettings } from '@superette/core';
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { formatFcfa, formatQty } from '@superette/core';
 
@@ -178,3 +178,17 @@ export function downloadText(filename: string, content: string, mime = 'text/csv
 
 /** Droit de l'utilisateur connecté (Administration › Droits). */
 export const has = (user: { rights: readonly string[] }, right: Permission) => user.rights.includes(right);
+
+/** Droits de l'utilisateur connecté, pour les écrans qui ne reçoivent pas l'utilisateur. */
+const RightsContext = createContext<readonly string[]>([]);
+export const RightsProvider = RightsContext.Provider;
+/** Paramètres du magasin utiles aux écrans (arrondi, remise maximale…), sans le logo. */
+const StoreSettingsContext = createContext<Omit<StoreSettings, 'logo'>>(DEFAULT_STORE_SETTINGS);
+export const StoreSettingsProvider = StoreSettingsContext.Provider;
+export const useStoreSettings = () => useContext(StoreSettingsContext);
+
+/** `can('a', 'b')` : vrai si l'utilisateur a l'un des droits. */
+export function useCan(): (...rights: Permission[]) => boolean {
+  const rights = useContext(RightsContext);
+  return (...wanted) => wanted.some((r) => rights.includes(r));
+}

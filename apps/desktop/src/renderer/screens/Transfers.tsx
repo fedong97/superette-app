@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateTime, fcfa, parseQty, qty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, dateTime, fcfa, parseQty, qty, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker } from './pickers';
 import { qtyText } from './packs';
 
@@ -37,12 +37,13 @@ export function Transfers() {
 }
 
 function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
+  const can = useCan();
   const [status, setStatus] = useState<Status | ''>('');
   const list = useLoad(() => call('transfers.list', status || null), [status]);
   return (
     <div>
       <div className="filters">
-        <button className="primary" onClick={() => onOpen('new')}>
+        <button className="primary" disabled={!can('transfer_create')} onClick={() => onOpen('new')}>
           Nouveau transfert
         </button>
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | '')}>
@@ -102,6 +103,8 @@ function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
 
 function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () => void; onOpen: (id: string | 'new') => void }) {
   const toast = useToast();
+  const can = useCan();
+  const canCreate = can('transfer_create');
   const warehouses = useLoad(() => call('admin.warehouses'), []);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [transfer, setTransfer] = useState<Transfer | null>(null);
@@ -154,7 +157,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
   }
 
   const status: Status = transfer?.status ?? 'draft';
-  const editable = status === 'draft';
+  const editable = status === 'draft' && canCreate;
   const total = lines.reduce((t, l) => t + Math.round((l.qty * l.unitCost) / 1000), 0);
   const input = () => ({
     fromWarehouseId: from,
@@ -369,7 +372,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
           </div>
         </div>
         <aside className="transfer-actions">
-          <button onClick={() => onOpen('new')} disabled={!transfer}>
+          <button onClick={() => onOpen('new')} disabled={!transfer || !canCreate}>
             Nouveau transfert
           </button>
           {editable && (
@@ -377,13 +380,14 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
               Enregistrer
             </button>
           )}
-          {editable && (
+          {status === 'draft' && can('transfer_ship') && (canCreate || transfer) && (
             <button
               className="main"
               disabled={busy || !lines.length || from === to}
               onClick={() =>
                 void run(async () => {
-                  const tid = await save();
+                  // Sans le droit d'enregistrer un bon, on expédie le brouillon tel qu'il a été préparé.
+                  const tid = canCreate ? await save() : transfer!.id;
                   await call('transfers.ship', tid, route || null);
                   await call('transfers.print', tid).catch(() => undefined);
                   await load(tid);
@@ -393,7 +397,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
               Expédier
             </button>
           )}
-          {status === 'shipped' && (
+          {status === 'shipped' && can('transfer_receive') && (
             <button
               className="main"
               disabled={busy}
@@ -428,7 +432,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
               Enlever une ligne
             </button>
           )}
-          {(status === 'draft' || status === 'shipped') && transfer && (
+          {(status === 'draft' || status === 'shipped') && transfer && can('transfer_cancel') && (
             <button
               className="danger"
               disabled={busy}

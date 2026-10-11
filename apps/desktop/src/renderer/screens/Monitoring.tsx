@@ -29,10 +29,12 @@ export function Monitoring({ user }: { user: User }) {
   const [warehouseId, setWarehouseId] = useState('');
   const [nonce, setNonce] = useState(0);
   const [asking, setAsking] = useState(false);
-  const canDecide = has(user, 'inventory');
-  const canAsk = canDecide || has(user, 'inventory_count');
+  const canDecide = has(user, 'stock_decide');
+  const canDirect = has(user, 'stock_adjust');
+  const canAsk = canDecide || canDirect || has(user, 'stock_request');
+  const canWatch = has(user, 'stock_monitoring');
   const changes = useLoad(
-    () => (article ? call('monitoring.changes', article.id, warehouseId || null, startOf(from), endOf(to)) : Promise.resolve(null)),
+    () => (article && canWatch ? call('monitoring.changes', article.id, warehouseId || null, startOf(from), endOf(to)) : Promise.resolve(null)),
     [article?.id, warehouseId, from, to, nonce],
   );
   const requests = useLoad(
@@ -105,8 +107,8 @@ export function Monitoring({ user }: { user: User }) {
         <section className="mon-section">
           <div className="mon-title">
             <h3>{article ? 'Demandes de modification' : 'Demandes de modification en attente (tous produits)'}</h3>
-            {article && (
-              <button onClick={() => setAsking(true)}>{canDecide ? 'Corriger le stock…' : 'Demander une correction…'}</button>
+            {article && (canDirect || has(user, 'stock_request')) && (
+              <button onClick={() => setAsking(true)}>{canDirect ? 'Corriger le stock…' : 'Demander une correction…'}</button>
             )}
           </div>
           <RequestTable rows={requests.data ?? []} canDecide={canDecide} showArticle={!article} onChanged={refresh} />
@@ -167,7 +169,7 @@ export function Monitoring({ user }: { user: User }) {
           article={article}
           warehouses={warehouses.data ?? []}
           defaultWarehouse={warehouseId}
-          direct={canDecide}
+          direct={canDirect}
           onClose={() => setAsking(false)}
           onDone={() => {
             setAsking(false);

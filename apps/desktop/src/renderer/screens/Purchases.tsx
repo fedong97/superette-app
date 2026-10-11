@@ -1,7 +1,7 @@
 import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useToast, has } from '../ui';
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
@@ -42,16 +42,17 @@ const num = (milli: number) => String(milli / 1000).replace('.', ',');
 const deliveryNote = (n: string) => (/^b\.?l\b/i.test(n.trim()) ? n.trim() : `BL ${n.trim()}`);
 
 export function Purchases({ user, initialTab = 'orders' }: { user: User; initialTab?: PurchasesTab }) {
-  const accounting = ['admin', 'manager', 'accountant'].includes(user.role);
   const buying = has(user, 'purchase_orders');
+  const invoices = has(user, 'purchase_invoices') || has(user, 'supplier_pay');
   const [tab, setTab] = useState<PurchasesTab>(initialTab === 'new-order' ? 'orders' : initialTab);
   const tabs: [PurchasesTab, string][] = [
     ['orders', 'Bons de commande'],
     ['receptions', 'Registre des réceptions'],
     ['pending', 'Non encore reçues'],
-    ...(accounting ? ([['invoices', 'Registre des achats'], ['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
+    ...(invoices ? ([['invoices', 'Registre des achats']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'purchase_due') ? ([['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
     ['byproduct', 'Achats par produit'],
-    ...(buying ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'reorder') ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -63,9 +64,9 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       {tab === 'receptions' && <Receptions />}
       {tab === 'pending' && <PendingReceipts />}
       {tab === 'byproduct' && <PurchasesByProduct />}
-      {tab === 'invoices' && <Invoices />}
-      {tab === 'due' && <Due />}
-      {tab === 'reorder' && <Reorder onCreated={() => setTab('orders')} />}
+      {tab === 'invoices' && invoices && <Invoices />}
+      {tab === 'due' && has(user, 'purchase_due') && <Due />}
+      {tab === 'reorder' && has(user, 'reorder') && <Reorder onCreated={() => setTab('orders')} />}
     </div>
   );
 }
@@ -190,6 +191,7 @@ function PackCell<L extends { qty: string; cost: string; packUnits: number; auto
 
 function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: string | null) => void }) {
   const toast = useToast();
+  const can = useCan();
   const [supplierId, setSupplierId] = useState(order?.supplier_id ?? '');
   const [warehouseId, setWarehouseId] = useState(order?.warehouse_id ?? '');
   const [expected, setExpected] = useState(order?.expected_date ?? '');
@@ -301,9 +303,11 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         <button disabled={!lines.length} onClick={() => void save(false)}>
           Enregistrer le brouillon
         </button>
-        <button className="primary" disabled={!lines.length} onClick={() => void save(true)}>
-          Enregistrer et envoyer
-        </button>
+        {can('order_close') && (
+          <button className="primary" disabled={!lines.length} onClick={() => void save(true)}>
+            Enregistrer et envoyer
+          </button>
+        )}
       </div>
     </div>
   );
@@ -311,6 +315,8 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
 
 function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; canEdit: boolean; onBack: () => void; onEdit: (o: Order) => void; onReceive: () => void }) {
   const toast = useToast();
+  const can = useCan();
+  const canClose = can('order_close');
   const order = useLoad(() => call('purchases.order', id), [id]);
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
   const o = order.data;
@@ -385,9 +391,9 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
       <div className="actions">
         <button onClick={onBack}>Retour à la liste</button>
         <button onClick={() => call('purchases.printOrder', o.id).catch(toast.error)}>Imprimer (A4)</button>
-        {canEdit && o.state === 'draft' && (
+        {canEdit && o.state === 'draft' && <button onClick={() => onEdit(o)}>Modifier</button>}
+        {canClose && o.state === 'draft' && (
           <>
-            <button onClick={() => onEdit(o)}>Modifier</button>
             <button className="danger" onClick={() => void setStatus('cancelled', 'Annuler ce bon de commande ?')}>
               Annuler
             </button>
@@ -396,15 +402,15 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
             </button>
           </>
         )}
-        {canEdit && o.state === 'sent' && (
+        {canClose && o.state === 'sent' && (
           <button className="danger" onClick={() => void setStatus('cancelled', 'Annuler ce bon de commande ?')}>
             Annuler
           </button>
         )}
-        {canEdit && o.state === 'partial' && (
+        {canClose && o.state === 'partial' && (
           <button onClick={() => void setStatus('closed', 'Solder la commande ? Le reliquat ne sera plus attendu.')}>Solder le reliquat</button>
         )}
-        {canEdit && (o.state === 'sent' || o.state === 'partial') && (
+        {can('order_receive') && (o.state === 'sent' || o.state === 'partial') && (
           <button className="primary" onClick={onReceive}>
             Réceptionner
           </button>
@@ -653,6 +659,7 @@ function InvoiceState({ i }: { i: Invoice }) {
 }
 
 function Invoices() {
+  const can = useCan();
   const [unpaid, setUnpaid] = useState(false);
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -663,9 +670,11 @@ function Invoices() {
         <label>
           <input type="checkbox" checked={unpaid} onChange={(e) => setUnpaid(e.target.checked)} /> Non réglées seulement
         </label>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setCreating(true)}>
-          Saisir une facture ou un avoir
-        </button>
+        {can('purchase_invoices') && (
+          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setCreating(true)}>
+            Saisir une facture ou un avoir
+          </button>
+        )}
       </div>
       <InvoiceTable invoices={list.data ?? []} onOpen={setOpen} />
       {creating && <InvoiceForm onClose={() => setCreating(false)} />}
@@ -836,6 +845,7 @@ function InvoiceForm({ onClose }: { onClose: () => void }) {
 }
 
 function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
+  const can = useCan();
   const data = useLoad(() => call('purchases.invoice', id), [id]);
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
   const [paying, setPaying] = useState(false);
@@ -894,7 +904,7 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
         </table>
       )}
       <div className="actions">
-        {i.balance > 0 && (
+        {i.balance > 0 && can('supplier_pay') && (
           <button className="primary" onClick={() => setPaying(true)}>
             {i.kind === 'invoice' ? 'Régler' : 'Enregistrer le remboursement'}
           </button>

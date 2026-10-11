@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PROMOTION_KINDS, type PromotionKind, formatQty, promotionLabel } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateFr, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, dateFr, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker } from './pickers';
 
 type Promotion = Result<'promotions.list'>[number];
@@ -22,6 +22,7 @@ const offer = (p: Promotion) =>
 /** Promotions datées appliquées d'elles-mêmes en caisse : prix promo, N achetés M payés, lot à prix fixe. */
 export function Promotions({ active }: { active: boolean }) {
   const toast = useToast();
+  const can = useCan();
   const list = useLoad(() => call('promotions.list'), []);
   // Les ventes faites en caisse pendant que la fenêtre était cachée mettent à jour les compteurs.
   useEffect(() => {
@@ -47,7 +48,7 @@ export function Promotions({ active }: { active: boolean }) {
             Toutes
           </button>
         </div>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
+        <button className="primary" style={{ marginLeft: 'auto' }} disabled={!can('promotion_save')} onClick={() => setEditing('new')}>
           Nouvelle promotion
         </button>
       </div>
@@ -86,8 +87,8 @@ export function Promotions({ active }: { active: boolean }) {
                 <td className="r">{p.sold_qty ? formatQty(p.sold_qty) : '-'}</td>
                 <td className="r">{p.given ? fcfa(p.given) : '-'}</td>
                 <td className="r nowrap">
-                  <button onClick={() => setEditing(p)}>Modifier</button>{' '}
-                  {p.status !== 'ended' && (
+                  {can('promotion_save') && <button onClick={() => setEditing(p)}>Modifier</button>}{' '}
+                  {p.status !== 'ended' && can('promotion_stop') && (
                     <button
                       className={p.active ? 'danger' : ''}
                       onClick={() =>

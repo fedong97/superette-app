@@ -54,6 +54,7 @@ const TABLES: Record<string, string> = {
   promotion: 'promotions',
   charge_plan: 'charge_plans',
   role_rights: 'role_rights',
+  user_rights: 'user_rights',
   central_cash_movement: 'central_cash_movements',
   inventory_entry: 'inventory_entries',
   rebate_entry: 'rebate_entries',

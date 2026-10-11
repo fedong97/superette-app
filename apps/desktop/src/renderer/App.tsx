@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Permission } from '@superette/core';
+import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
@@ -23,7 +23,7 @@ import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { Field, Modal, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -40,26 +40,30 @@ interface Win {
 
 
 
-const WINDOWS: Record<WinKind, { label: string; perm: Permission }> = {
-  cash1: { label: 'Fiche de facturation 1', perm: 'cash' },
-  cash2: { label: 'Fiche de facturation 2', perm: 'cash' },
-  credit: { label: 'Vente à crédit', perm: 'credit' },
-  sales: { label: 'Mes factures', perm: 'sales' },
-  articles: { label: 'Produits', perm: 'articles' },
-  stock: { label: 'Stock', perm: 'stock' },
-  purchases: { label: 'Achats', perm: 'purchases' },
-  suppliers: { label: 'Fournisseurs', perm: 'suppliers' },
-  customers: { label: 'Clients', perm: 'customers' },
-  expenses: { label: 'Dépenses', perm: 'expenses' },
-  quotes: { label: 'Devis et proformas', perm: 'quotes' },
-  promotions: { label: 'Promotions', perm: 'promotions' },
-  labels: { label: 'Étiquettes', perm: 'labels' },
-  reports: { label: 'Rapports de ventes', perm: 'reports' },
-  accounting: { label: 'Comptabilité', perm: 'accounting' },
-  treasury: { label: 'Opérations de trésorerie', perm: 'treasury' },
-  dashboard: { label: 'Tableau de bord', perm: 'dashboard' },
-  admin: { label: 'Administration', perm: 'admin' },
-  production: { label: 'Fabrication', perm: 'production' },
+/** Droits qui ouvrent une fenêtre : il suffit d'un seul (un droit précis ouvre la fenêtre sur ce qu'il permet). */
+const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
+  cash1: { label: 'Fiche de facturation 1', perm: ['cash'] },
+  cash2: { label: 'Fiche de facturation 2', perm: ['cash'] },
+  credit: { label: 'Vente à crédit', perm: ['credit'] },
+  sales: { label: 'Mes factures', perm: ['sales', 'cash_z', 'cash_operations', 'sales_alerts'] },
+  articles: { label: 'Produits', perm: ['articles', 'article_create'] },
+  stock: {
+    label: 'Stock',
+    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count'],
+  },
+  purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due'] },
+  suppliers: { label: 'Fournisseurs', perm: ['suppliers', 'supplier_statement'] },
+  customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement'] },
+  expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
+  quotes: { label: 'Devis et proformas', perm: ['quotes', 'quote_save'] },
+  promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
+  labels: { label: 'Étiquettes', perm: ['labels'] },
+  reports: { label: 'Rapports de ventes', perm: ['reports'] },
+  accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'chart_accounts'] },
+  treasury: { label: 'Opérations de trésorerie', perm: ['treasury', 'cash_history', 'central_cash'] },
+  dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
+  admin: { label: 'Administration', perm: ['admin'] },
+  production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
 };
 
 interface MenuItem {
@@ -115,7 +119,7 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Devis et factures proforma', open: ['quotes'] },
       { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
-      { label: 'Alertes sur les ventes', open: ['sales', 'alerts'] },
+      { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
       SEP,
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       { label: 'Situation des ventes', open: ['reports', 'department'], perm: 'reports' },
@@ -133,90 +137,90 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Registre des achats par produits', open: ['purchases', 'byproduct'] },
       SEP,
       { label: 'Registre des réceptions', open: ['purchases', 'receptions'] },
-      { label: 'Saisir une nouvelle réception (sans commande)', open: ['stock', 'receive'] },
+      { label: 'Saisir une nouvelle réception (sans commande)', open: ['stock', 'receive'], perm: 'stock_receive' },
       SEP,
-      { label: 'Bons de commande', open: ['purchases', 'orders'] },
-      { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'purchase_orders' },
+      { label: 'Bons de commande', open: ['purchases', 'orders'], perm: ['purchases', 'purchase_orders', 'order_receive'] },
+      { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Marchandises non encore reçues', open: ['purchases', 'pending'] },
-      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_invoices' },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_due' },
     ],
   ],
   [
     'Fabrication',
     [
-      { label: 'Nouvel ordre de fabrication', open: ['production', 'new'] },
-      { label: 'Ordres de fabrication', open: ['production', 'orders'] },
-      { label: 'Recettes (produits fabriqués)', open: ['production', 'recipes'] },
+      { label: 'Nouvel ordre de fabrication', open: ['production', 'new'], perm: 'production_create' },
+      { label: 'Ordres de fabrication', open: ['production', 'orders'], perm: ['production', 'production_create', 'production_validate'] },
+      { label: 'Recettes (produits fabriqués)', open: ['production', 'recipes'], perm: ['production', 'production_recipes'] },
     ],
   ],
   [
     'Trésorerie',
     [
       { label: 'Opérations de trésorerie (ouverture, clôture)', open: ['treasury', 'day'], perm: 'treasury' },
-      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_amounts', badge: 'gaps' },
+      { label: 'Historique des journées de caisse', open: ['treasury', 'history'], perm: 'cash_history', badge: 'gaps' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
       SEP,
       { label: 'Journaux de trésorerie', open: ['accounting', 'journals'], perm: 'accounting' },
       { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },
       { label: 'Extrait de compte (grand livre)', open: ['accounting', 'ledger'] },
-      { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'] },
+      { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'], perm: 'cash_operations' },
       SEP,
       { label: 'Règlements clients reçus', open: ['customers', 'payments'] },
-      { label: 'Rechercher dans les caisses', open: ['sales', 'find'] },
+      { label: 'Rechercher dans les caisses', open: ['sales', 'find'], perm: 'cash_operations' },
       SEP,
-      { label: 'Registre de caisse (Z)', open: ['sales', 'z'], perm: 'cash_amounts' },
-      { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], perm: 'accounting' },
+      { label: 'Registre de caisse (Z)', open: ['sales', 'z'], perm: 'cash_z' },
+      { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], perm: 'bank_reconciliation' },
     ],
   ],
   [
     'Produit',
     [
-      { label: 'Liste des produits', open: ['articles', 'list'] },
-      { label: 'Ajouter / paramétrer une marchandise', open: ['articles', 'new'] },
-      { label: 'Recherche', open: ['articles', 'search'] },
+      { label: 'Liste des produits', open: ['articles', 'list'], perm: 'articles' },
+      { label: 'Ajouter / paramétrer une marchandise', open: ['articles', 'new'], perm: 'article_create' },
+      { label: 'Recherche', open: ['articles', 'search'], perm: 'articles' },
       SEP,
-      { label: 'Péremptions', open: ['stock', 'expiry'] },
+      { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
       { label: 'Étiquettes de rayon', open: ['labels'] },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
-      { label: 'Articles par dépôt', open: ['stock', 'warehouses'] },
+      { label: 'Articles par dépôt', open: ['stock', 'warehouses'], perm: 'stock' },
       { label: 'Rayonnage des articles', open: ['articles', 'shelving'] },
       SEP,
-      { label: 'Stocks', open: ['stock', 'state'] },
-      { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'] },
-      { label: 'Mouvements de stock', open: ['stock', 'moves'] },
-      { label: "Monitoring de l'évolution du stock", open: ['stock', 'monitoring'] },
+      { label: 'Stocks', open: ['stock', 'state'], perm: 'stock' },
+      { label: 'Historique des ajustements de stock', open: ['stock', 'adjustments'], perm: 'stock_moves' },
+      { label: 'Mouvements de stock', open: ['stock', 'moves'], perm: 'stock_moves' },
+      { label: "Monitoring de l'évolution du stock", open: ['stock', 'monitoring'], perm: ['stock_monitoring', 'stock_request', 'stock_decide'] },
       SEP,
-      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
-      { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'] },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count', 'inventory_close', 'inventory_print'] },
+      { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'], perm: 'stock_loss' },
       SEP,
-      { label: 'Stocks critiques', open: ['stock', 'critical'] },
-      { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'purchase_orders' },
+      { label: 'Stocks critiques', open: ['stock', 'critical'], perm: 'stock' },
+      { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
     ],
   ],
   [
     'Fournisseur',
     [
-      { label: 'Liste des fournisseurs', open: ['suppliers', 'list'] },
+      { label: 'Liste des fournisseurs', open: ['suppliers', 'list'], perm: 'suppliers' },
       SEP,
-      { label: 'Consulter un extrait de compte', open: ['suppliers', 'statement'] },
-      { label: 'Situation des fournisseurs', open: ['suppliers', 'situation'], perm: 'purchase_invoices' },
-      { label: 'Les comptes dont le solde a bougé récemment', open: ['suppliers', 'recent'] },
+      { label: 'Consulter un extrait de compte', open: ['suppliers', 'statement'], perm: 'supplier_statement' },
+      { label: 'Situation des fournisseurs', open: ['suppliers', 'situation'], perm: 'supplier_statement' },
+      { label: 'Les comptes dont le solde a bougé récemment', open: ['suppliers', 'recent'], perm: 'supplier_statement' },
       SEP,
       { label: 'Factures et avoirs fournisseurs', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
-      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_invoices' },
+      { label: 'Échéancier fournisseurs', open: ['purchases', 'due'], perm: 'purchase_due' },
     ],
   ],
   [
     'Client',
     [
-      { label: 'Liste', open: ['customers', 'list'] },
+      { label: 'Liste', open: ['customers', 'list'], perm: 'customers' },
       { label: 'Contrôle des échéances', open: ['customers', 'receivables'], perm: 'receivables' },
       { label: "Contrôle des plafonds d'autorisation", open: ['customers', 'limits'], perm: 'receivables' },
       SEP,
-      { label: 'Consulter un extrait de compte', open: ['customers', 'statement'] },
+      { label: 'Consulter un extrait de compte', open: ['customers', 'statement'], perm: ['customer_statement', 'receivables'] },
       { label: 'Situation des clients', open: ['customers', 'receivables'], perm: 'receivables' },
       { label: 'Les comptes dont le solde a bougé récemment', open: ['customers', 'recent'] },
       SEP,
@@ -233,41 +237,49 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Charge',
     [
-      { label: 'Types de charge', open: ['expenses', 'categories'] },
-      { label: 'Définition des charges fixes', open: ['expenses', 'plans'] },
-      { label: 'Dépenses (nouvelle dépense)', open: ['expenses', 'new'] },
+      { label: 'Types de charge', open: ['expenses', 'categories'], perm: 'expense_categories' },
+      { label: 'Définition des charges fixes', open: ['expenses', 'plans'], perm: 'charge_plans' },
+      { label: 'Dépenses (nouvelle dépense)', open: ['expenses', 'new'], perm: 'expense_record' },
       SEP,
-      { label: 'Historique des dépenses', open: ['expenses', 'list'] },
-      { label: 'Dépenses par catégorie', open: ['expenses', 'summary'] },
+      { label: 'Historique des dépenses', open: ['expenses', 'list'], perm: 'expenses' },
+      { label: 'Dépenses par catégorie', open: ['expenses', 'summary'], perm: 'expenses' },
       SEP,
-      { label: 'Constats de charges', open: ['expenses', 'schedule'] },
+      { label: 'Constats de charges', open: ['expenses', 'schedule'], perm: 'charge_plans' },
     ],
   ],
-  ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'] }]],
+  ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_direct'] }]],
   [
     'Magasinier',
     [
-      { label: 'État du stock', open: ['stock', 'state'] },
-      { label: 'Mouvements de stock', open: ['stock', 'moves'] },
-      { label: 'Monitoring du stock', open: ['stock', 'monitoring'] },
-      { label: 'Pertes et casse', open: ['stock', 'loss'] },
-      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count'] },
-      { label: 'Péremptions', open: ['stock', 'expiry'] },
+      { label: 'État du stock', open: ['stock', 'state'], perm: 'stock' },
+      { label: 'Mouvements de stock', open: ['stock', 'moves'], perm: 'stock_moves' },
+      { label: 'Monitoring du stock', open: ['stock', 'monitoring'], perm: ['stock_monitoring', 'stock_request', 'stock_decide'] },
+      { label: 'Pertes et casse', open: ['stock', 'loss'], perm: 'stock_loss' },
+      { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count', 'inventory_close', 'inventory_print'] },
+      { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
       { label: 'Étiquettes de rayon', open: ['labels'] },
     ],
   ],
   [
     'Comptabilité',
     [
-      { label: 'Journaux', open: ['accounting', 'journals'] },
-      { label: 'Grand livre', open: ['accounting', 'ledger'] },
-      { label: 'Balance générale', open: ['accounting', 'balance'] },
-      { label: 'Bilan et compte de résultat', open: ['accounting', 'statements'] },
-      { label: 'Plan comptable', open: ['accounting', 'accounts'] },
-      { label: 'Export des ventes (CSV)', open: ['sales', 'export'] },
+      { label: 'Journaux', open: ['accounting', 'journals'], perm: 'accounting' },
+      { label: 'Grand livre', open: ['accounting', 'ledger'], perm: 'accounting' },
+      { label: 'Balance générale', open: ['accounting', 'balance'], perm: 'accounting' },
+      { label: 'Bilan et compte de résultat', open: ['accounting', 'statements'], perm: 'statements' },
+      { label: 'Plan comptable', open: ['accounting', 'accounts'], perm: ['accounting', 'chart_accounts'] },
+      { label: 'Export des ventes (CSV)', open: ['sales', 'export'], perm: 'accounting_export' },
     ],
   ],
-  ['Fiscal', [{ label: 'Déclaration de TVA', open: ['accounting', 'vat'] }, { label: 'États financiers et DSF', open: ['accounting', 'statements'] }, { label: 'Notes déclaratives de la DSF', open: ['accounting', 'dsf'] }, { label: 'Impôt sur le résultat', open: ['accounting', 'tax'] }]],
+  [
+    'Fiscal',
+    [
+      { label: 'Déclaration de TVA', open: ['accounting', 'vat'], perm: 'vat_return' },
+      { label: 'États financiers et DSF', open: ['accounting', 'statements'], perm: 'statements' },
+      { label: 'Notes déclaratives de la DSF', open: ['accounting', 'dsf'], perm: ['tax', 'tax_settings'] },
+      { label: 'Impôt sur le résultat', open: ['accounting', 'tax'], perm: ['tax', 'tax_settings'] },
+    ],
+  ],
   [
     'Administration',
     [
@@ -276,10 +288,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Dépôts', open: ['admin', 'warehouses'] },
       { label: 'Utilisateurs', open: ['admin', 'users'] },
       { label: 'Droits par rôle', open: ['admin', 'rights'] },
+      { label: 'Privilèges par utilisateur', open: ['admin', 'privileges'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
-      { label: 'Sauvegardes', open: ['admin', 'backups'] },
+      { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Serveur central', open: ['admin', 'server'] },
-      { label: "Journal d'audit", open: ['admin', 'audit'] },
+      { label: "Journal d'audit", open: ['admin', 'audit'], perm: 'audit' },
     ],
   ],
   [
@@ -349,7 +362,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const toast = useToast();
   const can = (perm: Permission) => user.rights.includes(perm);
   // Sans tout le registre, le caissier garde « Mes factures » pour ses trois dernières.
-  const canWin = (kind: WinKind) => can(WINDOWS[kind].perm) || (kind === 'sales' && (can('cash') || can('credit')));
+  const canWin = (kind: WinKind) => WINDOWS[kind].perm.some(can) || (kind === 'sales' && (can('cash') || can('credit')));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
   // Le caissier et le vendeur arrivent sur leur fiche de facturation ; les autres sur la page d'accueil.
   const startOnPos = ['cashier', 'seller'].includes(user.role);
@@ -401,6 +414,28 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     }, 15000);
     return () => clearInterval(t);
   }, []);
+  // Paramètres › Affichage : grande taille de texte sur ce PC.
+  useEffect(() => {
+    document.documentElement.classList.toggle('large-text', state.display === 'large');
+  }, [state.display]);
+  // Paramètres › Sécurité : déconnexion après quelques minutes sans clavier ni souris.
+  const idleMinutes = state.storeSettings?.idleMinutes ?? 0;
+  useEffect(() => {
+    if (!idleMinutes) return;
+    let last = Date.now();
+    const bump = () => {
+      last = Date.now();
+    };
+    const events = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'];
+    for (const e of events) window.addEventListener(e, bump, true);
+    const t = setInterval(() => {
+      if (Date.now() - last > idleMinutes * 60000) void call('auth.logout').then(refresh);
+    }, 10000);
+    return () => {
+      for (const e of events) window.removeEventListener(e, bump, true);
+      clearInterval(t);
+    };
+  }, [idleMinutes]);
   useEffect(() => {
     document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
@@ -456,7 +491,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     items
       .filter((i) => (!i.perm || [i.perm].flat().some(can)) && (!i.adminOnly || user.role === 'admin'))
       .filter((i) => (!i.open || canWin(i.open[0])) && (!i.soon || supervisor))
-      .filter((i) => i.open?.[0] !== 'sales' || can('sales') || i.open[1] === 'tickets' || i.open[1] === 'z')
+      .filter((i) => i.open?.[0] !== 'sales' || can('sales') || Boolean(i.perm) || i.open[1] === 'tickets')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
   const visibleMenus = MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep));
 
@@ -496,6 +531,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const tiles = ROLE_TILES[user.role].filter((t) => canWin(t.open[0]));
 
   return (
+    <RightsProvider value={user.rights}>
+    <StoreSettingsProvider value={state.storeSettings ?? DEFAULT_STORE_SETTINGS}>
     <div className="desk">
       <nav className="menubar">
         {visibleMenus.map(([name, items]) => (
@@ -830,6 +867,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </Modal>
       )}
     </div>
+    </StoreSettingsProvider>
+    </RightsProvider>
   );
 }
 

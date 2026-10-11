@@ -138,8 +138,21 @@ export function SupervisorPrompt({ action, onCancel, onConfirm }: { action: stri
   );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="empty">{children}</div>;
+/**
+ * Liste ou page vide : le message dit quoi faire ensuite, et le bouton
+ * facultatif le fait tout de suite (« Ouvrir la caisse », « Nouveau client »…).
+ */
+export function Empty({ children, action }: { children: ReactNode; action?: { label: string; onClick: () => void } }) {
+  return (
+    <div className="empty">
+      <div>{children}</div>
+      {action && (
+        <button className="primary empty-action" onClick={action.onClick}>
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; onChange: (v: T) => void; tabs: [T, string][] }) {

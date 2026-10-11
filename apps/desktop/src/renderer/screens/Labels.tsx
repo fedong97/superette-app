@@ -109,7 +109,7 @@ export function Labels({ active }: { active: boolean }) {
       <div className="labels-body">
         <div className="labels-list">
           {rows.length === 0 ? (
-            <Empty>{redo ? 'Toutes les étiquettes sont à jour.' : 'Aucun article.'}</Empty>
+            <Empty>{redo ? 'Toutes les étiquettes sont à jour.' : 'Aucun article ne correspond : changez le rayon ou la recherche.'}</Empty>
           ) : (
             <table className="list compact">
               <thead>

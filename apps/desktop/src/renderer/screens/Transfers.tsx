@@ -56,7 +56,7 @@ function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
         <span className="muted">Un transfert expédié n'est plus dans le dépôt de départ ; il entre dans le dépôt d'arrivée à la réception.</span>
       </div>
       {list.data?.length === 0 ? (
-        <Empty>Aucun transfert.</Empty>
+        <Empty>Aucun transfert. Cliquez sur « Nouveau transfert » pour déplacer la marchandise de la réserve vers la surface de vente.</Empty>
       ) : (
         <table className="list">
           <thead>

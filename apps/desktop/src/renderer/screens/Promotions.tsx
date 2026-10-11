@@ -52,7 +52,7 @@ export function Promotions({ active }: { active: boolean }) {
         </button>
       </div>
       {rows.length === 0 ? (
-        <Empty>Aucune promotion {filter === 'current' ? 'en cours ni à venir' : ''}</Empty>
+        <Empty>Aucune promotion {filter === 'current' ? 'en cours ni à venir' : ''}. Cliquez sur « Nouvelle promotion » : la caisse l’appliquera toute seule.</Empty>
       ) : (
         <table className="list compact">
           <thead>

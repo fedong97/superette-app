@@ -171,7 +171,7 @@ export function HeldDialog({ onClose, onResume }: { onClose: () => void; onResum
   return (
     <Modal title="Tickets en attente" onClose={onClose}>
       {Boolean(held.data?.length) && <p className="muted">Entrée reprend le ticket sélectionné, ↑ ↓ pour changer.</p>}
-      {held.data?.length === 0 && <Empty>Aucun ticket en attente.</Empty>}
+      {held.data?.length === 0 && <Empty>Aucun ticket en attente. À la caisse, F3 met la fiche en cours en attente pour servir un autre client.</Empty>}
       <div
         className="pick-list"
         onKeyDown={(e) => {
@@ -204,7 +204,7 @@ export function CancelDialog({ sessionId, onClose }: { sessionId: string; onClos
     <Modal title="Annuler un ticket" onClose={onClose}>
       {!target ? (
         <div className="pick-list">
-          {list.length === 0 && <Empty>Aucun ticket dans cette session.</Empty>}
+          {list.length === 0 && <Empty>Aucun ticket dans cette session. Les tickets validés depuis l’ouverture de la caisse s’affichent ici.</Empty>}
           {list.map((s) => (
             <button key={s.id} onClick={() => setTarget(s)}>
               <span>

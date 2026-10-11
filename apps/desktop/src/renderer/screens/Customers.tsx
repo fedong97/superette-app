@@ -452,7 +452,7 @@ function Receivables({ user }: { user: User }) {
 function Payments() {
   const toast = useToast();
   const list = useLoad(() => call('customers.payments', { limit: 200 }), []);
-  if (list.data?.length === 0) return <Empty>Aucun règlement client enregistré.</Empty>;
+  if (list.data?.length === 0) return <Empty>Aucun règlement client enregistré. Encaissez un règlement depuis le compte du client, ou à la caisse par Action › Règlement client.</Empty>;
   return (
     <table className="list">
       <thead>

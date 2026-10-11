@@ -145,7 +145,7 @@ function Journals() {
       {list.error ? (
         <Empty>{String((list.error as Error).message ?? list.error)}</Empty>
       ) : entries.length === 0 ? (
-        <Empty>Aucune écriture sur la période.</Empty>
+        <Empty>Aucune écriture sur la période. Changez les dates : les ventes sont passées à chaque clôture Z, les achats et dépenses à leur saisie.</Empty>
       ) : (
         <table className="list compact journal">
           <thead>
@@ -419,7 +419,7 @@ function Balance({ onOpen }: { onOpen: (account: string) => void }) {
         </button>
       </div>
       {rows.length === 0 ? (
-        <Empty>Aucun mouvement sur la période.</Empty>
+        <Empty>Aucun mouvement sur la période. Changez les dates ou le compte.</Empty>
       ) : (
         <table className="list compact">
           <thead>

@@ -203,6 +203,7 @@ export class SyncService extends Base {
           ...row,
           barcodes: this.db.prepare('SELECT code, pack_qty FROM barcodes WHERE article_id = ?').all(entityId),
           packs: this.db.prepare('SELECT * FROM article_packs WHERE article_id = ? ORDER BY position').all(entityId),
+          photo: this.db.prepare('SELECT photo, thumb, updated_at FROM article_photos WHERE article_id = ?').get(entityId) ?? null,
         };
       }
       case 'store_price': {
@@ -511,6 +512,12 @@ export class SyncService extends Base {
         if (Array.isArray(p['packs'])) {
           this.db.prepare('DELETE FROM article_packs WHERE article_id = ?').run(event.entityId);
           for (const pack of p['packs'] as Record<string, unknown>[]) this.upsert('article_packs', pack);
+        }
+        // Photo : null la retire ; un poste ancien n'envoie pas la clé.
+        if ('photo' in p) {
+          const ph = p['photo'] as { photo: string; thumb: string; updated_at: string } | null;
+          if (ph) this.upsert('article_photos', { article_id: event.entityId, ...ph }, ['article_id']);
+          else this.db.prepare('DELETE FROM article_photos WHERE article_id = ?').run(event.entityId);
         }
         return;
       }

@@ -1,4 +1,4 @@
-import { type Fcfa, type Milli, dueDate, lineAmount, parseStoreSettings, suggestReorder, ttcFromHt } from '@superette/core';
+import { type Fcfa, type Milli, dueDate, lineAmount, parseStoreSettings, purchaseAmounts, purchaseTermsError, spreadDiscount, suggestReorder, ttcFromHt } from '@superette/core';
 import type { Db } from './database';
 import type { ReceptionLine, StockService } from './stock';
 import { AppError, Base, type Clock, type Context, newId } from './util';
@@ -66,6 +66,21 @@ export interface PurchaseOrderLineInput {
   articleId: string;
   qty: Milli;
   unitCost: Fcfa;
+  /** Remise en points de base (1 000 = 10 %). */
+  discountBp?: number;
+  /** Unités gratuites comprises dans qty (« N achetés, M payés »). */
+  freeQty?: Milli;
+  /** Promo saisie, gardée pour l'affichage : N achetés, M payés. */
+  promoBuy?: number | null;
+  promoPay?: number | null;
+}
+
+/** Remise, gratuits et promo d'une ligne d'achat, tels qu'enregistrés. */
+export interface PurchaseLineTerms {
+  discount_bp: number;
+  free_qty: Milli;
+  promo_buy: number | null;
+  promo_pay: number | null;
 }
 
 export interface PurchaseOrder {
@@ -94,6 +109,10 @@ export interface PurchaseOrder {
     supplier_ref: string | null;
     qty: Milli;
     unit_cost: Fcfa;
+    discount_bp: number;
+    free_qty: Milli;
+    promo_buy: number | null;
+    promo_pay: number | null;
     received: Milli;
     total_ht: Fcfa;
   }[];
@@ -114,6 +133,8 @@ export interface Reception {
   invoice_number: string | null;
   user_name: string | null;
   received_at: string;
+  /** Remise globale (facture directe), déjà répartie sur les lignes. */
+  discount: Fcfa;
   total_ht: Fcfa;
   total_tva: Fcfa;
   total_ttc: Fcfa;
@@ -127,7 +148,14 @@ export interface ReceptionDetail extends Reception {
     article_name: string;
     unit: 'piece' | 'kg' | 'litre';
     qty: Milli;
+    /** Coût net qui est entré en stock. */
     unit_cost: Fcfa;
+    /** Prix avant remise et gratuits (null : réception d'avant la 0.35.0). */
+    gross_cost: Fcfa | null;
+    discount_bp: number;
+    free_qty: Milli;
+    promo_buy: number | null;
+    promo_pay: number | null;
     vat_rate_bp: number;
     lot_number: string | null;
     expiry: string | null;
@@ -152,6 +180,10 @@ export interface SupplierInvoice {
   total_ttc: Fcfa;
   /** Valeur HT des réceptions rattachées, pour le rapprochement. */
   received_ht: Fcfa;
+  /** Facture saisie avec ses articles, sans bon de commande. */
+  direct: number;
+  /** Remise globale HT de la facture directe. */
+  discount: Fcfa;
   notes: string | null;
   paid: Fcfa;
   balance: Fcfa;
@@ -363,13 +395,20 @@ export class PurchaseService extends Base {
     for (const l of lines) {
       if (!Number.isSafeInteger(l.qty) || l.qty <= 0) throw new AppError('Quantité commandée invalide', 'INVALID');
       if (!Number.isSafeInteger(l.unitCost) || l.unitCost < 0) throw new AppError("Prix d'achat invalide", 'INVALID');
+      const err = purchaseTermsError({ qty: l.qty, unitCost: l.unitCost, discountBp: l.discountBp, freeQty: l.freeQty });
+      if (err) throw new AppError(err, 'INVALID');
     }
   }
 
   private writeLines(orderId: string, lines: PurchaseOrderLineInput[]): void {
     this.db.prepare('DELETE FROM purchase_order_lines WHERE order_id = ?').run(orderId);
-    const insert = this.db.prepare('INSERT INTO purchase_order_lines (id, order_id, line_no, article_id, qty, unit_cost) VALUES (?, ?, ?, ?, ?, ?)');
-    lines.forEach((l, i) => insert.run(newId(), orderId, i + 1, l.articleId, l.qty, l.unitCost));
+    const insert = this.db.prepare(
+      `INSERT INTO purchase_order_lines (id, order_id, line_no, article_id, qty, unit_cost, discount_bp, free_qty, promo_buy, promo_pay)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    lines.forEach((l, i) =>
+      insert.run(newId(), orderId, i + 1, l.articleId, l.qty, l.unitCost, l.discountBp ?? 0, l.freeQty ?? 0, l.promoBuy ?? null, l.promoPay ?? null),
+    );
   }
 
   createOrder(
@@ -454,14 +493,14 @@ export class PurchaseService extends Base {
       this.db
         .prepare(
           `SELECT l.id, l.line_no, l.article_id, a.code AS article_code, a.name AS article_name, a.unit, a.perishable,
-                  sa.supplier_ref, l.qty, l.unit_cost,
+                  sa.supplier_ref, l.qty, l.unit_cost, l.discount_bp, l.free_qty, l.promo_buy, l.promo_pay,
                   COALESCE((SELECT SUM(rl.qty) FROM reception_lines rl WHERE rl.order_line_id = l.id), 0) AS received
            FROM purchase_order_lines l JOIN articles a ON a.id = l.article_id
            LEFT JOIN supplier_articles sa ON sa.article_id = l.article_id AND sa.supplier_id = ?
            WHERE l.order_id = ? ORDER BY l.line_no`,
         )
         .all(head.supplier_id, id) as Omit<PurchaseOrder['lines'][number], 'total_ht'>[]
-    ).map((l) => ({ ...l, total_ht: lineAmount(l.unit_cost, l.qty) }));
+    ).map((l) => ({ ...l, total_ht: purchaseAmounts({ qty: l.qty, unitCost: l.unit_cost, discountBp: l.discount_bp, freeQty: l.free_qty }).net }));
     return {
       ...head,
       lines,
@@ -519,12 +558,13 @@ export class PurchaseService extends Base {
   // --- Réceptions ---------------------------------------------------------------
 
   private receptionTotals(id: string): { total_ht: Fcfa; total_tva: Fcfa; total_ttc: Fcfa } {
-    const lines = this.db.prepare('SELECT qty, unit_cost, vat_rate_bp FROM reception_lines WHERE reception_id = ?').all(id) as {
+    const lines = this.db.prepare('SELECT qty, unit_cost, amount, vat_rate_bp FROM reception_lines WHERE reception_id = ?').all(id) as {
       qty: number;
       unit_cost: number;
+      amount: number | null;
       vat_rate_bp: number;
     }[];
-    return taxTotals(lines.map((l) => ({ ht: lineAmount(l.unit_cost, l.qty), rate: l.vat_rate_bp })));
+    return taxTotals(lines.map((l) => ({ ht: l.amount ?? lineAmount(l.unit_cost, l.qty), rate: l.vat_rate_bp })));
   }
 
   listReceptions(storeId: string, opts: { supplierId?: string; uninvoiced?: boolean; limit?: number } = {}): Reception[] {
@@ -549,12 +589,12 @@ export class PurchaseService extends Base {
     const lines = (
       this.db
         .prepare(
-          `SELECT rl.id, rl.article_id, a.code AS article_code, a.name AS article_name, a.unit, rl.qty, rl.unit_cost, rl.vat_rate_bp,
-                  rl.lot_number, rl.expiry
+          `SELECT rl.id, rl.article_id, a.code AS article_code, a.name AS article_name, a.unit, rl.qty, rl.unit_cost, rl.gross_cost,
+                  rl.discount_bp, rl.free_qty, rl.promo_buy, rl.promo_pay, rl.amount, rl.vat_rate_bp, rl.lot_number, rl.expiry
            FROM reception_lines rl JOIN articles a ON a.id = rl.article_id WHERE rl.reception_id = ? ORDER BY rl.line_no`,
         )
-        .all(id) as Omit<ReceptionDetail['lines'][number], 'total_ht'>[]
-    ).map((l) => ({ ...l, total_ht: lineAmount(l.unit_cost, l.qty) }));
+        .all(id) as (Omit<ReceptionDetail['lines'][number], 'total_ht'> & { amount: number | null })[]
+    ).map(({ amount, ...l }) => ({ ...l, total_ht: amount ?? lineAmount(l.unit_cost, l.qty) }));
     return { ...head, lines };
   }
 
@@ -656,6 +696,74 @@ export class PurchaseService extends Base {
       this.audit(ctx.userId, `supplier_invoice.${kind}`, 'supplier_invoice', id, { supplier: supplier.name, ttc: row.total_ttc });
       return this.getInvoice(id);
     });
+  }
+
+  /**
+   * Facture d'achat directe, sans bon de commande : la marchandise entre en
+   * stock au coût net (remises, gratuits, part de la remise globale), un bon de
+   * réception est créé et rattaché à la facture, et la facture peut être
+   * réglée tout de suite.
+   */
+  directInvoice(
+    ctx: Context,
+    input: {
+      supplierId: string;
+      supplierNumber: string;
+      invoiceDate: string;
+      dueDate?: string | null;
+      warehouseId: string;
+      notes?: string | null;
+      lines: ReceptionLine[];
+      /** Remise globale en % (points de base) ou en montant HT. */
+      discountBp?: number;
+      discountAmount?: Fcfa;
+      /** Règlement immédiat ; sans montant, toute la facture. */
+      payment?: { method: SupplierPaymentMethod; amount?: Fcfa | null; reference?: string | null; registerId?: string | null } | null;
+    },
+  ): SupplierInvoice {
+    const supplier = this.getSupplier(input.supplierId);
+    if (input.lines.length === 0) throw new AppError('La facture est vide : ajoutez au moins un article', 'EMPTY');
+    const nets = input.lines.map((l) => {
+      const err = purchaseTermsError({ qty: l.qty, unitCost: l.unitCost, discountBp: l.discountBp, freeQty: l.freeQty });
+      if (err) throw new AppError(err, 'INVALID');
+      return purchaseAmounts({ qty: l.qty, unitCost: l.unitCost, discountBp: l.discountBp, freeQty: l.freeQty }).net;
+    });
+    const sum = nets.reduce((a, n) => a + n, 0);
+    const bp = input.discountBp ?? 0;
+    if (!Number.isSafeInteger(bp) || bp < 0 || bp > 10_000) throw new AppError('Remise globale invalide : entre 0 et 100 %', 'INVALID');
+    const global = input.discountAmount !== undefined && input.discountAmount !== null && input.discountAmount > 0 ? input.discountAmount : Math.round((sum * bp) / 10_000);
+    if (!Number.isSafeInteger(global) || global < 0 || global > sum) throw new AppError('La remise globale dépasse le montant de la facture', 'INVALID');
+    const shares = spreadDiscount(nets, global);
+    return this.tx(() => {
+      const rec = this.stock.receive(ctx, {
+        warehouseId: input.warehouseId,
+        reference: input.supplierNumber,
+        supplierId: supplier.id,
+        discount: global,
+        lines: input.lines.map((l, i) => ({ ...l, globalDiscount: shares[i] })),
+      });
+      const totals = this.receptionTotals(rec.id);
+      const invoice = this.createInvoice(ctx, {
+        supplierId: supplier.id,
+        supplierNumber: input.supplierNumber,
+        invoiceDate: input.invoiceDate,
+        dueDate: input.dueDate,
+        totalHt: totals.total_ht,
+        totalTva: totals.total_tva,
+        receptionIds: [rec.id],
+        notes: input.notes,
+      });
+      this.db.prepare('UPDATE supplier_invoices SET direct = 1, discount = ? WHERE id = ?').run(global, invoice.id);
+      this.enqueue(ctx, 'supplier_invoice', invoice.id, 'upsert', {});
+      if (input.payment) this.paySupplier(ctx, { ...input.payment, amount: input.payment.amount || this.getInvoice(invoice.id).balance, invoiceId: invoice.id });
+      return this.getInvoice(invoice.id);
+    });
+  }
+
+  /** Lignes d'une facture directe (son bon de réception), pour l'affichage et l'impression. */
+  invoiceLines(invoiceId: string): ReceptionDetail['lines'] {
+    const ids = this.db.prepare('SELECT id FROM receptions WHERE invoice_id = ? ORDER BY received_at').pluck().all(invoiceId) as string[];
+    return ids.flatMap((id) => this.getReception(id).lines);
   }
 
   private invoiceQuery(where: string) {

@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.35.0',
+    items: [
+      'Photo de l’article sur sa fiche, en miniature dans la liste des produits et dans la recherche de la caisse.',
+      'Achats › Saisir une facture directe : la facture avec ses articles, sans bon de commande. Le stock entre, le bon de réception est créé, et la facture peut être réglée tout de suite.',
+      'Remise % et promo « N achetés, M payés » sur chaque ligne du bon de commande, de la réception et de la facture directe ; remise globale sur la facture directe. Le stock entre au coût net.',
+      'Collaborateurs : compte de rattachement au choix (Personnel 4211, CNPS 4311, État 4471, Associés 4621 ou autre compte de la classe 4), son sous-compte est créé dessous.',
+    ],
+  },
+  {
     version: '0.34.0',
     items: [
       'Opérations de trésorerie : boutons « Encaisser » et « Décaisser » sur chaque volet, comme dans KONTROL, avec le type (client, fournisseur, personnel, charge, reversement, autre), le n° de pièce et le motif.',

@@ -48,6 +48,8 @@ export interface Article {
   pack_purchase_price: Fcfa | null;
   /** Prix de revient du conditionnement d'achat (achat + transport, manutention). */
   pack_cost_price: Fcfa | null;
+  /** Miniature de la photo (data URL JPEG), null sans photo. */
+  photo_thumb: string | null;
   barcodes: { code: string; pack_qty: Milli }[];
   /** Conditionnements, du plus grand au plus petit (carton, paquet). */
   packs: ArticlePack[];
@@ -126,12 +128,17 @@ export interface ScanResult {
 
 const ARTICLE_SELECT = `
   SELECT a.*, v.rate_bp AS vat_rate_bp, f.name AS family_name, d.name AS department_name,
-         COALESCE(sp.sale_price, a.sale_price) AS store_price
+         COALESCE(sp.sale_price, a.sale_price) AS store_price, ph.thumb AS photo_thumb
   FROM articles a
+  LEFT JOIN article_photos ph ON ph.article_id = a.id
   JOIN vat_rates v ON v.id = a.vat_rate_id
   LEFT JOIN families f ON f.id = a.family_id
   LEFT JOIN departments d ON d.id = f.department_id
   LEFT JOIN store_prices sp ON sp.article_id = a.id AND sp.store_id = @storeId`;
+
+/** Taille maximale d'une photo et de sa miniature (data URL). */
+const PHOTO_MAX = 400_000;
+const THUMB_MAX = 40_000;
 
 export class CatalogueService extends Base {
   // --- Rayons et familles ---------------------------------------------------
@@ -403,6 +410,45 @@ export class CatalogueService extends Base {
         'STOCK_UNIT_LOCKED',
       );
     }
+  }
+
+  /** Photo de l'article (data URL), null sans photo. */
+  photo(articleId: string): string | null {
+    return (this.db.prepare('SELECT photo FROM article_photos WHERE article_id = ?').pluck().get(articleId) as string | undefined) ?? null;
+  }
+
+  /**
+   * Photo de l'article, déjà réduite par l'interface (environ 400 px) avec sa
+   * miniature ; null la retire. Elle part aux autres postes avec l'article.
+   */
+  setPhoto(userId: string, articleId: string, input: { photo: string; thumb: string } | null): Article {
+    this.getArticle(articleId);
+    if (input) {
+      for (const [v, max] of [
+        [input.photo, PHOTO_MAX],
+        [input.thumb, THUMB_MAX],
+      ] as const) {
+        if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) throw new AppError('Image invalide : choisissez une photo JPEG ou PNG', 'INVALID');
+        if (v.length > max) throw new AppError('Photo trop lourde, même réduite : choisissez une autre image', 'INVALID');
+      }
+    }
+    return this.tx(() => {
+      const now = this.now();
+      if (input) {
+        this.db
+          .prepare(
+            `INSERT INTO article_photos (article_id, photo, thumb, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(article_id) DO UPDATE SET photo = excluded.photo, thumb = excluded.thumb, updated_at = excluded.updated_at`,
+          )
+          .run(articleId, input.photo, input.thumb, now);
+      } else {
+        this.db.prepare('DELETE FROM article_photos WHERE article_id = ?').run(articleId);
+      }
+      this.db.prepare('UPDATE articles SET updated_at = ? WHERE id = ?').run(now, articleId);
+      this.enqueue(null, 'article', articleId, 'upsert', {});
+      this.audit(userId, input ? 'article.photo' : 'article.photo_remove', 'article', articleId, {});
+      return this.getArticle(articleId);
+    });
   }
 
   /** Prix propre à un magasin (null pour revenir au prix national). */

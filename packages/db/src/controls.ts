@@ -300,7 +300,7 @@ export class ControlService extends Base {
     const rows = this.db
       .prepare(
         `SELECT a.id AS article_id, a.code, a.name, a.unit, COUNT(DISTINCT r.id) AS receptions,
-                SUM(l.qty) AS qty, SUM(ROUND(l.qty * l.unit_cost / 1000.0)) AS amount_ht,
+                SUM(l.qty) AS qty, SUM(COALESCE(l.amount, ROUND(l.qty * l.unit_cost / 1000.0))) AS amount_ht,
                 MIN(l.unit_cost) AS min_cost, MAX(l.unit_cost) AS max_cost,
                 (SELECT l2.unit_cost FROM reception_lines l2 JOIN receptions r2 ON r2.id = l2.reception_id
                   WHERE l2.article_id = a.id AND r2.store_id = @storeId ORDER BY r2.received_at DESC LIMIT 1) AS last_cost,

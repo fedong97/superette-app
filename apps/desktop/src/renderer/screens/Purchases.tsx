@@ -5,11 +5,13 @@ import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQt
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
+import { type RecLine, RecLinesTable, newRecLine, recLineInput } from './Stock';
+import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
 type Invoice = Result<'purchases.invoice'>['invoice'];
-export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'due' | 'reorder';
+export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder';
 
 const ORDER_STATES: Record<Order['state'], string> = {
   draft: 'Brouillon',
@@ -44,12 +46,15 @@ const deliveryNote = (n: string) => (/^b\.?l\b/i.test(n.trim()) ? n.trim() : `BL
 export function Purchases({ user, initialTab = 'orders' }: { user: User; initialTab?: PurchasesTab }) {
   const buying = has(user, 'purchase_orders');
   const invoices = has(user, 'purchase_invoices') || has(user, 'supplier_pay');
+  // Facture directe : elle fait aussi entrer la marchandise.
+  const direct = has(user, 'purchase_invoices') && has(user, 'stock_receive');
   const [tab, setTab] = useState<PurchasesTab>(initialTab === 'new-order' ? 'orders' : initialTab);
   const tabs: [PurchasesTab, string][] = [
     ['orders', 'Bons de commande'],
     ['receptions', 'Registre des réceptions'],
     ['pending', 'Non encore reçues'],
     ...(invoices ? ([['invoices', 'Registre des achats']] as [PurchasesTab, string][]) : []),
+    ...(direct ? ([['direct', 'Facture directe']] as [PurchasesTab, string][]) : []),
     ...(has(user, 'purchase_due') ? ([['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
     ['byproduct', 'Achats par produit'],
     ...(has(user, 'reorder') ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
@@ -65,6 +70,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       {tab === 'pending' && <PendingReceipts />}
       {tab === 'byproduct' && <PurchasesByProduct />}
       {tab === 'invoices' && invoices && <Invoices />}
+      {tab === 'direct' && direct && <DirectInvoice canPay={has(user, 'supplier_pay')} />}
       {tab === 'due' && has(user, 'purchase_due') && <Due />}
       {tab === 'reorder' && has(user, 'reorder') && <Reorder onCreated={() => setTab('orders')} />}
     </div>
@@ -145,6 +151,15 @@ interface EditLine {
   packUnits: number;
   /** Ligne reprise d'un bon enregistré : passée au conditionnement d'achat dès qu'on le connaît. */
   auto?: boolean;
+  disc: string;
+  promo: string;
+}
+
+/** Ligne prête à envoyer : quantité et prix en unités de base, remise et gratuits. */
+function termsInput(l: { name: string; qty: string; cost: string; packUnits: number } & TermsText) {
+  const t = lineTerms(l);
+  if (typeof t === 'string') throw new Error(`${t} : ${l.name}`);
+  return { qty: t.qty, unitCost: t.unitCost, discountBp: t.discountBp, freeQty: t.freeQty, promoBuy: t.promoBuy, promoPay: t.promoPay };
 }
 
 const lineHt = (qty: string, cost: string) => Math.round(((parseQty(qty) ?? 0) * (parseAmount(cost) ?? 0)) / 1000);
@@ -197,12 +212,12 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
   const [expected, setExpected] = useState(order?.expected_date ?? '');
   const [notes, setNotes] = useState(order?.notes ?? '');
   const [lines, setLines] = useState<EditLine[]>(
-    order?.lines.map((l) => ({ articleId: l.article_id, code: l.article_code, name: l.article_name, unit: l.unit, ref: l.supplier_ref, qty: num(l.qty), cost: String(l.unit_cost), packUnits: 1000, auto: true })) ?? [],
+    order?.lines.map((l) => ({ articleId: l.article_id, code: l.article_code, name: l.article_name, unit: l.unit, ref: l.supplier_ref, qty: num(l.qty), cost: String(l.unit_cost), packUnits: 1000, auto: true, ...termsFrom(l) })) ?? [],
   );
   const [packs, remember] = useArticlePacks(lines.map((l) => l.articleId));
   useAutoPacks(lines, setLines, packs);
   const update = (i: number, patch: Partial<EditLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const total = lines.reduce((t, l) => t + lineHt(l.qty, l.cost), 0);
+  const total = lines.reduce((t, l) => t + lineNet(l), 0);
 
   const add = async (a: Result<'catalogue.get'>) => {
     // Prix négocié et colisage du fournisseur choisi, sinon dernier prix d'achat ;
@@ -216,7 +231,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
     const cost = ref?.unit_cost ? String(Math.round((unitCost * units) / 1000)) : packCostText(a, units);
     setLines([
       ...lines,
-      { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units },
+      { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units, ...noTerms },
     ]);
   };
 
@@ -227,11 +242,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         warehouseId,
         expectedDate: expected || null,
         notes: notes || null,
-        lines: lines.map((l) => {
-          const b = toBase(l.qty, l.cost, l.packUnits);
-          if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
-          return { articleId: l.articleId, qty: b.qty, unitCost: b.unitCost };
-        }),
+        lines: lines.map((l) => ({ articleId: l.articleId, ...termsInput(l) })),
       };
       if (!supplierId) throw new Error('Choisissez le fournisseur');
       let saved = order ? await call('purchases.updateOrder', order.id, input) : await call('purchases.createOrder', input);
@@ -263,6 +274,8 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
               <th>Quantité</th>
               <th>Conditionnement</th>
               <th>PU HT</th>
+              <th>Remise %</th>
+              <th>Promo N/M</th>
               <th className="r">Total HT</th>
               <th />
             </tr>
@@ -283,7 +296,8 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
                 <td>
                   <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
                 </td>
-                <td className="r">{fcfa(lineHt(l.qty, l.cost))}</td>
+                <TermsCells line={l} onChange={(p) => update(i, p)} />
+                <td className="r">{fcfa(lineNet(l))}</td>
                 <td>
                   <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
                     ✕
@@ -352,6 +366,8 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
             <th className="r">Reçu</th>
             <th className="r">Reste</th>
             <th className="r">PU HT</th>
+            <th className="r">Remise</th>
+            <th className="r">Gratuits</th>
             <th className="r">Total HT</th>
           </tr>
         </thead>
@@ -366,11 +382,16 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
               <td className="r">{l.received ? qty(l.received, l.unit) : ''}</td>
               <td className={`r ${l.qty > l.received ? 'neg' : 'pos'}`}>{qty(Math.max(0, l.qty - l.received), l.unit)}</td>
               <td className="r">{fcfa(l.unit_cost)}</td>
+              <td className="r">{l.discount_bp ? `${l.discount_bp / 100} %` : ''}</td>
+              <td className="r">
+                {l.free_qty ? qty(l.free_qty, l.unit) : ''}
+                {l.promo_buy && <small className="muted block">{l.promo_buy} achetés, {l.promo_pay} payés</small>}
+              </td>
               <td className="r">{fcfa(l.total_ht)}</td>
             </tr>
           ))}
           <tr className="b">
-            <td colSpan={6}>Total HT</td>
+            <td colSpan={8}>Total HT</td>
             <td className="r">{fcfa(o.total_ht)}</td>
           </tr>
         </tbody>
@@ -434,6 +455,8 @@ interface RecvLine {
   auto?: boolean;
   lot: string;
   expiry: string;
+  disc: string;
+  promo: string;
 }
 
 function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
@@ -458,6 +481,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
           auto: true,
           lot: '',
           expiry: '',
+          ...termsFrom(l),
         })),
       );
   }, [order.data, lines]);
@@ -469,7 +493,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
   };
   if (!order.data || !lines) return null;
   const update = (i: number, patch: Partial<RecvLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const total = lines.reduce((t, l) => t + lineHt(l.qty, l.cost), 0);
+  const total = lines.reduce((t, l) => t + lineNet(l), 0);
   return (
     <div>
       <h2>
@@ -488,7 +512,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
           const units = purchaseUnits(a);
           setLines([
             ...lines,
-            { orderLineId: null, articleId: a.id, name: a.name, unit: a.unit, perishable: a.perishable === 1, ordered: 0, already: 0, qty: '1', cost: packCostText(a, units), packUnits: units, lot: '', expiry: '' },
+            { orderLineId: null, articleId: a.id, name: a.name, unit: a.unit, perishable: a.perishable === 1, ordered: 0, already: 0, qty: '1', cost: packCostText(a, units), packUnits: units, lot: '', expiry: '', ...noTerms },
           ]);
         }}
       />
@@ -501,6 +525,8 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
             <th>Reçu</th>
             <th>Conditionnement</th>
             <th>PU HT</th>
+            <th>Remise %</th>
+            <th>Promo N/M</th>
             <th>N° de lot</th>
             <th>Date limite</th>
             <th className="r">Montant HT</th>
@@ -530,13 +556,14 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
                 <td>
                   <input className={`qty ${priceGap ? 'gap' : ''}`} value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
                 </td>
+                <TermsCells line={l} onChange={(p) => update(i, p)} />
                 <td>
                   <input className="qty" value={l.lot} onChange={(e) => update(i, { lot: e.target.value })} />
                 </td>
                 <td>
                   <input type="date" value={l.expiry} required={l.perishable && (parseQty(l.qty) ?? 0) > 0} onChange={(e) => update(i, { expiry: e.target.value })} />
                 </td>
-                <td className="r">{fcfa(lineHt(l.qty, l.cost))}</td>
+                <td className="r">{fcfa(lineNet(l))}</td>
               </tr>
             );
           })}
@@ -551,11 +578,15 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
             try {
               const input = lines
                 .filter((l) => l.qty.trim() && l.qty.trim() !== '0')
-                .map((l) => {
-                  const b = toBase(l.qty, l.cost, l.packUnits);
-                  if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou prix invalide : ${l.name}`);
-                  return { orderLineId: l.orderLineId, articleId: l.articleId, qty: b.qty, unitCost: b.unitCost, packCost: parseAmount(l.cost) ?? undefined, packUnits: l.packUnits, lotNumber: l.lot || null, expiry: l.expiry || null };
-                });
+                .map((l) => ({
+                  orderLineId: l.orderLineId,
+                  articleId: l.articleId,
+                  ...termsInput(l),
+                  packCost: parseAmount(l.cost) ?? undefined,
+                  packUnits: l.packUnits,
+                  lotNumber: l.lot || null,
+                  expiry: l.expiry || null,
+                }));
               const r = await call('purchases.receiveOrder', id, { deliveryNote: note || undefined, lines: input });
               toast.ok(`Réception ${r.number} enregistrée, stock mis à jour`);
               onDone();
@@ -617,37 +648,62 @@ function Receptions() {
             {detail.data.supplier_name ?? 'Sans fournisseur'} · {dateTime(detail.data.received_at)} · dépôt {detail.data.warehouse_name}
             {detail.data.user_name ? ` · reçu par ${detail.data.user_name}` : ''}
           </p>
-          <table className="list compact">
-            <thead>
-              <tr>
-                <th>Article</th>
-                <th className="r">Quantité</th>
-                <th className="r">PU HT</th>
-                <th>Lot</th>
-                <th>Date limite</th>
-                <th className="r">Total HT</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.data.lines.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.article_name}</td>
-                  <td className="r">{qty(l.qty, l.unit)}</td>
-                  <td className="r">{fcfa(l.unit_cost)}</td>
-                  <td>{l.lot_number}</td>
-                  <td>{l.expiry ? dateFr(l.expiry) : ''}</td>
-                  <td className="r">{fcfa(l.total_ht)}</td>
-                </tr>
-              ))}
-              <tr className="b">
-                <td colSpan={5}>Total HT · TVA {fcfa(detail.data.total_tva)} · TTC {fcfa(detail.data.total_ttc)}</td>
-                <td className="r">{fcfa(detail.data.total_ht)}</td>
-              </tr>
-            </tbody>
-          </table>
+          <ReceivedLines lines={detail.data.lines} />
+          <p className="b">
+            Total HT {fcfa(detail.data.total_ht)} · TVA {fcfa(detail.data.total_tva)} · TTC {fcfa(detail.data.total_ttc)}
+            {detail.data.discount ? ` · dont remise globale ${fcfa(detail.data.discount)}` : ''}
+          </p>
         </Modal>
       )}
     </>
+  );
+}
+
+/** Lignes reçues : prix avant remise, remise, gratuits, coût net entré en stock. */
+function ReceivedLines({ lines }: { lines: Result<'purchases.reception'>['lines'] }) {
+  const terms = lines.some((l) => l.discount_bp || l.free_qty || (l.gross_cost !== null && l.gross_cost !== l.unit_cost));
+  return (
+    <table className="list compact">
+      <thead>
+        <tr>
+          <th>Article</th>
+          <th className="r">Quantité</th>
+          <th className="r">PU HT</th>
+          {terms && (
+            <>
+              <th className="r">Remise</th>
+              <th className="r">Gratuits</th>
+              <th className="r">Coût net</th>
+            </>
+          )}
+          <th>Lot</th>
+          <th>Date limite</th>
+          <th className="r">Total HT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map((l) => (
+          <tr key={l.id}>
+            <td>{l.article_name}</td>
+            <td className="r">{qty(l.qty, l.unit)}</td>
+            <td className="r">{fcfa(l.gross_cost ?? l.unit_cost)}</td>
+            {terms && (
+              <>
+                <td className="r">{l.discount_bp ? `${l.discount_bp / 100} %` : ''}</td>
+                <td className="r">
+                  {l.free_qty ? qty(l.free_qty, l.unit) : ''}
+                  {l.promo_buy && <small className="muted block">{l.promo_buy} achetés, {l.promo_pay} payés</small>}
+                </td>
+                <td className="r">{fcfa(l.unit_cost)}</td>
+              </>
+            )}
+            <td>{l.lot_number}</td>
+            <td>{l.expiry ? dateFr(l.expiry) : ''}</td>
+            <td className="r">{fcfa(l.total_ht)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -846,11 +902,12 @@ function InvoiceForm({ onClose }: { onClose: () => void }) {
 
 function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const can = useCan();
+  const toast = useToast();
   const data = useLoad(() => call('purchases.invoice', id), [id]);
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
   const [paying, setPaying] = useState(false);
   if (!data.data) return null;
-  const { invoice: i, payments } = data.data;
+  const { invoice: i, payments, lines } = data.data;
   return (
     <Modal title={`${i.kind === 'invoice' ? 'Facture' : 'Avoir'} ${i.number} · ${i.supplier_name}`} onClose={onClose} wide>
       <p>
@@ -878,6 +935,12 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </tr>
         </tbody>
       </table>
+      {i.direct === 1 && lines.length > 0 && (
+        <>
+          <h3>Articles de la facture{i.discount ? ` · remise globale ${fcfa(i.discount)} répartie sur les lignes` : ''}</h3>
+          <ReceivedLines lines={lines} />
+        </>
+      )}
       <p className="muted">
         Bons rattachés :{' '}
         {(receptions.data ?? [])
@@ -904,6 +967,7 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
         </table>
       )}
       <div className="actions">
+        <button onClick={() => call('purchases.printInvoice', i.id).catch(toast.error)}>Imprimer (A4)</button>
         {i.balance > 0 && can('supplier_pay') && (
           <button className="primary" onClick={() => setPaying(true)}>
             {i.kind === 'invoice' ? 'Régler' : 'Enregistrer le remboursement'}
@@ -984,6 +1048,203 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Facture d'achat directe, sans bon de commande : les articles de la facture
+ * entrent en stock au coût net (remise, gratuits, remise globale), et la
+ * facture va au registre des achats, réglée tout de suite ou à l'échéance.
+ */
+function DirectInvoice({ canPay }: { canPay: boolean }) {
+  const toast = useToast();
+  const app = useLoad(() => call('app.state'), []);
+  const vat = app.data?.station?.store.vat_enabled !== 0;
+  const [supplierId, setSupplierId] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
+  const [number, setNumber] = useState('');
+  const [date, setDate] = useState(today());
+  const [due, setDue] = useState('');
+  const [notes, setNotes] = useState('');
+  const [lines, setLines] = useState<RecLine[]>([]);
+  const [disc, setDisc] = useState('');
+  const [discMode, setDiscMode] = useState<'pct' | 'amount'>('pct');
+  const [pay, setPay] = useState(false);
+  const [method, setMethod] = useState<keyof typeof PAY_METHODS>('CASH');
+  const [reference, setReference] = useState('');
+  const [registerId, setRegisterId] = useState('');
+  const emoney = useLoad(() => call('emoney.registers'), []);
+  const [done, setDone] = useState<Invoice | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const sum = lines.reduce((s, l) => s + lineNet(l), 0);
+  const d = Number(disc.replace(',', '.').replace('%', '').trim() || 0);
+  const global = !Number.isFinite(d) || d <= 0 ? 0 : discMode === 'pct' ? Math.round((sum * Math.min(d, 100)) / 100) : Math.min(sum, Math.round(d));
+  const ht = sum - global;
+  // TVA estimée ligne par ligne (le calcul exact est fait à l'enregistrement).
+  const tva = vat ? lines.reduce((s, l) => s + Math.round(((sum ? (lineNet(l) * ht) / sum : 0) * l.article.vat_rate_bp) / 10000), 0) : 0;
+  const payout = method === 'MTN_MOMO' || method === 'ORANGE_MONEY';
+  const chosen = registerId || emoney.data?.centralId || emoney.data?.registers[0]?.id || '';
+  const reset = () => {
+    setLines([]);
+    setNumber('');
+    setDisc('');
+    setNotes('');
+    setPay(false);
+    setReference('');
+  };
+  if (done)
+    return (
+      <div className="card done-card">
+        <h2>Facture {done.number} enregistrée</h2>
+        <p>
+          {done.supplier_name} · facture n° {done.supplier_number} · {fcfa(done.total_ttc)} TTC · {done.balance > 0 ? `reste à payer ${fcfa(done.balance)}, échéance le ${dateFr(done.due_date)}` : 'réglée'}
+        </p>
+        <p className="muted">La marchandise est entrée en stock et le bon de réception est rattaché à la facture.</p>
+        <div className="actions">
+          <button onClick={() => setOpen(done.id)}>Voir la facture</button>
+          <button onClick={() => call('purchases.printInvoice', done.id).catch(toast.error)}>Imprimer (A4)</button>
+          <button
+            className="primary"
+            onClick={() => {
+              setDone(null);
+              reset();
+            }}
+          >
+            Nouvelle facture directe
+          </button>
+        </div>
+        {open && <InvoiceDetail id={open} onClose={() => setOpen(null)} />}
+      </div>
+    );
+  return (
+    <div>
+      <h2>Facture d'achat directe (sans bon de commande)</h2>
+      <p className="muted">Saisissez la facture du fournisseur avec ses articles : la marchandise entre en stock au coût net et la facture va au registre des achats.</p>
+      <div className="grid3">
+        <SupplierSelect value={supplierId} onChange={setSupplierId} />
+        <Field label="N° de la facture du fournisseur">
+          <input value={number} onChange={(e) => setNumber(e.target.value)} />
+        </Field>
+        <WarehouseSelect value={warehouseId} onChange={setWarehouseId} label="Dépôt qui reçoit" />
+        <Field label="Date de la facture">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field label="Échéance" hint="Par défaut : délai de paiement du fournisseur">
+          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+        </Field>
+        <Field label="Notes">
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+      </div>
+      <ArticlePicker placeholder="Ajouter un article : scanner ou rechercher" onPick={(a) => setLines([...lines, newRecLine(a)])} />
+      <RecLinesTable lines={lines} setLines={setLines} />
+      {lines.length > 0 && (
+        <div className="direct-foot">
+          <div>
+            <Field label="Remise globale">
+              <div className="inline">
+                <input className="qty" value={disc} onChange={(e) => setDisc(e.target.value)} placeholder="0" />
+                <select value={discMode} onChange={(e) => setDiscMode(e.target.value as 'pct' | 'amount')}>
+                  <option value="pct">%</option>
+                  <option value="amount">FCFA</option>
+                </select>
+              </div>
+            </Field>
+            {canPay && (
+              <label className="check">
+                <input type="checkbox" checked={pay} onChange={(e) => setPay(e.target.checked)} /> Réglée tout de suite
+              </label>
+            )}
+            {pay && (
+              <>
+                <div className="methods">
+                  {(Object.keys(PAY_METHODS) as (keyof typeof PAY_METHODS)[]).map((m) => (
+                    <button type="button" key={m} className={method === m ? 'active' : ''} onClick={() => setMethod(m)}>
+                      {PAY_METHODS[m]}
+                    </button>
+                  ))}
+                </div>
+                {method === 'CASH' && <p className="muted small">Les espèces sortent de la caisse centrale.</p>}
+                {payout && Boolean(emoney.data?.registers.length) && (
+                  <Field label="Payé depuis la caisse électronique">
+                    <select value={chosen} onChange={(e) => setRegisterId(e.target.value)}>
+                      {emoney.data!.registers.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                          {r.central ? ' (centrale)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+                {method !== 'CASH' && (
+                  <Field label={method === 'CHEQUE' ? 'N° de chèque' : 'Référence de la transaction'}>
+                    <input value={reference} onChange={(e) => setReference(e.target.value)} />
+                  </Field>
+                )}
+              </>
+            )}
+          </div>
+          <table className="totals">
+            <tbody>
+              <tr>
+                <td>Total des lignes HT</td>
+                <td className="r">{fcfa(sum)}</td>
+              </tr>
+              {global > 0 && (
+                <tr>
+                  <td>Remise globale</td>
+                  <td className="r">-{fcfa(global)}</td>
+                </tr>
+              )}
+              <tr>
+                <td>Total HT</td>
+                <td className="r">{fcfa(ht)}</td>
+              </tr>
+              {vat && (
+                <tr>
+                  <td>TVA (calculée par article)</td>
+                  <td className="r">{fcfa(tva)}</td>
+                </tr>
+              )}
+              <tr className="b">
+                <td>Total TTC</td>
+                <td className="r">{fcfa(ht + tva)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="actions">
+        <button
+          className="primary"
+          disabled={!lines.length || !supplierId || !number.trim()}
+          onClick={async () => {
+            try {
+              if (!warehouseId) throw new Error('Choisissez le dépôt qui reçoit');
+              if (pay && method !== 'CASH' && !reference.trim()) throw new Error('Saisissez la référence du règlement');
+              const inv = await call('purchases.directInvoice', {
+                supplierId,
+                supplierNumber: number,
+                invoiceDate: date,
+                dueDate: due || null,
+                warehouseId,
+                notes: notes || null,
+                lines: lines.map(recLineInput),
+                ...(discMode === 'pct' ? { discountBp: Math.round(Math.min(Math.max(d, 0), 100) * 100) } : { discountAmount: global }),
+                payment: pay ? { method, reference: reference || null, registerId: payout ? chosen || null : null } : null,
+              });
+              toast.ok(`Facture ${inv.number} enregistrée, stock mis à jour`);
+              setDone(inv);
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          Enregistrer la facture et la réception
+        </button>
+      </div>
+    </div>
   );
 }
 

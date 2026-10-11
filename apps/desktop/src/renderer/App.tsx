@@ -135,6 +135,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Saisir un nouvel achat (bon de commande)', open: ['purchases', 'new-order'], perm: 'purchase_orders' },
       { label: 'Saisir une facture à partir des BL', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
+      { label: 'Saisir une facture directe (sans bon de commande)', open: ['purchases', 'direct'], perm: 'purchase_invoices' },
       { label: 'Registre des achats', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
       { label: 'Registre des achats par produits', open: ['purchases', 'byproduct'] },
       SEP,

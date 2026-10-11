@@ -1353,4 +1353,38 @@ INSERT OR IGNORE INTO accounts (id, label, role) VALUES
   ('4711', 'Débiteurs et créditeurs divers (compte d''attente)', NULL);
 `,
   },
+  {
+    version: 29,
+    name: 'photo article, remises et promos à l’achat, facture directe, rattachement des collaborateurs',
+    sql: `
+-- Photo de l'article : l'image réduite (fiche, caisse) et sa miniature (listes). À part pour garder les listes légères.
+CREATE TABLE article_photos (
+  article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+  photo TEXT NOT NULL,
+  thumb TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- Remise en % (points de base) et unités gratuites (« N achetés, M payés ») de chaque ligne d'achat.
+ALTER TABLE purchase_order_lines ADD COLUMN discount_bp INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE purchase_order_lines ADD COLUMN free_qty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE purchase_order_lines ADD COLUMN promo_buy INTEGER;
+ALTER TABLE purchase_order_lines ADD COLUMN promo_pay INTEGER;
+-- Réception : unit_cost reste le coût net qui entre en stock ; gross_cost est le prix avant remises,
+-- amount le montant HT net de la ligne (remise globale de la facture directe comprise).
+ALTER TABLE reception_lines ADD COLUMN gross_cost INTEGER;
+ALTER TABLE reception_lines ADD COLUMN discount_bp INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE reception_lines ADD COLUMN free_qty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE reception_lines ADD COLUMN promo_buy INTEGER;
+ALTER TABLE reception_lines ADD COLUMN promo_pay INTEGER;
+ALTER TABLE reception_lines ADD COLUMN amount INTEGER;
+-- Facture directe : saisie avec ses articles, sans bon de commande ; sa remise globale (HT).
+ALTER TABLE supplier_invoices ADD COLUMN direct INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE supplier_invoices ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE receptions ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;
+-- Compte de rattachement du collaborateur : le compte parent de son sous-compte (4211 par défaut).
+ALTER TABLE staff ADD COLUMN parent_account TEXT NOT NULL DEFAULT '4211';
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES
+  ('4621', 'Associés, comptes courants', NULL);
+`,
+  },
 ];

@@ -15,7 +15,7 @@ import {
   receiptToEscPos,
   splitTtc,
 } from '@superette/core';
-import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
+import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, SUPPLIER_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
 import { sendNetwork, sendWindowsRaw } from './rawPrint';
@@ -24,6 +24,11 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const money = (v: number) => formatFcfa(v, false);
 const dateFr = (iso: string) =>
   new Date(iso).toLocaleString('fr-FR', { timeZone: 'Africa/Douala', dateStyle: 'short', timeStyle: 'short' });
+/** Remise et gratuits d'une ligne d'achat (« 12 achetés, 10 payés » rappelé sous les gratuits). */
+const termCells = (l: { discount_bp: number; free_qty: number; promo_buy: number | null; promo_pay: number | null; unit: 'piece' | 'kg' | 'litre' }) =>
+  `<td class="r">${l.discount_bp ? `${(l.discount_bp / 100).toLocaleString('fr-FR')} %` : ''}</td><td class="r">${
+    l.free_qty ? `${formatQty(l.free_qty, l.unit)}${l.promo_buy && l.promo_pay !== null ? `<br><small>${l.promo_buy} achetés, ${l.promo_pay} payés</small>` : ''}` : ''
+  }</td>`;
 const dayFr = (ymd: string) => new Date(`${ymd.slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR');
 
 const STYLE = `
@@ -524,14 +529,57 @@ export function createPrinter(s: Services): Printer {
       await printReceipt(s.receipts.testPage(cfg.columns), withDrawer, true);
     },
 
+    async purchaseInvoice(invoiceId) {
+      const i = s.purchases.getInvoice(invoiceId);
+      const sup = s.purchases.getSupplier(i.supplier_id);
+      const store = s.admin.getStore(i.store_id);
+      const lines = s.purchases.invoiceLines(invoiceId);
+      const pays = s.purchases.invoicePayments(invoiceId);
+      const rows = lines
+        .map(
+          (l) => `<tr><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td><td class="r">${formatQty(l.qty, l.unit)}</td>
+            <td class="r">${money(l.gross_cost ?? l.unit_cost)}</td>${termCells(l)}<td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
+        )
+        .join('');
+      const payRows = pays
+        .map((p) => `<tr><td>${dayFr(p.paid_at)} · ${esc(SUPPLIER_PAYMENT_METHODS[p.method] ?? p.method)}${p.reference ? ` (${esc(p.reference)})` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
+        .join('');
+      await printA4(`<div class="head">
+          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
+            .filter(Boolean)
+            .map((v) => esc(v!))
+            .join('<br>')}</div>
+          <div class="box"><b>${esc(sup.name)}</b><br>${[sup.contact, sup.address, sup.phone, sup.email].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
+        </div>
+        <h1>${i.kind === 'invoice' ? 'Facture d’achat' : 'Avoir fournisseur'} ${esc(i.number)}</h1>
+        <div>Facture du fournisseur n° ${esc(i.supplier_number)} du ${dayFr(i.invoice_date)} · Échéance : ${dayFr(i.due_date)}${i.direct ? ' · Saisie directe, sans bon de commande' : ''}</div>
+        ${
+          rows
+            ? `<table><thead><tr><th>Code</th><th>Désignation</th><th class="r">Qté</th><th class="r">PU HT</th><th class="r">Remise</th><th class="r">Gratuits</th><th class="r">Coût net</th><th class="r">Total HT</th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+            : ''
+        }
+        <table class="totals">
+          ${i.discount ? `<tr><td>Remise globale (déjà déduite des lignes)</td><td class="r">-${money(i.discount)}</td></tr>` : ''}
+          <tr><td>Total HT</td><td class="r">${money(i.total_ht)}</td></tr>
+          ${i.total_tva ? `<tr><td>TVA</td><td class="r">${money(i.total_tva)}</td></tr>` : ''}
+          <tr class="total"><td>Total TTC (FCFA)</td><td class="r">${money(i.total_ttc)}</td></tr>
+          ${payRows}
+          <tr class="total"><td>Reste à payer</td><td class="r">${money(i.balance)}</td></tr></table>
+        ${i.notes ? `<p>${esc(i.notes)}</p>` : ''}
+        <div class="sign"><div>Contrôlé par</div><div>Visa</div></div>`);
+    },
+
     async purchaseOrder(orderId) {
       const o = s.purchases.getOrder(orderId);
       const sup = s.purchases.getSupplier(o.supplier_id);
       const store = s.admin.getStore(o.store_id);
+      // Remise et gratuits : colonnes affichées seulement si une ligne en a.
+      const terms = o.lines.some((l) => l.discount_bp || l.free_qty);
       const rows = o.lines
         .map(
           (l) => `<tr><td>${esc(l.supplier_ref ?? '')}</td><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td>
-            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
+            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td>${terms ? termCells(l) : ''}<td class="r">${money(l.total_ht)}</td></tr>`,
         )
         .join('');
       await printA4(`<div class="head">
@@ -545,8 +593,8 @@ export function createPrinter(s: Services): Printer {
         <div>Date : ${new Date(`${o.order_date}T00:00:00`).toLocaleDateString('fr-FR')}${
           o.expected_date ? ` · Livraison souhaitée : ${new Date(`${o.expected_date}T00:00:00`).toLocaleDateString('fr-FR')}` : ''
         } · Livrer à : ${esc(o.warehouse_name)}</div>
-        <table><thead><tr><th>Réf. fournisseur</th><th>Code</th><th>Désignation</th><th class="r">Quantité</th><th class="r">PU HT</th><th class="r">Total HT</th></tr></thead>
-        <tbody>${rows}<tr class="total"><td colspan="5">Total HT (FCFA)</td><td class="r">${money(o.total_ht)}</td></tr></tbody></table>
+        <table><thead><tr><th>Réf. fournisseur</th><th>Code</th><th>Désignation</th><th class="r">Quantité</th><th class="r">PU HT</th>${terms ? '<th class="r">Remise</th><th class="r">Gratuits</th>' : ''}<th class="r">Total HT</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="${terms ? 7 : 5}">Total HT (FCFA)</td><td class="r">${money(o.total_ht)}</td></tr></tbody></table>
         ${o.notes ? `<p>${esc(o.notes)}</p>` : ''}
         <div class="sign"><div>Établi par : ${esc(o.user_name ?? '')}</div><div>Signature et cachet</div></div>`);
     },

@@ -705,3 +705,19 @@ td.nowrap > button.link + button.link { margin-left: 12px; }
 .staff-cards small { display: block; color: var(--muted); }
 .staff-cards b { font-size: 18px; }
 table.list tr.cancelled td { text-decoration: line-through; color: var(--muted); }
+
+/* 0.35.0 : photo d'article, remises à l'achat, facture directe. */
+.article-top { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 16px; align-items: start; }
+.photo-field { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.photo-box { width: 180px; height: 180px; border: 1px solid var(--line); border-radius: 8px; background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.photo-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+td.thumb-cell { width: 44px; padding: 2px 4px; }
+img.thumb { width: 38px; height: 38px; object-fit: contain; border-radius: 4px; background: #fff; border: 1px solid var(--line); display: block; }
+.sale-search-body { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 12px; align-items: start; }
+.sale-search-photo { display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; }
+input.qty.pct { width: 56px; }
+input.qty.promo { width: 64px; }
+.direct-foot { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; margin-top: 12px; }
+.direct-foot table.totals { width: 100%; }
+.direct-foot table.totals td { padding: 4px 8px; }
+.done-card { padding: 16px 20px; }

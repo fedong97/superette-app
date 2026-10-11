@@ -5,7 +5,8 @@ import { StockByWarehouse } from './Controls';
 import { Inventories } from './Inventories';
 import { Transfers } from './Transfers';
 import { Monitoring } from './Monitoring';
-import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase } from './packs';
+import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits } from './packs';
+import { type TermsText, TermsCells, lineNet, lineTerms, noTerms } from './purchaseTerms';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has } from '../ui';
 
@@ -135,7 +136,7 @@ function StockState({ critical = false }: { critical?: boolean }) {
   );
 }
 
-interface RecLine {
+export interface RecLine extends TermsText {
   article: Article;
   /** Quantité et coût HT dans le conditionnement choisi (`packUnits` unités, en millièmes). */
   qty: string;
@@ -145,17 +146,99 @@ interface RecLine {
   expiry: string;
 }
 
+/** Nouvelle ligne : un conditionnement d'achat au dernier prix. */
+export function newRecLine(a: Article): RecLine {
+  const units = purchaseUnits(a);
+  return { article: a, qty: '1', cost: packCostText(a, units), packUnits: units, lot: '', expiry: '', ...noTerms };
+}
+
+/** Ligne prête à envoyer : unités de base, remise, gratuits, lot. */
+export function recLineInput(l: RecLine) {
+  const t = lineTerms(l);
+  if (typeof t === 'string') throw new Error(`${t} : ${l.article.name}`);
+  return {
+    articleId: l.article.id,
+    qty: t.qty,
+    unitCost: t.unitCost,
+    discountBp: t.discountBp,
+    freeQty: t.freeQty,
+    promoBuy: t.promoBuy,
+    promoPay: t.promoPay,
+    packCost: parseAmount(l.cost) ?? undefined,
+    packUnits: l.packUnits,
+    lotNumber: l.lot || null,
+    expiry: l.expiry || null,
+  };
+}
+
+/** Lignes d'une réception libre ou d'une facture directe : quantité, prix, remise, promo N/M, lot. */
+export function RecLinesTable({ lines, setLines }: { lines: RecLine[]; setLines: (l: RecLine[]) => void }) {
+  const update = (i: number, patch: Partial<RecLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  if (!lines.length) return null;
+  return (
+    <table className="list">
+      <thead>
+        <tr>
+          <th />
+          <th>Article</th>
+          <th>Quantité</th>
+          <th>Conditionnement</th>
+          <th>Coût unitaire HT</th>
+          <th>Remise %</th>
+          <th>Promo N/M</th>
+          <th>N° de lot</th>
+          <th>Date limite</th>
+          <th className="r">Montant net</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map((l, i) => (
+          <tr key={i}>
+            <td className="thumb-cell">{l.article.photo_thumb && <img className="thumb" src={l.article.photo_thumb} alt="" />}</td>
+            <td>{l.article.name}</td>
+            <td>
+              <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
+            </td>
+            <td>
+              <PackUnitSelect choices={packChoices(l.article)} value={l.packUnits} onChange={(u) => update(i, { ...switchUnits(l.qty, l.cost, l.packUnits, u), packUnits: u })} />
+            </td>
+            <td>
+              <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
+            </td>
+            <TermsCells line={l} onChange={(p) => update(i, p)} />
+            <td>
+              <input className="qty" value={l.lot} onChange={(e) => update(i, { lot: e.target.value })} />
+            </td>
+            <td>
+              <input type="date" value={l.expiry} required={l.article.perishable === 1} onChange={(e) => update(i, { expiry: e.target.value })} />
+            </td>
+            <td className="r">{fcfa(lineNet(l))}</td>
+            <td>
+              <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
+                ✕
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function Reception() {
   const toast = useToast();
   const [warehouseId, setWarehouseId] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [reference, setReference] = useState('');
   const [lines, setLines] = useState<RecLine[]>([]);
-  const update = (i: number, patch: Partial<RecLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const total = lines.reduce((s, l) => s + Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000), 0);
+  const total = lines.reduce((s, l) => s + lineNet(l), 0);
   return (
     <div>
-      <p className="muted">Réception libre, sans bon de commande (lot et date limite). Pour réceptionner une commande : Achats › Bons de commande.</p>
+      <p className="muted">
+        Réception libre, sans bon de commande (lot et date limite). Pour réceptionner une commande : Achats › Bons de commande. Pour saisir la facture en même temps :
+        Achats › Saisir une facture directe.
+      </p>
       <div className="grid3">
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} />
         <SupplierSelect value={supplierId} onChange={setSupplierId} optional />
@@ -163,60 +246,8 @@ function Reception() {
           <input value={reference} onChange={(e) => setReference(e.target.value)} />
         </Field>
       </div>
-      <ArticlePicker
-        onPick={(a) => {
-          const units = purchaseUnits(a);
-          setLines([...lines, { article: a, qty: '1', cost: packCostText(a, units), packUnits: units, lot: '', expiry: '' }]);
-        }}
-      />
-      {lines.length > 0 && (
-        <table className="list">
-          <thead>
-            <tr>
-              <th>Article</th>
-              <th>Quantité</th>
-              <th>Conditionnement</th>
-              <th>Coût unitaire HT</th>
-              <th>N° de lot</th>
-              <th>Date limite</th>
-              <th className="r">Montant</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => (
-              <tr key={i}>
-                <td>{l.article.name}</td>
-                <td>
-                  <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
-                </td>
-                <td>
-                  <PackUnitSelect
-                    choices={packChoices(l.article)}
-                    value={l.packUnits}
-                    onChange={(u) => update(i, { ...switchUnits(l.qty, l.cost, l.packUnits, u), packUnits: u })}
-                  />
-                </td>
-                <td>
-                  <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
-                </td>
-                <td>
-                  <input className="qty" value={l.lot} onChange={(e) => update(i, { lot: e.target.value })} />
-                </td>
-                <td>
-                  <input type="date" value={l.expiry} required={l.article.perishable === 1} onChange={(e) => update(i, { expiry: e.target.value })} />
-                </td>
-                <td className="r">{fcfa(Math.round(((parseQty(l.qty) ?? 0) * (parseAmount(l.cost) ?? 0)) / 1000))}</td>
-                <td>
-                  <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <ArticlePicker onPick={(a) => setLines([...lines, newRecLine(a)])} />
+      <RecLinesTable lines={lines} setLines={setLines} />
       <div className="actions">
         <span className="big-total">{fcfa(total)} HT</span>
         <button
@@ -228,11 +259,7 @@ function Reception() {
                 warehouseId,
                 supplierId: supplierId || null,
                 reference: reference || undefined,
-                lines: lines.map((l) => {
-                  const b = toBase(l.qty, l.cost, l.packUnits);
-                  if (!b.qty || b.unitCost === null) throw new Error(`Quantité ou coût invalide : ${l.article.name}`);
-                  return { articleId: l.article.id, qty: b.qty, unitCost: b.unitCost, packCost: parseAmount(l.cost) ?? undefined, packUnits: l.packUnits, lotNumber: l.lot || null, expiry: l.expiry || null };
-                }),
+                lines: lines.map(recLineInput),
               });
               toast.ok('Réception enregistrée');
               setLines([]);

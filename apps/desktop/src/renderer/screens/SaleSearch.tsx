@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { formatFcfa } from '@superette/core';
 import { type Result, call } from '../api';
 import { Field, Modal, fcfa, parseAmount, parseQty, qty, useToast } from '../ui';
+import { ArticlePhotoView } from './photo';
 
 export type SaleRow = Result<'pos.search'>[number];
 
@@ -172,6 +173,7 @@ export function SaleSearchDialog({
           <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} /> Masquer les lignes épuisées
         </label>
       </div>
+      <div className="sale-search-body">
       <div className="sale-search">
         <table className="list compact">
           <thead>
@@ -208,6 +210,11 @@ export function SaleSearchDialog({
             )}
           </tbody>
         </table>
+      </div>
+      <aside className="sale-search-photo">
+        <ArticlePhotoView articleId={current?.article_id ?? null} />
+        {current && <small className="muted">{current.name}</small>}
+      </aside>
       </div>
       <div className="actions spread">
         {canCreate && (

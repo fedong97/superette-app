@@ -4,6 +4,7 @@ import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker } from './pickers';
+import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Quote = Result<'quotes.get'>;
@@ -62,7 +63,7 @@ export function Quotes({ user }: { user: User }) {
               <th>Client</th>
               <th>Valable jusqu'au</th>
               <th>État</th>
-              <th className="r">Montant TTC</th>
+              <th className="r">{tx('Montant TTC')}</th>
             </tr>
           </thead>
           <tbody>
@@ -255,7 +256,7 @@ function QuoteEditor({ user, quote, onClose, onSaved }: { user: User; quote: Quo
                 </tr>
               )}
               <tr className="total">
-                <td colSpan={4}>Total TTC</td>
+                <td colSpan={4}>{tx('Total TTC')}</td>
                 <td className="r">{fcfa(totals.totalTtc)}</td>
                 <td />
               </tr>
@@ -353,16 +354,20 @@ function QuoteDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
               <td className="r">{fcfa(l.total_ttc)}</td>
             </tr>
           ))}
-          <tr>
-            <td colSpan={4}>Total HT</td>
-            <td className="r">{fcfa(q.total_ht)}</td>
-          </tr>
-          <tr>
-            <td colSpan={4}>TVA</td>
-            <td className="r">{fcfa(q.total_tva)}</td>
-          </tr>
+          {hasVat() && (
+            <>
+              <tr>
+                <td colSpan={4}>Total HT</td>
+                <td className="r">{fcfa(q.total_ht)}</td>
+              </tr>
+              <tr>
+                <td colSpan={4}>TVA</td>
+                <td className="r">{fcfa(q.total_tva)}</td>
+              </tr>
+            </>
+          )}
           <tr className="total">
-            <td colSpan={4}>Total TTC</td>
+            <td colSpan={4}>{tx('Total TTC')}</td>
             <td className="r">{fcfa(q.total_ttc)}</td>
           </tr>
         </tbody>
@@ -407,7 +412,7 @@ export function QuotePickDialog({ onClose, onPick }: { onClose: () => void; onPi
               <th>N°</th>
               <th>Client</th>
               <th>Valable jusqu'au</th>
-              <th className="r">Montant TTC</th>
+              <th className="r">{tx('Montant TTC')}</th>
             </tr>
           </thead>
           <tbody>

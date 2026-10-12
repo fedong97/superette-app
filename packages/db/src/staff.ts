@@ -3,6 +3,14 @@ import { AppError, Base, type Context, newId } from './util';
 
 /** Racines des sous-comptes de tiers du personnel : rémunérations dues et avances. */
 export const STAFF_SALARY_ROOT = '4211';
+
+/** Comptes de rattachement proposés ; « Autre » accepte tout compte de tiers de la classe 4. */
+export const STAFF_PARENTS: Record<string, string> = {
+  '4211': 'Personnel, rémunérations dues',
+  '4311': 'Caisse de prévoyance (CNPS)',
+  '4471': 'État',
+  '4621': 'Associés, comptes courants',
+};
 export const STAFF_ADVANCE_ROOT = '4251';
 /** Compte de charge des salaires constatés. */
 export const STAFF_WAGES_ACCOUNT = '661';
@@ -20,6 +28,9 @@ export interface Staff {
   user_id: string | null;
   user_name: string | null;
   salary_account: string;
+  /** Compte de rattachement : parent du sous-compte (4211 par défaut). */
+  parent_account: string;
+  parent_label: string | null;
   advance_account: string;
   active: number;
   notes: string | null;
@@ -37,6 +48,8 @@ export interface StaffInput {
   hiredOn?: string | null;
   /** Compte utilisateur du collaborateur (caissier…), facultatif. */
   userId?: string | null;
+  /** Compte de rattachement (4211 Personnel par défaut, 4311, 4471, 4621 ou un autre compte de la classe 4). */
+  parentAccount?: string | null;
   active?: boolean;
   notes?: string | null;
 }
@@ -92,7 +105,10 @@ export const periodLabel = (period: string) => `${MONTHS[Number(period.slice(5, 
  */
 export class StaffService extends Base {
   private query(where: string) {
-    return this.db.prepare(`SELECT s.*, u.name AS user_name FROM staff s LEFT JOIN users u ON u.id = s.user_id WHERE ${where} ORDER BY s.active DESC, s.name`);
+    return this.db.prepare(
+      `SELECT s.*, u.name AS user_name, pa.label AS parent_label FROM staff s LEFT JOIN users u ON u.id = s.user_id
+       LEFT JOIN accounts pa ON pa.id = s.parent_account WHERE ${where} ORDER BY s.active DESC, s.name`,
+    );
   }
 
   list(storeId: string, opts: { includeInactive?: boolean } = {}): (Staff & StaffBalance)[] {
@@ -107,15 +123,69 @@ export class StaffService extends Base {
   }
 
   /** Premier numéro libre pour les deux sous-comptes (4211001 et 4251001, puis 002…). */
-  private nextAccounts(): { salary: string; advance: string } {
+  private nextAccounts(parent: string = STAFF_SALARY_ROOT): { salary: string; advance: string } {
     const exists = this.db.prepare('SELECT 1 FROM accounts WHERE id = ?').pluck();
     for (let n = 1; n < 1000; n++) {
       const suffix = String(n).padStart(3, '0');
-      const salary = `${STAFF_SALARY_ROOT}${suffix}`;
+      const salary = `${parent}${suffix}`;
       const advance = `${STAFF_ADVANCE_ROOT}${suffix}`;
       if (!exists.get(salary) && !exists.get(advance)) return { salary, advance };
     }
     throw new AppError('Plus de numéro de sous-compte libre pour le personnel', 'INVALID');
+  }
+
+  /**
+   * Comptes de rattachement possibles : les quatre proposés d'abord (même
+   * absents du plan, ils sont créés au besoin), puis les autres comptes de
+   * tiers de la classe 4 du plan.
+   */
+  parents(): { id: string; label: string; suggested: boolean }[] {
+    const rows = this.db
+      .prepare("SELECT id, label FROM accounts WHERE id LIKE '4%' AND length(id) BETWEEN 2 AND 4 AND id <> ? AND COALESCE(active, 1) = 1 ORDER BY id")
+      .all(STAFF_ADVANCE_ROOT) as { id: string; label: string }[];
+    const known = Object.entries(STAFF_PARENTS).map(([id, label]) => ({ id, label: rows.find((r) => r.id === id)?.label ?? label, suggested: true }));
+    return [...known, ...rows.filter((r) => !(r.id in STAFF_PARENTS)).map((r) => ({ ...r, suggested: false }))];
+  }
+
+  /** Premier sous-compte libre sous un compte de rattachement (4621001, 4621002…). */
+  private nextSub(parent: string): string {
+    const exists = this.db.prepare('SELECT 1 FROM accounts WHERE id = ?').pluck();
+    for (let n = 1; n < 1000; n++) {
+      const id = `${parent}${String(n).padStart(3, '0')}`;
+      if (!exists.get(id)) return id;
+    }
+    throw new AppError('Plus de numéro de sous-compte libre sous ce compte', 'INVALID');
+  }
+
+  /**
+   * Compte de rattachement choisi : un compte de tiers de la classe 4 (4 chiffres
+   * au plus, pas un sous-compte), ni le compte des avances. Les comptes
+   * proposés sont créés s'ils manquent au plan.
+   */
+  private checkParent(id: string, now: string): { id: string; label: string } {
+    const parent = id.trim();
+    if (!/^4\d{1,3}$/.test(parent)) throw new AppError('Compte de rattachement invalide : un compte de tiers de la classe 4, par exemple 4211', 'INVALID');
+    if (parent === STAFF_ADVANCE_ROOT) throw new AppError('Le compte des avances (4251) ne peut pas être un compte de rattachement', 'INVALID');
+    const row = this.db.prepare('SELECT label FROM accounts WHERE id = ?').get(parent) as { label: string } | undefined;
+    if (row) return { id: parent, label: row.label };
+    const label = STAFF_PARENTS[parent];
+    if (!label) throw new AppError(`Le compte ${parent} n'existe pas au plan comptable`, 'INVALID');
+    this.saveAccount(parent, label, now);
+    return { id: parent, label };
+  }
+
+  /** Libellé du sous-compte : « Rémunérations dues, Paul » sous 4211, sinon « Associés, comptes courants, Paul ». */
+  private subLabel(parent: { id: string; label: string }, name: string): string {
+    return parent.id === STAFF_SALARY_ROOT ? `Rémunérations dues, ${name}` : `${parent.label}, ${name}`;
+  }
+
+  /** Le collaborateur a-t-il déjà des écritures sur son sous-compte ? */
+  private hasEntries(staff: Staff): boolean {
+    return Boolean(
+      this.db.prepare('SELECT 1 FROM staff_salaries WHERE staff_id = ? LIMIT 1').get(staff.id) ||
+        this.db.prepare('SELECT 1 FROM treasury_entries WHERE staff_id = ? LIMIT 1').get(staff.id) ||
+        this.db.prepare('SELECT 1 FROM manual_entry_lines WHERE account_id = ? LIMIT 1').get(staff.salary_account),
+    );
   }
 
   private saveAccount(id: string, label: string, now: string): void {
@@ -142,8 +212,17 @@ export class StaffService extends Base {
     if (current && input.active === false && (current.due || current.advances)) {
       throw new AppError('Soldez son compte (salaire dû, avances) avant de le marquer parti', 'INVALID');
     }
+    const wanted = (input.parentAccount ?? current?.parent_account ?? STAFF_SALARY_ROOT).trim();
+    const moving = Boolean(current && wanted !== current.parent_account);
+    if (moving && this.hasEntries(current!)) {
+      throw new AppError(
+        `${current!.name} a déjà des écritures sur son sous-compte ${current!.salary_account} : son compte de rattachement ne peut plus changer. Créez une nouvelle fiche si besoin.`,
+        'INVALID',
+      );
+    }
     return this.tx(() => {
       const now = this.now();
+      const parent = this.checkParent(wanted, now);
       const values = {
         name,
         position: input.position?.trim() || null,
@@ -164,9 +243,16 @@ export class StaffService extends Base {
                hired_on = @hired_on, user_id = @user_id, active = @active, notes = @notes, updated_at = @now WHERE id = @id`,
           )
           .run({ ...values, id: current.id });
+        // Nouveau rattachement, sans écriture encore : nouveau sous-compte, l'ancien est désactivé.
+        if (moving) {
+          const sub = this.nextSub(parent.id);
+          this.db.prepare('UPDATE staff SET parent_account = ?, salary_account = ? WHERE id = ?').run(parent.id, sub, current.id);
+          this.db.prepare('UPDATE accounts SET active = 0, updated_at = ? WHERE id = ?').run(now, current.salary_account);
+          this.enqueue(null, 'account', current.salary_account, 'upsert', {});
+        }
       } else {
         staffId = newId();
-        const accounts = this.nextAccounts();
+        const accounts = this.nextAccounts(parent.id);
         this.db
           .prepare(
             `INSERT INTO staff (id, store_id, code, name, position, phone, id_card, base_salary, hired_on, user_id, salary_account, advance_account, active, notes, created_at, updated_at)
@@ -181,9 +267,10 @@ export class StaffService extends Base {
             advance: accounts.advance,
           });
       }
+      if (!current) this.db.prepare('UPDATE staff SET parent_account = ? WHERE id = ?').run(parent.id, staffId);
       const s = this.query('s.id = ?').get(staffId) as Staff;
       // Les libellés des sous-comptes suivent le nom du collaborateur.
-      this.saveAccount(s.salary_account, `Rémunérations dues, ${name}`, now);
+      this.saveAccount(s.salary_account, this.subLabel(parent, name), now);
       this.saveAccount(s.advance_account, `Avances, ${name}`, now);
       this.enqueue(ctx, 'staff', s.id, 'upsert', {});
       this.audit(ctx.userId, current ? 'staff.update' : 'staff.create', 'staff', s.id, { name, baseSalary });

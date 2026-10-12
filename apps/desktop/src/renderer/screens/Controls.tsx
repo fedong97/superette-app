@@ -3,6 +3,7 @@ import { PAYMENT_METHODS, type PaymentMethod, type XlsxSheet, xlsxWorkbook } fro
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, dateFr, dateTime, fcfa, qty, today, useLoad, useToast } from '../ui';
 import { SaleDetail } from './Sales';
+import { tx } from '../tax';
 
 /**
  * Registres et contrôles rangés comme les menus de KONTROL : registre des
@@ -125,7 +126,7 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
                 { header: 'Client', width: 24 },
                 { header: 'Paiement', width: 22 },
                 { header: 'Remises', format: 'money' },
-                { header: 'Total TTC', format: 'money' },
+                { header: tx('Total TTC'), format: 'money' },
               ],
               rows: r.rows.map((x) => [
                 x.number,
@@ -190,7 +191,7 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
               <th>Client</th>
               <th>Paiement</th>
               <th className="r">Remises</th>
-              <th className="r">Total TTC</th>
+              <th className="r">{tx('Total TTC')}</th>
               <th>État</th>
             </tr>
           </thead>
@@ -294,7 +295,7 @@ export function SalesAlerts() {
           </tbody>
         </table>
       )}
-      <p className="muted small">Vente à perte : prix de vente HT, remise déduite, sous le coût d'achat moyen (CMUP) au moment de la vente.</p>
+      <p className="muted small">{tx("Vente à perte : prix de vente HT, remise déduite, sous le coût d'achat moyen (CMUP) au moment de la vente.")}</p>
       {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
     </>
   );
@@ -410,7 +411,7 @@ export function PurchasesByProduct() {
                 { header: 'Article', width: 32 },
                 { header: 'Réceptions', format: 'int' },
                 { header: 'Quantité', format: 'qty' },
-                { header: 'Montant HT', format: 'money' },
+                { header: tx('Montant HT'), format: 'money' },
                 { header: 'Coût mini', format: 'money' },
                 { header: 'Coût maxi', format: 'money' },
                 { header: 'Dernier coût', format: 'money' },
@@ -434,7 +435,7 @@ export function PurchasesByProduct() {
               <th>Article</th>
               <th className="r">Réceptions</th>
               <th className="r">Quantité</th>
-              <th className="r">Montant HT</th>
+              <th className="r">{tx('Montant HT')}</th>
               <th className="r">Coût mini</th>
               <th className="r">Coût maxi</th>
               <th className="r">Dernier coût</th>
@@ -489,7 +490,7 @@ export function PendingReceipts() {
             <strong>{d.orders}</strong>
           </div>
           <div>
-            <small>Valeur à recevoir (HT)</small>
+            <small>{tx('Valeur à recevoir (HT)')}</small>
             <strong>{fcfa(d.value)}</strong>
           </div>
           <div className={d.late ? 'neg' : ''}>
@@ -516,7 +517,7 @@ export function PendingReceipts() {
               <th className="r">Commandé</th>
               <th className="r">Reçu</th>
               <th className="r">Reste</th>
-              <th className="r">Valeur HT</th>
+              <th className="r">{tx('Valeur HT')}</th>
             </tr>
           </thead>
           <tbody>

@@ -3,6 +3,7 @@ import { PROMOTION_KINDS, type PromotionKind, formatQty, promotionLabel } from '
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, dateFr, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker } from './pickers';
+import { tx } from '../tax';
 
 type Promotion = Result<'promotions.list'>[number];
 type Article = Parameters<Parameters<typeof ArticlePicker>[0]['onPick']>[0];
@@ -213,7 +214,7 @@ function PromotionForm({
           </Field>
           {kind === 'price' && (
             <Field label={article?.unit === 'kg' ? 'Prix promo au kg' : article?.unit === 'litre' ? 'Prix promo au litre' : 'Prix promo'}>
-              <input inputMode="numeric" value={promoPrice} onChange={(e) => setPromoPrice(e.target.value)} placeholder="FCFA TTC" />
+              <input inputMode="numeric" value={promoPrice} onChange={(e) => setPromoPrice(e.target.value)} placeholder={tx('FCFA TTC')} />
             </Field>
           )}
           {kind !== 'price' && (
@@ -228,7 +229,7 @@ function PromotionForm({
           )}
           {kind === 'lot' && (
             <Field label="Prix du lot">
-              <input inputMode="numeric" value={lotPrice} onChange={(e) => setLotPrice(e.target.value)} placeholder="FCFA TTC" />
+              <input inputMode="numeric" value={lotPrice} onChange={(e) => setLotPrice(e.target.value)} placeholder={tx('FCFA TTC')} />
             </Field>
           )}
           <Field label="Du">

@@ -127,6 +127,7 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Ajouter / paramétrer une marchandise » : ligne 1, le conditionnement d’achat (carton, palette) avec ses prix.',
           'Lignes 2 à 4 : les conditionnements de vente (paquet, pièce) avec leur nombre par carton ; achat et revient se calculent.',
           'Ajoutez les codes-barres : chaque conditionnement peut avoir le sien.',
+          'Photo : « Choisir une image… » à droite de la fiche. Elle est réduite toute seule et s’affiche dans la liste et dans la recherche de la caisse.',
         ],
       },
       { tab: 'shelving', title: 'Rayonnage', steps: ['Rangez les produits par rayon et famille ; ces rayons servent aux inventaires et aux rapports.'] },
@@ -137,7 +138,18 @@ export const HELP: Record<WinKind, PageHelp> = {
     intro: 'Quantités par dépôt, réceptions, pertes, transferts, inventaires et péremptions.',
     sections: [
       { tab: 'state', title: 'État du stock', steps: ['Le stock de chaque produit, en cartons, paquets et unités. Les couleurs signalent rupture, alerte et surstock.'] },
-      { tab: 'receive', title: 'Réception sans commande', steps: ['Choisissez le dépôt, ajoutez les produits reçus avec la quantité, le prix et la date limite pour les périssables, puis validez.'] },
+      {
+        tab: 'multi',
+        title: 'Stock multi-magasin (Stock MM)',
+        steps: [
+          'Une ligne par article, une colonne par magasin et le total : par exemple DOLAIT, 38 pièces à Akwa et 12 à Bastos.',
+          'Sous la quantité, l’équivalent en cartons. En rouge : rupture ; en orange : sous le stock d’alerte.',
+          'Cliquez une quantité pour voir le détail par dépôt de ce magasin.',
+          'Le stock des autres magasins arrive par le serveur central à chaque synchronisation ; la date de leur dernier envoi est rappelée au-dessus du tableau.',
+          'Filtrez par nom, code ou famille, ou sur les articles en rupture dans au moins un magasin. Imprimez en A4 ou exportez vers Excel.',
+        ],
+      },
+      { tab: 'receive', title: 'Réception sans commande', steps: ['Choisissez le dépôt, ajoutez les produits reçus avec la quantité, le prix et la date limite pour les périssables, puis validez.', 'Remise % et promo « N/M » (12/10 : 12 achetés, 10 payés) par ligne : le stock entre au coût net.'] },
       { tab: 'loss', title: 'Pertes et casse', steps: ['Produit, quantité et motif (casse, vol, péremption, consommation) : le stock baisse et la perte est tracée.'] },
       {
         tab: 'transfer',
@@ -166,7 +178,21 @@ export const HELP: Record<WinKind, PageHelp> = {
         tab: 'orders',
         title: 'Bon de commande',
         perm: 'purchase_orders',
-        steps: ['« Nouveau bon » : fournisseur, produits et quantités (en cartons), puis « Envoyer » et imprimer.', 'À la livraison, « Réceptionner » : le stock entre ; une livraison partielle laisse un reliquat.'],
+        steps: [
+          '« Nouveau bon » : fournisseur, produits et quantités (en cartons), puis « Envoyer » et imprimer.',
+          'Par ligne : « Remise % » et « Promo N/M » (12/10 = 12 achetés, 10 payés ; sur 24 cartons, 4 gratuits). Le total est net.',
+          'À la livraison, « Réceptionner » : remise et promo du bon sont reprises, le stock entre au coût net ; une livraison partielle laisse un reliquat.',
+        ],
+      },
+      {
+        tab: 'direct',
+        title: 'Facture directe (sans bon de commande)',
+        perm: 'purchase_invoices',
+        steps: [
+          'Fournisseur, n° de sa facture, date et dépôt, puis les articles avec quantité, prix, remise % et promo N/M.',
+          'Remise globale en % ou en FCFA : elle est répartie sur les lignes. Cochez « Réglée tout de suite » pour payer (caisse centrale, MoMo/OM, virement, chèque).',
+          '« Enregistrer » : le stock entre au coût net, un bon de réception est créé et la facture va au registre des achats et à l’échéancier. Imprimez-la en A4.',
+        ],
       },
       { tab: 'reorder', title: 'Proposition de commande', perm: 'purchase_orders', steps: ['Les quantités à commander d’après les ventes des 4 dernières semaines et le stock d’alerte ; un bon par fournisseur en un clic.'] },
       { tab: 'invoices', title: 'Factures fournisseurs', perm: 'purchase_invoices', steps: ['Saisissez la facture à partir des bons de réception, puis enregistrez les paiements.'] },
@@ -378,7 +404,9 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Ajouter un collaborateur',
         steps: [
           '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée.',
-          'Deux sous-comptes sont créés à son nom : 4211… pour ses salaires dus, 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
+          'Choisissez son compte de rattachement : Personnel (4211, par défaut), CNPS (4311), État (4471), Associés (4621) ou un autre compte de la classe 4.',
+          'Deux sous-comptes sont créés à son nom : sous le compte de rattachement pour ses salaires dus (4211001…), et 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
+          'Le rattachement ne change plus une fois qu’il a des écritures.',
           '« Avance… » paie une avance au bureau ; à la caisse, utilisez Décaisser › Remboursement / Prêt.',
         ],
       },

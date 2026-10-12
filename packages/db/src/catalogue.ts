@@ -48,6 +48,8 @@ export interface Article {
   pack_purchase_price: Fcfa | null;
   /** Prix de revient du conditionnement d'achat (achat + transport, manutention). */
   pack_cost_price: Fcfa | null;
+  /** Miniature de la photo (data URL JPEG), null sans photo. */
+  photo_thumb: string | null;
   barcodes: { code: string; pack_qty: Milli }[];
   /** Conditionnements, du plus grand au plus petit (carton, paquet). */
   packs: ArticlePack[];
@@ -124,14 +126,20 @@ export interface ScanResult {
   pack?: ArticlePack;
 }
 
+/** Taux de TVA de l'article ; 0 dans un magasin sans TVA, quel que soit le taux de la fiche. */
 const ARTICLE_SELECT = `
-  SELECT a.*, v.rate_bp AS vat_rate_bp, f.name AS family_name, d.name AS department_name,
-         COALESCE(sp.sale_price, a.sale_price) AS store_price
+  SELECT a.*, CASE WHEN (SELECT vat_enabled FROM stores WHERE id = @storeId) = 0 THEN 0 ELSE v.rate_bp END AS vat_rate_bp, f.name AS family_name, d.name AS department_name,
+         COALESCE(sp.sale_price, a.sale_price) AS store_price, ph.thumb AS photo_thumb
   FROM articles a
+  LEFT JOIN article_photos ph ON ph.article_id = a.id
   JOIN vat_rates v ON v.id = a.vat_rate_id
   LEFT JOIN families f ON f.id = a.family_id
   LEFT JOIN departments d ON d.id = f.department_id
   LEFT JOIN store_prices sp ON sp.article_id = a.id AND sp.store_id = @storeId`;
+
+/** Taille maximale d'une photo et de sa miniature (data URL). */
+const PHOTO_MAX = 400_000;
+const THUMB_MAX = 40_000;
 
 export class CatalogueService extends Base {
   // --- Rayons et familles ---------------------------------------------------
@@ -405,6 +413,45 @@ export class CatalogueService extends Base {
     }
   }
 
+  /** Photo de l'article (data URL), null sans photo. */
+  photo(articleId: string): string | null {
+    return (this.db.prepare('SELECT photo FROM article_photos WHERE article_id = ?').pluck().get(articleId) as string | undefined) ?? null;
+  }
+
+  /**
+   * Photo de l'article, déjà réduite par l'interface (environ 400 px) avec sa
+   * miniature ; null la retire. Elle part aux autres postes avec l'article.
+   */
+  setPhoto(userId: string, articleId: string, input: { photo: string; thumb: string } | null): Article {
+    this.getArticle(articleId);
+    if (input) {
+      for (const [v, max] of [
+        [input.photo, PHOTO_MAX],
+        [input.thumb, THUMB_MAX],
+      ] as const) {
+        if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) throw new AppError('Image invalide : choisissez une photo JPEG ou PNG', 'INVALID');
+        if (v.length > max) throw new AppError('Photo trop lourde, même réduite : choisissez une autre image', 'INVALID');
+      }
+    }
+    return this.tx(() => {
+      const now = this.now();
+      if (input) {
+        this.db
+          .prepare(
+            `INSERT INTO article_photos (article_id, photo, thumb, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(article_id) DO UPDATE SET photo = excluded.photo, thumb = excluded.thumb, updated_at = excluded.updated_at`,
+          )
+          .run(articleId, input.photo, input.thumb, now);
+      } else {
+        this.db.prepare('DELETE FROM article_photos WHERE article_id = ?').run(articleId);
+      }
+      this.db.prepare('UPDATE articles SET updated_at = ? WHERE id = ?').run(now, articleId);
+      this.enqueue(null, 'article', articleId, 'upsert', {});
+      this.audit(userId, input ? 'article.photo' : 'article.photo_remove', 'article', articleId, {});
+      return this.getArticle(articleId);
+    });
+  }
+
   /** Prix propre à un magasin (null pour revenir au prix national). */
   setStorePrice(userId: string, articleId: string, storeId: string, price: Fcfa | null): void {
     this.tx(() => {
@@ -504,6 +551,7 @@ export class CatalogueService extends Base {
   importArticles(
     userId: string,
     rows: { name: string; barcode?: string; salePrice: Fcfa; purchasePrice?: Fcfa; vatRateBp?: number; unit?: Unit; department?: string; family?: string }[],
+    opts: { noVat?: boolean } = {},
   ): { created: number; updated: number; errors: { row: number; message: string }[] } {
     const rates = this.db.prepare('SELECT id, rate_bp FROM vat_rates WHERE active = 1').all() as { id: string; rate_bp: number }[];
     const result = { created: 0, updated: 0, errors: [] as { row: number; message: string }[] };
@@ -519,7 +567,8 @@ export class CatalogueService extends Base {
     };
     rows.forEach((row, index) => {
       try {
-        const rate = rates.find((r) => r.rate_bp === (row.vatRateBp ?? 1925));
+        // Magasin sans TVA : tout article importé est exonéré, quelle que soit la colonne TVA.
+        const rate = rates.find((r) => r.rate_bp === (opts.noVat ? 0 : (row.vatRateBp ?? 1925)));
         if (!rate) throw new AppError(`Taux de TVA inconnu : ${row.vatRateBp}`, 'INVALID');
         const code = row.barcode ? normalizeBarcode(row.barcode) : null;
         const existingId = code

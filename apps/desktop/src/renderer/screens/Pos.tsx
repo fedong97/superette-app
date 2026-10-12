@@ -9,6 +9,7 @@ import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, useSaleRows } from './SaleSearch';
 import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
+import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -538,7 +539,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             )}
             <div className={`fiche-total ${!lines.length && lastSale ? 'done' : ''}`}>
               {amount(shownTotal)}
-              <small>TTC</small>
+              <small>{tx('TTC')}</small>
             </div>
             <label>Date</label>
             <input readOnly value={now.toLocaleString('fr-FR')} />
@@ -656,8 +657,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                         <th className="r">Qté</th>
                         {withDiscount && <th className="r">Remise</th>}
                         <th>Cond.</th>
-                        <th className="r">PU TTC</th>
-                        <th className="r">Total TTC</th>
+                        <th className="r">{tx('PU TTC')}</th>
+                        <th className="r">{tx('Total TTC')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1169,7 +1170,7 @@ function VaryDialog({
               ? 'Étiquette balance à prix imposé : quantité non modifiable'
               : pack
                 ? `Prix du ${pack.name.toLowerCase()} : ${fcfa(tariffPrice(pack.tariff, level))} · ${pack.units / 1000} ${line.unitName.toLowerCase()}`
-                : `PU TTC : ${fcfa(tariffPrice(line.tariff, level))}`
+                : `${tx('PU TTC')} : ${fcfa(tariffPrice(line.tariff, level))}`
           }
         >
           <input autoFocus inputMode="decimal" value={value} disabled={fixed} onChange={(e) => setValue(e.target.value)} />

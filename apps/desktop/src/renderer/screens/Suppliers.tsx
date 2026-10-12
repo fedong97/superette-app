@@ -3,6 +3,7 @@ import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
+import { tx } from '../tax';
 
 type Supplier = Result<'suppliers.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -245,7 +246,7 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
           <tr>
             <th>Réf. fournisseur</th>
             <th>Article</th>
-            <th className="r">Prix négocié HT</th>
+            <th className="r">{tx('Prix négocié HT')}</th>
             <th className="r">Dernier prix payé</th>
             <th className="r">Colisage</th>
             <th>Principal</th>
@@ -318,7 +319,7 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
               <input value={edit.ref} onChange={(e) => setEdit({ ...edit, ref: e.target.value })} autoFocus />
             </Field>
             <div className="grid2">
-              <Field label="Prix négocié HT (FCFA)" hint={edit.unit === 'piece' ? 'par pièce' : `par ${edit.unit === 'kg' ? 'kg' : 'litre'}`}>
+              <Field label={tx('Prix négocié HT (FCFA)')} hint={edit.unit === 'piece' ? 'par pièce' : `par ${edit.unit === 'kg' ? 'kg' : 'litre'}`}>
                 <input inputMode="numeric" value={edit.cost} onChange={(e) => setEdit({ ...edit, cost: e.target.value })} />
               </Field>
               <Field label="Colisage" hint="On commande par multiples de cette quantité (ex. 24 pour un casier)">
@@ -377,7 +378,7 @@ function SupplierAccount({ supplierId }: { supplierId: string }) {
               <tr key={o.id}>
                 <td>{o.number}</td>
                 <td>{dateFr(o.order_date)}</td>
-                <td className="r">{fcfa(o.total_ht)} HT</td>
+                <td className="r">{fcfa(o.total_ht)}{tx(' HT')}</td>
               </tr>
             ))}
           </tbody>

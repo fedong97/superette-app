@@ -1,4 +1,4 @@
-import { type Fcfa, type Milli, PAYMENT_METHODS, type XlsxSheet } from '@superette/core';
+import { type Fcfa, type Milli, PAYMENT_METHODS, type XlsxCell, type XlsxSheet } from '@superette/core';
 import { AppError, Base } from './util';
 
 export interface DailySummary {
@@ -15,6 +15,22 @@ export interface DailySummary {
 }
 
 /** Indicateurs de base de la phase 1 ; les tableaux de bord complets arrivent en phase 4. */
+/** Feuille sans colonnes ni lignes HT/TVA, et sans « TTC » dans les libellés (magasin sans TVA). */
+function withoutVat(sheet: XlsxSheet): XlsxSheet {
+  const strip = (v: string) => v.replace(/\s*\b(?:HT|TTC)\b/g, '');
+  const drop = new Set(sheet.columns.flatMap((c, i) => (/\bHT\b/.test(c.header) || c.header === 'TVA' ? [i] : [])));
+  const keep = <T,>(cells: T[]) => cells.filter((_, i) => !drop.has(i));
+  const label = (cell: XlsxCell) => (typeof cell === 'string' ? strip(cell) : cell);
+  // Synthèse : la ligne « Chiffre d'affaires HT » double « Chiffre d'affaires ».
+  const rows = sheet.rows.filter((r) => !(typeof r[0] === 'string' && /\bHT\b/.test(r[0]) && /affaires/.test(r[0])));
+  return {
+    ...sheet,
+    columns: keep(sheet.columns).map((c) => ({ ...c, header: strip(c.header) })),
+    rows: rows.map((r) => keep(r).map(label)),
+    totalRow: sheet.totalRow ? keep(sheet.totalRow) : undefined,
+  };
+}
+
 export class ReportService extends Base {
   daily(storeId: string, date: string): DailySummary {
     const base = `FROM sale_lines l JOIN sales s ON s.id = l.sale_id
@@ -75,7 +91,11 @@ export class ReportService extends Base {
          ORDER BY s.created_at, l.line_no`,
       )
       .all(storeId, from, to) as Record<string, string | number>[];
-    const header = ['Ticket', 'Type', 'Date', 'Article', 'Quantité', 'Prix unitaire TTC', 'Remise', 'Taux TVA %', 'Total TTC'];
+    // Magasin sans TVA : ni colonne de taux, ni mention TTC (les lignes taxées d'avant gardent leur taux).
+    const noVat = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(storeId) as number) !== 1 && rows.every((r) => Number(r.vat_rate_bp) === 0);
+    const header = noVat
+      ? ['Ticket', 'Type', 'Date', 'Article', 'Quantité', 'Prix unitaire', 'Remise', 'Total']
+      : ['Ticket', 'Type', 'Date', 'Article', 'Quantité', 'Prix unitaire TTC', 'Remise', 'Taux TVA %', 'Total TTC'];
     const esc = (v: string | number | undefined) => {
       const s = String(v ?? '');
       return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -89,7 +109,7 @@ export class ReportService extends Base {
         (Number(r.qty) / 1000).toString().replace('.', ','),
         r.unit_price,
         r.discount,
-        (Number(r.vat_rate_bp) / 100).toString().replace('.', ','),
+        ...(noVat ? [] : [(Number(r.vat_rate_bp) / 100).toString().replace('.', ',')]),
         r.total_ttc,
       ]
         .map(esc)
@@ -396,7 +416,9 @@ export class ReportService extends Base {
         l.ht - l.cost,
       ]),
     });
-    return sheets;
+    // Magasin sans TVA, période sans vente taxée : ni feuille TVA, ni colonne HT ou TVA, ni mention TTC.
+    const noVat = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(storeId) as number) !== 1 && vat.every((v) => v.rate_bp === 0);
+    return noVat ? sheets.filter((sh) => sh.name !== 'TVA').map(withoutVat) : sheets;
   }
 }
 

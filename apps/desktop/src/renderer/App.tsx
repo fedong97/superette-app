@@ -25,6 +25,7 @@ import { Treasury, type TreasuryTab } from './screens/Treasury';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
 import { Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { hasVat, setVatOn } from './tax';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -135,6 +136,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Saisir un nouvel achat (bon de commande)', open: ['purchases', 'new-order'], perm: 'purchase_orders' },
       { label: 'Saisir une facture à partir des BL', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
+      { label: 'Saisir une facture directe (sans bon de commande)', open: ['purchases', 'direct'], perm: 'purchase_invoices' },
       { label: 'Registre des achats', open: ['purchases', 'invoices'], perm: 'purchase_invoices' },
       { label: 'Registre des achats par produits', open: ['purchases', 'byproduct'] },
       SEP,
@@ -188,6 +190,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Étiquettes de rayon', open: ['labels'] },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
+      { label: 'Stock multi-magasin', open: ['stock', 'multi'], perm: 'stock' },
       { label: 'Articles par dépôt', open: ['stock', 'warehouses'], perm: 'stock' },
       { label: 'Rayonnage des articles', open: ['articles', 'shelving'] },
       SEP,
@@ -326,7 +329,7 @@ const QUICK: QuickTab[] = [
   { label: 'Registre', open: ['sales', 'z'] },
   { label: 'Produits', open: ['articles'] },
   { label: 'Stock', open: ['stock', 'state'] },
-  { label: 'Stock MM', open: ['stock', 'moves'] },
+  { label: 'Stock MM', open: ['stock', 'multi'] },
   { label: 'Transfert', open: ['stock', 'transfer'] },
   { label: 'Devis', open: ['quotes'] },
   { label: 'Dépenses', open: ['expenses', 'list'] },
@@ -348,7 +351,11 @@ export const ROLE_LABELS: Record<Role, string> = {
 
 export function App() {
   const [state, setState] = useState<AppState>();
-  const refresh = () => call('app.state').then(setState);
+  const refresh = () =>
+    call('app.state').then((s) => {
+      setVatOn(s.station?.store.vat_enabled !== 0);
+      setState(s);
+    });
   useEffect(() => void refresh(), []);
 
   if (!state) return <div className="splash">Chargement…</div>;
@@ -409,7 +416,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     setPrefs((p) => ({ ...p, [key]: value }));
     call('prefs.set', key, value).catch(toast.error);
   };
-  const quickTabs = ((prefs.quickTabs as QuickTab[] | undefined) ?? QUICK).filter((q) => canWin(q.open[0]));
+  const quickTabs = ((prefs.quickTabs as QuickTab[] | undefined) ?? QUICK)
+    // 0.36.0 : « Stock MM » ouvre le stock multi-magasin (il ouvrait les mouvements).
+    .map((q) => (q.label === 'Stock MM' && q.open[0] === 'stock' && q.open[1] === 'moves' ? { ...q, open: ['stock', 'multi'] as QuickTab['open'] } : q))
+    .filter((q) => canWin(q.open[0]));
   const saveTabs = (tabs: QuickTab[] | null) => {
     savePref('quickTabs', tabs);
     setHelp(null);
@@ -514,6 +524,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     items
       .filter((i) => (!i.perm || [i.perm].flat().some(can)) && (!i.adminOnly || user.role === 'admin'))
       .filter((i) => (!i.open || canWin(i.open[0])) && (!i.soon || supervisor))
+      // Magasin sans TVA : pas de déclaration de TVA.
+      .filter((i) => hasVat() || i.open?.[1] !== 'vat')
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || Boolean(i.perm) || i.open[1] === 'tickets')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
   const visibleMenus = MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep));

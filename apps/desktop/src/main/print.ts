@@ -15,7 +15,7 @@ import {
   receiptToEscPos,
   splitTtc,
 } from '@superette/core';
-import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
+import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, SUPPLIER_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
 import { sendNetwork, sendWindowsRaw } from './rawPrint';
@@ -24,6 +24,13 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const money = (v: number) => formatFcfa(v, false);
 const dateFr = (iso: string) =>
   new Date(iso).toLocaleString('fr-FR', { timeZone: 'Africa/Douala', dateStyle: 'short', timeStyle: 'short' });
+/** Libellé sans « HT » ni « TTC » pour un magasin sans TVA (« Total HT » devient « Total »). */
+const tx = (label: string, store: { vat_enabled: number }) => (store.vat_enabled === 1 ? label : label.replace(/\s*\b(?:HT|TTC)\b/g, ''));
+/** Remise et gratuits d'une ligne d'achat (« 12 achetés, 10 payés » rappelé sous les gratuits). */
+const termCells = (l: { discount_bp: number; free_qty: number; promo_buy: number | null; promo_pay: number | null; unit: 'piece' | 'kg' | 'litre' }) =>
+  `<td class="r">${l.discount_bp ? `${(l.discount_bp / 100).toLocaleString('fr-FR')} %` : ''}</td><td class="r">${
+    l.free_qty ? `${formatQty(l.free_qty, l.unit)}${l.promo_buy && l.promo_pay !== null ? `<br><small>${l.promo_buy} achetés, ${l.promo_pay} payés</small>` : ''}` : ''
+  }</td>`;
 const dayFr = (ymd: string) => new Date(`${ymd.slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR');
 
 const STYLE = `
@@ -344,13 +351,13 @@ export function createPrinter(s: Services): Printer {
             .join('');
           grand += sub;
           return `<h3>${esc(supplierId ? ((supName.get(supplierId) as string | undefined) ?? '') : 'Sans fournisseur')}</h3>
-            <table><thead><tr><th>Code</th><th>Réf. fournisseur</th><th>Article</th><th class="r">Quantité</th><th>En conditionnements</th><th class="r">PU HT</th><th class="r">Montant HT</th></tr></thead>
+            <table><thead><tr><th>Code</th><th>Réf. fournisseur</th><th>Article</th><th class="r">Quantité</th><th>En conditionnements</th><th class="r">${tx('PU HT', store)}</th><th class="r">${tx('Montant HT', store)}</th></tr></thead>
             <tbody>${rows}<tr class="total"><td colspan="6">Total fournisseur</td><td class="r">${money(sub)}</td></tr></tbody></table>`;
         })
         .join('');
       await printA4(`${a4Head(store)}
         <h1>Proposition de commande</h1>
-        <p>Établie le ${new Date().toLocaleString('fr-FR')} · ${lines.length} article(s) · total ${money(grand)} FCFA HT</p>
+        <p>Établie le ${new Date().toLocaleString('fr-FR')} · ${lines.length} article(s) · total ${money(grand)} ${tx('FCFA HT', store)}</p>
         ${sections}`);
     },
 
@@ -499,7 +506,7 @@ export function createPrinter(s: Services): Printer {
           ${row('Différentiel', z.difference, true)}${se.deposit !== null ? row('Versé à la caisse centrale', se.deposit) + row('Fond laissé dans le tiroir', se.float_left) : ''}
         </table><table class="totals" style="width:50%;margin:0">
           ${row('Tickets', null)}<tr><td colspan="2">${z.ticketCount} ventes, ${z.cancelled.count} annulés</td></tr>
-          ${row('Chiffre d’affaires net TTC', z.netTtc, true)}${row('Remises', z.discounts)}${row('Promotions', z.promotions)}${row('Ventes à crédit', journal.creditSales)}
+          ${row(tx('Chiffre d’affaires net TTC', store), z.netTtc, true)}${row('Remises', z.discounts)}${row('Promotions', z.promotions)}${row('Ventes à crédit', journal.creditSales)}
           ${z.byMethod.map((m) => row(esc(m.label), m.amount)).join('')}
           ${z.elsewhere.map((m) => row(`${esc(m.label)} (sur ${esc(m.registerName)})`, m.amount)).join('')}
         </table></div>
@@ -524,14 +531,76 @@ export function createPrinter(s: Services): Printer {
       await printReceipt(s.receipts.testPage(cfg.columns), withDrawer, true);
     },
 
+    async stockByStore(storeId, opts) {
+      const store = s.admin.getStore(storeId);
+      const d = s.controls.stockByStore(storeId, opts);
+      const cell = (v: number | undefined, unit: 'piece' | 'kg' | 'litre') => (v === undefined ? '—' : formatQty(v, unit));
+      const rows = d.rows
+        .map(
+          (r) => `<tr><td>${esc(r.code)}</td><td>${esc(r.name)}</td>${d.stores
+            .map((st) => `<td class="r">${cell(r.byStore[st.id], r.unit)}</td>`)
+            .join('')}<td class="r"><b>${formatQty(r.total, r.unit)}</b></td></tr>`,
+        )
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Stock multi-magasin</h1>
+        <p>Imprimé le ${new Date().toLocaleString('fr-FR')} · ${d.rows.length} article(s)${opts.shortage ? ' · en rupture dans au moins un magasin' : ''}${opts.search ? ` · recherche « ${esc(opts.search)} »` : ''}</p>
+        <p>${d.stores.map((st) => `${esc(st.name)} : ${st.own ? 'stock de ce poste' : st.updated_at ? `à jour au ${dateFr(st.updated_at)}` : 'jamais reçu'}`).join(' · ')}</p>
+        <table><thead><tr><th>Code</th><th>Article</th>${d.stores.map((st) => `<th class="r">${esc(st.name)}</th>`).join('')}<th class="r">Total</th></tr></thead>
+        <tbody>${rows}</tbody></table>`);
+    },
+
+    async purchaseInvoice(invoiceId) {
+      const i = s.purchases.getInvoice(invoiceId);
+      const sup = s.purchases.getSupplier(i.supplier_id);
+      const store = s.admin.getStore(i.store_id);
+      const lines = s.purchases.invoiceLines(invoiceId);
+      const pays = s.purchases.invoicePayments(invoiceId);
+      const rows = lines
+        .map(
+          (l) => `<tr><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td><td class="r">${formatQty(l.qty, l.unit)}</td>
+            <td class="r">${money(l.gross_cost ?? l.unit_cost)}</td>${termCells(l)}<td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
+        )
+        .join('');
+      const payRows = pays
+        .map((p) => `<tr><td>${dayFr(p.paid_at)} · ${esc(SUPPLIER_PAYMENT_METHODS[p.method] ?? p.method)}${p.reference ? ` (${esc(p.reference)})` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
+        .join('');
+      await printA4(`<div class="head">
+          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
+            .filter(Boolean)
+            .map((v) => esc(v!))
+            .join('<br>')}</div>
+          <div class="box"><b>${esc(sup.name)}</b><br>${[sup.contact, sup.address, sup.phone, sup.email].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
+        </div>
+        <h1>${i.kind === 'invoice' ? 'Facture d’achat' : 'Avoir fournisseur'} ${esc(i.number)}</h1>
+        <div>Facture du fournisseur n° ${esc(i.supplier_number)} du ${dayFr(i.invoice_date)} · Échéance : ${dayFr(i.due_date)}${i.direct ? ' · Saisie directe, sans bon de commande' : ''}</div>
+        ${
+          rows
+            ? `<table><thead><tr><th>Code</th><th>Désignation</th><th class="r">Qté</th><th class="r">${tx('PU HT', store)}</th><th class="r">Remise</th><th class="r">Gratuits</th><th class="r">Coût net</th><th class="r">${tx('Total HT', store)}</th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+            : ''
+        }
+        <table class="totals">
+          ${i.discount ? `<tr><td>Remise globale (déjà déduite des lignes)</td><td class="r">-${money(i.discount)}</td></tr>` : ''}
+          ${store.vat_enabled === 1 || i.total_tva ? `<tr><td>Total HT</td><td class="r">${money(i.total_ht)}</td></tr>` : ''}
+          ${i.total_tva ? `<tr><td>TVA</td><td class="r">${money(i.total_tva)}</td></tr>` : ''}
+          <tr class="total"><td>${store.vat_enabled === 1 || i.total_tva ? 'Total TTC (FCFA)' : 'Total (FCFA)'}</td><td class="r">${money(i.total_ttc)}</td></tr>
+          ${payRows}
+          <tr class="total"><td>Reste à payer</td><td class="r">${money(i.balance)}</td></tr></table>
+        ${i.notes ? `<p>${esc(i.notes)}</p>` : ''}
+        <div class="sign"><div>Contrôlé par</div><div>Visa</div></div>`);
+    },
+
     async purchaseOrder(orderId) {
       const o = s.purchases.getOrder(orderId);
       const sup = s.purchases.getSupplier(o.supplier_id);
       const store = s.admin.getStore(o.store_id);
+      // Remise et gratuits : colonnes affichées seulement si une ligne en a.
+      const terms = o.lines.some((l) => l.discount_bp || l.free_qty);
       const rows = o.lines
         .map(
           (l) => `<tr><td>${esc(l.supplier_ref ?? '')}</td><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td>
-            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
+            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td>${terms ? termCells(l) : ''}<td class="r">${money(l.total_ht)}</td></tr>`,
         )
         .join('');
       await printA4(`<div class="head">
@@ -545,8 +614,8 @@ export function createPrinter(s: Services): Printer {
         <div>Date : ${new Date(`${o.order_date}T00:00:00`).toLocaleDateString('fr-FR')}${
           o.expected_date ? ` · Livraison souhaitée : ${new Date(`${o.expected_date}T00:00:00`).toLocaleDateString('fr-FR')}` : ''
         } · Livrer à : ${esc(o.warehouse_name)}</div>
-        <table><thead><tr><th>Réf. fournisseur</th><th>Code</th><th>Désignation</th><th class="r">Quantité</th><th class="r">PU HT</th><th class="r">Total HT</th></tr></thead>
-        <tbody>${rows}<tr class="total"><td colspan="5">Total HT (FCFA)</td><td class="r">${money(o.total_ht)}</td></tr></tbody></table>
+        <table><thead><tr><th>Réf. fournisseur</th><th>Code</th><th>Désignation</th><th class="r">Quantité</th><th class="r">${tx('PU HT', store)}</th>${terms ? '<th class="r">Remise</th><th class="r">Gratuits</th>' : ''}<th class="r">${tx('Total HT', store)}</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="${terms ? 7 : 5}">${tx('Total HT (FCFA)', store)}</td><td class="r">${money(o.total_ht)}</td></tr></tbody></table>
         ${o.notes ? `<p>${esc(o.notes)}</p>` : ''}
         <div class="sign"><div>Établi par : ${esc(o.user_name ?? '')}</div><div>Signature et cachet</div></div>`);
     },

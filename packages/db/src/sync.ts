@@ -159,6 +159,30 @@ export class SyncService extends Base {
 
   // --- Envoi ------------------------------------------------------------------
 
+  /**
+   * Stock multi-magasin : met en file le stock de chaque article et dépôt de ce magasin
+   * qui a changé depuis le dernier envoi (un seul envoi par article, même après cent ventes).
+   */
+  publishStock(storeId: string): number {
+    return this.tx(() => {
+      const changed = this.db
+        .prepare(
+          `SELECT s.warehouse_id, s.article_id, s.qty FROM stock s JOIN warehouses w ON w.id = s.warehouse_id
+           LEFT JOIN stock_published p ON p.warehouse_id = s.warehouse_id AND p.article_id = s.article_id
+           WHERE w.store_id = ? AND (p.qty IS NULL OR p.qty <> s.qty)`,
+        )
+        .all(storeId) as { warehouse_id: string; article_id: string; qty: number }[];
+      const mark = this.db.prepare(
+        'INSERT INTO stock_published (warehouse_id, article_id, qty) VALUES (?, ?, ?) ON CONFLICT (warehouse_id, article_id) DO UPDATE SET qty = excluded.qty',
+      );
+      for (const c of changed) {
+        mark.run(c.warehouse_id, c.article_id, c.qty);
+        this.enqueue(null, 'stock_level', `${c.warehouse_id}:${c.article_id}`, 'upsert', {});
+      }
+      return changed.length;
+    });
+  }
+
   /** Opérations à envoyer, dans l'ordre où elles ont été faites. */
   pending(limit = 500): SyncEvent[] {
     const rows = this.db
@@ -203,7 +227,13 @@ export class SyncService extends Base {
           ...row,
           barcodes: this.db.prepare('SELECT code, pack_qty FROM barcodes WHERE article_id = ?').all(entityId),
           packs: this.db.prepare('SELECT * FROM article_packs WHERE article_id = ? ORDER BY position').all(entityId),
+          photo: this.db.prepare('SELECT photo, thumb, updated_at FROM article_photos WHERE article_id = ?').get(entityId) ?? null,
         };
+      }
+      case 'stock_level': {
+        const [warehouseId, articleId] = entityId.split(':');
+        const qty = this.db.prepare('SELECT qty FROM stock WHERE warehouse_id = ? AND article_id = ?').pluck().get(warehouseId, articleId) as number | undefined;
+        return qty === undefined ? null : { warehouse_id: warehouseId, article_id: articleId, qty, updated_at: this.now() };
       }
       case 'store_price': {
         const [articleId, storeId] = entityId.split(':');
@@ -512,6 +542,12 @@ export class SyncService extends Base {
           this.db.prepare('DELETE FROM article_packs WHERE article_id = ?').run(event.entityId);
           for (const pack of p['packs'] as Record<string, unknown>[]) this.upsert('article_packs', pack);
         }
+        // Photo : null la retire ; un poste ancien n'envoie pas la clé.
+        if ('photo' in p) {
+          const ph = p['photo'] as { photo: string; thumb: string; updated_at: string } | null;
+          if (ph) this.upsert('article_photos', { article_id: event.entityId, ...ph }, ['article_id']);
+          else this.db.prepare('DELETE FROM article_photos WHERE article_id = ?').run(event.entityId);
+        }
         return;
       }
       case 'sale': {
@@ -523,6 +559,21 @@ export class SyncService extends Base {
       case 'lot': {
         this.upsert('lots', { ...p, qty: 0 }, ['id'], true);
         lots.add(event.entityId);
+        return;
+      }
+      case 'stock_level': {
+        // Stock d'un dépôt d'un autre magasin ; celui de ce magasin vient de ses propres mouvements.
+        const own = this.db
+          .prepare("SELECT 1 FROM warehouses w JOIN settings k ON k.key = 'station.storeId' AND k.value = w.store_id WHERE w.id = ?")
+          .get(String(p['warehouse_id']));
+        if (own) return;
+        this.db
+          .prepare(
+            `INSERT INTO stock_levels (warehouse_id, article_id, qty, updated_at) VALUES (@warehouse_id, @article_id, @qty, @updated_at)
+             ON CONFLICT (warehouse_id, article_id) DO UPDATE SET qty = excluded.qty, updated_at = excluded.updated_at
+             WHERE excluded.updated_at >= stock_levels.updated_at`,
+          )
+          .run({ warehouse_id: p['warehouse_id'], article_id: p['article_id'], qty: p['qty'], updated_at: p['updated_at'] });
         return;
       }
       case 'stock_movement': {

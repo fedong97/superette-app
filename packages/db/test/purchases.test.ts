@@ -1,4 +1,4 @@
-import { suggestReorder } from '@superette/core';
+import { receiptToText, renderDocHtml, renderDocTicket, suggestReorder } from '@superette/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type Context, type Services, createServices, openDatabase } from '../src';
 
@@ -72,6 +72,11 @@ describe('fournisseurs et achats', () => {
       ],
     });
     expect(order).toMatchObject({ number: 'BC-DLA11-00001', state: 'draft', total_ht: 26_400, expected_date: '2026-10-09' });
+    const bc = renderDocHtml(s.receipts.purchaseTemplate('purchaseOrder', ctx.storeId, 'a4'), s.receipts.purchaseOrderDoc(order.id));
+    expect(bc).toContain('Bon de commande BC-DLA11-00001');
+    expect(bc).toContain('Livraison souhaitée : 09/10/2026');
+    expect(bc).toMatch(/Total HT \(FCFA\)<\/td><td class="r">26\s400/);
+    expect(bc).not.toContain('Total TTC');
     expect(() => s.purchases.receiveOrder(ctx, order.id, { lines: [] })).toThrow('Envoyez la commande');
     s.purchases.setOrderStatus(ctx, order.id, 'sent');
 
@@ -126,6 +131,15 @@ describe('fournisseurs et achats', () => {
     expect(() => s.purchases.paySupplier(ctx, { invoiceId: invoice.id, method: 'MTN_MOMO', amount: 10_000 })).toThrow('référence');
     s.purchases.paySupplier(ctx, { invoiceId: invoice.id, method: 'CASH', amount: 10_000 });
     expect(s.purchases.getInvoice(invoice.id)).toMatchObject({ state: 'partial', balance: 9_319 });
+    // Impression avec le modèle de facture d'achat : fournisseur, pièce du fournisseur, règlements et reste à payer.
+    const t = s.receipts.purchaseTemplate('purchaseInvoice', ctx.storeId, 'a4');
+    const html = renderDocHtml(t, s.receipts.purchaseInvoiceDoc(invoice.id));
+    expect(html).toContain('Facture d’achat FF-DLA11-00001');
+    expect(html).toContain('Facture du fournisseur n° FA-2026-118 du 06/10/2026');
+    expect(html).toContain('33 Export 65 cl');
+    expect(html).toMatch(/Reste à payer<\/td><td class="r">9\s319/);
+    const ticket = receiptToText(renderDocTicket(s.receipts.purchaseTemplate('purchaseInvoice', ctx.storeId, 'ticket'), s.receipts.purchaseInvoiceDoc(invoice.id)), 48);
+    expect(ticket).toContain('Fournisseur : SABC');
     expect(() => s.purchases.paySupplier(ctx, { invoiceId: invoice.id, method: 'CASH', amount: 10_000 })).toThrow('reste à payer');
 
     advanceDays(31);

@@ -105,7 +105,9 @@ export interface Printer {
   sessionReport(sessionId: string, blind?: boolean): Promise<void>;
   openDrawer(): Promise<void>;
   testPage(withDrawer: boolean): Promise<void>;
-  purchaseOrder(orderId: string): Promise<void>;
+  /** Bon de commande et facture d'achat selon un modèle (A4 par défaut). Renvoient false si annulé. */
+  purchaseOrder(orderId: string, opts?: InvoicePrintOptions): Promise<boolean>;
+  previewPurchaseOrder(orderId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
   /** Facture selon un modèle (A4 par défaut) ; `output: 'pdf'` l'enregistre. Renvoie false si annulé. */
   invoice(saleId: string, opts?: InvoicePrintOptions): Promise<boolean>;
   /** Page HTML de la facture selon le modèle, pour l'aperçu. */
@@ -146,7 +148,8 @@ export interface Printer {
   transferNote(transferId: string): Promise<void>;
   productionNote(orderId: string): Promise<void>;
   /** Facture fournisseur A4 : en-tête, lignes (prix, remise, gratuits, net) et règlements. */
-  purchaseInvoice(invoiceId: string): Promise<void>;
+  purchaseInvoice(invoiceId: string, opts?: InvoicePrintOptions): Promise<boolean>;
+  previewPurchaseInvoice(invoiceId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
   /** Stock multi-magasin : un article par ligne, une colonne par magasin. */
   stockByStore(storeId: string, opts: { search?: string | null; familyId?: string | null; shortage?: boolean }): Promise<void>;
   reorderSheet(storeId: string, lines: { articleId: string; supplierId: string | null; qty: Milli; unitCost: Fcfa }[]): Promise<void>;
@@ -614,7 +617,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     ) => s.purchases.updateOrder(ctx(['purchase_orders']), id, input),
     'purchases.setOrderStatus': (id: string, status: 'sent' | 'closed' | 'cancelled') => s.purchases.setOrderStatus(ctx(['order_close']), id, status),
     'purchases.receiveOrder': (id: string, input: Parameters<Services['purchases']['receiveOrder']>[2]) => s.purchases.receiveOrder(ctx(['order_receive']), id, input),
-    'purchases.printOrder': (id: string) => (requireUser(), printer.purchaseOrder(id)),
+    'purchases.printOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (requireUser(), printer.purchaseOrder(id, opts)),
+    'purchases.previewOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => (
+      requireUser(), { ...printer.previewPurchaseOrder(id, opts), doc: 'purchaseOrder' as const, variant: 'order' as DocVariant }
+    ),
     'purchases.receptions': (opts?: { supplierId?: string; uninvoiced?: boolean }) => s.purchases.listReceptions(ctx().storeId, opts),
     'purchases.reception': (id: string) => (requireUser(), s.purchases.getReception(id)),
     'purchases.invoicePreview': (receptionIds: string[]) => (requireUser(), s.purchases.invoicePreview(receptionIds)),
@@ -631,7 +637,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (input.payment && !can(user!, ['supplier_pay'])) throw new AppError("Vous n'avez pas le droit de régler les fournisseurs", 'FORBIDDEN');
       return s.purchases.directInvoice(c, input);
     },
-    'purchases.printInvoice': (id: string) => (requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']), printer.purchaseInvoice(id)),
+    'purchases.printInvoice': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (
+      requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']), printer.purchaseInvoice(id, opts)
+    ),
+    'purchases.previewInvoice': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => (
+      requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']),
+      { ...printer.previewPurchaseInvoice(id, opts), doc: 'purchaseInvoice' as const, variant: 'supplierInvoice' as DocVariant }
+    ),
     'purchases.pay': (input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null; registerId?: string | null }) =>
       s.purchases.paySupplier(ctx(['supplier_pay']), input),
     'purchases.due': () => s.purchases.dueSchedule(ctx(['purchase_due']).storeId),
@@ -1078,7 +1090,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Document servant à l'aperçu d'un modèle : la dernière pièce de cette variante, sinon un exemple. */
     'docs.sample': (variant: DocVariant) => {
       const { storeId } = ctx(['print_templates']);
-      if (variant === 'quote' || variant === 'proforma') {
+      if (variant === 'order') {
+        const last = s.purchases.listOrders(storeId, { limit: 1 })[0];
+        if (last) return { real: true, number: last.number, data: s.receipts.purchaseOrderDoc(last.id) };
+      } else if (variant === 'supplierInvoice') {
+        const last = s.purchases.listInvoices(storeId).find((i) => i.kind === 'invoice');
+        if (last) return { real: true, number: last.number, data: s.receipts.purchaseInvoiceDoc(last.id) };
+      } else if (variant === 'quote' || variant === 'proforma') {
         const last = s.quotes.list(storeId, { limit: 60 }).find((q) => q.kind === variant);
         if (last) return { real: true, number: last.number, data: s.receipts.quoteDoc(last.id) };
       } else {

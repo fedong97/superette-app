@@ -14,14 +14,34 @@ import { formatRate, splitTtc } from './tax';
 import { numberToWordsFr } from './words';
 import type { Receipt, ReceiptLine } from './escpos';
 
-export const DOC_KINDS = { invoice: 'Facture client', quote: 'Devis et proforma', delivery: 'Bon de livraison' } as const;
+export const DOC_KINDS = {
+  invoice: 'Facture client',
+  quote: 'Devis et proforma',
+  delivery: 'Bon de livraison',
+  purchaseOrder: 'Bon de commande',
+  purchaseInvoice: 'Facture d’achat',
+} as const;
 export type DocKind = keyof typeof DOC_KINDS;
 export const DOC_FORMATS = { ticket: 'Ticket de caisse', a4: 'A4', listing: 'Listing' } as const;
 export type DocFormat = keyof typeof DOC_FORMATS;
-export const DOC_VARIANTS = { cash: 'Comptant', credit: 'À terme', quote: 'Devis', proforma: 'Proforma', delivery: 'Bon de livraison' } as const;
+export const DOC_VARIANTS = {
+  cash: 'Comptant',
+  credit: 'À terme',
+  quote: 'Devis',
+  proforma: 'Proforma',
+  delivery: 'Bon de livraison',
+  order: 'Commande fournisseur',
+  supplierInvoice: 'Facture fournisseur',
+} as const;
 export type DocVariant = keyof typeof DOC_VARIANTS;
 /** Variantes de chaque document. */
-export const DOC_KIND_VARIANTS: Record<DocKind, DocVariant[]> = { invoice: ['cash', 'credit'], quote: ['quote', 'proforma'], delivery: ['delivery'] };
+export const DOC_KIND_VARIANTS: Record<DocKind, DocVariant[]> = {
+  invoice: ['cash', 'credit'],
+  quote: ['quote', 'proforma'],
+  delivery: ['delivery'],
+  purchaseOrder: ['order'],
+  purchaseInvoice: ['supplierInvoice'],
+};
 export const DOC_PAPERS = { '80mm': 'Rouleau 80 mm', '58mm': 'Rouleau 58 mm', A4: 'A4', A5: 'A5' } as const;
 export type DocPaper = keyof typeof DOC_PAPERS;
 export const DOC_FONTS = { sans: 'Arial (sans empattement)', serif: 'Times (avec empattement)', mono: 'Courier (machine à écrire)' } as const;
@@ -30,6 +50,7 @@ export type DocFont = keyof typeof DOC_FONTS;
 /** Colonnes possibles du tableau des articles, avec leur titre par défaut. */
 export const DOC_COLUMNS = {
   line: 'N°',
+  supplierRef: 'Réf. fournisseur',
   code: 'Code',
   barcode: 'Code-barres',
   label: 'Désignation',
@@ -41,10 +62,12 @@ export const DOC_COLUMNS = {
   vat: 'TVA',
   totalHt: 'Total HT',
   totalTtc: 'Total TTC',
+  freeQty: 'Gratuits',
+  netCost: 'Coût net',
 } as const;
 export type DocColumnKey = keyof typeof DOC_COLUMNS;
 const COLUMN_KEYS = Object.keys(DOC_COLUMNS) as DocColumnKey[];
-const NUMERIC_COLUMNS: DocColumnKey[] = ['qty', 'unitPrice', 'unitPriceHt', 'discount', 'vat', 'totalHt', 'totalTtc'];
+const NUMERIC_COLUMNS: DocColumnKey[] = ['qty', 'unitPrice', 'unitPriceHt', 'discount', 'vat', 'totalHt', 'totalTtc', 'freeQty', 'netCost'];
 
 export interface DocColumn {
   key: DocColumnKey;
@@ -150,6 +173,7 @@ export interface DocData {
     thanks: string;
     vatEnabled: boolean;
   };
+  /** Client, ou fournisseur pour les documents d'achat. */
   customer: {
     name: string;
     code: string | null;
@@ -161,8 +185,10 @@ export interface DocData {
     /** Client de passage (nom saisi à la caisse, sans compte). */
     counter: boolean;
   } | null;
+  /** « Client » (par défaut) ou « Fournisseur ». */
+  partyLabel?: string;
   doc: {
-    kind: 'sale' | 'return' | 'quote';
+    kind: 'sale' | 'return' | 'quote' | 'purchase';
     number: string;
     /** Date et heure ISO. */
     date: string;
@@ -177,6 +203,8 @@ export interface DocData {
     validUntil?: string | null;
     /** Observations saisies sur le document. */
     notes?: string | null;
+    /** Autres informations du document (« Facture fournisseur n° 123 du 10/10/2026 », « Livrer à : Magasin »). */
+    extra?: string[];
   };
   lines: DocLine[];
   payments: { label: string; amount: number }[];
@@ -203,6 +231,11 @@ export interface DocLine {
   promoName: string | null;
   /** Plus d'une unité ou un conditionnement : le ticket détaille « 6 x 650 ». */
   detail: boolean;
+  /** Achats : référence chez le fournisseur, remise en %, gratuits, coût net. */
+  supplierRef?: string | null;
+  discountLabel?: string;
+  freeQty?: string;
+  netCost?: number;
 }
 
 /** Emplacement d'un modèle : un document, un format, une variante. */
@@ -339,6 +372,48 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
         totals,
         footer,
         columns: cols({ code: 0, label: 0, qty: 0 }),
+      },
+    ];
+  })(),
+  ...((): DocTemplate[] => {
+    const supplier = { show: true, code: false, address: true, phone: true, niu: true, balance: false };
+    const noTotals = { ttc: false, ht: false, vatDetail: false, discount: false, promo: false, rounding: false, payments: false, change: false, remaining: false, words: false };
+    const order = {
+      info: { title: 'Bon de commande', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: false, validUntil: false },
+      totals: { ...noTotals, ht: true },
+      footer: { text: '', thanks: '', signatures: true, signLeft: 'Établi par {vendeur}', signRight: 'Signature et cachet', duplicate: false },
+    };
+    const invoice = {
+      info: { title: 'Facture d’achat', number: true, date: true, time: false, seller: false, register: false, priceLevel: false, dueDate: true, validUntil: false },
+      totals: { ...noTotals, ttc: true, ht: true, vatDetail: true, discount: true, payments: true, remaining: true },
+      footer: { text: '', thanks: '', signatures: true, signLeft: 'Contrôlé par', signRight: 'Visa', duplicate: false },
+    };
+    const ticket = { ...TICKET_BASE, customer: { ...supplier, address: false, niu: false } };
+    return [
+      { ...A4_BASE, doc: 'purchaseOrder', id: 'purchaseOrder-a4-order', variant: 'order', name: 'Bon de commande A4', customer: supplier, ...order, columns: cols({ supplierRef: 13, code: 10, label: 0, qty: 8, unitPrice: [11, 'PU HT'], discount: 10, freeQty: 9, totalHt: 13 }) },
+      { ...LISTING_BASE, doc: 'purchaseOrder', id: 'purchaseOrder-listing-order', variant: 'order', name: 'Bon de commande listing', customer: supplier, ...order, columns: cols({ supplierRef: 14, code: 12, label: 0, qty: 10, unitPrice: [12, 'PU HT'], totalHt: 13 }) },
+      { ...ticket, doc: 'purchaseOrder', id: 'purchaseOrder-ticket-order', variant: 'order', name: 'Bon de commande ticket', ...order, info: { ...order.info, title: 'BON DE COMMANDE' }, footer: { ...order.footer, signatures: false }, columns: cols({ label: 0, qty: 0, unitPrice: 0, totalHt: 0 }) },
+      {
+        ...A4_BASE,
+        doc: 'purchaseInvoice',
+        id: 'purchaseInvoice-a4-supplierInvoice',
+        variant: 'supplierInvoice',
+        name: 'Facture d’achat A4',
+        customer: supplier,
+        ...invoice,
+        columns: cols({ code: 9, label: 0, qty: 8, unitPrice: [10, 'PU HT'], discount: 10, freeQty: 9, netCost: 10, totalHt: 12 }),
+      },
+      { ...LISTING_BASE, doc: 'purchaseInvoice', id: 'purchaseInvoice-listing-supplierInvoice', variant: 'supplierInvoice', name: 'Facture d’achat listing', customer: supplier, ...invoice, columns: cols({ code: 12, label: 0, qty: 10, netCost: 12, totalHt: 13 }) },
+      {
+        ...ticket,
+        doc: 'purchaseInvoice',
+        id: 'purchaseInvoice-ticket-supplierInvoice',
+        variant: 'supplierInvoice',
+        name: 'Facture d’achat ticket',
+        ...invoice,
+        info: { ...invoice.info, title: 'FACTURE D’ACHAT' },
+        footer: { ...invoice.footer, signatures: false },
+        columns: cols({ label: 0, qty: 0, netCost: 0, totalHt: 0 }),
       },
     ];
   })(),
@@ -489,7 +564,8 @@ function fill(text: string, d: DocData): string {
     .replace(/\{numero\}/g, d.doc.number)
     .replace(/\{date\}/g, dayFr(d.doc.date))
     .replace(/\{echeance\}/g, d.doc.dueDate ? dayFr(d.doc.dueDate) : '')
-    .replace(/\{validite\}/g, d.doc.validUntil ? dayFr(d.doc.validUntil) : '');
+    .replace(/\{validite\}/g, d.doc.validUntil ? dayFr(d.doc.validUntil) : '')
+    .replace(/\{vendeur\}/g, d.doc.seller);
 }
 
 function vatByRate(d: DocData) {
@@ -497,6 +573,13 @@ function vatByRate(d: DocData) {
   for (const l of d.lines) byRate.set(l.vatRate, (byRate.get(l.vatRate) ?? 0) + l.totalTtc);
   return [...byRate.entries()].map(([rate, ttc]) => ({ rate, ttc, tva: splitTtc(ttc, rate).tva }));
 }
+
+/** Titre : celui du modèle, sauf pour un retour (« Avoir », « Avoir fournisseur »). */
+const docTitle = (t: DocTemplate, d: DocData) =>
+  d.doc.kind === 'return' && t.doc === 'invoice' ? 'Avoir' : d.doc.kind === 'return' && t.doc === 'purchaseInvoice' ? 'Avoir fournisseur' : fill(t.info.title, d);
+const sellerLabel = (d: DocData) => (d.partyLabel ? 'Établi par' : 'Vendeur');
+/** TVA par taux (ventes, à partir du TTC) ; un document d'achat donne seulement le total de TVA. */
+const vatRows = (d: DocData) => (d.partyLabel ? (d.totals.tva ? [{ label: 'TVA', base: null as number | null, tva: d.totals.tva }] : []) : vatByRate(d).map((v) => ({ label: `TVA ${formatRate(v.rate)}`, base: v.ttc as number | null, tva: v.tva })));
 
 const shown = (t: DocTemplate, d: DocData) => {
   const noVat = docWithoutVat(d);
@@ -519,7 +602,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
   if (r.length) r.push({ t: 'rule' });
 
-  const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'RETOUR CLIENT' : fill(t.info.title, d);
+  const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'RETOUR CLIENT' : docTitle(t, d);
   if (title) r.push({ t: 'text', text: title, bold: true });
   if (d.doc.cancelled) r.push({ t: 'text', text: 'ANNULÉ', bold: true });
   if (d.doc.duplicate && t.footer.duplicate) r.push({ t: 'text', text: 'DUPLICATA', bold: true });
@@ -529,7 +612,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (meta) r.push({ t: 'text', text: meta });
   const c = d.customer;
   if (t.customer.show && c) {
-    r.push({ t: 'text', text: `Client : ${c.name}` });
+    r.push({ t: 'text', text: `${d.partyLabel ?? 'Client'} : ${c.name}` });
     if (t.customer.code && c.code) r.push({ t: 'text', text: `Compte : ${c.code}` });
     if (t.customer.phone && c.phone) r.push({ t: 'text', text: `Tél. : ${c.phone}` });
     if (t.customer.address && c.address) r.push({ t: 'text', text: c.address });
@@ -537,6 +620,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   }
   if (t.info.priceLevel && d.doc.priceLevel) r.push({ t: 'text', text: `Tarif : ${d.doc.priceLevel}` });
   if (t.info.validUntil && d.doc.validUntil) r.push({ t: 'text', text: `Valable jusqu'au ${dayFr(d.doc.validUntil)}` });
+  for (const x of d.doc.extra ?? []) r.push({ t: 'text', text: x });
   r.push({ t: 'rule' });
 
   const on = new Set(shown(t, d).map((x) => x.key));
@@ -544,10 +628,12 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
     const left = [on.has('line') ? `${d.lines.indexOf(l) + 1}.` : '', on.has('code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ');
     r.push({ t: 'row', left, right: on.has('totalTtc') ? money(l.totalTtc + l.promo) : on.has('totalHt') ? money(l.totalHt) : '' });
     const qty = `${l.qty}${l.unit ? ` ${l.unit}` : ''}`;
-    const priced = on.has('unitPrice') || on.has('unitPriceHt');
+    const price = on.has('unitPrice') ? l.unitPrice : on.has('unitPriceHt') ? l.unitPriceHt : on.has('netCost') ? l.netCost : undefined;
+    const priced = price !== undefined;
     const parts = [
-      priced ? `${qty} x ${money(on.has('unitPrice') ? l.unitPrice : l.unitPriceHt)}` : on.has('qty') ? `Qté : ${qty}` : '',
-      on.has('discount') && l.discount ? `(remise ${money(l.discount)})` : '',
+      priced ? `${qty} x ${money(price)}` : on.has('qty') ? `Qté : ${qty}` : '',
+      on.has('discount') && (l.discountLabel || l.discount) ? `(remise ${l.discountLabel ?? money(l.discount)})` : '',
+      on.has('freeQty') && l.freeQty ? `+ ${l.freeQty} gratuits` : '',
       on.has('vat') ? `TVA ${formatRate(l.vatRate)}` : '',
     ].filter(Boolean);
     if (parts.length && (l.detail || !priced || (on.has('discount') && l.discount) || on.has('vat'))) r.push({ t: 'row', left: parts.join(' '), right: '', indent: 2 });
@@ -556,7 +642,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   }
   if (t.totals.ttc || t.totals.ht || t.totals.payments) r.push({ t: 'rule' });
   const tot = d.totals;
-  if (t.totals.ht && !noVat) r.push({ t: 'row', left: 'Total HT', right: money(tot.ht) });
+  if (t.totals.ht && (!noVat || !t.totals.ttc)) r.push({ t: 'row', left: tx('TOTAL HT FCFA', noVat), right: money(tot.ht), bold: !t.totals.ttc, big: !t.totals.ttc });
   if (t.totals.discount && tot.discount) r.push({ t: 'row', left: 'Remises', right: money(tot.discount) });
   if (t.totals.ttc) r.push({ t: 'row', left: 'TOTAL FCFA', right: money(tot.ttc), bold: true, big: true });
   if (t.totals.rounding && tot.rounding) r.push({ t: 'row', left: 'dont arrondi espèces', right: `-${money(tot.rounding)}`, indent: 2 });
@@ -572,8 +658,8 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
     r.push({ t: 'rule' });
     if (noVat) r.push(centered('TVA non applicable'));
     else {
-      for (const v of vatByRate(d)) r.push({ t: 'row', left: `TVA ${formatRate(v.rate)} sur ${money(v.ttc)}`, right: money(v.tva) });
-      r.push({ t: 'row', left: 'dont TVA', right: money(tot.tva) });
+      for (const v of vatRows(d)) r.push({ t: 'row', left: v.base === null ? v.label : `${v.label} sur ${money(v.base)}`, right: money(v.tva) });
+      if (!d.partyLabel) r.push({ t: 'row', left: 'dont TVA', right: money(tot.tva) });
     }
   }
   if (t.footer.signatures) {
@@ -710,7 +796,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
       ? `<div class="head"><div class="store">${logo}<div>${ident}</div></div>${client}</div>`
       : `${logo ? `<div class="logo">${logo}</div>` : ''}<div class="head"><div class="store"><div>${ident}</div></div>${client}</div>`;
 
-  const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'Avoir' : fill(t.info.title, d);
+  const title = docTitle(t, d);
   const titleLine = `<h2>${esc(title)}${t.info.number ? ` ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (annulé)' : ''}${
     d.doc.duplicate && t.footer.duplicate ? ' <span class="dup">DUPLICATA</span>' : ''
   }</h2>`;
@@ -718,9 +804,10 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
     t.info.date ? `Date : ${t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)}` : '',
     t.info.dueDate && d.doc.dueDate ? `Échéance : ${dayFr(d.doc.dueDate)}` : '',
     t.info.validUntil && d.doc.validUntil ? `Valable jusqu'au ${dayFr(d.doc.validUntil)}` : '',
-    t.info.seller ? `Vendeur : ${esc(d.doc.seller)}` : '',
+    t.info.seller && d.doc.seller ? `${sellerLabel(d)} : ${esc(d.doc.seller)}` : '',
     t.info.register && d.doc.register ? `Caisse : ${esc(d.doc.register)}` : '',
     t.info.priceLevel && d.doc.priceLevel ? `Tarif : ${esc(d.doc.priceLevel)}` : '',
+    ...(d.doc.extra ?? []).map(esc),
   ].filter(Boolean);
 
   const columns = shown(t, d);
@@ -728,6 +815,9 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   const cell = (key: DocColumnKey, l: DocLine, i: number): string => {
     switch (key) {
       case 'line': return String(i + 1);
+      case 'supplierRef': return esc(l.supplierRef ?? '');
+      case 'freeQty': return esc(l.freeQty ?? '');
+      case 'netCost': return l.netCost === undefined ? '' : money(l.netCost);
       case 'code': return esc(l.code ?? '');
       case 'barcode': return esc(l.barcode ?? '');
       case 'label': return esc(l.label);
@@ -735,22 +825,22 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
       case 'unit': return esc(l.unit);
       case 'unitPrice': return money(l.unitPrice);
       case 'unitPriceHt': return money(l.unitPriceHt);
-      case 'discount': return l.discount ? money(l.discount) : '';
+      case 'discount': return l.discountLabel ? esc(l.discountLabel) : l.discount ? money(l.discount) : '';
       case 'vat': return formatRate(l.vatRate);
       case 'totalHt': return money(l.totalHt);
       case 'totalTtc': return money(l.totalTtc);
     }
   };
   const right = (k: DocColumnKey) => (NUMERIC_COLUMNS.includes(k) ? ' class="r"' : '');
-  const table = `<table class="lines"><colgroup>${columns.map((x) => `<col${x.width ? ` style="width:${x.width}%"` : ''}>`).join('')}</colgroup>
+  const table = !d.lines.length ? '' : `<table class="lines"><colgroup>${columns.map((x) => `<col${x.width ? ` style="width:${x.width}%"` : ''}>`).join('')}</colgroup>
     <thead><tr>${columns.map((x) => `<th${right(x.key)}>${esc(tx(x.label, noVat))}</th>`).join('')}</tr></thead>
     <tbody>${d.lines.map((l, i) => `<tr>${columns.map((x) => `<td${right(x.key)}>${cell(x.key, l, i)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 
   const tot = d.totals;
   const row = (label: string, v: number, cls = '') => `<tr${cls ? ` class="${cls}"` : ''}><td>${label}</td><td class="r">${money(v)}</td></tr>`;
   const totals = [
-    t.totals.ht && !noVat ? row('Total HT', tot.ht) : '',
-    t.totals.vatDetail && !noVat ? vatByRate(d).filter((v) => v.rate > 0).map((v) => row(`TVA ${formatRate(v.rate)}`, v.tva)).join('') : '',
+    t.totals.ht && (!noVat || !t.totals.ttc) ? row(tx('Total HT (FCFA)', noVat && !t.totals.ttc), tot.ht, t.totals.ttc ? '' : 'total') : '',
+    t.totals.vatDetail && !noVat ? vatRows(d).filter((v) => v.tva).map((v) => row(v.label, v.tva)).join('') : '',
     t.totals.discount && tot.discount ? row('Remises accordées', tot.discount) : '',
     t.totals.promo && tot.promo ? row('Promotions', tot.promo) : '',
     t.totals.rounding && tot.rounding ? row('Arrondi espèces', -tot.rounding) : '',
@@ -793,6 +883,7 @@ export function sampleDocData(variant: DocVariant, store?: Partial<DocData['stor
   ];
   const ttc = lines.reduce((s, l) => s + l.totalTtc, 0);
   const ht = lines.reduce((s, l) => s + l.totalHt, 0);
+  if (variant === 'order' || variant === 'supplierInvoice') return samplePurchase(variant, store);
   const quote = variant === 'quote' || variant === 'proforma';
   const known = credit || quote || variant === 'delivery';
   const paid = credit ? 10000 : quote ? 0 : ttc + 650;
@@ -818,5 +909,43 @@ export function sampleDocData(variant: DocVariant, store?: Partial<DocData['stor
     lines,
     payments: credit ? [{ label: 'Espèces', amount: 10000 }, { label: 'Crédit client', amount: ttc - 10000 }] : quote ? [] : [{ label: 'Espèces', amount: paid }],
     totals: { ht, tva: ttc - ht, ttc, discount: 500, promo: 0, rounding: 0, change: credit || quote ? 0 : paid - ttc, remaining: credit ? ttc - 10000 : 0 },
+  };
+}
+
+/** Bon de commande ou facture d'achat d'exemple. */
+function samplePurchase(variant: 'order' | 'supplierInvoice', store?: Partial<DocData['store']>): DocData {
+  const invoice = variant === 'supplierInvoice';
+  const line = (ref: string, code: string, label: string, qty: number, gross: number, discountPct: number, free: number): DocLine => {
+    const net = Math.round((gross * (100 - discountPct)) / 100);
+    const totalHt = qty * net;
+    return {
+      code, barcode: null, label, qty: String(qty), unit: '', unitPrice: gross, unitPriceHt: gross, discount: 0, vatRate: 1925, totalHt, totalTtc: totalHt,
+      promo: 0, promoName: null, detail: true, supplierRef: ref, discountLabel: discountPct ? `${discountPct} %` : '', freeQty: free ? String(free) : '', netCost: net,
+    };
+  };
+  const lines = [line('CAS-65', 'BOI012', 'Bière Castel 65 cl (casier de 12)', 20, 6500, 0, 1), line('UB5', 'RIZ005', "Riz parfumé Uncle Ben's 5 kg", 30, 3800, 5, 0), line('DIA1', 'HUI010', 'Huile Diamaor 1 L', 48, 1050, 0, 0)];
+  const ht = lines.reduce((s, l) => s + l.totalHt, 0);
+  const tva = Math.round((ht * 1925) / 10000);
+  const inDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  return {
+    store: { name: 'Mon magasin', address: 'Rue principale, Douala', phone: '6 99 00 00 00', niu: 'M000000000000A', rccm: '', logo: '', message: '', thanks: '', vatEnabled: true, ...store },
+    customer: { name: 'SABC Distribution', code: 'F0003', address: 'Zone industrielle de Bassa, Douala', phone: '2 33 40 00 00', niu: 'M098765432109C', balance: null, counter: false },
+    partyLabel: 'Fournisseur',
+    doc: {
+      kind: 'purchase',
+      number: invoice ? 'FA-DLA1-00045' : 'BC-DLA1-00031',
+      date: new Date().toISOString().slice(0, 10),
+      dueDate: invoice ? inDays(30) : null,
+      seller: 'Steve',
+      register: null,
+      priceLevel: null,
+      cancelled: false,
+      duplicate: false,
+      notes: invoice ? null : 'Livraison le matin avant 10 h.',
+      extra: invoice ? [`Facture du fournisseur n° 2026-8841 du ${new Date().toLocaleDateString('fr-FR')}`] : [`Livraison souhaitée : ${new Date(Date.now() + 3 * 86400000).toLocaleDateString('fr-FR')}`, 'Livrer à : Magasin principal'],
+    },
+    lines,
+    payments: invoice ? [{ label: 'Virement', amount: 300000 }] : [],
+    totals: { ht, tva: invoice ? tva : 0, ttc: invoice ? ht + tva : ht, discount: 0, promo: 0, rounding: 0, change: 0, remaining: invoice ? ht + tva - 300000 : 0 },
   };
 }

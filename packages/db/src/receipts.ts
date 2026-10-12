@@ -24,6 +24,7 @@ import type { InventoryService } from './inventories';
 import { REBATE_KINDS, type RebateService } from './rebates';
 import { EmoneyService } from './emoney';
 import type { QuoteService } from './quotes';
+import { SUPPLIER_PAYMENT_METHODS, type PurchaseService } from './purchases';
 import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
@@ -56,6 +57,7 @@ export class ReceiptService extends Base {
     private readonly inventories?: InventoryService,
     private readonly rebates?: RebateService,
     private readonly quotes?: QuoteService,
+    private readonly purchases?: PurchaseService,
   ) {
     super(db, clock);
   }
@@ -121,6 +123,115 @@ export class ReceiptService extends Base {
     if (!ids.length) return new Map();
     const rows = this.db.prepare(`SELECT id, code FROM articles WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: string; code: string }[];
     return new Map(rows.map((a) => [a.id, a.code]));
+  }
+
+  /** Modèle d'impression d'un bon de commande ou d'une facture d'achat. */
+  purchaseTemplate(doc: 'purchaseOrder' | 'purchaseInvoice', storeId: string, format: DocFormat | null, templateId?: string | null): DocTemplate {
+    return resolveTemplate(this.admin.storeSettings(storeId), doc, format, doc === 'purchaseOrder' ? 'order' : 'supplierInvoice', templateId);
+  }
+
+  private supplierParty(supplierId: string): DocData['customer'] {
+    const sup = this.purchases!.getSupplier(supplierId);
+    return { name: sup.name, code: sup.code, address: sup.address, phone: sup.phone, niu: sup.taxpayer_number, balance: null, counter: false };
+  }
+
+  /** Remise en % et gratuits d'une ligne d'achat (« 12 achetés, 10 payés » rappelé sous les gratuits). */
+  private purchaseTerms(l: { discount_bp: number; free_qty: number; promo_buy: number | null; promo_pay: number | null; unit: 'piece' | 'kg' | 'litre' }) {
+    return {
+      discountLabel: l.discount_bp ? `${(l.discount_bp / 100).toLocaleString('fr-FR')} %` : '',
+      freeQty: l.free_qty ? `${formatQty(l.free_qty, l.unit)}${l.promo_buy && l.promo_pay !== null ? ` (${l.promo_buy} achetés, ${l.promo_pay} payés)` : ''}` : '',
+    };
+  }
+
+  /** Contenu d'un bon de commande fournisseur pour les modèles d'impression. */
+  purchaseOrderDoc(orderId: string): DocData {
+    const o = this.purchases!.getOrder(orderId);
+    return {
+      store: this.docStore(o.store_id),
+      customer: this.supplierParty(o.supplier_id),
+      partyLabel: 'Fournisseur',
+      doc: {
+        kind: 'purchase',
+        number: o.number,
+        date: o.order_date,
+        dueDate: null,
+        seller: o.user_name ?? '',
+        register: null,
+        priceLevel: null,
+        cancelled: o.status === 'cancelled',
+        duplicate: false,
+        notes: o.notes,
+        extra: [...(o.expected_date ? [`Livraison souhaitée : ${dayFr(o.expected_date)}`] : []), `Livrer à : ${o.warehouse_name}`],
+      },
+      lines: o.lines.map((l) => ({
+        code: l.article_code,
+        barcode: null,
+        label: l.article_name,
+        qty: formatQty(l.qty, l.unit),
+        unit: '',
+        unitPrice: l.unit_cost,
+        unitPriceHt: l.unit_cost,
+        discount: 0,
+        vatRate: 0,
+        totalHt: l.total_ht,
+        totalTtc: l.total_ht,
+        promo: 0,
+        promoName: null,
+        detail: true,
+        supplierRef: l.supplier_ref,
+        netCost: l.qty ? Math.round((l.total_ht * 1000) / l.qty) : l.unit_cost,
+        ...this.purchaseTerms(l),
+      })),
+      payments: [],
+      totals: { ht: o.total_ht, tva: 0, ttc: o.total_ht, discount: 0, promo: 0, rounding: 0, change: 0, remaining: 0 },
+    };
+  }
+
+  /** Contenu d'une facture d'achat ou d'un avoir fournisseur pour les modèles d'impression. */
+  purchaseInvoiceDoc(invoiceId: string): DocData {
+    const i = this.purchases!.getInvoice(invoiceId);
+    const lines = this.purchases!.invoiceLines(invoiceId);
+    return {
+      store: this.docStore(i.store_id),
+      customer: this.supplierParty(i.supplier_id),
+      partyLabel: 'Fournisseur',
+      doc: {
+        kind: i.kind === 'invoice' ? 'purchase' : 'return',
+        number: i.number,
+        date: i.invoice_date,
+        dueDate: i.due_date,
+        seller: '',
+        register: null,
+        priceLevel: null,
+        cancelled: false,
+        duplicate: false,
+        notes: i.notes,
+        extra: [`Facture du fournisseur n° ${i.supplier_number} du ${dayFr(i.invoice_date)}`, ...(i.direct ? ['Saisie directe, sans bon de commande'] : [])],
+      },
+      lines: lines.map((l) => ({
+        code: l.article_code,
+        barcode: null,
+        label: l.article_name,
+        qty: formatQty(l.qty, l.unit),
+        unit: '',
+        unitPrice: l.gross_cost ?? l.unit_cost,
+        unitPriceHt: l.gross_cost ?? l.unit_cost,
+        discount: 0,
+        vatRate: l.vat_rate_bp,
+        totalHt: l.total_ht,
+        totalTtc: l.total_ht,
+        promo: 0,
+        promoName: null,
+        detail: true,
+        netCost: l.unit_cost,
+        ...this.purchaseTerms(l),
+      })),
+      payments: this.purchases!.invoicePayments(invoiceId).map((p) => ({
+        label: `${dayFr(p.paid_at)} · ${SUPPLIER_PAYMENT_METHODS[p.method] ?? p.method}${p.reference ? ` (${p.reference})` : ''}`,
+        amount: p.amount,
+      })),
+      totals: { ht: i.total_ht, tva: i.total_tva, ttc: i.total_ttc, discount: i.discount, promo: 0, rounding: 0, change: 0, remaining: i.balance },
+    };
   }
 
   /** Contenu d'un devis ou d'une proforma pour les modèles d'impression. */

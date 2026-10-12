@@ -116,6 +116,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Aperçu avant impression dans Ventes et la fiche client : changez de modèle, imprimez ou enregistrez la facture en PDF. Les réimpressions portent « DUPLICATA ».',
       'Devis et proformas : modèles A4, listing et ticket, avec la date de validité, les observations et le montant en lettres ; « Aperçu et impression… » dans la fiche du devis.',
       'Nouveau bon de livraison d’une vente (A4, listing ou ticket) : quantités sans prix, zones « Livré par » et « Reçu par ». Il se choisit dans l’aperçu de la vente.',
+      'Achats : modèles du bon de commande et de la facture d’achat (A4, listing, ticket), avec le fournisseur, sa référence, la pièce du fournisseur, les règlements et le reste à payer ; « Aperçu et impression… » dans la commande et la facture.',
     ],
   },
   {

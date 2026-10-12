@@ -439,10 +439,11 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
               {check('info', 'number', 'Numéro')}
               {check('info', 'date', 'Date')}
               {check('info', 'time', 'Heure')}
-              {check('info', 'seller', 'Vendeur')}
+              {check('info', 'seller', 'Vendeur ou établi par')}
               {check('info', 'register', 'Caisse')}
               {check('info', 'priceLevel', 'Tarif (gros, super gros)')}
               {check('info', 'dueDate', 'Échéance')}
+              {check('info', 'validUntil', 'Validité ou livraison souhaitée')}
             </div>
           </Section>
 
@@ -493,6 +494,7 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
 
           <Section title="Totaux">
             <div className="checks">
+              {check('totals', 'ttc', 'Total TTC')}
               {check('totals', 'ht', 'Total HT')}
               {check('totals', 'vatDetail', 'Détail de la TVA')}
               {check('totals', 'discount', 'Remises accordées')}

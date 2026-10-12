@@ -1,4 +1,4 @@
-import { DOC_FORMATS, DOC_KINDS, DOC_VARIANTS, type DocFormat, type DocVariant } from '@superette/core';
+import { DOC_FORMATS, DOC_KINDS, DOC_VARIANTS, type DocFormat, type DocKind, type DocVariant } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { call } from '../api';
 import { Modal, useLoad, useToast } from '../ui';
@@ -20,8 +20,26 @@ export const ZOOMS: [number, string][] = [
   [1.25, '125 %'],
 ];
 
-type Preview = { templateId: string; html: string; doc: 'invoice' | 'quote'; variant: DocVariant };
-type Source = { kind: 'sale'; id: string } | { kind: 'quote'; id: string };
+type Preview = { templateId: string; html: string; doc: DocKind; variant: DocVariant };
+type Source = { kind: 'sale' | 'quote' | 'purchaseOrder' | 'purchaseInvoice'; id: string };
+type Opts = { templateId?: string; format?: 'a4'; output?: 'print' | 'pdf' };
+
+const previewOf = (source: Source, opts: Opts) =>
+  source.kind === 'sale'
+    ? call('pos.previewInvoice', source.id, opts)
+    : source.kind === 'quote'
+      ? call('quotes.preview', source.id, opts)
+      : source.kind === 'purchaseOrder'
+        ? call('purchases.previewOrder', source.id, opts)
+        : call('purchases.previewInvoice', source.id, opts);
+const printOf = (source: Source, opts: Opts): Promise<boolean> =>
+  source.kind === 'sale'
+    ? call('pos.printInvoice', source.id, opts)
+    : source.kind === 'quote'
+      ? call('quotes.print', source.id, opts)
+      : source.kind === 'purchaseOrder'
+        ? call('purchases.printOrder', source.id, opts)
+        : call('purchases.printInvoice', source.id, opts);
 
 /** Aperçu d'une vente (facture ou bon de livraison) avant impression. */
 export function InvoicePreview({ saleId, onClose }: { saleId: string; onClose: () => void }) {
@@ -42,8 +60,8 @@ export function DocPreview({ source, onClose }: { source: Source; onClose: () =>
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const opts = templateId ? { templateId } : { format: 'a4' as const };
-    (source.kind === 'sale' ? call('pos.previewInvoice', source.id, opts) : call('quotes.preview', source.id, opts))
+    const opts: Opts = templateId ? { templateId } : { format: 'a4' };
+    previewOf(source, opts)
       .then(setPreview)
       .catch((err) => (toast.error(err), onClose()));
   }, [source.id, templateId]);
@@ -57,8 +75,8 @@ export function DocPreview({ source, onClose }: { source: Source; onClose: () =>
   const run = async (output: 'print' | 'pdf') => {
     setBusy(true);
     try {
-      const opts = { templateId: preview.templateId, output };
-      const done = await (source.kind === 'sale' ? call('pos.printInvoice', source.id, opts) : call('quotes.print', source.id, opts));
+      const opts: Opts = { templateId: preview.templateId, output };
+      const done = await printOf(source, opts);
       if (done) toast.ok(output === 'pdf' ? 'PDF enregistré' : 'Document imprimé');
     } catch (err) {
       toast.error(err);

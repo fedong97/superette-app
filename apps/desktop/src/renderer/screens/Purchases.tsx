@@ -8,6 +8,7 @@ import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { type RecLine, RecLinesTable, newRecLine, recLineInput } from './Stock';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
 import { hasVat, tx } from '../tax';
+import { DocPreview } from './docPreview';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
@@ -334,6 +335,7 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
   const canClose = can('order_close');
   const order = useLoad(() => call('purchases.order', id), [id]);
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
+  const [preview, setPreview] = useState(false);
   const o = order.data;
   if (!o) return null;
   const setStatus = async (status: 'sent' | 'closed' | 'cancelled', question?: string) => {
@@ -412,7 +414,8 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
       )}
       <div className="actions">
         <button onClick={onBack}>Retour à la liste</button>
-        <button onClick={() => call('purchases.printOrder', o.id).catch(toast.error)}>Imprimer (A4)</button>
+        <button onClick={() => setPreview(true)}>Aperçu et impression…</button>
+        {preview && <DocPreview source={{ kind: 'purchaseOrder', id: o.id }} onClose={() => setPreview(false)} />}
         {canEdit && o.state === 'draft' && <button onClick={() => onEdit(o)}>Modifier</button>}
         {canClose && o.state === 'draft' && (
           <>
@@ -911,8 +914,10 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const data = useLoad(() => call('purchases.invoice', id), [id]);
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
   const [paying, setPaying] = useState(false);
+  const [preview, setPreview] = useState(false);
   if (!data.data) return null;
   const { invoice: i, payments, lines } = data.data;
+  if (preview) return <DocPreview source={{ kind: 'purchaseInvoice', id: i.id }} onClose={() => setPreview(false)} />;
   return (
     <Modal title={`${i.kind === 'invoice' ? 'Facture' : 'Avoir'} ${i.number} · ${i.supplier_name}`} onClose={onClose} wide>
       <p>
@@ -972,7 +977,7 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
         </table>
       )}
       <div className="actions">
-        <button onClick={() => call('purchases.printInvoice', i.id).catch(toast.error)}>Imprimer (A4)</button>
+        <button onClick={() => setPreview(true)}>Aperçu et impression…</button>
         {i.balance > 0 && can('supplier_pay') && (
           <button className="primary" onClick={() => setPaying(true)}>
             {i.kind === 'invoice' ? 'Régler' : 'Enregistrer le remboursement'}
@@ -1063,6 +1068,7 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
  */
 function DirectInvoice({ canPay }: { canPay: boolean }) {
   const toast = useToast();
+  const [preview, setPreview] = useState<string | null>(null);
   const app = useLoad(() => call('app.state'), []);
   const vat = app.data?.station?.store.vat_enabled !== 0;
   const [supplierId, setSupplierId] = useState('');
@@ -1107,7 +1113,8 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
         <p className="muted">La marchandise est entrée en stock et le bon de réception est rattaché à la facture.</p>
         <div className="actions">
           <button onClick={() => setOpen(done.id)}>Voir la facture</button>
-          <button onClick={() => call('purchases.printInvoice', done.id).catch(toast.error)}>Imprimer (A4)</button>
+          <button onClick={() => setPreview(done.id)}>Aperçu et impression…</button>
+          {preview && <DocPreview source={{ kind: 'purchaseInvoice', id: preview }} onClose={() => setPreview(null)} />}
           <button
             className="primary"
             onClick={() => {

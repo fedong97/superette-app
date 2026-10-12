@@ -16,9 +16,9 @@ const builtin = (id: string) => BUILTIN_TEMPLATES.find((t) => t.id === id)!;
 describe('modèles d’impression', () => {
   it('un modèle par emplacement : chaque document en ticket, A4 et listing, pour chacune de ses variantes', () => {
     const slots = BUILTIN_TEMPLATES.map((t) => `${t.doc}.${t.format}.${t.variant}`);
-    // Facture (comptant, à terme), devis (devis, proforma), bon de livraison : 5 variantes × 3 formats.
-    expect(new Set(slots).size).toBe(15);
-    expect(slots.length).toBe(15);
+    // Facture (comptant, à terme), devis (devis, proforma), bon de livraison, bon de commande, facture d'achat : 7 variantes × 3 formats.
+    expect(new Set(slots).size).toBe(21);
+    expect(slots.length).toBe(21);
     expect(resolveTemplate({}, 'invoice', 'listing', 'credit').id).toBe('invoice-listing-credit');
   });
 

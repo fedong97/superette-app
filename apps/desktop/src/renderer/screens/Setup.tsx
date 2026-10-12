@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { call } from '../api';
+import logo from '../assets/logo.svg';
 import { Field, useToast } from '../ui';
 
 /** Premier démarrage : création du premier magasin et du compte administrateur. */
@@ -78,7 +79,10 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
   return (
     <div className="center-page">
       <form className="card setup" onSubmit={submit}>
-        <h1>Bienvenue</h1>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img src={logo} alt="" width={44} height={44} />
+          Bienvenue dans FEDO Gestion
+        </h1>
         <p>Première installation : renseignez votre magasin et le compte administrateur. Vous pourrez ajouter d'autres magasins et caisses ensuite.</p>
         <h3>Magasin</h3>
         <div className="grid2">

@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.38.0',
+    items: [
+      'Le logiciel s’appelle maintenant FEDO Gestion, avec son logo sur l’écran de connexion, l’icône du bureau et l’installateur.',
+      'Vos données, vos réglages et votre licence sont gardés : rien à refaire après la mise à jour.',
+    ],
+  },
+  {
     version: '0.37.0',
     items: [
       'Licence : Administration › Licence montre le code machine de ce PC (à copier ou envoyer par WhatsApp) et active la clé reçue de votre fournisseur.',

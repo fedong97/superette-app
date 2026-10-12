@@ -28,6 +28,7 @@ import {
   type Context,
   type CustomerInput,
   type CustomerPaymentMethod,
+  type DigestConfig,
   type DisclosuresInput,
   type ExpenseInput,
   type ChargePlanInput,
@@ -73,6 +74,8 @@ export interface SystemHooks {
   openFolder(path: string): Promise<void>;
   /** Ferme la base, la remplace par la sauvegarde et relance l'application. */
   restore(file: string, userId: string): void;
+  /** Résumé du soir par e-mail : chiffre le mot de passe pour ce PC, envoie le résumé du jour. */
+  digest?: { seal(password: string): string; sendNow(): Promise<string> };
 }
 
 export interface Printer {
@@ -1217,6 +1220,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'charges.late': () => (user && can(user, ['charge_plans']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
 
     'reports.daily': (date: string) => s.reports.daily(ctx(['dashboard']).storeId, date),
+    /** Résumé du jour du magasin, à envoyer au gérant par WhatsApp ou par e-mail. */
+    'digest.preview': (date?: string | null) => s.digest.build(ctx(['dashboard']).storeId, date || s.digest.day(0)),
+    'digest.config': () => {
+      requireAdmin();
+      return s.digest.config();
+    },
+    /** password : nouveau mot de passe ; absent ou null, on garde l'actuel ; vide, on l'efface. */
+    'digest.saveConfig': (input: DigestConfig, password?: string | null) => {
+      const u = requireAdmin();
+      let sealed: string | undefined;
+      if (password === '') sealed = '';
+      else if (password) {
+        if (!system.digest) throw new AppError("L'envoi par e-mail n'est pas disponible sur ce poste", 'INVALID');
+        sealed = system.digest.seal(password);
+      }
+      s.digest.saveConfig(u.id, input, sealed);
+      return s.digest.config();
+    },
+    'digest.sendNow': async () => {
+      requireAdmin();
+      if (!system.digest) throw new AppError("L'envoi par e-mail n'est pas disponible sur ce poste", 'INVALID');
+      return system.digest.sendNow();
+    },
     /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
     'attention.list': () => {
       const c = ctx(['dashboard']);

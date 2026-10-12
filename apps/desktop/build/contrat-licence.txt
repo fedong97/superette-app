@@ -1,0 +1,77 @@
+﻿CONTRAT DE LICENCE D'UTILISATION DU LOGICIEL FEDO GESTION
+
+Entre FEDONG, éditeur du logiciel FEDO Gestion (ci-après « l'Éditeur »), et la personne physique ou morale qui installe ou utilise le logiciel (ci-après « le Client »).
+
+En installant ou en utilisant FEDO Gestion, le Client reconnaît avoir lu ce contrat et l'accepter sans réserve. S'il ne l'accepte pas, il ne doit ni installer ni utiliser le logiciel.
+
+
+1. OBJET
+
+Ce contrat fixe les conditions dans lesquelles l'Éditeur concède au Client le droit d'utiliser le logiciel FEDO Gestion (caisse, stock, achats, clients, comptabilité) et ses mises à jour éventuelles.
+
+
+2. PROPRIÉTÉ
+
+FEDO Gestion reste la propriété exclusive de l'Éditeur. Le Client n'acquiert qu'un droit d'utilisation personnel, non exclusif et non cessible. Le nom FEDO Gestion, le logo et la documentation appartiennent à l'Éditeur.
+
+
+3. LICENCE, DURÉE ET POSTES
+
+3.1. Le logiciel s'active avec une clé de licence fournie par l'Éditeur. La clé est liée au code machine du PC indiqué par le Client et précise le nombre de PC et de magasins autorisés.
+
+3.2. La licence est mensuelle, annuelle ou à vie, selon la formule choisie et payée par le Client. Les dates de début et de fin figurent dans Administration › Licence.
+
+3.3. Sans licence, le logiciel fonctionne en essai pendant 15 jours.
+
+3.4. À la fin d'une licence non renouvelée, le Client dispose de 15 jours de grâce. Ensuite, l'encaissement des ventes est bloqué jusqu'au renouvellement. La consultation des données, la clôture de caisse et les sauvegardes restent toujours possibles.
+
+3.5. Le prix payé pour une période commencée n'est pas remboursable, sauf accord écrit de l'Éditeur.
+
+3.6. En cas de changement ou de panne d'un PC, l'Éditeur transfère la licence sur le nouveau PC à la demande du Client. Le Client s'engage alors à ne plus utiliser l'ancien PC avec cette licence.
+
+
+4. INTERDICTIONS
+
+Le Client s'interdit, sans accord écrit de l'Éditeur :
+- de copier le logiciel ou une clé de licence pour l'utiliser sur un PC ou dans un magasin non autorisé ;
+- de vendre, louer, prêter ou céder le logiciel ou sa licence à un tiers ;
+- de modifier, décompiler ou désassembler le logiciel, ou de chercher à contourner la licence, notamment en modifiant la date de l'ordinateur ;
+- de retirer les mentions de propriété de l'Éditeur.
+
+Toute violation met fin à la licence immédiatement, sans remboursement, et sans préjudice de poursuites.
+
+
+5. DONNÉES DU CLIENT
+
+5.1. Les données saisies (articles, ventes, clients, comptabilité) appartiennent au Client. Elles sont enregistrées sur ses PC et, le cas échéant, sur son serveur central.
+
+5.2. L'Éditeur n'accède pas aux données du Client, sauf à sa demande pour une intervention d'assistance.
+
+5.3. Le Client est responsable de ses sauvegardes. Le logiciel propose des sauvegardes automatiques ; le Client veille à en garder une copie hors du PC (clé USB, disque externe).
+
+
+6. ASSISTANCE ET MISES À JOUR
+
+L'assistance (installation, formation, dépannage) et la fourniture des mises à jour sont assurées selon les conditions convenues avec l'Éditeur au moment de l'achat. Les mises à jour peuvent ajouter, modifier ou retirer des fonctions.
+
+
+7. GARANTIE ET RESPONSABILITÉ
+
+7.1. L'Éditeur s'efforce de fournir un logiciel fiable et corrige les anomalies qui lui sont signalées dans un délai raisonnable.
+
+7.2. Le logiciel est un outil d'aide à la gestion. Le Client reste responsable de ses prix, de ses comptes, de ses déclarations fiscales et sociales, et de la vérification des documents produits.
+
+7.3. L'Éditeur n'est pas responsable des dommages indirects (perte de chiffre d'affaires, perte de données non sauvegardées, interruption d'activité), ni des pannes de matériel, de réseau ou d'électricité. Dans tous les cas, sa responsabilité est limitée au montant payé par le Client pour la licence au cours des 12 derniers mois.
+
+
+8. DURÉE ET FIN DU CONTRAT
+
+Le contrat prend effet à l'installation du logiciel et dure tant que la licence est valable. Il prend fin à l'expiration de la licence non renouvelée ou en cas de manquement du Client à ses obligations.
+
+
+9. DROIT APPLICABLE ET LITIGES
+
+Ce contrat est soumis au droit camerounais et aux Actes uniformes de l'OHADA. Les parties cherchent d'abord une solution amiable. À défaut, le litige est porté devant les juridictions compétentes du ressort du siège de l'Éditeur.
+
+
+FEDONG, éditeur de FEDO Gestion.

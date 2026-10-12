@@ -4,12 +4,14 @@ import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
 import { Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
+import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
+import contract from '../../../build/contrat-licence.txt?raw';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'backups' | 'server' | 'license' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'backups' | 'server' | 'license' | 'digest' | 'audit';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -27,6 +29,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
     ['license', 'Licence'],
+    ...(can('dashboard') ? ([['digest', 'Résumé du jour']] as [Tab, string][]) : []),
     ...(can('audit') ? ([['audit', "Journal d'audit"]] as [Tab, string][]) : []),
   ];
   return (
@@ -54,6 +57,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}
+      {tab === 'digest' && can('dashboard') && <Digest isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && can('audit') && <Audit />}
     </div>
   );
@@ -614,6 +618,7 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   const status = useLoad(() => call('license.status'));
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showContract, setShowContract] = useState(false);
   const st = status.data;
   if (!st) return null;
   const lic = st.license;
@@ -623,8 +628,16 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
     <div className="narrow">
       <p>
         FEDO Gestion s'utilise avec une licence liée à ce PC. Envoyez le code machine à votre fournisseur ; il vous renvoie une clé de licence à
-        coller ci-dessous. Les autres PC reliés au serveur central reçoivent la licence tout seuls.
+        coller ci-dessous. Les autres PC reliés au serveur central reçoivent la licence tout seuls.{' '}
+        <button type="button" className="link" onClick={() => setShowContract(true)}>
+          Lire le contrat de licence
+        </button>
       </p>
+      {showContract && (
+        <Modal title="Contrat de licence" wide onClose={() => setShowContract(false)}>
+          <pre className="contract">{contract.replace(/^\uFEFF/, '')}</pre>
+        </Modal>
+      )}
       <p className={st.canSell ? (st.warn ? 'warn-text' : 'pos') : 'neg'}>
         <strong>{st.message}</strong>
       </p>

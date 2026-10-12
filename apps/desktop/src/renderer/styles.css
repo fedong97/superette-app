@@ -730,3 +730,12 @@ input.qty.promo { width: 64px; }
 
 /* Logo FEDO Gestion sur l'écran de connexion */
 .card.login .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: #1f7a5c; }
+pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.5; max-height: 65vh; overflow-y: auto; margin: 0; }
+.digest { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.digest-text { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.5; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 8px 0; max-height: 60vh; overflow-y: auto; }
+.digest a.button { display: inline-block; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px; text-decoration: none; color: inherit; background: var(--panel); }
+.digest a.button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 700; }
+.digest-settings h3 { margin: 0 0 4px; }
+.digest-settings h4 { margin: 16px 0 4px; }
+.digest-settings label.check { display: flex; gap: 8px; align-items: center; margin: 8px 0; font-weight: 600; }
+@media (max-width: 1100px) { .digest { grid-template-columns: 1fr; } }

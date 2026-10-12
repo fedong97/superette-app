@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.39.0',
+    items: [
+      'Résumé du jour (Administration › Résumé du jour) : ventes, encaissements par moyen de paiement, état des caisses et écarts, meilleures ventes et points à surveiller, à envoyer au gérant par WhatsApp en un clic.',
+      'L’administrateur peut aussi faire partir ce résumé chaque soir par e-mail, à l’heure choisie, depuis le PC où il le règle.',
+      'Le contrat de licence s’affiche à l’installation et dans Administration › Licence.',
+    ],
+  },
+  {
     version: '0.38.0',
     items: [
       'Le logiciel s’appelle maintenant FEDO Gestion, avec son logo sur l’écran de connexion, l’icône du bureau et l’installateur.',

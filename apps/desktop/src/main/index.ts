@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { AppError, openServices, restoreDatabase } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
+import { createDigestMailer } from './digest';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 
@@ -76,6 +77,7 @@ void app.whenReady().then(() => {
   const backupStart = setTimeout(autoBackup, 60_000);
   // Toutes les 5 minutes : la sauvegarde du jour, puis celle de l'heure fixe réglée.
   const backupTimer = setInterval(autoBackup, 300_000);
+  const digest = createDigestMailer(services);
 
   const system: SystemHooks = {
     chooseFolder: async (title) => {
@@ -95,12 +97,14 @@ void app.whenReady().then(() => {
       const error = await shell.openPath(path);
       if (error) throw new AppError(error);
     },
+    digest: { seal: digest.seal, sendNow: digest.sendNow },
     restore: (file, userId) => {
       const safetyFile = services.backups.safetyFile();
       const keep = services.backups.localSettings();
       // Laisse partir la réponse à l'écran avant de fermer la base.
       setTimeout(() => {
         sync.stop();
+        digest.stop();
         clearTimeout(backupStart);
         clearInterval(backupTimer);
         services.db.close();
@@ -141,6 +145,7 @@ void app.whenReady().then(() => {
     clearTimeout(backupStart);
     clearInterval(backupTimer);
     sync.stop();
+    digest.stop();
     services.db.close();
   });
 });

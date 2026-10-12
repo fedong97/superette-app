@@ -37,6 +37,20 @@ CREATE INDEX events_store ON events (store_id, seq);
 CREATE INDEX events_activation_code ON events ((payload->>'activation_code')) WHERE entity = 'register';
 `,
   },
+  {
+    version: 2,
+    sql: `
+-- Licences reçues des PC : la plus récente fixe le nombre de PC permis et part aux autres PC.
+CREATE TABLE licenses (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL,
+  client TEXT NOT NULL,
+  stations INT NOT NULL,
+  issued TEXT NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+`,
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

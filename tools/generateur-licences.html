@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Générateur de licences</title>
+<!--
+  Générateur de licences Superette Gestion, réservé à l'éditeur.
+  S'ouvre dans Chrome ou Edge, sans Internet. La clé secrète est chargée une
+  fois depuis son fichier .pem puis gardée par le navigateur sans pouvoir être
+  relue ; elle ne quitte jamais ce PC. Le logiciel des clients ne contient que
+  la clé publique ci-dessous : il vérifie les licences sans pouvoir en créer.
+-->
+<style>
+  :root { --bg: #f4f5f7; --card: #fff; --text: #1d2939; --muted: #667085; --line: #d5dae3; --accent: #1f7a5c; --danger: #b42318; --warn: #b54708; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #111418; --card: #1b2026; --text: #e6e9ee; --muted: #98a2b3; --line: #2f3741; --accent: #3ccf9a; --danger: #f97066; --warn: #fdb022; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 4px 0 2px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 14px 0; }
+  .muted { color: var(--muted); }
+  .ok { color: var(--accent); font-weight: 600; }
+  .bad { color: var(--danger); font-weight: 600; }
+  label { display: block; font-weight: 600; margin: 8px 0 3px; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input, select, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+  textarea { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; }
+  .plans { display: flex; gap: 8px; flex-wrap: wrap; }
+  .plans label { display: flex; gap: 6px; align-items: center; font-weight: 500; border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; margin: 0; cursor: pointer; }
+  .plans input { width: auto; }
+  button { padding: 7px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .scroll { overflow-x: auto; }
+  .expiry { font-size: 15px; margin-top: 10px; }
+  details summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Générateur de licences</h1>
+  <p class="muted">Superette Gestion · réservé à l'éditeur. Gardez une copie du fichier de clé secrète sur une clé USB rangée en lieu sûr.</p>
+
+  <section class="card">
+    <h2>1. Clé secrète</h2>
+    <p id="keyState" class="muted">Recherche de la clé…</p>
+    <div class="row">
+      <input type="file" id="keyFile" accept=".pem,.txt" style="max-width: 360px">
+      <button id="forgetKey" type="button">Oublier la clé sur ce PC</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. Paramétrage</h2>
+    <div class="grid">
+      <div><label for="pContact">Votre contact (affiché au client pour renouveler)</label><input id="pContact" placeholder="ex. Steve 6 77 00 00 00"></div>
+      <div><label for="pPlan">Formule proposée</label>
+        <select id="pPlan"><option value="monthly">Mensuelle</option><option value="annual">Annuelle</option><option value="lifetime">À vie</option></select></div>
+      <div><label for="pStations">Nombre de PC proposé</label><input id="pStations" type="number" min="1" value="1"></div>
+      <div><label for="pStores">Nombre de magasins proposé</label><input id="pStores" type="number" min="1" value="1"></div>
+    </div>
+    <div class="row"><button id="saveParams" type="button">Enregistrer le paramétrage</button><span id="paramsSaved" class="ok"></span></div>
+  </section>
+
+  <section class="card">
+    <h2>3. Nouvelle licence</h2>
+    <form id="form">
+      <div class="grid">
+        <div><label for="client">Client (magasin ou société)</label><input id="client" required></div>
+        <div><label for="phone">Téléphone WhatsApp du client</label><input id="phone" placeholder="ex. 237677000000"></div>
+        <div><label for="machine">Code machine reçu du client</label><input id="machine" required placeholder="XXXX-XXXX-XXXX-XXXX" style="text-transform: uppercase"></div>
+      </div>
+      <label>Validité de l'abonnement</label>
+      <div class="plans">
+        <label><input type="radio" name="plan" value="monthly"> Mensuelle (1 mois)</label>
+        <label><input type="radio" name="plan" value="annual"> Annuelle (1 an)</label>
+        <label><input type="radio" name="plan" value="lifetime"> À vie</label>
+      </div>
+      <div class="grid">
+        <div><label for="start">Début de validité</label><input id="start" type="date" required></div>
+        <div><label for="stations">Nombre de PC</label><input id="stations" type="number" min="1" required></div>
+        <div><label for="stores">Nombre de magasins</label><input id="stores" type="number" min="1" required></div>
+      </div>
+      <p class="expiry" id="expiry"></p>
+      <div class="row"><button class="primary" type="submit">Créer la licence</button><span id="formError" class="bad"></span></div>
+    </form>
+    <div id="result" hidden>
+      <label for="keyOut">Clé de licence à envoyer au client</label>
+      <textarea id="keyOut" rows="5" readonly></textarea>
+      <div class="row">
+        <button id="copyKey" type="button">Copier la clé</button>
+        <a id="sendWa" target="_blank" rel="noreferrer">Envoyer par WhatsApp</a>
+      </div>
+      <p class="muted">Le client la colle dans Administration › Licence, sur le PC dont il vous a donné le code.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4. Licences créées</h2>
+    <div class="row" style="margin-top: 0">
+      <input id="search" placeholder="Rechercher un client ou un code machine" style="max-width: 360px">
+      <button id="exportCsv" type="button">Exporter (Excel CSV)</button>
+      <button id="exportJson" type="button">Sauvegarder le registre</button>
+      <label class="row" style="margin: 0; font-weight: 500"><input id="importJson" type="file" accept=".json" hidden><span style="text-decoration: underline; cursor: pointer">Restaurer un registre</span></label>
+    </div>
+    <div class="scroll"><table>
+      <thead><tr><th>N°</th><th>Client</th><th>Code machine</th><th>Formule</th><th>Validité</th><th>PC</th><th>Créée le</th><th></th></tr></thead>
+      <tbody id="register"></tbody>
+    </table></div>
+  </section>
+
+  <details class="card">
+    <summary>Avancé : créer une nouvelle paire de clés</summary>
+    <p>À ne faire que si votre clé secrète est perdue ou volée. Les licences déjà vendues ne seront plus reconnues par une nouvelle version du logiciel, et la clé publique devra être remplacée dans le logiciel et le serveur central avant de compiler.</p>
+    <button id="newPair" type="button">Créer une nouvelle paire</button>
+    <textarea id="newPublic" rows="3" readonly hidden></textarea>
+  </details>
+</main>
+
+<script>
+'use strict';
+const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEANc6pFEZB747aucZFvJws/lEKyWGiPHM+eoOjTp9Mhjk=
+-----END PUBLIC KEY-----`;
+const PLAN_LABELS = { monthly: 'Mensuelle', annual: 'Annuelle', lifetime: 'À vie' };
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { alert("Ce navigateur n'enregistre pas les données : exportez le registre."); } },
+};
+
+// --- Clé secrète, gardée dans IndexedDB sans pouvoir être relue --------------
+function idb() {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open('generateur-licences', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('keys');
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function idbDo(mode, fn) {
+  const db = await idb();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction('keys', mode);
+    const req = fn(t.objectStore('keys'));
+    t.oncomplete = () => resolve(req && req.result);
+    t.onerror = () => reject(t.error);
+  });
+}
+const pemToDer = (pem) => Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')), (c) => c.charCodeAt(0));
+const derToPem = (der, label) => `-----BEGIN ${label}-----\n${btoa(String.fromCharCode(...new Uint8Array(der))).match(/.{1,64}/g).join('\n')}\n-----END ${label}-----\n`;
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+let privateKey = null;
+
+/** La clé chargée signe-t-elle des licences que le logiciel reconnaît ? */
+async function matchesSoftware(key) {
+  const pub = await crypto.subtle.importKey('spki', pemToDer(PUBLIC_KEY_PEM), { name: 'Ed25519' }, false, ['verify']);
+  const probe = new TextEncoder().encode('superette-gestion');
+  const sig = await crypto.subtle.sign({ name: 'Ed25519' }, key, probe);
+  return crypto.subtle.verify({ name: 'Ed25519' }, pub, sig, probe);
+}
+
+async function showKeyState() {
+  const el = $('keyState');
+  if (!privateKey) {
+    el.className = 'bad';
+    el.textContent = 'Aucune clé chargée : choisissez le fichier cle-secrete-licences-superette.pem.';
+    return;
+  }
+  const ok = await matchesSoftware(privateKey);
+  el.className = ok ? 'ok' : 'bad';
+  el.textContent = ok
+    ? 'Clé secrète chargée : elle correspond au logiciel Superette Gestion.'
+    : 'Cette clé ne correspond pas au logiciel : les licences créées seraient refusées.';
+}
+
+$('keyFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const key = await crypto.subtle.importKey('pkcs8', pemToDer(await file.text()), { name: 'Ed25519' }, false, ['sign']);
+    await idbDo('readwrite', (s) => s.put(key, 'private'));
+    privateKey = key;
+  } catch (err) {
+    alert(`Fichier de clé illisible (${err.message}). Utilisez Chrome ou Edge à jour.`);
+  }
+  e.target.value = '';
+  showKeyState();
+});
+$('forgetKey').addEventListener('click', async () => {
+  if (!confirm('Oublier la clé sur ce PC ? Il faudra recharger le fichier .pem pour créer des licences.')) return;
+  await idbDo('readwrite', (s) => s.delete('private'));
+  privateKey = null;
+  showKeyState();
+});
+
+// --- Paramétrage ---------------------------------------------------------------
+const params = () => store.get('params', { contact: '', plan: 'annual', stations: 1, stores: 1 });
+function loadParams() {
+  const p = params();
+  $('pContact').value = p.contact;
+  $('pPlan').value = p.plan;
+  $('pStations').value = p.stations;
+  $('pStores').value = p.stores;
+}
+$('saveParams').addEventListener('click', () => {
+  store.set('params', {
+    contact: $('pContact').value.trim(),
+    plan: $('pPlan').value,
+    stations: Math.max(1, parseInt($('pStations').value, 10) || 1),
+    stores: Math.max(1, parseInt($('pStores').value, 10) || 1),
+  });
+  $('paramsSaved').textContent = 'Enregistré';
+  setTimeout(() => ($('paramsSaved').textContent = ''), 2000);
+  resetForm();
+});
+
+// --- Dates ---------------------------------------------------------------------
+const pad = (n) => String(n).padStart(2, '0');
+const iso = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+const parse = (s) => new Date(`${s}T00:00:00Z`);
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const fr = (s) => s.split('-').reverse().join('/');
+function addDays(s, n) { const d = parse(s); d.setUTCDate(d.getUTCDate() + n); return iso(d); }
+/** Même jour N mois plus tard (le 31 janvier donne le 28 ou 29 février). */
+function addMonths(s, n) {
+  const d = parse(s);
+  const y = d.getUTCFullYear(), m = d.getUTCMonth() + n, day = d.getUTCDate();
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return iso(new Date(Date.UTC(y, m, Math.min(day, last))));
+}
+/** Dernier jour de validité : la veille du même jour, un mois ou un an plus tard. */
+function expiryOf(plan, start) {
+  if (plan === 'lifetime') return null;
+  return addDays(addMonths(start, plan === 'monthly' ? 1 : 12), -1);
+}
+
+// --- Formulaire ----------------------------------------------------------------
+const plan = () => (document.querySelector('input[name=plan]:checked') || {}).value;
+const CROCKFORD = /^[0-9A-HJKMNP-TV-Z]{16}$/;
+function normalizeMachine(v) {
+  const c = v.toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+  return CROCKFORD.test(c) ? c.match(/.{4}/g).join('-') : null;
+}
+function showExpiry() {
+  const p = plan(), s = $('start').value;
+  if (!p || !s) { $('expiry').textContent = ''; return; }
+  const e = expiryOf(p, s);
+  $('expiry').innerHTML = e
+    ? `Valable du <strong>${fr(s)}</strong> au <strong>${fr(e)}</strong> inclus, puis 15 jours de grâce avant l'arrêt des ventes.`
+    : `Valable à partir du <strong>${fr(s)}</strong>, <strong>sans date de fin</strong>.`;
+}
+function resetForm(prefill) {
+  const p = params();
+  $('client').value = prefill?.client ?? '';
+  $('phone').value = prefill?.phone ?? '';
+  $('machine').value = prefill?.machine ?? '';
+  $('start').value = prefill?.start ?? today();
+  $('stations').value = prefill?.stations ?? p.stations;
+  $('stores').value = prefill?.stores ?? p.stores;
+  const chosen = prefill?.plan ?? p.plan;
+  document.querySelectorAll('input[name=plan]').forEach((r) => (r.checked = r.value === chosen));
+  showExpiry();
+}
+document.querySelectorAll('input[name=plan]').forEach((r) => r.addEventListener('change', showExpiry));
+$('start').addEventListener('change', showExpiry);
+
+function newId() {
+  const rnd = crypto.getRandomValues(new Uint8Array(3));
+  return `L-${today().replace(/-/g, '')}-${Array.from(rnd, (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+}
+
+async function sign(payload) {
+  const data = new TextEncoder().encode(JSON.stringify(payload));
+  const sig = await crypto.subtle.sign({ name: 'Ed25519' }, privateKey, data);
+  return `SG1.${b64url(data)}.${b64url(sig)}`;
+}
+
+function waLink(phone, text) {
+  const digits = (phone || '').replace(/\D/g, '');
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('formError').textContent = '';
+  if (!privateKey) { $('formError').textContent = "Chargez d'abord la clé secrète (étape 1)."; return; }
+  const machine = normalizeMachine($('machine').value);
+  if (!machine) { $('formError').textContent = 'Code machine invalide : 16 lettres et chiffres, comme 7KQ2-M9XA-3DTR-P0WF.'; return; }
+  const p = plan();
+  if (!p) { $('formError').textContent = "Choisissez la validité de l'abonnement."; return; }
+  const start = $('start').value;
+  const payload = {
+    v: 1,
+    id: newId(),
+    client: $('client').value.trim(),
+    machine,
+    plan: p,
+    start,
+    expires: expiryOf(p, start),
+    stations: Math.max(1, parseInt($('stations').value, 10) || 1),
+    stores: Math.max(1, parseInt($('stores').value, 10) || 1),
+    issued: new Date().toISOString(),
+  };
+  const contact = params().contact;
+  if (contact) payload.contact = contact;
+  const key = await sign(payload);
+  const phone = $('phone').value.trim();
+  const reg = store.get('register', []);
+  reg.unshift({ ...payload, phone, key });
+  store.set('register', reg);
+  showResult(key, phone, payload);
+  renderRegister();
+});
+
+function showResult(key, phone, payload) {
+  $('result').hidden = false;
+  $('keyOut').value = key;
+  const until = payload.expires ? `jusqu'au ${fr(payload.expires)}` : 'à vie';
+  $('sendWa').href = waLink(phone, `Bonjour, voici votre licence Superette Gestion (${PLAN_LABELS[payload.plan].toLowerCase()}, ${until}). Collez-la dans Administration › Licence :\n\n${key}`);
+  $('keyOut').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+$('copyKey').addEventListener('click', () => {
+  navigator.clipboard.writeText($('keyOut').value).then(
+    () => ($('copyKey').textContent = 'Copiée ✓'),
+    () => { $('keyOut').select(); document.execCommand('copy'); },
+  );
+  setTimeout(() => ($('copyKey').textContent = 'Copier la clé'), 2000);
+});
+
+// --- Registre ------------------------------------------------------------------
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+function renderRegister() {
+  const q = $('search').value.trim().toLowerCase();
+  const rows = store.get('register', []).filter((r) => !q || `${r.client} ${r.machine} ${r.id}`.toLowerCase().includes(q));
+  $('register').innerHTML = rows.length
+    ? rows.map((r, i) => {
+        const late = r.expires && r.expires < today();
+        return `<tr>
+          <td>${esc(r.id)}</td><td>${esc(r.client)}</td><td>${esc(r.machine)}</td><td>${PLAN_LABELS[r.plan]}</td>
+          <td class="${late ? 'bad' : ''}">${r.expires ? `${fr(r.start)} → ${fr(r.expires)}` : `depuis ${fr(r.start)}`}</td>
+          <td>${r.stations}</td><td>${fr(r.issued.slice(0, 10))}</td>
+          <td><button type="button" data-show="${esc(r.id)}">Clé</button> <button type="button" data-renew="${esc(r.id)}">Renouveler</button></td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="8" class="muted">Aucune licence.</td></tr>';
+}
+$('register').addEventListener('click', (e) => {
+  const reg = store.get('register', []);
+  const show = e.target.dataset.show, renew = e.target.dataset.renew;
+  const r = reg.find((x) => x.id === (show || renew));
+  if (!r) return;
+  if (show) showResult(r.key, r.phone, r);
+  if (renew) {
+    // La nouvelle période commence le lendemain de la fin de l'ancienne, sinon aujourd'hui.
+    const start = r.expires && r.expires >= today() ? addDays(r.expires, 1) : today();
+    resetForm({ ...r, start });
+    $('form').scrollIntoView({ behavior: 'smooth' });
+  }
+});
+$('search').addEventListener('input', renderRegister);
+
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+$('exportCsv').addEventListener('click', () => {
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [['N°', 'Client', 'Téléphone', 'Code machine', 'Formule', 'Début', 'Fin', 'PC', 'Magasins', 'Créée le', 'Clé'].map(cell).join(';')];
+  for (const r of store.get('register', [])) {
+    lines.push([r.id, r.client, r.phone, r.machine, PLAN_LABELS[r.plan], fr(r.start), r.expires ? fr(r.expires) : 'à vie', r.stations, r.stores, fr(r.issued.slice(0, 10)), r.key].map(cell).join(';'));
+  }
+  download(`licences-${today()}.csv`, `﻿${lines.join('\r\n')}`, 'text/csv');
+});
+$('exportJson').addEventListener('click', () => download(`registre-licences-${today()}.json`, JSON.stringify(store.get('register', []), null, 1), 'application/json'));
+$('importJson').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const rows = JSON.parse(await file.text());
+    if (!Array.isArray(rows)) throw new Error('format');
+    const known = new Set(store.get('register', []).map((r) => r.id));
+    const merged = [...store.get('register', []), ...rows.filter((r) => r && r.id && r.key && !known.has(r.id))].sort((a, b) => (a.issued < b.issued ? 1 : -1));
+    store.set('register', merged);
+    renderRegister();
+  } catch {
+    alert('Fichier de registre illisible.');
+  }
+  e.target.value = '';
+});
+
+// --- Nouvelle paire de clés ----------------------------------------------------
+$('newPair').addEventListener('click', async () => {
+  if (!confirm('Créer une nouvelle paire ? Les licences vendues ne seront plus reconnues par la prochaine version du logiciel.')) return;
+  const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  download('cle-secrete-licences-superette.pem', derToPem(await crypto.subtle.exportKey('pkcs8', pair.privateKey), 'PRIVATE KEY'), 'application/x-pem-file');
+  $('newPublic').hidden = false;
+  $('newPublic').value = derToPem(await crypto.subtle.exportKey('spki', pair.publicKey), 'PUBLIC KEY');
+  alert('Clé secrète téléchargée. Chargez-la à l’étape 1, et faites remplacer la clé publique affichée dans le logiciel et le serveur central.');
+});
+
+// --- Démarrage -----------------------------------------------------------------
+(async () => {
+  loadParams();
+  resetForm();
+  renderRegister();
+  if (!crypto.subtle || !window.indexedDB) {
+    $('keyState').className = 'bad';
+    $('keyState').textContent = 'Ouvrez ce fichier dans Chrome ou Edge à jour.';
+    return;
+  }
+  try {
+    privateKey = (await idbDo('readonly', (s) => s.get('private'))) || null;
+  } catch {
+    privateKey = null;
+  }
+  showKeyState();
+})();
+</script>
+</body>
+</html>

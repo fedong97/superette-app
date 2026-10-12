@@ -41,6 +41,13 @@ export class SyncController {
     return this.sync.push(device, body?.events);
   }
 
+  @Post('license')
+  @HttpCode(200)
+  async license(@Headers('authorization') auth: string | undefined, @Body() body: { key: string }) {
+    await this.sync.authenticate(auth);
+    return this.sync.uploadLicense(body?.key);
+  }
+
   @Get('sync/pull')
   async pull(@Headers('authorization') auth: string | undefined, @Query('since') since?: string, @Query('limit') limit?: string) {
     const device = await this.sync.authenticate(auth);

@@ -53,13 +53,26 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
       sent += accepted.length;
       if (accepted.length < batch.length) break;
     }
+    // Licence activée sur ce PC : le serveur la garde et la donne aux autres PC du magasin.
+    const key = s.license.pendingUpload();
+    if (key) {
+      try {
+        const r = await request<{ license: string | null }>(creds.url, '/api/v1/license', { token: creds.token, body: { key } });
+        s.license.markUploaded(key);
+        s.license.acceptFromServer(r.license);
+      } catch (e) {
+        // Serveur pas encore mis à jour ou licence refusée : la synchronisation continue.
+        if (e instanceof AppError && e.code === 'SYNC_OFFLINE') throw e;
+      }
+    }
     for (;;) {
       const since = s.sync.state().cursor;
-      const page = await request<{ events: SyncEvent[]; cursor: number; hasMore: boolean }>(creds.url, `/api/v1/sync/pull?since=${since}&limit=1000`, {
+      const page = await request<{ events: SyncEvent[]; cursor: number; hasMore: boolean; license?: string | null }>(creds.url, `/api/v1/sync/pull?since=${since}&limit=1000`, {
         token: creds.token,
       });
       const result = s.sync.applyRemote(page.events);
       s.sync.setCursor(page.cursor);
+      s.license.acceptFromServer(page.license);
       received += result.applied;
       conflicts += result.conflicts;
       if (!page.hasMore) break;

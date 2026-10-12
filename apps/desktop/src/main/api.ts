@@ -270,6 +270,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
       /** Préférences de l'utilisateur : onglets rapides épinglés, dernière version vue. */
       prefs: user ? s.admin.prefs(user.id) : {},
+      /** Licence de ce PC : essai, valable, à renouveler ou bloquée. */
+      license: (() => {
+        const { license, ...rest } = s.license.status();
+        return { ...rest, client: license?.client ?? null };
+      })(),
       /** Taille du texte réglée sur ce PC (Paramètres › Affichage). */
       display: s.admin.getSetting('display.size') === 'large' ? 'large' : 'normal',
     }),
@@ -309,8 +314,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
     // --- Administration -----------------------------------------------------
     'admin.stores': () => (requireUser(), s.admin.listStores()),
-    'admin.createStore': (input: { storeCode: string; storeName: string; address?: string; phone?: string; taxpayerNumber?: string }) =>
-      s.admin.createStore(requireAdmin().id, input),
+    'admin.createStore': (input: { storeCode: string; storeName: string; address?: string; phone?: string; taxpayerNumber?: string }) => {
+      const u = requireAdmin();
+      s.license.assertCanAddStore(s.admin.listStores().length);
+      return s.admin.createStore(u.id, input);
+    },
     'admin.updateStore': (id: string, patch: { name?: string; address?: string | null; phone?: string | null; taxpayer_number?: string | null }) =>
       s.admin.updateStore(requireAdmin().id, id, patch),
     /**
@@ -387,6 +395,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.audit': () => (requireUser(['audit']), s.admin.auditLog()),
     'admin.printers': () => (requireUser(), printer.list()),
     'admin.printTest': (withDrawer: boolean) => (requireUser(['settings_edit']), printer.testPage(withDrawer)),
+
+    // --- Licence -------------------------------------------------------------
+    /** État de la licence et code machine de ce PC (Administration › Licence). */
+    'license.status': () => (requireUser(), s.license.status()),
+    /** Active la clé envoyée par l'éditeur ; un PC relié la transmet aussitôt au serveur central. */
+    'license.activate': (key: string) => {
+      const status = s.license.activate(requireAdmin().id, key);
+      if (s.sync.credentials()) void sync.now().catch((e) => console.warn('[licence]', e instanceof Error ? e.message : e));
+      return status;
+    },
 
     // --- Serveur central ----------------------------------------------------
     'sync.state': () => (requireUser(), s.sync.state()),
@@ -595,6 +613,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       clientName?: string | null;
     }) => {
       const c = ctx(POS);
+      s.license.assertCanSell();
       if (input.lines.some((l) => l.price != null) && !can(user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
       const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(user!, ['discount']) ? user!.id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;

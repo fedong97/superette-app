@@ -4,6 +4,8 @@ export interface ServerConfig {
   port: number;
   /** Clé secrète pour rattacher le premier poste d'un magasin (saisie une fois dans l'application). */
   enrollmentKey: string;
+  /** Clé publique qui vérifie les licences ; celle de l'éditeur par défaut (autre clé : tests seulement). */
+  licensePublicKey?: string;
 }
 
 export const CONFIG = Symbol('CONFIG');

@@ -635,7 +635,7 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
       </p>
       {showContract && (
         <Modal title="Contrat de licence" wide onClose={() => setShowContract(false)}>
-          <pre className="contract">{contract.replace(/^\uFEFF/, '')}</pre>
+          <pre className="contract">{contract.replace(/^\uFEFF/, '').replace(/\r/g, '')}</pre>
         </Modal>
       )}
       <p className={st.canSell ? (st.warn ? 'warn-text' : 'pos') : 'neg'}>

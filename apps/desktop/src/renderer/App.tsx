@@ -304,6 +304,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: 'Licence', open: ['admin', 'license'] },
+      { label: 'Résumé du jour', open: ['admin', 'digest'], perm: 'dashboard' },
       { label: "Journal d'audit", open: ['admin', 'audit'], perm: 'audit' },
     ],
   ],

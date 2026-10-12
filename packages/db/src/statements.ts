@@ -29,6 +29,11 @@ export interface FinancialStatements {
   stock: { opening: Fcfa; closing: Fcfa; variation: Fcfa };
   /** Comptes qu'aucune ligne de l'état ne reprend (à vérifier dans le plan comptable). */
   unmapped: { account: string; balance: Fcfa }[];
+  /**
+   * Marchandises entrées en stock sans facture fournisseur à la fin de la période :
+   * le stock les compte, les achats pas encore, donc le résultat est surévalué d'autant.
+   */
+  uninvoiced: { amount: Fcfa };
 }
 
 /** Tableau des flux de trésorerie (TFT) du SYSCOHADA révisé, méthode indirecte. */
@@ -269,7 +274,27 @@ export class FinancialStatementsService extends Base {
       result,
       stock: cur.stock,
       unmapped: [...unmapped].filter(([, v]) => v).map(([account, balance]) => ({ account, balance })),
+      uninvoiced: this.uninvoiced(storeId, to),
     };
+  }
+
+  /**
+   * Marchandises reçues au plus tard le `to` et pas encore facturées à cette date :
+   * valeur HT des réceptions moins les factures (nettes des avoirs) des fournisseurs.
+   */
+  uninvoiced(storeId: string, to: string): { amount: Fcfa } {
+    const received = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(COALESCE((SELECT SUM(ROUND(l.qty * l.unit_cost / 1000.0)) FROM reception_lines l WHERE l.reception_id = r.id), 0) - r.discount), 0)
+         FROM receptions r WHERE r.store_id = ? AND date(r.received_at, 'localtime') <= ?`,
+      )
+      .pluck()
+      .get(storeId, to) as number;
+    const invoiced = this.db
+      .prepare(`SELECT COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_ht ELSE -total_ht END), 0) FROM supplier_invoices WHERE store_id = ? AND invoice_date <= ?`)
+      .pluck()
+      .get(storeId, to) as number;
+    return { amount: Math.max(0, received - invoiced) };
   }
 
   /** Export pour la saisie de la DSF : une ligne par poste avec sa référence. */

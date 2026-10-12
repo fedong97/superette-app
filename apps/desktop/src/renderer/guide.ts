@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.39.1',
+    items: [
+      'Import du catalogue et des comptages : un fichier enregistré par Excel en « CSV (séparateur point-virgule) » garde ses accents.',
+      'L’avertissement « Sauvegarde en retard » disparaît dès que la sauvegarde est faite.',
+      'Barre d’état plus courte, toujours sur une seule ligne.',
+      'États financiers : un message indique les marchandises entrées en stock sans facture fournisseur, qui gonflent le résultat tant que la facture n’est pas saisie.',
+    ],
+  },
+  {
     version: '0.39.0',
     items: [
       'Résumé du jour (Administration › Résumé du jour) : ventes, encaissements par moyen de paiement, état des caisses et écarts, meilleures ventes et points à surveiller, à envoyer au gérant par WhatsApp en un clic.',

@@ -14,6 +14,11 @@ import {
   type StockLevel,
   type RegisterKind,
   type StoreSettings,
+  type DocFormat,
+  type DocTemplate,
+  type DocVariant,
+  effectiveTemplates,
+  sampleDocData,
 } from '@superette/core';
 import {
   AppError,
@@ -78,9 +83,16 @@ export interface SystemHooks {
   digest?: { seal(password: string): string; sendNow(): Promise<string> };
 }
 
+export interface InvoicePrintOptions {
+  templateId?: string | null;
+  format?: DocFormat | null;
+  output?: 'print' | 'pdf';
+  duplicate?: boolean;
+}
+
 export interface Printer {
   /** `newSale` : ticket d'une vente qui vient d'être encaissée (ouvre le tiroir selon les réglages). */
-  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number }): Promise<void>;
+  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null }): Promise<void>;
   zReport(sessionId: string): Promise<void>;
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
@@ -92,7 +104,10 @@ export interface Printer {
   openDrawer(): Promise<void>;
   testPage(withDrawer: boolean): Promise<void>;
   purchaseOrder(orderId: string): Promise<void>;
-  invoice(saleId: string): Promise<void>;
+  /** Facture selon un modèle (A4 par défaut) ; `output: 'pdf'` l'enregistre. Renvoie false si annulé. */
+  invoice(saleId: string, opts?: InvoicePrintOptions): Promise<boolean>;
+  /** Page HTML de la facture selon le modèle, pour l'aperçu. */
+  previewInvoice(saleId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
   statement(storeId: string, customerId: string, from?: string | null, to?: string | null): Promise<void>;
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
@@ -228,6 +243,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     const u = requireUser();
     if (can(u, ['sales', 'cash_amounts']) || ownRecent(u).some((x) => x.id === saleId)) return u;
     throw new AppError('Vous ne pouvez revoir que vos trois dernières factures', 'FORBIDDEN');
+  };
+  /** Facture d'une vente : juste après la vente par son vendeur (renvoie true), ou plus tard avec le droit de réimprimer. */
+  const invoiceAccess = (saleId: string) => {
+    const u = requireSaleAccess(saleId);
+    const sale = s.pos.getSale(saleId);
+    const fresh = sale.user_id === u.id && Date.now() - Date.parse(sale.created_at) < 15 * 60000;
+    if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer une facture", 'FORBIDDEN');
+    return fresh;
   };
   const SUPPLIERS: Permission[] = ['purchases', 'suppliers', 'purchase_invoices', 'supplier_statement'];
   const STAFF: Permission[] = ['staff', 'staff_edit', 'staff_salaries'];
@@ -687,11 +710,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.zReport': (sessionId: string) => (requireAmounts(), requireUser(['cash_z']), s.pos.zReport(sessionId)),
     'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(['cash_history']).storeId)),
     /** Ticket d'une vente qui vient d'être faite (autant d'exemplaires que réglé), ou réimpression avec le droit. */
-    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean }) => {
+    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean; templateId?: string | null }) => {
       const u = requireSaleAccess(saleId);
       const fresh = Boolean(opts?.newSale && can(u, POS));
       if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer un ticket", 'FORBIDDEN');
-      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1 });
+      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId });
     },
     /** Ouverture du tiroir sans encaissement : tracée dans le journal d'audit. */
     'pos.openDrawer': async () => {
@@ -1025,13 +1048,51 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!Object.values(s.pos.linkedRegisters(u.id)).includes(se.register_id)) requireAmounts();
       return printer.sessionReport(sessionId, true);
     },
-    /** Facture A4 : juste après la vente, ou plus tard avec le droit de réimprimer. */
-    'pos.printInvoice': (saleId: string) => {
-      const u = requireSaleAccess(saleId);
-      const sale = s.pos.getSale(saleId);
-      const fresh = sale.user_id === u.id && Date.now() - Date.parse(sale.created_at) < 15 * 60000;
-      if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer une facture", 'FORBIDDEN');
-      return printer.invoice(saleId);
+    /** Facture selon un modèle : juste après la vente, ou plus tard avec le droit de réimprimer (« DUPLICATA »). */
+    'pos.printInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => {
+      const fresh = invoiceAccess(saleId);
+      return printer.invoice(saleId, { ...opts, duplicate: !fresh });
+    },
+    /** Aperçu d'une facture avec le modèle choisi (ou celui par défaut du format). */
+    'pos.previewInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => {
+      const fresh = invoiceAccess(saleId);
+      return { ...printer.previewInvoice(saleId, { ...opts, duplicate: !fresh }), variant: s.receipts.saleVariant(saleId) };
+    },
+
+    // --- Modèles d'impression -------------------------------------------------
+    /** Modèles du magasin (ceux du logiciel et ceux modifiés ou ajoutés) et modèle par défaut de chaque emplacement. */
+    'docs.templates': () => {
+      requireUser();
+      const set = settings();
+      return { templates: effectiveTemplates(set.printTemplates), stored: set.printTemplates.map((t) => t.id), defaults: set.printDefaults };
+    },
+    /** Enregistre les modèles modifiés ou ajoutés et les modèles par défaut ; ils partent vers les autres postes. */
+    'docs.saveTemplates': (templates: DocTemplate[], defaults: Record<string, string>) => {
+      const c = ctx(['print_templates']);
+      return s.admin.saveStoreSettings(c.userId, c.storeId, { printTemplates: templates, printDefaults: defaults });
+    },
+    /** Facture servant à l'aperçu d'un modèle : la dernière vente de cette variante, sinon un exemple. */
+    'docs.sample': (variant: DocVariant) => {
+      const { storeId } = ctx(['print_templates']);
+      const last = s.pos.listSales({ storeId, limit: 60 }).find((x) => x.kind === 'sale' && x.status === 'completed' && s.receipts.saleVariant(x.id) === variant);
+      if (last) return { real: true, number: last.number, data: s.receipts.saleDoc(last.id) };
+      const store = s.admin.getStore(storeId);
+      const set = settings();
+      return {
+        real: false,
+        number: null,
+        data: sampleDocData(variant, {
+          name: store.name,
+          address: store.address,
+          phone: store.phone,
+          niu: store.taxpayer_number,
+          rccm: set.rccm,
+          logo: set.logo,
+          message: set.ticketHeader,
+          thanks: s.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
+          vatEnabled: store.vat_enabled === 1,
+        }),
+      };
     },
 
     // --- Clients et crédit ----------------------------------------------------

@@ -4,6 +4,7 @@ import { type Result, call } from '../api';
 import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
 import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
 import { ZView } from './PosDialogs';
+import { InvoicePreview } from './docPreview';
 import { tx } from '../tax';
 
 export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export';
@@ -218,6 +219,8 @@ function Export() {
 export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClose: () => void }) {
   const toast = useToast();
   const can = useCan();
+  const [preview, setPreview] = useState(false);
+  if (preview) return <InvoicePreview saleId={sale.id} onClose={() => setPreview(false)} />;
   return (
     <Modal title={`Ticket ${sale.number}`} onClose={() => onClose()}>
       <p className="muted">
@@ -251,8 +254,8 @@ export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClos
       </table>
       <div className="actions">
         {!can('sale_reprint') && <span className="muted">Réimpression non permise (droit « Réimprimer un ticket ou une facture »).</span>}
-        <button disabled={!can('sale_reprint')} onClick={() => call('pos.printInvoice', sale.id).then(() => toast.ok('Facture imprimée'), toast.error)}>
-          Facture A4
+        <button disabled={!can('sale_reprint')} onClick={() => setPreview(true)} title="Aperçu avec le choix du modèle (A4, listing, ticket)">
+          Facture (aperçu)…
         </button>
         <button className="primary" disabled={!can('sale_reprint')} onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
           Réimprimer le ticket

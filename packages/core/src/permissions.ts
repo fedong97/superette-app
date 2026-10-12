@@ -205,6 +205,7 @@ export const PERMISSIONS = {
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   warehouses_manage: { label: 'Créer des dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
+  print_templates: { label: "Modifier les modèles d'impression (factures, tickets)", group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   backups: { label: 'Faire une sauvegarde et consulter les sauvegardes', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   audit: { label: "Consulter le journal d'audit", group: 'Paramétrage du système', type: 'Menu', parent: 'admin' },
 } satisfies Record<string, PermissionDef>;

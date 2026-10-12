@@ -301,6 +301,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Droits par rôle', open: ['admin', 'rights'] },
       { label: 'Privilèges par utilisateur', open: ['admin', 'privileges'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
+      { label: "Modèles d'impression", open: ['admin', 'templates'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: 'Licence', open: ['admin', 'license'] },

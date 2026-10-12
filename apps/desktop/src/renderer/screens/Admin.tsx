@@ -6,12 +6,13 @@ import { Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
+import { PrintTemplates } from './PrintTemplates';
 import contract from '../../../build/contrat-licence.txt?raw';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'backups' | 'server' | 'license' | 'digest' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -26,6 +27,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
     ['settings', 'Paramètres'],
+    ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
     ['license', 'Licence'],
@@ -54,6 +56,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'rights' && <RoleRights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'privileges' && <UserPrivileges key={privUser ?? ''} isAdmin={user.role === 'admin'} initialUserId={privUser} onChanged={onChanged} />}
       {tab === 'settings' && <Settings user={user} onChanged={onChanged} />}
+      {tab === 'templates' && <PrintTemplates user={user} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}

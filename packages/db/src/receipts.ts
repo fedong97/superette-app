@@ -1,4 +1,18 @@
-import { PAYMENT_METHODS, PRICE_LEVELS, formatFcfa, formatQty, formatRate, splitTtc, type Receipt } from '@superette/core';
+import {
+  PAYMENT_METHODS,
+  PRICE_LEVELS,
+  type DocData,
+  type DocFormat,
+  type DocTemplate,
+  type DocVariant,
+  formatFcfa,
+  formatQty,
+  formatRate,
+  renderDocTicket,
+  resolveTemplate,
+  splitTtc,
+  type Receipt,
+} from '@superette/core';
 import type { AdminService } from './admin';
 import { CUSTOMER_PAYMENT_METHODS, type CustomerService } from './customers';
 import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
@@ -60,42 +74,99 @@ export class ReceiptService extends Base {
     ];
   }
 
-  ticket(saleId: string): Receipt {
+  /** Variante d'une vente : à terme quand une partie passe sur le compte du client ou qu'une échéance est fixée. */
+  saleVariant(saleId: string): DocVariant {
     const sale = this.pos.getSale(saleId);
-    const footer = this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !';
-    const r: Receipt = this.header();
-    if (sale.kind === 'return') r.push({ t: 'text', text: 'RETOUR CLIENT', bold: true });
-    r.push({ t: 'text', text: `Ticket ${sale.number}` }, { t: 'text', text: `${dateFr(sale.created_at)} · ${sale.user_name}` });
-    if (sale.customer_name) r.push({ t: 'text', text: `Client : ${sale.customer_name}` });
-    if (sale.price_level && sale.price_level !== 'retail') r.push({ t: 'text', text: `Tarif : ${PRICE_LEVELS[sale.price_level]}` });
-    r.push({ t: 'rule' });
-    for (const l of sale.lines) {
-      r.push({ t: 'row', left: l.label, right: money(l.total_ttc + l.promo) });
-      const discount = l.discount ? ` (remise ${money(l.discount)})` : '';
-      if (l.pack_name && l.pack_units && l.pack_price !== null)
-        r.push({ t: 'row', left: `${Math.abs(l.qty) / l.pack_units} ${l.pack_name} x ${money(l.pack_price)}${discount}`, right: '', indent: 2 });
-      else if (l.qty !== 1000 || l.discount)
-        r.push({ t: 'row', left: `${formatQty(Math.abs(l.qty), l.unit)} x ${money(l.unit_price)}${discount}`, right: '', indent: 2 });
-      if (l.promo) r.push({ t: 'row', left: `Promo ${l.promotion_name ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
-    }
-    r.push({ t: 'rule' }, { t: 'row', left: 'TOTAL FCFA', right: money(sale.total_ttc), bold: true, big: true });
-    if (sale.rounding) r.push({ t: 'row', left: 'dont arrondi espèces', right: `-${money(sale.rounding)}`, indent: 2 });
-    if (sale.total_promo > 0) r.push({ t: 'row', left: 'Vous avez économisé', right: money(sale.total_promo), bold: true });
-    for (const p of sale.payments) r.push({ t: 'row', left: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, right: money(p.amount) });
-    if (sale.change_given) r.push({ t: 'row', left: 'Rendu monnaie', right: money(sale.change_given), bold: true });
-    if (sale.due_date) r.push({ t: 'text', text: `À régler avant le ${dayFr(sale.due_date)}` });
-    r.push({ t: 'rule' });
-    if (sale.lines.every((l) => l.vat_rate_bp === 0) && this.admin.getStore(sale.store_id).vat_enabled !== 1) {
-      // Magasin non assujetti (régime simplifié).
-      r.push({ t: 'text', text: 'TVA non applicable', align: 'center' });
-    } else {
-      const byRate = new Map<number, number>();
-      for (const l of sale.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-      for (const [rate, ttc] of byRate) r.push({ t: 'row', left: `TVA ${formatRate(rate)} sur ${money(ttc)}`, right: money(splitTtc(ttc, rate).tva) });
-      r.push({ t: 'row', left: 'dont TVA', right: money(sale.total_tva) });
-    }
-    r.push({ t: 'rule' }, { t: 'text', text: footer, align: 'center' });
-    return r;
+    return sale.due_date || sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') ? 'credit' : 'cash';
+  }
+
+  /** Modèle d'impression d'une vente : celui demandé, sinon celui par défaut du format et de la variante. */
+  saleTemplate(saleId: string, format: DocFormat | null, templateId?: string | null): DocTemplate {
+    const sale = this.pos.getSale(saleId);
+    return resolveTemplate(this.admin.storeSettings(sale.store_id), 'invoice', format, this.saleVariant(saleId), templateId);
+  }
+
+  /** Contenu d'une vente pour les modèles de facture (ticket, A4, listing). */
+  saleDoc(saleId: string, opts?: { duplicate?: boolean }): DocData {
+    const sale = this.pos.getSale(saleId);
+    const store = this.admin.getStore(sale.store_id);
+    const set = this.admin.storeSettings(sale.store_id);
+    const codes = new Map(
+      (this.db.prepare(`SELECT id, code FROM articles WHERE id IN (${sale.lines.map(() => '?').join(',') || "''"})`).all(...sale.lines.map((l) => l.article_id)) as { id: string; code: string }[]).map(
+        (a) => [a.id, a.code],
+      ),
+    );
+    const register = this.db.prepare('SELECT name FROM registers WHERE id = ?').pluck().get(sale.register_id) as string | undefined;
+    const c = sale.customer_id ? this.customers.getCustomer(sale.customer_id) : null;
+    const balance = c ? this.customers.account(sale.store_id, c.id).balance : null;
+    return {
+      store: {
+        name: store.name,
+        address: store.address,
+        phone: store.phone,
+        niu: store.taxpayer_number,
+        rccm: set.rccm,
+        logo: set.logo,
+        message: set.ticketHeader,
+        thanks: this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
+        vatEnabled: store.vat_enabled === 1,
+      },
+      customer: c
+        ? { name: c.name, code: c.code, address: c.address, phone: c.phone, niu: c.taxpayer_number, balance, counter: false }
+        : sale.customer_name
+          ? { name: sale.customer_name, code: null, address: null, phone: null, niu: null, balance: null, counter: true }
+          : null,
+      doc: {
+        kind: sale.kind,
+        number: sale.number,
+        date: sale.created_at,
+        dueDate: sale.due_date,
+        seller: sale.user_name,
+        register: register ?? null,
+        priceLevel: sale.price_level && sale.price_level !== 'retail' ? PRICE_LEVELS[sale.price_level] : null,
+        cancelled: sale.status === 'cancelled',
+        duplicate: Boolean(opts?.duplicate),
+      },
+      lines: sale.lines.map((l) => {
+        const pack = Boolean(l.pack_name && l.pack_units && l.pack_price !== null);
+        const unitPrice = pack ? l.pack_price! : l.unit_price;
+        return {
+          code: codes.get(l.article_id) ?? null,
+          barcode: l.barcode,
+          label: l.label,
+          qty: pack ? String(Math.abs(l.qty) / l.pack_units!) : formatQty(Math.abs(l.qty), l.unit),
+          unit: pack ? l.pack_name! : '',
+          unitPrice,
+          unitPriceHt: splitTtc(unitPrice, l.vat_rate_bp).ht,
+          discount: l.discount,
+          vatRate: l.vat_rate_bp,
+          totalHt: splitTtc(l.total_ttc, l.vat_rate_bp).ht,
+          totalTtc: l.total_ttc,
+          promo: l.promo,
+          promoName: l.promotion_name,
+          detail: pack || l.qty !== 1000,
+        };
+      }),
+      payments: sale.payments.map((p) => ({ label: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, amount: p.amount })),
+      totals: {
+        ht: sale.total_ht,
+        tva: sale.total_tva,
+        ttc: sale.total_ttc,
+        discount: sale.total_discount,
+        promo: sale.total_promo,
+        rounding: sale.rounding,
+        change: sale.change_given,
+        remaining: sale.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0),
+      },
+    };
+  }
+
+  /** Ticket de caisse d'une vente, selon le modèle ticket choisi (ou celui par défaut de sa variante). */
+  ticket(saleId: string, opts?: { templateId?: string | null; duplicate?: boolean }): Receipt {
+    const template = this.saleTemplate(saleId, 'ticket', opts?.templateId);
+    // Un modèle A4 ou listing demandé au ticket : on prend le ticket par défaut.
+    const t = template.format === 'ticket' ? template : this.saleTemplate(saleId, 'ticket');
+    return renderDocTicket(t, this.saleDoc(saleId, opts));
   }
 
   zReport(sessionId: string): Receipt {

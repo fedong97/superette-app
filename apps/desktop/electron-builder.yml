@@ -21,6 +21,8 @@ nsis:
   createDesktopShortcut: true
   shortcutName: FEDO Gestion
   language: '1036'
+  # Contrat de licence à accepter pendant l'installation (aussi affiché dans Administration › Licence).
+  license: build/contrat-licence.txt
 # Mise à jour automatique : les nouvelles versions (.exe + latest.yml) sont
 # déposées sur le serveur central ; chaque poste vérifie au démarrage.
 publish:

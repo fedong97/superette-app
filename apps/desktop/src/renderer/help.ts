@@ -383,6 +383,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Envoyez le code machine de ce PC à votre fournisseur (bouton « Envoyer par WhatsApp »), puis collez la clé reçue et « Activer la licence ».',
           'Sans licence, le logiciel fonctionne 15 jours en essai. À la fin de la licence, la caisse vend encore 15 jours, puis s’arrête ; la consultation, la clôture et les sauvegardes restent possibles.',
           'Les autres PC reliés au serveur central reçoivent la licence tout seuls, dans la limite du nombre de PC qu’elle permet.',
+          '« Lire le contrat de licence » affiche les conditions d’utilisation acceptées à l’installation.',
+        ],
+      },
+      {
+        tab: 'digest',
+        title: 'Résumé du jour',
+        steps: [
+          'Choisissez la journée : le résumé montre les ventes, les encaissements, les caisses et leurs écarts, les meilleures ventes et ce qui demande votre attention.',
+          '« Envoyer par WhatsApp » ouvre WhatsApp avec le résumé, adressé au numéro du gérant réglé à droite.',
+          'Pour l’envoi automatique, l’administrateur coche « Envoyer le résumé chaque soir », choisit l’heure, les destinataires et le compte e-mail qui envoie. Ce PC doit être allumé avec FEDO Gestion ouvert ; sinon le résumé de la veille part au démarrage suivant.',
         ],
       },
     ],

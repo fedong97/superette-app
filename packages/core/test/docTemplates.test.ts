@@ -14,9 +14,11 @@ import {
 const builtin = (id: string) => BUILTIN_TEMPLATES.find((t) => t.id === id)!;
 
 describe('modèles d’impression', () => {
-  it('un modèle par emplacement : facture client en ticket, A4 et listing, comptant et à terme', () => {
+  it('un modèle par emplacement : chaque document en ticket, A4 et listing, pour chacune de ses variantes', () => {
     const slots = BUILTIN_TEMPLATES.map((t) => `${t.doc}.${t.format}.${t.variant}`);
-    expect(new Set(slots).size).toBe(6);
+    // Facture (comptant, à terme), devis (devis, proforma), bon de livraison : 5 variantes × 3 formats.
+    expect(new Set(slots).size).toBe(15);
+    expect(slots.length).toBe(15);
     expect(resolveTemplate({}, 'invoice', 'listing', 'credit').id).toBe('invoice-listing-credit');
   });
 
@@ -72,6 +74,30 @@ describe('modèles d’impression', () => {
     expect(html).not.toContain('<th class="r">TVA</th>');
     expect(html).toContain('Total (FCFA)');
     expect(html).toContain('TVA non applicable');
+  });
+
+  it('devis et proforma : validité, observations, montant en lettres, sans règlement', () => {
+    const d = sampleDocData('proforma');
+    const html = renderDocHtml(resolveTemplate({}, 'quote', 'a4', 'proforma'), d);
+    expect(html).toContain('Facture proforma PF-DLA1-00012');
+    expect(html).toContain("Valable jusqu'au");
+    expect(html).toContain('Livraison possible à Bonabéri.');
+    expect(html).toContain('Bon pour accord, le client');
+    expect(html).not.toContain('Espèces');
+    expect(() => normalizeTemplate({ id: 'tpl-q', name: 'Devis', doc: 'quote', variant: 'cash' })).not.toThrow();
+    expect(normalizeTemplate({ id: 'tpl-q', name: 'Devis', doc: 'quote', variant: 'cash' }).variant).toBe('quote');
+  });
+
+  it('bon de livraison : quantités sans prix ni total, zones « Livré par » et « Reçu par »', () => {
+    const d = sampleDocData('delivery');
+    const html = renderDocHtml(resolveTemplate({}, 'delivery', 'a4', 'delivery'), d);
+    expect(html).toContain('<th>N°</th><th>Code</th><th>Désignation</th><th class="r">Qté</th><th>Unité</th>');
+    expect(html).not.toContain('Total TTC');
+    expect(html).toContain('Reçu par');
+    const text = receiptToText(renderDocTicket(resolveTemplate({}, 'delivery', 'ticket', 'delivery'), d), 32);
+    expect(text).toContain('BON DE LIVRAISON');
+    expect(text).toContain('Qté : 2 CASIER');
+    expect(text).not.toContain('TOTAL');
   });
 
   it('ticket à terme : titre, compte du client, reste à payer et duplicata', () => {

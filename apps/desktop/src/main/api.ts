@@ -85,6 +85,8 @@ export interface SystemHooks {
 
 export interface InvoicePrintOptions {
   templateId?: string | null;
+  /** Vente : facture (par défaut) ou bon de livraison. */
+  doc?: 'invoice' | 'delivery';
   format?: DocFormat | null;
   output?: 'print' | 'pdf';
   duplicate?: boolean;
@@ -128,7 +130,9 @@ export interface Printer {
   staffStatement(staffId: string, from?: string | null, to?: string | null): Promise<void>;
   /** Bon d'une avance, d'un salaire ou d'un remboursement fait au bureau. */
   officeVoucher(entryId: string): Promise<void>;
-  quote(quoteId: string): Promise<void>;
+  /** Devis ou proforma selon un modèle (A4 par défaut) ; `output: 'pdf'` l'enregistre. Renvoie false si annulé. */
+  quote(quoteId: string, opts?: InvoicePrintOptions): Promise<boolean>;
+  previewQuote(quoteId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
   journal(storeId: string, from?: string | null, to?: string | null, journal?: JournalCode | null): Promise<void>;
   list(): Promise<{ name: string; isDefault: boolean }[]>;
   /** Planche d'étiquettes déjà mise en page ; false si l'utilisateur annule. */
@@ -1049,14 +1053,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return printer.sessionReport(sessionId, true);
     },
     /** Facture selon un modèle : juste après la vente, ou plus tard avec le droit de réimprimer (« DUPLICATA »). */
-    'pos.printInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => {
+    'pos.printInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf'; doc?: 'invoice' | 'delivery' }) => {
       const fresh = invoiceAccess(saleId);
       return printer.invoice(saleId, { ...opts, duplicate: !fresh });
     },
     /** Aperçu d'une facture avec le modèle choisi (ou celui par défaut du format). */
-    'pos.previewInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => {
+    'pos.previewInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null; doc?: 'invoice' | 'delivery' }) => {
       const fresh = invoiceAccess(saleId);
-      return { ...printer.previewInvoice(saleId, { ...opts, duplicate: !fresh }), variant: s.receipts.saleVariant(saleId) };
+      return { ...printer.previewInvoice(saleId, { ...opts, duplicate: !fresh }), doc: 'invoice' as const, variant: s.receipts.saleVariant(saleId) };
     },
 
     // --- Modèles d'impression -------------------------------------------------
@@ -1071,11 +1075,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx(['print_templates']);
       return s.admin.saveStoreSettings(c.userId, c.storeId, { printTemplates: templates, printDefaults: defaults });
     },
-    /** Facture servant à l'aperçu d'un modèle : la dernière vente de cette variante, sinon un exemple. */
+    /** Document servant à l'aperçu d'un modèle : la dernière pièce de cette variante, sinon un exemple. */
     'docs.sample': (variant: DocVariant) => {
       const { storeId } = ctx(['print_templates']);
-      const last = s.pos.listSales({ storeId, limit: 60 }).find((x) => x.kind === 'sale' && x.status === 'completed' && s.receipts.saleVariant(x.id) === variant);
-      if (last) return { real: true, number: last.number, data: s.receipts.saleDoc(last.id) };
+      if (variant === 'quote' || variant === 'proforma') {
+        const last = s.quotes.list(storeId, { limit: 60 }).find((q) => q.kind === variant);
+        if (last) return { real: true, number: last.number, data: s.receipts.quoteDoc(last.id) };
+      } else {
+        const last = s.pos
+          .listSales({ storeId, limit: 60 })
+          .find((x) => x.kind === 'sale' && x.status === 'completed' && (variant === 'delivery' || s.receipts.saleVariant(x.id) === variant));
+        if (last) return { real: true, number: last.number, data: s.receipts.saleDoc(last.id) };
+      }
       const store = s.admin.getStore(storeId);
       const set = settings();
       return {
@@ -1164,7 +1175,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.quotes.save(c, input, { id: id ?? undefined, discountAuthorizedBy: supervisorPin ? supervisor(supervisorPin).id : null });
     },
     'quotes.cancel': (id: string) => s.quotes.cancel(ctx(['quote_cancel']), id),
-    'quotes.print': (id: string) => (requireUser(), printer.quote(id)),
+    'quotes.print': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (requireUser(), printer.quote(id, opts)),
+    'quotes.preview': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => {
+      requireUser();
+      return { ...printer.previewQuote(id, opts), doc: 'quote' as const, variant: s.quotes.get(id).kind as DocVariant };
+    },
     /** Lignes à charger dans la fiche de facturation, aux prix garantis par le devis. */
     'quotes.saleLines': (id: string) => s.quotes.saleLines(ctx(POS).storeId, id),
 

@@ -5,6 +5,7 @@ import {
   type DocFormat,
   type DocTemplate,
   type DocVariant,
+  effectiveTemplates,
   formatFcfa,
   formatQty,
   formatRate,
@@ -22,6 +23,7 @@ import type { TreasuryService } from './treasury';
 import type { InventoryService } from './inventories';
 import { REBATE_KINDS, type RebateService } from './rebates';
 import { EmoneyService } from './emoney';
+import type { QuoteService } from './quotes';
 import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
@@ -53,6 +55,7 @@ export class ReceiptService extends Base {
     private readonly treasury: TreasuryService,
     private readonly inventories?: InventoryService,
     private readonly rebates?: RebateService,
+    private readonly quotes?: QuoteService,
   ) {
     super(db, clock);
   }
@@ -80,37 +83,101 @@ export class ReceiptService extends Base {
     return sale.due_date || sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') ? 'credit' : 'cash';
   }
 
-  /** Modèle d'impression d'une vente : celui demandé, sinon celui par défaut du format et de la variante. */
-  saleTemplate(saleId: string, format: DocFormat | null, templateId?: string | null): DocTemplate {
-    const sale = this.pos.getSale(saleId);
-    return resolveTemplate(this.admin.storeSettings(sale.store_id), 'invoice', format, this.saleVariant(saleId), templateId);
+  /**
+   * Modèle d'impression d'une vente : celui demandé (facture ou bon de livraison),
+   * sinon celui par défaut du document, du format et de la variante.
+   */
+  saleTemplate(saleId: string, format: DocFormat | null, templateId?: string | null, doc: 'invoice' | 'delivery' = 'invoice'): DocTemplate {
+    const set = this.admin.storeSettings(this.pos.getSale(saleId).store_id);
+    const asked = templateId ? effectiveTemplates(set.printTemplates).find((t) => t.id === templateId && (t.doc === 'invoice' || t.doc === 'delivery')) : undefined;
+    if (asked) return asked;
+    return doc === 'delivery' ? resolveTemplate(set, 'delivery', format, 'delivery') : resolveTemplate(set, 'invoice', format, this.saleVariant(saleId));
+  }
+
+  /** Modèle d'impression d'un devis ou d'une proforma. */
+  quoteTemplate(quoteId: string, format: DocFormat | null, templateId?: string | null): DocTemplate {
+    const q = this.quotes!.get(quoteId);
+    return resolveTemplate(this.admin.storeSettings(q.store_id), 'quote', format, q.kind, templateId);
+  }
+
+  /** Identité du magasin pour les modèles d'impression. */
+  private docStore(storeId: string): DocData['store'] {
+    const store = this.admin.getStore(storeId);
+    const set = this.admin.storeSettings(storeId);
+    return {
+      name: store.name,
+      address: store.address,
+      phone: store.phone,
+      niu: store.taxpayer_number,
+      rccm: set.rccm,
+      logo: set.logo,
+      message: set.ticketHeader,
+      thanks: this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
+      vatEnabled: store.vat_enabled === 1,
+    };
+  }
+
+  private articleCodes(ids: string[]): Map<string, string> {
+    if (!ids.length) return new Map();
+    const rows = this.db.prepare(`SELECT id, code FROM articles WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: string; code: string }[];
+    return new Map(rows.map((a) => [a.id, a.code]));
+  }
+
+  /** Contenu d'un devis ou d'une proforma pour les modèles d'impression. */
+  quoteDoc(quoteId: string): DocData {
+    const q = this.quotes!.get(quoteId);
+    const c = q.customer_id ? this.customers.getCustomer(q.customer_id) : null;
+    const codes = this.articleCodes(q.lines.map((l) => l.article_id));
+    return {
+      store: this.docStore(q.store_id),
+      customer: c
+        ? { name: c.name, code: c.code, address: c.address, phone: c.phone, niu: c.taxpayer_number, balance: null, counter: false }
+        : q.customer_name
+          ? { name: q.customer_name, code: null, address: null, phone: null, niu: null, balance: null, counter: false }
+          : null,
+      doc: {
+        kind: 'quote',
+        number: q.number,
+        date: q.quote_date,
+        dueDate: null,
+        seller: q.user_name ?? '',
+        register: null,
+        priceLevel: c && c.price_level !== 'retail' ? PRICE_LEVELS[c.price_level] : null,
+        cancelled: q.state === 'cancelled',
+        duplicate: false,
+        validUntil: q.valid_until,
+        notes: q.notes,
+      },
+      lines: q.lines.map((l) => ({
+        code: codes.get(l.article_id) ?? null,
+        barcode: null,
+        label: l.label,
+        qty: formatQty(l.qty, l.unit),
+        unit: '',
+        unitPrice: l.unit_price,
+        unitPriceHt: splitTtc(l.unit_price, l.vat_rate_bp).ht,
+        discount: l.discount,
+        vatRate: l.vat_rate_bp,
+        totalHt: splitTtc(l.total_ttc, l.vat_rate_bp).ht,
+        totalTtc: l.total_ttc,
+        promo: 0,
+        promoName: null,
+        detail: l.qty !== 1000,
+      })),
+      payments: [],
+      totals: { ht: q.total_ht, tva: q.total_tva, ttc: q.total_ttc, discount: q.total_discount, promo: 0, rounding: 0, change: 0, remaining: 0 },
+    };
   }
 
   /** Contenu d'une vente pour les modèles de facture (ticket, A4, listing). */
   saleDoc(saleId: string, opts?: { duplicate?: boolean }): DocData {
     const sale = this.pos.getSale(saleId);
-    const store = this.admin.getStore(sale.store_id);
-    const set = this.admin.storeSettings(sale.store_id);
-    const codes = new Map(
-      (this.db.prepare(`SELECT id, code FROM articles WHERE id IN (${sale.lines.map(() => '?').join(',') || "''"})`).all(...sale.lines.map((l) => l.article_id)) as { id: string; code: string }[]).map(
-        (a) => [a.id, a.code],
-      ),
-    );
+    const codes = this.articleCodes(sale.lines.map((l) => l.article_id));
     const register = this.db.prepare('SELECT name FROM registers WHERE id = ?').pluck().get(sale.register_id) as string | undefined;
     const c = sale.customer_id ? this.customers.getCustomer(sale.customer_id) : null;
     const balance = c ? this.customers.account(sale.store_id, c.id).balance : null;
     return {
-      store: {
-        name: store.name,
-        address: store.address,
-        phone: store.phone,
-        niu: store.taxpayer_number,
-        rccm: set.rccm,
-        logo: set.logo,
-        message: set.ticketHeader,
-        thanks: this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
-        vatEnabled: store.vat_enabled === 1,
-      },
+      store: this.docStore(sale.store_id),
       customer: c
         ? { name: c.name, code: c.code, address: c.address, phone: c.phone, niu: c.taxpayer_number, balance, counter: false }
         : sale.customer_name

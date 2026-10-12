@@ -3,12 +3,14 @@ import {
   DOC_COLUMNS,
   DOC_FONTS,
   DOC_FORMATS,
+  DOC_KIND_VARIANTS,
   DOC_KINDS,
   DOC_PAPERS,
   DOC_VARIANTS,
   type DocColumn,
   type DocData,
   type DocFormat,
+  type DocKind,
   type DocTemplate,
   type DocVariant,
   renderDocHtml,
@@ -158,16 +160,29 @@ export function PrintTemplates({ user }: { user: User }) {
 
 /** Nouveau modèle : on choisit le format et la variante, puis le modèle de départ. */
 function NewTemplate({ templates, onClose, onCreate }: { templates: DocTemplate[]; onClose: () => void; onCreate: (base: DocTemplate) => void }) {
+  const [doc, setDoc] = useState<DocKind>('invoice');
   const [format, setFormat] = useState<DocFormat>('a4');
   const [variant, setVariant] = useState<DocVariant>('cash');
-  const bases = templates.filter((t) => t.doc === 'invoice' && t.format === format && t.variant === variant);
+  const bases = templates.filter((t) => t.doc === doc && t.format === format && t.variant === variant);
   const [base, setBase] = useState('');
   const chosen = bases.find((t) => t.id === base) ?? bases[0];
   return (
     <Modal title="Nouveau modèle" onClose={onClose}>
       <Field label="Document">
-        <select disabled value="invoice">
-          <option value="invoice">{DOC_KINDS.invoice}</option>
+        <select
+          value={doc}
+          onChange={(e) => {
+            const d = e.target.value as DocKind;
+            setDoc(d);
+            setVariant(DOC_KIND_VARIANTS[d][0]!);
+            setBase('');
+          }}
+        >
+          {Object.entries(DOC_KINDS).map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
         </select>
       </Field>
       <div className="grid2">
@@ -182,9 +197,9 @@ function NewTemplate({ templates, onClose, onCreate }: { templates: DocTemplate[
         </Field>
         <Field label="Variante">
           <select value={variant} onChange={(e) => (setVariant(e.target.value as DocVariant), setBase(''))}>
-            {Object.entries(DOC_VARIANTS).map(([k, l]) => (
+            {DOC_KIND_VARIANTS[doc].map((k) => (
               <option key={k} value={k}>
-                {l}
+                {DOC_VARIANTS[k]}
               </option>
             ))}
           </select>
@@ -211,7 +226,7 @@ function NewTemplate({ templates, onClose, onCreate }: { templates: DocTemplate[
   );
 }
 
-/** Facture servant à l'aperçu : la dernière vente de la variante, sinon un exemple. */
+/** Document servant à l'aperçu : la dernière pièce de la variante, sinon un exemple. */
 function useSample(variant: DocVariant) {
   const [sample, setSample] = useState<{ real: boolean; number: string | null; data: DocData } | null>(null);
   useEffect(() => {
@@ -232,7 +247,7 @@ function LivePreview({ template }: { template: DocTemplate }) {
   return (
     <div className="live-preview">
       <div className="toolbar">
-        <span className="muted">{sample.real ? `Aperçu avec la vente ${sample.number}` : 'Aperçu avec une facture d’exemple'}</span>
+        <span className="muted">{sample.real ? `Aperçu avec la pièce ${sample.number}` : 'Aperçu avec un document d’exemple'}</span>
         <span className="spacer" />
         <label className="inline">
           <input type="checkbox" checked={duplicate} onChange={(e) => setDuplicate(e.target.checked)} /> Réimpression

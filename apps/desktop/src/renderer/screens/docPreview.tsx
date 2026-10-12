@@ -1,4 +1,4 @@
-import { DOC_FORMATS, DOC_VARIANTS } from '@superette/core';
+import { DOC_FORMATS, DOC_KINDS, DOC_VARIANTS, type DocFormat, type DocVariant } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { call } from '../api';
 import { Modal, useLoad, useToast } from '../ui';
@@ -20,31 +20,45 @@ export const ZOOMS: [number, string][] = [
   [1.25, '125 %'],
 ];
 
+type Preview = { templateId: string; html: string; doc: 'invoice' | 'quote'; variant: DocVariant };
+type Source = { kind: 'sale'; id: string } | { kind: 'quote'; id: string };
+
+/** Aperçu d'une vente (facture ou bon de livraison) avant impression. */
+export function InvoicePreview({ saleId, onClose }: { saleId: string; onClose: () => void }) {
+  return <DocPreview source={{ kind: 'sale', id: saleId }} onClose={onClose} />;
+}
+
 /**
- * Aperçu d'une facture avant impression : choix du modèle (ticket, A4,
- * listing), puis impression ou enregistrement en PDF.
+ * Aperçu d'un document avant impression : choix du modèle (ticket, A4,
+ * listing ; facture ou bon de livraison pour une vente), puis impression ou
+ * enregistrement en PDF.
  */
-export function InvoicePreview({ saleId, format = 'a4', onClose }: { saleId: string; format?: 'ticket' | 'a4' | 'listing'; onClose: () => void }) {
+export function DocPreview({ source, onClose }: { source: Source; onClose: () => void }) {
   const toast = useToast();
   const list = useLoad(() => call('docs.templates'));
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(0.75);
-  const [preview, setPreview] = useState<{ templateId: string; html: string; variant: 'cash' | 'credit' } | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    call('pos.previewInvoice', saleId, templateId ? { templateId } : { format })
+    const opts = templateId ? { templateId } : { format: 'a4' as const };
+    (source.kind === 'sale' ? call('pos.previewInvoice', source.id, opts) : call('quotes.preview', source.id, opts))
       .then(setPreview)
       .catch((err) => (toast.error(err), onClose()));
-  }, [saleId, templateId]);
+  }, [source.id, templateId]);
 
   if (!preview || !list.data) return null;
-  const choices = list.data.templates.filter((t) => t.doc === 'invoice' && t.variant === preview.variant);
+  const choices = list.data.templates.filter((t) => (t.doc === preview.doc && t.variant === preview.variant) || (source.kind === 'sale' && t.doc === 'delivery'));
   const current = choices.find((t) => t.id === preview.templateId);
+  const groups = [...new Set(choices.map((t) => t.doc))].flatMap((d) =>
+    (Object.keys(DOC_FORMATS) as DocFormat[]).map((f) => [d, f, choices.filter((t) => t.doc === d && t.format === f)] as const),
+  );
   const run = async (output: 'print' | 'pdf') => {
     setBusy(true);
     try {
-      const done = await call('pos.printInvoice', saleId, { templateId: preview.templateId, output });
+      const opts = { templateId: preview.templateId, output };
+      const done = await (source.kind === 'sale' ? call('pos.printInvoice', source.id, opts) : call('quotes.print', source.id, opts));
       if (done) toast.ok(output === 'pdf' ? 'PDF enregistré' : 'Document imprimé');
     } catch (err) {
       toast.error(err);
@@ -54,22 +68,22 @@ export function InvoicePreview({ saleId, format = 'a4', onClose }: { saleId: str
   };
 
   return (
-    <Modal title={`Aperçu avant impression · ${DOC_VARIANTS[preview.variant]}`} onClose={onClose} wide>
+    <Modal title={`Aperçu avant impression · ${current?.doc === 'delivery' ? DOC_KINDS.delivery : DOC_VARIANTS[preview.variant]}`} onClose={onClose} wide>
       <div className="toolbar">
         <label className="inline">
           Modèle
           <select value={preview.templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            {(Object.keys(DOC_FORMATS) as (keyof typeof DOC_FORMATS)[]).map((f) => (
-              <optgroup key={f} label={DOC_FORMATS[f]}>
-                {choices
-                  .filter((t) => t.format === f)
-                  .map((t) => (
+            {groups
+              .filter(([, , ts]) => ts.length)
+              .map(([d, f, ts]) => (
+                <optgroup key={`${d}.${f}`} label={`${DOC_KINDS[d]} · ${DOC_FORMATS[f]}`}>
+                  {ts.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
                     </option>
                   ))}
-              </optgroup>
-            ))}
+                </optgroup>
+              ))}
           </select>
         </label>
         <label className="inline">

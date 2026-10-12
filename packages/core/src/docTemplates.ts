@@ -14,12 +14,14 @@ import { formatRate, splitTtc } from './tax';
 import { numberToWordsFr } from './words';
 import type { Receipt, ReceiptLine } from './escpos';
 
-export const DOC_KINDS = { invoice: 'Facture client' } as const;
+export const DOC_KINDS = { invoice: 'Facture client', quote: 'Devis et proforma', delivery: 'Bon de livraison' } as const;
 export type DocKind = keyof typeof DOC_KINDS;
 export const DOC_FORMATS = { ticket: 'Ticket de caisse', a4: 'A4', listing: 'Listing' } as const;
 export type DocFormat = keyof typeof DOC_FORMATS;
-export const DOC_VARIANTS = { cash: 'Comptant', credit: 'À terme' } as const;
+export const DOC_VARIANTS = { cash: 'Comptant', credit: 'À terme', quote: 'Devis', proforma: 'Proforma', delivery: 'Bon de livraison' } as const;
 export type DocVariant = keyof typeof DOC_VARIANTS;
+/** Variantes de chaque document. */
+export const DOC_KIND_VARIANTS: Record<DocKind, DocVariant[]> = { invoice: ['cash', 'credit'], quote: ['quote', 'proforma'], delivery: ['delivery'] };
 export const DOC_PAPERS = { '80mm': 'Rouleau 80 mm', '58mm': 'Rouleau 58 mm', A4: 'A4', A5: 'A5' } as const;
 export type DocPaper = keyof typeof DOC_PAPERS;
 export const DOC_FONTS = { sans: 'Arial (sans empattement)', serif: 'Times (avec empattement)', mono: 'Courier (machine à écrire)' } as const;
@@ -102,9 +104,13 @@ export interface DocTemplate {
     register: boolean;
     priceLevel: boolean;
     dueDate: boolean;
+    /** Date de validité (devis et proforma). */
+    validUntil: boolean;
   };
   columns: DocColumn[];
   totals: {
+    /** Total TTC (à décocher pour un bon de livraison sans prix). */
+    ttc: boolean;
     ht: boolean;
     vatDetail: boolean;
     discount: boolean;
@@ -156,7 +162,7 @@ export interface DocData {
     counter: boolean;
   } | null;
   doc: {
-    kind: 'sale' | 'return';
+    kind: 'sale' | 'return' | 'quote';
     number: string;
     /** Date et heure ISO. */
     date: string;
@@ -167,6 +173,10 @@ export interface DocData {
     priceLevel: string | null;
     cancelled: boolean;
     duplicate: boolean;
+    /** Date de validité d'un devis. */
+    validUntil?: string | null;
+    /** Observations saisies sur le document. */
+    notes?: string | null;
   };
   lines: DocLine[];
   payments: { label: string; amount: number }[];
@@ -212,9 +222,9 @@ const TICKET_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   page: { paper: '80mm', landscape: false, margin: 4, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false },
   header: { logo: true, logoSize: 25, logoAlign: 'center', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: false, address: false, phone: false, niu: false, balance: false },
-  info: { title: '', number: true, date: true, time: true, seller: true, register: false, priceLevel: true, dueDate: true },
+  info: { title: '', number: true, date: true, time: true, seller: true, register: false, priceLevel: true, dueDate: true, validUntil: false },
   columns: cols({ label: 0, qty: 0, unitPrice: 0, discount: 0, totalTtc: 0 }),
-  totals: { ht: false, vatDetail: true, discount: false, promo: true, rounding: true, payments: true, change: true, remaining: false, words: false },
+  totals: { ttc: true, ht: false, vatDetail: true, discount: false, promo: true, rounding: true, payments: true, change: true, remaining: false, words: false },
   footer: { text: '', thanks: '', signatures: false, signLeft: 'Le client', signRight: '', duplicate: true },
 };
 
@@ -225,9 +235,9 @@ const A4_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   page: { paper: 'A4', landscape: false, margin: 15, font: 'sans', fontSize: 12, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: true },
   header: { logo: true, logoSize: 22, logoAlign: 'left', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: true, address: true, phone: true, niu: true, balance: false },
-  info: { title: 'Facture', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: true },
+  info: { title: 'Facture', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: true, validUntil: false },
   columns: cols({ label: 0, qty: 10, unitPrice: 12, discount: 9, vat: 9, totalHt: 12, totalTtc: 13 }),
-  totals: { ht: true, vatDetail: true, discount: false, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
+  totals: { ttc: true, ht: true, vatDetail: true, discount: false, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
   footer: { text: '', thanks: '', signatures: true, signLeft: 'Le client', signRight: 'Pour {magasin}', duplicate: true },
 };
 
@@ -238,7 +248,7 @@ const LISTING_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   header: { ...A4_BASE.header, logo: false },
   customer: { show: true, code: true, address: false, phone: true, niu: true, balance: false },
   columns: cols({ code: 12, label: 0, qty: 11, unitPrice: 12, discount: 10, totalTtc: 13 }),
-  totals: { ht: true, vatDetail: true, discount: true, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
+  totals: { ttc: true, ht: true, vatDetail: true, discount: true, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
 };
 
 /** Modèles livrés avec le logiciel, un par emplacement. */
@@ -274,6 +284,64 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
     customer: { ...LISTING_BASE.customer, balance: true },
     totals: { ...LISTING_BASE.totals, remaining: true, words: true },
   },
+  ...(['quote', 'proforma'] as const).flatMap((variant): DocTemplate[] => {
+    const proforma = variant === 'proforma';
+    const label = proforma ? 'Facture proforma' : 'Devis';
+    const info = { title: label, number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: false, validUntil: true };
+    const totals = { ttc: true, ht: true, vatDetail: true, discount: false, promo: false, rounding: false, payments: false, change: false, remaining: false, words: true };
+    const footer = {
+      text: `Prix garantis jusqu'au {validite} dans la limite des stocks disponibles. Ce document n'est pas une facture définitive.`,
+      thanks: '',
+      signatures: true,
+      signLeft: 'Bon pour accord, le client\nDate et signature',
+      signRight: 'Pour {magasin}',
+      duplicate: false,
+    };
+    return [
+      { ...A4_BASE, doc: 'quote', id: `quote-a4-${variant}`, variant, name: `${label} A4`, info, totals, footer },
+      { ...LISTING_BASE, doc: 'quote', id: `quote-listing-${variant}`, variant, name: `${label} listing`, info, totals: { ...totals, discount: true }, footer },
+      {
+        ...TICKET_BASE,
+        doc: 'quote',
+        id: `quote-ticket-${variant}`,
+        variant,
+        name: `${label} ticket`,
+        customer: { ...TICKET_BASE.customer, phone: true },
+        info: { ...info, title: label.toUpperCase(), priceLevel: true },
+        totals: { ...totals, words: false },
+        footer: { ...footer, signatures: false },
+      },
+    ];
+  }),
+  ...((): DocTemplate[] => {
+    const info = { title: 'Bon de livraison', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: false, validUntil: false };
+    const totals = { ttc: false, ht: false, vatDetail: false, discount: false, promo: false, rounding: false, payments: false, change: false, remaining: false, words: false };
+    const footer = {
+      text: 'Marchandises reçues en bon état et conformes à la commande.',
+      thanks: '',
+      signatures: true,
+      signLeft: 'Livré par',
+      signRight: 'Reçu par\n(nom, date et signature)',
+      duplicate: true,
+    };
+    const customer = { show: true, code: true, address: true, phone: true, niu: false, balance: false };
+    return [
+      { ...A4_BASE, doc: 'delivery', id: 'delivery-a4-delivery', variant: 'delivery', name: 'Bon de livraison A4', customer, info, totals, footer, columns: cols({ line: 6, code: 14, label: 0, qty: 12, unit: 14 }) },
+      { ...LISTING_BASE, doc: 'delivery', id: 'delivery-listing-delivery', variant: 'delivery', name: 'Bon de livraison listing', customer, info, totals, footer, columns: cols({ code: 14, label: 0, qty: 12, unit: 14 }) },
+      {
+        ...TICKET_BASE,
+        doc: 'delivery',
+        id: 'delivery-ticket-delivery',
+        variant: 'delivery',
+        name: 'Bon de livraison ticket',
+        customer: { ...customer, address: false },
+        info: { ...info, title: 'BON DE LIVRAISON' },
+        totals,
+        footer,
+        columns: cols({ code: 0, label: 0, qty: 0 }),
+      },
+    ];
+  })(),
 ];
 
 const builtinFor = (doc: DocKind, format: DocFormat, variant: DocVariant) =>
@@ -330,7 +398,7 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<DocTemplate> & Record<string, unknown>;
   const doc = pick(r.doc, Object.keys(DOC_KINDS) as DocKind[], 'invoice');
   const format = pick(r.format, Object.keys(DOC_FORMATS) as DocFormat[], 'a4');
-  const variant = pick(r.variant, Object.keys(DOC_VARIANTS) as DocVariant[], 'cash');
+  const variant = pick(r.variant, DOC_KIND_VARIANTS[doc], DOC_KIND_VARIANTS[doc][0]!);
   const base = builtinFor(doc, format, variant);
   const id = str(r.id, 60).trim();
   if (!/^[\w-]{1,60}$/.test(id)) throw new Error('Modèle : identifiant invalide');
@@ -420,7 +488,8 @@ function fill(text: string, d: DocData): string {
     .replace(/\{client\}/g, d.customer?.name ?? '')
     .replace(/\{numero\}/g, d.doc.number)
     .replace(/\{date\}/g, dayFr(d.doc.date))
-    .replace(/\{echeance\}/g, d.doc.dueDate ? dayFr(d.doc.dueDate) : '');
+    .replace(/\{echeance\}/g, d.doc.dueDate ? dayFr(d.doc.dueDate) : '')
+    .replace(/\{validite\}/g, d.doc.validUntil ? dayFr(d.doc.validUntil) : '');
 }
 
 function vatByRate(d: DocData) {
@@ -450,7 +519,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
   if (r.length) r.push({ t: 'rule' });
 
-  const title = d.doc.kind === 'return' ? 'RETOUR CLIENT' : fill(t.info.title, d);
+  const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'RETOUR CLIENT' : fill(t.info.title, d);
   if (title) r.push({ t: 'text', text: title, bold: true });
   if (d.doc.cancelled) r.push({ t: 'text', text: 'ANNULÉ', bold: true });
   if (d.doc.duplicate && t.footer.duplicate) r.push({ t: 'text', text: 'DUPLICATA', bold: true });
@@ -467,6 +536,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
     if (t.customer.niu && c.niu) r.push({ t: 'text', text: `NIU : ${c.niu}` });
   }
   if (t.info.priceLevel && d.doc.priceLevel) r.push({ t: 'text', text: `Tarif : ${d.doc.priceLevel}` });
+  if (t.info.validUntil && d.doc.validUntil) r.push({ t: 'text', text: `Valable jusqu'au ${dayFr(d.doc.validUntil)}` });
   r.push({ t: 'rule' });
 
   const on = new Set(shown(t, d).map((x) => x.key));
@@ -474,20 +544,21 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
     const left = [on.has('line') ? `${d.lines.indexOf(l) + 1}.` : '', on.has('code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ');
     r.push({ t: 'row', left, right: on.has('totalTtc') ? money(l.totalTtc + l.promo) : on.has('totalHt') ? money(l.totalHt) : '' });
     const qty = `${l.qty}${l.unit ? ` ${l.unit}` : ''}`;
+    const priced = on.has('unitPrice') || on.has('unitPriceHt');
     const parts = [
-      on.has('qty') || on.has('unitPrice') ? `${qty} x ${money(on.has('unitPrice') || !on.has('unitPriceHt') ? l.unitPrice : l.unitPriceHt)}` : '',
+      priced ? `${qty} x ${money(on.has('unitPrice') ? l.unitPrice : l.unitPriceHt)}` : on.has('qty') ? `Qté : ${qty}` : '',
       on.has('discount') && l.discount ? `(remise ${money(l.discount)})` : '',
       on.has('vat') ? `TVA ${formatRate(l.vatRate)}` : '',
     ].filter(Boolean);
-    if (parts.length && (l.detail || (on.has('discount') && l.discount) || on.has('vat'))) r.push({ t: 'row', left: parts.join(' '), right: '', indent: 2 });
+    if (parts.length && (l.detail || !priced || (on.has('discount') && l.discount) || on.has('vat'))) r.push({ t: 'row', left: parts.join(' '), right: '', indent: 2 });
     if (on.has('barcode') && l.barcode) r.push({ t: 'row', left: l.barcode, right: '', indent: 2 });
     if (t.totals.promo && l.promo) r.push({ t: 'row', left: `Promo ${l.promoName ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
   }
-  r.push({ t: 'rule' });
+  if (t.totals.ttc || t.totals.ht || t.totals.payments) r.push({ t: 'rule' });
   const tot = d.totals;
   if (t.totals.ht && !noVat) r.push({ t: 'row', left: 'Total HT', right: money(tot.ht) });
   if (t.totals.discount && tot.discount) r.push({ t: 'row', left: 'Remises', right: money(tot.discount) });
-  r.push({ t: 'row', left: 'TOTAL FCFA', right: money(tot.ttc), bold: true, big: true });
+  if (t.totals.ttc) r.push({ t: 'row', left: 'TOTAL FCFA', right: money(tot.ttc), bold: true, big: true });
   if (t.totals.rounding && tot.rounding) r.push({ t: 'row', left: 'dont arrondi espèces', right: `-${money(tot.rounding)}`, indent: 2 });
   if (t.totals.promo && tot.promo > 0) r.push({ t: 'row', left: 'Vous avez économisé', right: money(tot.promo), bold: true });
   if (t.totals.payments) for (const p of d.payments) r.push({ t: 'row', left: p.label, right: money(p.amount) });
@@ -496,6 +567,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
   if (t.info.dueDate && d.doc.dueDate) r.push({ t: 'text', text: `À régler avant le ${dayFr(d.doc.dueDate)}` });
   if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: `Arrêté à la somme de ${numberToWordsFr(tot.ttc)} francs CFA` });
+  if (d.doc.notes) r.push({ t: 'rule' }, ...d.doc.notes.split('\n').filter(Boolean).map((text): ReceiptLine => ({ t: 'text', text })));
   if (t.totals.vatDetail) {
     r.push({ t: 'rule' });
     if (noVat) r.push(centered('TVA non applicable'));
@@ -638,13 +710,14 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
       ? `<div class="head"><div class="store">${logo}<div>${ident}</div></div>${client}</div>`
       : `${logo ? `<div class="logo">${logo}</div>` : ''}<div class="head"><div class="store"><div>${ident}</div></div>${client}</div>`;
 
-  const title = d.doc.kind === 'return' ? 'Avoir' : fill(t.info.title, d);
-  const titleLine = `<h2>${esc(title)}${t.info.number ? ` ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (annulée)' : ''}${
+  const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'Avoir' : fill(t.info.title, d);
+  const titleLine = `<h2>${esc(title)}${t.info.number ? ` ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (annulé)' : ''}${
     d.doc.duplicate && t.footer.duplicate ? ' <span class="dup">DUPLICATA</span>' : ''
   }</h2>`;
   const meta = [
     t.info.date ? `Date : ${t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)}` : '',
     t.info.dueDate && d.doc.dueDate ? `Échéance : ${dayFr(d.doc.dueDate)}` : '',
+    t.info.validUntil && d.doc.validUntil ? `Valable jusqu'au ${dayFr(d.doc.validUntil)}` : '',
     t.info.seller ? `Vendeur : ${esc(d.doc.seller)}` : '',
     t.info.register && d.doc.register ? `Caisse : ${esc(d.doc.register)}` : '',
     t.info.priceLevel && d.doc.priceLevel ? `Tarif : ${esc(d.doc.priceLevel)}` : '',
@@ -681,7 +754,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
     t.totals.discount && tot.discount ? row('Remises accordées', tot.discount) : '',
     t.totals.promo && tot.promo ? row('Promotions', tot.promo) : '',
     t.totals.rounding && tot.rounding ? row('Arrondi espèces', -tot.rounding) : '',
-    row(noVat ? 'Total (FCFA)' : 'Total TTC (FCFA)', tot.ttc, 'total'),
+    t.totals.ttc ? row(noVat ? 'Total (FCFA)' : 'Total TTC (FCFA)', tot.ttc, 'total') : '',
     t.totals.payments ? d.payments.map((p) => row(esc(p.label), p.amount)).join('') : '',
     t.totals.change && tot.change ? row('Rendu monnaie', tot.change) : '',
     t.totals.remaining && tot.remaining ? row('Reste à payer', tot.remaining, 'total') : '',
@@ -689,6 +762,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   const left = [
     t.totals.words && tot.ttc >= 0 ? `<p>Arrêté à la somme de <b>${esc(numberToWordsFr(tot.ttc))} francs CFA</b>${noVat ? '' : ' toutes taxes comprises'}.</p>` : '',
     t.totals.vatDetail && noVat ? '<p class="muted">TVA non applicable.</p>' : '',
+    d.doc.notes ? `<p class="notes">${nl(d.doc.notes)}</p>` : '',
   ].join('');
   const footer = [
     t.footer.text ? `<div class="notes">${nl(fill(t.footer.text, d))}</div>` : '',
@@ -699,7 +773,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   return wrap(
     documentCss(t),
     `${head}${titleLine}${meta.length ? `<div class="meta">${meta.join(' · ')}</div>` : ''}${table}
-    <div class="bottom"><div class="left">${left}</div><table class="totals">${totals}</table></div>
+    ${left || totals ? `<div class="bottom"><div class="left">${left}</div>${totals ? `<table class="totals">${totals}</table>` : ''}</div>` : ''}
     ${footer ? `<footer>${footer}</footer>` : ''}`,
   );
 }
@@ -719,15 +793,30 @@ export function sampleDocData(variant: DocVariant, store?: Partial<DocData['stor
   ];
   const ttc = lines.reduce((s, l) => s + l.totalTtc, 0);
   const ht = lines.reduce((s, l) => s + l.totalHt, 0);
-  const paid = credit ? 10000 : ttc + 650;
+  const quote = variant === 'quote' || variant === 'proforma';
+  const known = credit || quote || variant === 'delivery';
+  const paid = credit ? 10000 : quote ? 0 : ttc + 650;
+  const inDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
   return {
     store: { name: 'Mon magasin', address: 'Rue principale, Douala', phone: '6 99 00 00 00', niu: 'M000000000000A', rccm: '', logo: '', message: '', thanks: 'Merci de votre visite !', vatEnabled: true, ...store },
-    customer: credit
-      ? { name: 'Ets MBALLA & Fils', code: 'C0012', address: 'Marché central, Douala', phone: '6 77 12 34 56', niu: 'P123456789012B', balance: 245000, counter: false }
+    customer: known
+      ? { name: 'Ets MBALLA & Fils', code: 'C0012', address: 'Marché central, Douala', phone: '6 77 12 34 56', niu: 'P123456789012B', balance: credit ? 245000 : null, counter: false }
       : null,
-    doc: { kind: 'sale', number: 'DLA1-1-000123', date: new Date().toISOString(), dueDate: credit ? new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) : null, seller: 'Awa', register: 'Caisse 1', priceLevel: credit ? 'Gros' : null, cancelled: false, duplicate: false },
+    doc: {
+      kind: quote ? 'quote' : 'sale',
+      number: quote ? `${variant === 'proforma' ? 'PF' : 'DV'}-DLA1-00012` : 'DLA1-1-000123',
+      date: new Date().toISOString(),
+      dueDate: credit ? inDays(30) : null,
+      seller: 'Awa',
+      register: quote ? null : 'Caisse 1',
+      priceLevel: credit || quote ? 'Gros' : null,
+      cancelled: false,
+      duplicate: false,
+      validUntil: quote ? inDays(15) : null,
+      notes: quote ? 'Livraison possible à Bonabéri.' : null,
+    },
     lines,
-    payments: credit ? [{ label: 'Espèces', amount: 10000 }, { label: 'Crédit client', amount: ttc - 10000 }] : [{ label: 'Espèces', amount: paid }],
-    totals: { ht, tva: ttc - ht, ttc, discount: 500, promo: 0, rounding: 0, change: credit ? 0 : paid - ttc, remaining: credit ? ttc - 10000 : 0 },
+    payments: credit ? [{ label: 'Espèces', amount: 10000 }, { label: 'Crédit client', amount: ttc - 10000 }] : quote ? [] : [{ label: 'Espèces', amount: paid }],
+    totals: { ht, tva: ttc - ht, ttc, discount: 500, promo: 0, rounding: 0, change: credit || quote ? 0 : paid - ttc, remaining: credit ? ttc - 10000 : 0 },
   };
 }

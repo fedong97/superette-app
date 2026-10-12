@@ -86,6 +86,13 @@ describe('tickets de caisse', () => {
     expect(html).toContain('Facture DLA1-1-000001');
     expect(html).toContain('Vendeur : Steve');
     expect(html).toContain('<td>Bière Castel 65 cl</td>');
+    // Bon de livraison de la même vente : quantités, sans prix.
+    const bl = s.receipts.saleTemplate(sale.id, 'a4', null, 'delivery');
+    expect(bl.id).toBe('delivery-a4-delivery');
+    expect(s.receipts.saleTemplate(sale.id, null, 'delivery-ticket-delivery').doc).toBe('delivery');
+    const blHtml = renderDocHtml(bl, s.receipts.saleDoc(sale.id));
+    expect(blHtml).toContain('Bon de livraison DLA1-1-000001');
+    expect(blHtml).not.toContain('3 900');
   });
 
   it('rapport Z et page de test', () => {

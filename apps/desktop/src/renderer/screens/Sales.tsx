@@ -254,8 +254,8 @@ export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClos
       </table>
       <div className="actions">
         {!can('sale_reprint') && <span className="muted">Réimpression non permise (droit « Réimprimer un ticket ou une facture »).</span>}
-        <button disabled={!can('sale_reprint')} onClick={() => setPreview(true)} title="Aperçu avec le choix du modèle (A4, listing, ticket)">
-          Facture (aperçu)…
+        <button disabled={!can('sale_reprint')} onClick={() => setPreview(true)} title="Aperçu avec le choix du modèle : facture ou bon de livraison, en A4, listing ou ticket">
+          Facture ou BL (aperçu)…
         </button>
         <button className="primary" disabled={!can('sale_reprint')} onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
           Réimprimer le ticket

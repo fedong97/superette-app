@@ -12,8 +12,10 @@ import {
   LABEL_FORMATS,
   type LabelFormatId,
   numberToWordsFr,
+  type DocData,
   type DocTemplate,
   pageSize,
+  renderDocTicket,
   receiptToEscPos,
   receiptToHtml,
   renderDocHtml,
@@ -132,6 +134,17 @@ export function createPrinter(s: Services): Printer {
     } finally {
       win.destroy();
     }
+  }
+
+  /** Document selon son modèle : ticket sur l'imprimante de caisse, A4 ou listing par la fenêtre d'impression ou en PDF. */
+  async function printWithTemplate(t: DocTemplate, data: DocData, output: 'print' | 'pdf' | undefined, pdfName: string): Promise<boolean> {
+    const html = renderDocHtml(t, data);
+    if (t.format === 'ticket' && output !== 'pdf') {
+      const receipt = renderDocTicket(t, data);
+      for (let i = 0; i < t.page.copies; i++) await printReceipt(receipt, false, true, html);
+      return true;
+    }
+    return printDocument(html, t, output === 'pdf' ? pdfName : undefined);
   }
 
   /** Réglages d'impression du poste (non synchronisés : chaque caisse a son imprimante). */
@@ -658,64 +671,25 @@ export function createPrinter(s: Services): Printer {
     },
 
     async invoice(saleId, opts) {
-      const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId);
-      if (t.format === 'ticket' && opts?.output !== 'pdf') {
-        const receipt = s.receipts.ticket(saleId, { templateId: t.id, duplicate: opts?.duplicate });
-        const html = renderDocHtml(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate }));
-        for (let i = 0; i < t.page.copies; i++) await printReceipt(receipt, false, true, html);
-        return true;
-      }
+      const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId, opts?.doc);
       const sale = s.pos.getSale(saleId);
-      const html = renderDocHtml(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate }));
-      return printDocument(html, t, opts?.output === 'pdf' ? `${sale.kind === 'return' ? 'avoir' : 'facture'}-${sale.number}.pdf` : undefined);
+      const name = t.doc === 'delivery' ? 'bon-de-livraison' : sale.kind === 'return' ? 'avoir' : 'facture';
+      return printWithTemplate(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate }), opts?.output, `${name}-${sale.number}.pdf`);
     },
 
     previewInvoice(saleId, opts) {
-      const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId);
+      const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId, opts?.doc);
       return { templateId: t.id, html: renderDocHtml(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate })) };
     },
 
-    async quote(quoteId) {
-      const q = s.quotes.get(quoteId);
-      const store = s.admin.getStore(q.store_id);
-      const c = q.customer_id ? s.customers.getCustomer(q.customer_id) : null;
-      const noVat = store.vat_enabled !== 1 && q.lines.every((l) => l.vat_rate_bp === 0);
-      const rows = q.lines
-        .map((l) => {
-          const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
-          return `<tr><td>${esc(l.label)}</td><td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_price)}</td>
-            <td class="r">${l.discount ? money(l.discount) : ''}</td>${noVat ? '' : `<td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td>`}<td class="r">${money(l.total_ttc)}</td></tr>`;
-        })
-        .join('');
-      const byRate = new Map<number, number>();
-      for (const l of q.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-      const vat = [...byRate.entries()]
-        .filter(([rate]) => rate > 0)
-        .map(([rate, ttc]) => `<tr><td>TVA ${formatRate(rate)}</td><td class="r">${money(splitTtc(ttc, rate).tva)}</td></tr>`)
-        .join('');
-      const title = q.kind === 'proforma' ? 'Facture proforma' : 'Devis';
-      const words = numberToWordsFr(q.total_ttc);
-      await printA4(`<div class="head">
-          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
-            .filter(Boolean)
-            .map((v) => esc(v!))
-            .join('<br>')}</div>
-          <div class="box">${
-            c
-              ? `<b>${esc(c.name)}</b><br>${[c.address, c.phone, c.taxpayer_number ? `NIU ${c.taxpayer_number}` : null].filter(Boolean).map((v) => esc(v!)).join('<br>')}`
-              : `<b>${esc(q.customer_name ?? '')}</b>`
-          }</div>
-        </div>
-        <h1>${title} ${esc(q.number)}${q.state === 'cancelled' ? ' (annulé)' : ''}</h1>
-        <div>Date : ${dayFr(q.quote_date)} · Valable jusqu'au ${dayFr(q.valid_until)}${q.user_name ? ` · Établi par ${esc(q.user_name)}` : ''}</div>
-        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">${noVat ? 'Prix unitaire' : 'PU TTC'}</th><th class="r">Remise</th>${noVat ? '' : '<th class="r">TVA</th><th class="r">Total HT</th>'}<th class="r">${noVat ? 'Total' : 'Total TTC'}</th></tr></thead>
-        <tbody>${rows}</tbody></table>
-        <table class="totals">${noVat ? '' : `<tr><td>Total HT</td><td class="r">${money(q.total_ht)}</td></tr>${vat}`}
-          <tr class="total"><td>${noVat ? 'Net à payer (FCFA)' : 'Net à payer TTC (FCFA)'}</td><td class="r">${money(q.total_ttc)}</td></tr></table>
-        <p>Arrêté${q.kind === 'proforma' ? 'e la présente facture proforma' : ' le présent devis'} à la somme de <b>${esc(words)} francs CFA</b>${noVat ? ' (TVA non applicable)' : ' toutes taxes comprises'}.</p>
-        ${q.notes ? `<p>${esc(q.notes)}</p>` : ''}
-        <p class="muted">Prix garantis jusqu'au ${dayFr(q.valid_until)} dans la limite des stocks disponibles. Ce document n'est pas une facture définitive.</p>
-        <div class="sign"><div>Bon pour accord, le client<br><br>Date et signature</div><div>Pour ${esc(store.name)}</div></div>`);
+    async quote(quoteId, opts) {
+      const t = s.receipts.quoteTemplate(quoteId, opts?.format ?? 'a4', opts?.templateId);
+      return printWithTemplate(t, s.receipts.quoteDoc(quoteId), opts?.output, `${t.variant === 'proforma' ? 'proforma' : 'devis'}-${s.quotes.get(quoteId).number}.pdf`);
+    },
+
+    previewQuote(quoteId, opts) {
+      const t = s.receipts.quoteTemplate(quoteId, opts?.format ?? 'a4', opts?.templateId);
+      return { templateId: t.id, html: renderDocHtml(t, s.receipts.quoteDoc(quoteId)) };
     },
 
     async statement(storeId, customerId, from, to) {

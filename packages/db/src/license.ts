@@ -12,7 +12,7 @@ import { AppError, Base, type Clock } from './util';
  * central (apps/server/src/license.ts).
  */
 export const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEANc6pFEZB747aucZFvJws/lEKyWGiPHM+eoOjTp9Mhjk=
+MCowBQYDK2VwAyEAFN0JKMfb8/004ITtjE6SQUCW0mIEhx+wKm11o+bLs+w=
 -----END PUBLIC KEY-----`;
 
 /** Jours d'essai d'une installation sans licence. */

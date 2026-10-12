@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FEDO Gestion : manuel d'utilisation</title>
+<style>
+  :root {
+    --vert: #1f7a5c;
+    --vert-fonce: #155a43;
+    --vert-clair: #e8f3ee;
+    --or: #f2b705;
+    --or-clair: #fff6d6;
+    --rouge: #b42318;
+    --rouge-clair: #fdecea;
+    --texte: #1d2433;
+    --gris: #5b6474;
+    --trait: #d9e2dc;
+  }
+  @page { size: A4; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    color: var(--texte);
+    font-size: 10.5pt;
+    line-height: 1.5;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  main { max-width: 178mm; margin: 0 auto; }
+  @media screen {
+    body { background: #eef2ef; }
+    main, .cover { background: #fff; padding: 14mm 16mm; margin: 10mm auto; max-width: 210mm; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  }
+  html.no-cover .cover { display: none; }
+  html.only-cover main { display: none; }
+
+  /* ---------- Couverture ---------- */
+  .cover {
+    height: 297mm;
+    width: 210mm;
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(160deg, #ffffff 0%, #ffffff 55%, var(--vert-clair) 100%);
+    padding: 0;
+  }
+  .cover .bande { position: absolute; left: 0; top: 0; bottom: 0; width: 14mm; background: var(--vert); }
+  .cover .bande::after { content: ""; position: absolute; left: 0; right: 0; top: 168mm; height: 22mm; background: var(--or); }
+  .cover .contenu { position: absolute; left: 32mm; right: 20mm; top: 42mm; }
+  .cover .logo { width: 44mm; height: 44mm; display: block; margin-bottom: 14mm; }
+  .cover h1 { font-size: 40pt; line-height: 1.05; margin: 0; color: var(--vert-fonce); letter-spacing: -0.5pt; }
+  .cover .sous { font-size: 22pt; margin: 4mm 0 0; color: var(--texte); font-weight: 600; }
+  .cover .editeur { margin-top: 10mm; font-size: 13pt; color: var(--gris); }
+  .cover .editeur b { color: var(--vert); }
+  .cover .domaine { margin-top: 3mm; font-size: 11pt; color: var(--gris); }
+  .cover .version { display: inline-block; margin-top: 12mm; padding: 2mm 5mm; border-radius: 3mm; background: var(--vert); color: #fff; font-weight: 700; font-size: 11pt; }
+  .cover .contact {
+    position: absolute; left: 32mm; right: 20mm; bottom: 26mm;
+    border: 0.4mm solid var(--trait); border-radius: 4mm; padding: 6mm 8mm; background: #fff;
+  }
+  .cover .contact h3 { margin: 0 0 3mm; font-size: 11pt; color: var(--vert-fonce); }
+  .cover .contact .ligne { display: flex; gap: 4mm; margin-top: 4mm; font-size: 10pt; color: var(--gris); }
+  .cover .contact .ligne span { white-space: nowrap; }
+  .cover .contact .ligne i { flex: 1; border-bottom: 0.3mm dotted #9aa5a0; }
+
+  /* ---------- Titres ---------- */
+  .chapitre { break-before: page; page-break-before: always; }
+  .chap-tete { border-left: 2.2mm solid var(--vert); padding: 1mm 0 1mm 5mm; margin: 0 0 6mm; }
+  .chap-num { font-size: 10pt; font-weight: 700; color: var(--or); text-transform: uppercase; letter-spacing: 1pt; }
+  h1 { font-size: 21pt; margin: 0; color: var(--vert-fonce); line-height: 1.2; }
+  h2 { font-size: 13.5pt; color: var(--vert); margin: 7mm 0 2.5mm; break-after: avoid; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 4mm 0 1.5mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; }
+  .pourqui { display: flex; flex-wrap: wrap; gap: 2mm; margin: 0 0 4mm; font-size: 9pt; color: var(--gris); align-items: center; }
+  .role { display: inline-block; padding: 0.6mm 2.6mm; border-radius: 10mm; font-weight: 700; font-size: 8.5pt; }
+  .role.caissier { background: var(--or-clair); color: #7a5a00; }
+  .role.gerant { background: var(--vert-clair); color: var(--vert-fonce); }
+  .role.admin { background: #e8ecf7; color: #2b3f78; }
+  .intro { font-size: 11pt; color: #364152; }
+
+  /* ---------- Étapes ---------- */
+  ol.etapes { list-style: none; counter-reset: e; padding: 0; margin: 2mm 0 3mm; }
+  ol.etapes > li { counter-increment: e; position: relative; padding: 0 0 0 9mm; margin: 0 0 2mm; break-inside: avoid; }
+  ol.etapes > li::before {
+    content: counter(e); position: absolute; left: 0; top: 0.2mm;
+    width: 5.6mm; height: 5.6mm; border-radius: 50%; background: var(--vert); color: #fff;
+    font-weight: 700; font-size: 8.5pt; line-height: 5.6mm; text-align: center;
+  }
+  ul { margin: 1mm 0 3mm; padding-left: 6mm; }
+  ul li { margin: 0 0 1mm; }
+  .menu { font-weight: 700; color: var(--vert-fonce); white-space: nowrap; }
+  .btn { display: inline-block; padding: 0 1.8mm; border: 0.3mm solid #b9c6bf; border-radius: 1.2mm; background: #f6f8f7; font-weight: 600; font-size: 9.5pt; white-space: nowrap; }
+  kbd { display: inline-block; min-width: 5mm; padding: 0 1.4mm; border: 0.3mm solid #b9c6bf; border-bottom-width: 0.7mm; border-radius: 1.2mm; background: #fff; font-family: inherit; font-size: 8.5pt; font-weight: 700; text-align: center; white-space: nowrap; }
+  code { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 8.8pt; background: #f2f4f3; padding: 0.2mm 1mm; border-radius: 1mm; }
+  pre { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 8.5pt; background: #f2f4f3; padding: 3mm 4mm; border-radius: 2mm; white-space: pre-wrap; margin: 2mm 0 3mm; }
+
+  /* ---------- Figures ---------- */
+  figure { margin: 3mm auto 5mm; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+  figure img { width: 86%; border: 0.3mm solid var(--trait); border-radius: 2mm; box-shadow: 0 0.6mm 2mm rgba(0,0,0,.08); }
+  figure.petit img { width: 72%; }
+  figcaption { font-size: 8.8pt; color: var(--gris); margin-top: 1.5mm; }
+  figcaption b { color: var(--vert); }
+
+  /* ---------- Encadrés ---------- */
+  .encadre { border-radius: 2.5mm; padding: 3mm 4mm 3mm 4mm; margin: 3mm 0 4mm; break-inside: avoid; font-size: 10pt; }
+  .encadre p:last-child, .encadre ul:last-child { margin-bottom: 0; }
+  .encadre .t { font-weight: 800; display: block; margin-bottom: 1mm; }
+  .astuce { background: var(--vert-clair); border-left: 1.4mm solid var(--vert); }
+  .astuce .t { color: var(--vert-fonce); }
+  .attention { background: var(--or-clair); border-left: 1.4mm solid var(--or); }
+  .attention .t { color: #7a5a00; }
+  .important { background: var(--rouge-clair); border-left: 1.4mm solid var(--rouge); }
+  .important .t { color: var(--rouge); }
+
+  /* ---------- Tableaux ---------- */
+  table.t { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 9.5pt; break-inside: avoid; }
+  table.t th { background: var(--vert); color: #fff; text-align: left; padding: 1.6mm 2.5mm; font-weight: 700; }
+  table.t td { padding: 1.5mm 2.5mm; border-bottom: 0.3mm solid var(--trait); vertical-align: top; }
+  table.t tr:nth-child(even) td { background: #f7faf8; }
+
+  /* ---------- Sommaire ---------- */
+  .sommaire h1 { margin-bottom: 6mm; }
+  .toc { list-style: none; padding: 0; margin: 0; }
+  .toc > li { margin: 0 0 1.6mm; }
+  .toc a { color: inherit; text-decoration: none; }
+  .toc .l { display: flex; align-items: baseline; gap: 2mm; }
+  .toc .l .n { font-weight: 800; color: var(--or); width: 7mm; flex: none; }
+  .toc .l .titre { font-weight: 700; color: var(--vert-fonce); }
+  .toc .l .pts { flex: 1; border-bottom: 0.3mm dotted #b9c6bf; transform: translateY(-1mm); }
+  .toc .l .pg { font-weight: 700; min-width: 7mm; text-align: right; }
+  .toc ul { list-style: none; padding: 0 0 0 9mm; margin: 0.6mm 0 0; font-size: 9.2pt; color: var(--gris); }
+  .toc ul li { margin: 0 0 0.3mm; }
+  .toc ul .l .titre { font-weight: 500; color: var(--gris); }
+  .toc ul .l .pg { font-weight: 500; }
+  .lecture { margin-top: 7mm; }
+
+  /* ---------- FAQ ---------- */
+  .q { break-inside: avoid; margin: 0 0 3.5mm; }
+  .q h3 { color: var(--vert-fonce); margin: 0 0 1mm; }
+  .q h3::before { content: "?"; display: inline-block; width: 5mm; height: 5mm; border-radius: 50%; background: var(--or); color: #fff; font-size: 8.5pt; line-height: 5mm; text-align: center; margin-right: 2mm; transform: translateY(-0.3mm); }
+</style>
+</head>
+<body>
+
+<!-- ======================= COUVERTURE ======================= -->
+<section class="cover">
+  <div class="bande"></div>
+  <div class="contenu">
+    <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Logo FEDO Gestion"><rect width="100" height="100" rx="22" fill="#1f7a5c"/><path d="M30 24 H72 V36 H43 V46 H66 V58 H43 V78 H30 Z" fill="#fff"/><circle cx="72" cy="72" r="8" fill="#f2b705"/></svg>
+    <h1>FEDO Gestion</h1>
+    <p class="sous">Manuel d'utilisation</p>
+    <p class="editeur">un logiciel <b>FEDONG</b></p>
+    <p class="domaine">Caisse, stock, clients, achats et comptabilité pour les superettes du Cameroun</p>
+    <span class="version">Version <span data-version>0.39.0</span></span>
+  </div>
+  <div class="contact">
+    <h3>Votre contact FEDONG (installation, licence, assistance)</h3>
+    <div class="ligne"><span>Nom :</span><i></i></div>
+    <div class="ligne"><span>Téléphone / WhatsApp :</span><i></i></div>
+    <div class="ligne"><span>Date d'installation :</span><i></i><span>Nombre de PC :</span><i></i></div>
+  </div>
+</section>
+
+<main>
+
+<!-- ======================= SOMMAIRE ======================= -->
+<section class="sommaire">
+  <h1>Sommaire</h1>
+  <ol class="toc" id="toc"></ol>
+
+  <div class="lecture">
+    <h2>Comment lire ce manuel</h2>
+    <p>Chaque chapitre explique une tâche, étape par étape, avec des images de l'écran. Les noms de menus et de boutons sont écrits <span class="menu">en gras vert</span> ou comme ceci : <span class="btn">Valider</span>. Les touches du clavier sont écrites comme ceci : <kbd>F4</kbd>.</p>
+    <p>Un chemin comme <span class="menu">Trésorerie › Opérations de trésorerie</span> veut dire : cliquez sur le menu <b>Trésorerie</b> en haut de l'écran, puis sur <b>Opérations de trésorerie</b>.</p>
+    <table class="t">
+      <tr><th style="width:32%">Vous êtes</th><th>Lisez en priorité</th></tr>
+      <tr><td><span class="role caissier">Caissier</span></td><td>Chapitre 4 (vendre, encaisser, clôturer) et chapitre 6 (ventes à crédit).</td></tr>
+      <tr><td><span class="role gerant">Gérant</span></td><td>Chapitres 2 à 7, puis 9 et 12.</td></tr>
+      <tr><td><span class="role admin">Propriétaire (administrateur)</span></td><td>Tout le manuel, en particulier les chapitres 1, 2, 9 et 10.</td></tr>
+    </table>
+    <div class="encadre astuce"><span class="t">Aide dans le logiciel</span>
+      <p>Sur chaque écran, le bouton rond <b>?</b> en haut à droite (ou le lien <b>Comment utiliser cette page ?</b>) explique la page affichée. Voir le chapitre 12.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 1 ======================= -->
+<section class="chapitre" id="ch1">
+  <div class="chap-tete"><div class="chap-num">Chapitre 1</div><h1>Installation et première ouverture</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span></div>
+  <p class="intro">FEDO Gestion s'installe sur un PC Windows (64 bits). Il garde ses données sur le PC lui-même : la caisse fonctionne même sans Internet.</p>
+
+  <h2 id="s1-1">Ce qu'il faut</h2>
+  <ul>
+    <li>Un PC Windows 64 bits avec le fichier d'installation <code>FedoGestion-Setup-<span data-version>0.39.0</span>.exe</code> remis par FEDONG.</li>
+    <li>Conseillé : une douchette (lecteur de codes-barres), une imprimante de tickets 80 mm ou 58 mm (USB ou réseau) et un tiroir-caisse branché sur l'imprimante.</li>
+    <li>Une clé USB pour les sauvegardes (chapitre 9).</li>
+  </ul>
+  <div class="encadre astuce"><span class="t">Le plus souvent, c'est FEDONG qui installe</span>
+    <p>Votre vendeur installe le logiciel, crée le magasin et règle l'imprimante avec vous. Gardez ce manuel près de la caisse.</p>
+  </div>
+
+  <h2 id="s1-2">Installer le logiciel</h2>
+  <ol class="etapes">
+    <li>Double-cliquez sur le fichier <code>FedoGestion-Setup-…exe</code>. Windows peut demander l'autorisation de l'administrateur du PC : acceptez.</li>
+    <li>Lisez le <b>contrat de licence</b> et acceptez-le. Le même contrat reste lisible plus tard dans <span class="menu">Administration › Licence</span>.</li>
+    <li>Gardez le dossier d'installation proposé, puis cliquez sur <span class="btn">Installer</span>.</li>
+    <li>À la fin, l'icône <b>FEDO Gestion</b> apparaît sur le bureau. Double-cliquez dessus pour ouvrir le logiciel.</li>
+  </ol>
+  <div class="encadre attention"><span class="t">Avertissement de Windows</span>
+    <p>Si Windows affiche « Windows a protégé votre ordinateur », cliquez sur <b>Informations complémentaires</b> puis <b>Exécuter quand même</b>, seulement si le fichier vient bien de FEDONG.</p>
+  </div>
+
+  <h2 id="s1-3">Créer le magasin (première ouverture)</h2>
+  <p>À la toute première ouverture, FEDO Gestion demande de créer votre magasin et le compte de l'administrateur (le propriétaire).</p>
+  <ol class="etapes">
+    <li>Tapez le <b>code magasin</b> (2 à 6 caractères, par exemple <code>DLA1</code>) et le <b>nom du magasin</b>. L'adresse, le téléphone et le NIU sont imprimés sur les tickets et factures.</li>
+    <li>Laissez la case <b>Magasin assujetti à la TVA</b> décochée si vous êtes au régime simplifié : les tickets porteront « TVA non applicable ». Cochez-la si vous êtes au réel (TVA 19,25 %). Elle peut être changée plus tard.</li>
+    <li>Dans <b>Administrateur</b>, tapez votre nom, un <b>identifiant</b> (par exemple votre prénom) et un <b>code secret</b> de 4 à 8 chiffres, deux fois.</li>
+    <li>Cliquez sur <span class="btn">Créer le magasin</span>.</li>
+  </ol>
+  <figure><img src="images/01-creation-magasin.png" alt=""><figcaption><b>Figure 1.1</b> Création du magasin à la première ouverture.</figcaption></figure>
+  <div class="encadre important"><span class="t">Notez le code de l'administrateur</span>
+    <p>Écrivez l'identifiant et le code secret de l'administrateur et rangez-les en lieu sûr. C'est le seul compte qui peut tout faire : créer les utilisateurs, activer la licence, restaurer une sauvegarde.</p>
+  </div>
+  <p>Le bouton <span class="btn">Rejoindre un magasin existant</span> sert seulement pour un deuxième PC du même magasin (chapitre 11).</p>
+
+  <h2 id="s1-4">Se connecter</h2>
+  <p>À chaque ouverture, chacun se connecte avec <b>son</b> identifiant et <b>son</b> code secret. Ainsi, chaque vente et chaque opération porte le nom de la personne qui l'a faite.</p>
+  <figure class="petit"><img src="images/01-connexion.png" alt=""><figcaption><b>Figure 1.2</b> L'écran de connexion. Tapez l'identifiant, le code secret, puis Entrée.</figcaption></figure>
+  <p>Le caissier arrive directement sur la fiche de vente. Le gérant et l'administrateur arrivent sur la <b>page d'accueil</b>, avec de grosses tuiles pour les tâches de tous les jours.</p>
+  <figure><img src="images/01-accueil-admin.png" alt=""><figcaption><b>Figure 1.3</b> Page d'accueil de l'administrateur.</figcaption></figure>
+  <p>L'écran est toujours rangé de la même façon :</p>
+  <ul>
+    <li><b>En haut</b> : les menus (Facturation, Vente, Achats, Trésorerie, Produit…). Chacun ne voit que les menus permis par ses droits.</li>
+    <li><b>Dessous</b> : les onglets rapides (V. cash 1, V. crédit, Stock, Trésorerie…). Un clic ouvre la fenêtre.</li>
+    <li><b>En bas</b> : la barre d'état. Elle montre le magasin, la caisse, l'utilisateur, le serveur, l'état de la sauvegarde et de la licence. Le lien <b>Changer d'utilisateur</b> est en bas à droite.</li>
+  </ul>
+  <p>À la première connexion, le <b>Guide de démarrage</b> affiche les cinq premières choses à faire selon votre rôle. Vous le retrouvez dans <span class="menu">Aide › Guide de démarrage</span>.</p>
+
+  <h2 id="s1-5">L'essai de 15 jours</h2>
+  <p>Sans licence, FEDO Gestion fonctionne <b>15 jours en essai</b>, avec toutes ses fonctions. La barre d'état affiche <b>Version d'essai (N j)</b>, le nombre de jours qui restent. Avant la fin, activez votre licence (chapitre 10).</p>
+</section>
+
+<!-- ======================= 2 ======================= -->
+<section class="chapitre" id="ch2">
+  <div class="chap-tete"><div class="chap-num">Chapitre 2</div><h1>Utilisateurs et droits</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Chaque personne a son propre compte. Son <b>rôle</b> décide de ce qu'elle voit et de ce qu'elle peut faire.</p>
+
+  <table class="t">
+    <tr><th style="width:26%">Rôle</th><th>Ce qu'il fait</th></tr>
+    <tr><td><b>Administrateur</b></td><td>Tous les droits. Crée les caisses et les utilisateurs, règle les paramètres, active la licence, restaure les sauvegardes. À réserver au propriétaire.</td></tr>
+    <tr><td><b>Gérant</b></td><td>Suit la journée, contrôle les clôtures et justifie les écarts, reçoit la marchandise, gère le stock, les clients et les commandes. Son code autorise les remises, retours et annulations des caissiers.</td></tr>
+    <tr><td><b>Caissier</b></td><td>Ouvre sa caisse, vend, encaisse, fait les ventes à crédit et clôture sa caisse.</td></tr>
+    <tr><td>Autres rôles</td><td><b>Vendeur</b> (comme le caissier), <b>Magasinier</b> (réceptions, transferts, inventaires, pertes), <b>Responsable d'achat</b> (commandes, fournisseurs), <b>Comptable</b> (journaux, TVA, états financiers).</td></tr>
+  </table>
+
+  <h2 id="s2-1">Créer les caisses</h2>
+  <p>Dans <span class="menu">Administration › Caisses</span>, l'administrateur crée une caisse <b>Espèces</b> par poste de vente. Il peut aussi créer une caisse <b>Électronique</b> (MTN Mobile Money, Orange Money, carte) et une caisse <b>Banque</b> (virement, chèque) pour chaque caissier. Chaque paiement va ensuite dans la caisse de son type.</p>
+
+  <h2 id="s2-2">Créer un utilisateur</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Administration › Utilisateurs</span>.</li>
+    <li>Cliquez sur <span class="btn">Ajouter un utilisateur</span>.</li>
+    <li>Tapez le <b>nom complet</b>, l'<b>identifiant</b> (ce qu'il tapera pour se connecter) et un <b>code secret</b> en chiffres.</li>
+    <li>Choisissez le <b>rôle</b> et le <b>magasin</b>.</li>
+    <li>Pour un caissier, choisissez sa <b>caisse espèces</b>. Sans caisse, il ne peut pas vendre. Choisissez aussi sa caisse électronique et sa caisse banque si vous en avez.</li>
+    <li>Cliquez sur <span class="btn">Enregistrer</span>.</li>
+  </ol>
+  <figure><img src="images/02-utilisateurs.png" alt=""><figcaption><b>Figure 2.1</b> La liste des utilisateurs, avec leur rôle et leur caisse.</figcaption></figure>
+  <figure><img src="images/02-ajout-utilisateur.png" alt=""><figcaption><b>Figure 2.2</b> Fiche d'un nouvel utilisateur.</figcaption></figure>
+  <div class="encadre astuce"><span class="t">Code oublié, compte bloqué</span>
+    <p>Cliquez sur l'utilisateur dans la liste, tapez un <b>nouveau code</b> puis enregistrez. Après trop de codes faux, le compte est bloqué 15 minutes : l'administrateur peut cliquer sur <span class="btn">Débloquer</span> dans la liste.</p>
+  </div>
+
+  <h2 id="s2-3">Régler les droits</h2>
+  <p>Les droits par défaut conviennent à la plupart des magasins. Pour les changer :</p>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Administration › Droits par rôle</span>.</li>
+    <li>Choisissez un groupe à gauche (Facturation, Trésorerie, Gestion des stocks…), ou tapez un mot dans la recherche.</li>
+    <li>Cochez ou décochez la case du droit dans la colonne du rôle. L'administrateur garde toujours tous les droits.</li>
+    <li>Le changement vaut pour tous les utilisateurs du rôle, à leur prochaine connexion.</li>
+  </ol>
+  <figure><img src="images/02-droits.png" alt=""><figcaption><b>Figure 2.3</b> Les droits par rôle, rangés par groupe.</figcaption></figure>
+  <p>Pour donner ou retirer un droit à <b>une seule personne</b> sans changer son rôle, utilisez <span class="menu">Administration › Privilèges par utilisateur</span>.</p>
+  <div class="encadre attention"><span class="t">Ce que le caissier ne voit pas</span>
+    <p>Par défaut, le caissier ne voit pas les montants de la caisse : il compte à l'aveugle à la clôture et ne voit pas l'attendu. Seul le gérant (ou le comptable) voit les montants et les écarts. Les menus et boutons non permis ne s'affichent pas du tout.</p>
+  </div>
+</section>
+
+<!-- ======================= 3 ======================= -->
+<section class="chapitre" id="ch3">
+  <div class="chap-tete"><div class="chap-num">Chapitre 3</div><h1>Articles et prix</h1></div>
+  <div class="pourqui">Pour qui : <span class="role gerant">Gérant</span> <span class="role admin">Propriétaire</span></div>
+  <p class="intro">Chaque produit vendu a une fiche article : son nom, son rayon, ses prix et ses codes-barres. Vous pouvez créer les fiches une par une ou importer tout le catalogue depuis Excel.</p>
+
+  <h2 id="s3-1">La liste des produits</h2>
+  <p>Ouvrez <span class="menu">Produit › Liste des produits</span> (ou l'onglet <b>Produits</b>). Tapez dans la zone jaune pour chercher par nom, code, code-barres ou marque. Cliquez sur un produit pour ouvrir sa fiche.</p>
+  <figure><img src="images/03-produits.png" alt=""><figcaption><b>Figure 3.1</b> La liste des produits avec le prix d'achat, le prix de vente et la marge.</figcaption></figure>
+
+  <h2 id="s3-2">Créer une fiche article</h2>
+  <ol class="etapes">
+    <li>Cliquez sur <span class="btn">Nouvel article</span>.</li>
+    <li>Tapez la <b>désignation</b> (le nom imprimé sur le ticket). Laissez le <b>code article</b> vide : il est numéroté tout seul.</li>
+    <li>Choisissez le <b>rayon / famille</b> et l'<b>unité de vente</b> : pièce, kg ou litre. Pour créer un rayon, utilisez <b>Nouveau rayon</b> plus bas.</li>
+    <li>Dans <b>Conditionnements et prix</b>, la ligne 1 est le conditionnement d'achat (CARTON, CASIER, PALETTE…) avec son prix d'<b>achat</b>, son prix de <b>revient</b> (achat plus transport) et son prix de <b>vente</b>.</li>
+    <li>Si vous vendez aussi au détail, cochez la ligne 2 : tapez le nom (BOÎTE, CANETTE, PIÈCE…), le <b>diviseur</b> (24 boîtes dans le carton) et le prix de vente. L'achat et le revient se calculent seuls. Les colonnes <b>Gros</b> et <b>Sup. gros</b> sont les prix des clients grossistes.</li>
+    <li>Plus bas, scannez le <b>code-barres</b> du produit avec la douchette, ou cliquez sur <span class="btn">Générer un code interne</span> pour un produit sans code-barres.</li>
+    <li>Réglez si besoin le <b>stock d'alerte</b>, cochez <b>Périssable</b> (la date limite sera demandée à la réception) ou <b>Touche rapide en caisse</b>. Vous pouvez ajouter une photo.</li>
+    <li>Cliquez sur <span class="btn">Enregistrer</span>.</li>
+  </ol>
+  <figure><img src="images/03-fiche-article.png" alt=""><figcaption><b>Figure 3.2</b> Fiche d'un article acheté au carton et vendu à la boîte.</figcaption></figure>
+  <div class="encadre astuce"><span class="t">Changer un prix</span>
+    <p>Ouvrez la fiche, changez le prix de vente et enregistrez. L'historique des prix reste sur la fiche. Pensez à imprimer la nouvelle étiquette : <span class="menu">Produit › Étiquettes de rayon</span> liste les étiquettes à refaire.</p>
+  </div>
+
+  <h2 id="s3-3">Importer le catalogue depuis Excel</h2>
+  <p>Si vous avez déjà la liste de vos produits dans Excel, vous pouvez l'importer en une fois.</p>
+  <ol class="etapes">
+    <li>Dans Excel, mettez les colonnes dans cet ordre, avec ces en-têtes sur la première ligne :
+      <pre>designation;code_barres;prix_vente;prix_achat;tva;unite;rayon;famille
+Riz parfumé 5 kg;6111234567890;4500;3800;0;piece;Épicerie;Riz</pre>
+      Pour l'unité, écrivez <code>piece</code>, <code>kg</code> ou <code>litre</code>.</li>
+    <li>Dans Excel : <b>Fichier › Enregistrer sous</b>, type <b>CSV</b>. Choisissez de préférence <b>CSV UTF-8</b> pour garder les accents.</li>
+    <li>Dans FEDO Gestion, ouvrez <span class="menu">Produit › Liste des produits</span> et cliquez sur <span class="btn">Importer (CSV)</span>.</li>
+    <li>Choisissez le fichier. Le nombre de lignes lues s'affiche : cliquez sur <span class="btn">Importer</span>.</li>
+    <li>Vérifiez quelques fiches dans la liste des produits.</li>
+  </ol>
+  <figure><img src="images/03-import.png" alt=""><figcaption><b>Figure 3.3</b> La fenêtre d'import, avec les colonnes attendues.</figcaption></figure>
+
+  <h2 id="s3-4">Produits vendus au poids</h2>
+  <p>Pour la viande, le poisson ou les légumes au kilo, choisissez l'unité <b>Kg</b> et le prix au kilo. Si votre balance imprime des étiquettes à code-barres, tapez le <b>code balance (PLU)</b> du produit sur sa fiche (5 chiffres). À la caisse, l'étiquette scannée donne directement le poids ou le prix.</p>
+</section>
+
+<!-- ======================= 4 ======================= -->
+<section class="chapitre" id="ch4">
+  <div class="chap-tete"><div class="chap-num">Chapitre 4</div><h1>La caisse : ouvrir, vendre, clôturer</h1></div>
+  <div class="pourqui">Pour qui : <span class="role caissier">Caissier</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">La journée d'un caissier se fait en trois temps : ouvrir sa caisse le matin, vendre, puis clôturer le soir en comptant les billets.</p>
+
+  <h2 id="s4-1">Ouvrir la caisse le matin</h2>
+  <p>Aucune vente n'est possible tant que la caisse n'est pas ouverte. La fiche de vente affiche alors <b>La caisse est fermée</b>.</p>
+  <ol class="etapes">
+    <li>Cliquez sur <span class="btn">Ouvrir la caisse dans Trésorerie</span> (ou ouvrez l'onglet <b>Trésorerie</b>).</li>
+    <li>Cliquez sur <span class="btn">Ouvrir la caisse…</span>.</li>
+    <li>Le fond laissé dans le tiroir à la dernière clôture est proposé. Vérifiez-le. Pour compter billet par billet, cliquez sur <b>Compter par coupures</b>.</li>
+    <li>Cliquez sur <span class="btn">Ouvrir la caisse</span>. Votre caisse électronique (MoMo, Orange Money) s'ouvre en même temps.</li>
+  </ol>
+  <figure><img src="images/04-ouverture-caisse.png" alt=""><figcaption><b>Figure 4.1</b> Ouverture de la caisse avec le fond de la veille.</figcaption></figure>
+  <div class="encadre attention"><span class="t">Fond plus élevé que la veille</span>
+    <p>Si vous mettez plus d'argent que le fond de la veille, le complément vient de la caisse centrale : le code du gérant est demandé et un bon est imprimé.</p>
+  </div>
+
+  <h2 id="s4-2">Vendre</h2>
+  <p>Ouvrez l'onglet <b>V. cash 1</b> (vente au comptant). Le curseur est dans la zone jaune.</p>
+  <ol class="etapes">
+    <li><b>Avec la douchette</b> : scannez le code-barres. Le produit s'ajoute avec la quantité 1.</li>
+    <li><b>Plusieurs pièces</b> : tapez la quantité, une étoile, puis scannez. Exemple : <code>6*</code> puis le code du Coca donne 6 Coca. Les touches <kbd>+</kbd> et <kbd>−</kbd> changent la quantité de la ligne choisie.</li>
+    <li><b>Sans code-barres</b> : tapez les premières lettres du nom (2 lettres suffisent). Une liste s'ouvre avec le prix et le stock. Choisissez avec les flèches puis <kbd>Entrée</kbd>.</li>
+    <li>Une petite fenêtre demande la quantité. Tapez-la puis <kbd>Entrée</kbd>.</li>
+    <li>Pour enlever une ligne, cliquez dessus puis <kbd>Suppr</kbd> ou le bouton <span class="btn">Enlever</span>.</li>
+  </ol>
+  <figure><img src="images/04-recherche.png" alt=""><figcaption><b>Figure 4.2</b> En tapant « huile », la liste propose les produits avec leur stock et leur prix.</figcaption></figure>
+  <figure><img src="images/04-fiche-vente.png" alt=""><figcaption><b>Figure 4.3</b> Une fiche de vente prête à encaisser. Le total est affiché en grand.</figcaption></figure>
+  <p>Un produit épuisé reste dans la liste, marqué <b>Épuisé</b>, mais ne peut pas être vendu.</p>
+
+  <h2 id="s4-3">Vendre au poids</h2>
+  <p>Pour un produit au kilo, la fenêtre demande la <b>quantité en kg</b>. Tapez le poids lu sur la balance avec une virgule, par exemple <code>1,250</code> pour 1,250 kg, puis <kbd>Entrée</kbd>. Le prix se calcule tout seul. Si la balance imprime une étiquette à code-barres, scannez simplement l'étiquette.</p>
+  <figure><img src="images/04-poids.png" alt=""><figcaption><b>Figure 4.4</b> Viande vendue au poids : 1,250 kg à 3 500 FCFA le kilo.</figcaption></figure>
+
+  <h2 id="s4-4">Encaisser en espèces</h2>
+  <ol class="etapes">
+    <li>Cliquez sur les billets reçus du client (<span class="btn">1 000</span>, <span class="btn">2 000</span>, <span class="btn">5 000</span>, <span class="btn">10 000</span>) ou tapez le montant. <b>E</b> montre l'encaissé et <b>R</b> la monnaie à rendre.</li>
+    <li>Appuyez sur <kbd>F4</kbd> (ou <span class="btn">Valider / Nouv.</span>). Le ticket s'imprime et une nouvelle fiche commence.</li>
+  </ol>
+  <figure><img src="images/04-especes.png" alt=""><figcaption><b>Figure 4.5</b> Le client donne 5 000 FCFA : il faut rendre 1 700 FCFA.</figcaption></figure>
+  <p>Pour réimprimer le dernier ticket : <kbd>F2</kbd>. Pour une facture A4 du dernier ticket : <kbd>F9</kbd>.</p>
+
+  <h2 id="s4-5">Encaisser par MTN Mobile Money, Orange Money ou carte</h2>
+  <ol class="etapes">
+    <li>Appuyez sur <kbd>Ctrl</kbd>+<kbd>E</kbd> (ou <span class="btn">Encaisser</span>).</li>
+    <li>Cliquez sur le moyen de paiement : <b>MTN Mobile Money</b>, <b>Orange Money</b>, <b>Carte bancaire</b> ou <b>Bon d'achat</b>.</li>
+    <li>Tapez le montant, puis la <b>référence de la transaction</b> reçue par SMS. Elle est obligatoire.</li>
+    <li>Cliquez sur <span class="btn">Ajouter le paiement</span>.</li>
+    <li>Le client paie une partie en espèces et le reste en MoMo ? Ajoutez simplement deux paiements.</li>
+    <li>Quand <b>Reste à payer</b> est à 0, cliquez sur <span class="btn">Valider le ticket</span>.</li>
+  </ol>
+  <figure><img src="images/04-encaissement.png" alt=""><figcaption><b>Figure 4.6</b> Paiement mixte : 10 000 FCFA en espèces et le reste par MTN Mobile Money.</figcaption></figure>
+  <div class="encadre astuce"><span class="t">Vérifiez le SMS avant de valider</span>
+    <p>Ne validez un paiement MoMo ou Orange Money qu'après avoir vu le SMS de confirmation. La référence sert à retrouver le paiement à la clôture.</p>
+  </div>
+
+  <h2 id="s4-6">Mettre un ticket en attente</h2>
+  <p>Un client a oublié quelque chose ? Mettez son ticket de côté pour servir le suivant.</p>
+  <ol class="etapes">
+    <li>Appuyez sur <kbd>F3</kbd> (<span class="btn">Mise en attente</span>). La fiche se vide.</li>
+    <li>Servez les autres clients normalement. Le bouton <b>Ouvrir (en attente)</b> affiche le nombre de tickets en attente.</li>
+    <li>Quand le client revient, appuyez sur <kbd>F10</kbd>, choisissez son ticket et <kbd>Entrée</kbd>.</li>
+  </ol>
+  <figure><img src="images/04-attente.png" alt=""><figcaption><b>Figure 4.7</b> Rappel d'un ticket mis en attente.</figcaption></figure>
+
+  <h2 id="s4-7">Faire une remise</h2>
+  <ol class="etapes">
+    <li>Cliquez sur la ligne du produit, puis appuyez sur <kbd>F6</kbd>.</li>
+    <li>Choisissez <b>En %</b> ou <b>En FCFA</b>, tapez la remise et cliquez sur <span class="btn">Appliquer</span>.</li>
+    <li>Si vous n'avez pas le droit de faire des remises, le code du gérant est demandé à l'encaissement.</li>
+  </ol>
+  <figure><img src="images/04-remise.png" alt=""><figcaption><b>Figure 4.8</b> Remise de 10 % sur une ligne, validée par le gérant à l'encaissement.</figcaption></figure>
+  <p>Les promotions enregistrées par le gérant (<span class="menu">Vente › Promotions</span>) s'appliquent toutes seules, sans code.</p>
+
+  <h2 id="s4-8">Retour d'un client, annulation d'un ticket</h2>
+  <ol class="etapes">
+    <li>Dans la fiche de vente, ouvrez la liste <b>Action</b> et choisissez <b>Retour client</b>.</li>
+    <li>Tapez le <b>numéro du ticket</b> (imprimé sur le ticket du client) et cliquez sur <span class="btn">Rechercher</span>.</li>
+    <li>Pour chaque article rapporté, tapez la quantité retournée.</li>
+    <li>Choisissez le mode de <b>remboursement</b> et tapez le <b>motif</b>.</li>
+    <li>Cliquez sur <span class="btn">Valider le retour</span> : le gérant tape son code. Les articles reviennent en stock.</li>
+  </ol>
+  <figure><img src="images/04-retour.png" alt=""><figcaption><b>Figure 4.9</b> Retour d'un savon sur un ticket du jour.</figcaption></figure>
+  <p>Pour annuler un ticket entier de la journée : <b>Action › Annuler un ticket</b>, avec un motif et le code du gérant. La liste <b>Action</b> sert aussi aux apports et prélèvements d'espèces, aux règlements des clients à crédit et aux dépenses payées avec l'argent du tiroir.</p>
+
+  <h2 id="s4-9">Clôturer la caisse le soir</h2>
+  <p>La clôture se fait <b>à l'aveugle</b> : vous comptez d'abord les billets, sans voir ce que le logiciel attend.</p>
+  <ol class="etapes">
+    <li>Terminez ou mettez en attente le ticket en cours, puis ouvrez l'onglet <b>Trésorerie</b>.</li>
+    <li>Cliquez sur <span class="btn">Fermer la caisse…</span>.</li>
+    <li>Comptez les espèces du tiroir et tapez le <b>nombre</b> de billets et de pièces de chaque valeur. Le total se calcule en bas.</li>
+    <li>Cliquez sur <span class="btn">Valider le comptage</span>.</li>
+    <li>Indiquez le <b>fond laissé dans le tiroir pour demain</b>. Le reste est <b>versé à la caisse centrale</b>.</li>
+    <li>Cliquez sur <span class="btn">Clôturer et verser</span>. Le bon de versement s'imprime : remettez-le au gérant avec l'argent, et faites-le signer.</li>
+  </ol>
+  <figure><img src="images/04-cloture-comptage.png" alt=""><figcaption><b>Figure 4.10</b> Comptage des espèces par coupure.</figcaption></figure>
+  <figure><img src="images/04-cloture-fin.png" alt=""><figcaption><b>Figure 4.11</b> Caisse fermée : espèces comptées, fond laissé et montant versé.</figcaption></figure>
+  <p>Ensuite, dans <b>Mes autres caisses</b>, cliquez sur <span class="btn">Clôturer…</span> en face de votre caisse électronique. Tapez pour chaque moyen (MTN, Orange, carte) le <b>montant relevé</b> sur le téléphone ou le terminal, puis validez.</p>
+  <div class="encadre attention"><span class="t">Caisse oubliée ouverte</span>
+    <p>Une caisse restée ouverte d'un jour sur l'autre est signalée. Fermez la journée d'hier avant d'ouvrir celle d'aujourd'hui.</p>
+  </div>
+
+  <h2 id="s4-10">Écart de caisse et rapport Z (gérant)</h2>
+  <p>Après la clôture, le logiciel compare le comptage avec l'attendu. Si l'écart dépasse le <b>seuil</b> (500 FCFA par défaut, réglable dans <span class="menu">Administration › Paramètres</span>), la journée reste <b>« écart à justifier »</b> et la barre d'état du gérant le signale.</p>
+  <ol class="etapes">
+    <li>Le gérant ouvre <span class="menu">Trésorerie › Historique des journées de caisse</span>.</li>
+    <li>Dans <b>Écarts à justifier</b>, il clique sur <b>Ouvrir la journée</b>, puis sur <span class="btn">Justifier l'écart…</span>.</li>
+    <li>Il voit l'attendu, le relevé et l'écart. Après avoir parlé avec le caissier, il tape le <b>motif</b> et clique sur <span class="btn">Enregistrer le motif</span>.</li>
+  </ol>
+  <figure><img src="images/04-justifier.png" alt=""><figcaption><b>Figure 4.12</b> Le gérant justifie un manquant de 1 000 FCFA.</figcaption></figure>
+  <p>Dans la même journée, l'onglet <b>Vue détaillée (Z)</b> montre le <b>rapport Z</b> : nombre de tickets, chiffre d'affaires, encaissements par moyen de paiement, fond, ventes en espèces, compté, versé et fond laissé. Les boutons <span class="btn">Imprimer le Z</span> et <span class="btn">Rapport de clôture (A4)</span> les impriment, à tout moment.</p>
+  <figure><img src="images/04-rapport-z.png" alt=""><figcaption><b>Figure 4.13</b> Le rapport Z d'une journée de caisse.</figcaption></figure>
+
+  <h2 id="s4-11">Suivre la journée (gérant)</h2>
+  <ul>
+    <li><span class="menu">Vente › Tableau de bord</span> : chiffre d'affaires du jour, tickets, panier moyen, marge, meilleures ventes.</li>
+    <li><span class="menu">Vente › Points d'attention</span> : ce qui attend une action (ruptures, écarts, factures en retard…). Une tuile ouvre la bonne fenêtre.</li>
+    <li><span class="menu">Administration › Résumé du jour</span> : le résumé de la journée, prêt à envoyer au gérant par WhatsApp. L'administrateur peut aussi le faire partir chaque soir par e-mail.</li>
+  </ul>
+  <figure><img src="images/04-resume-jour.png" alt=""><figcaption><b>Figure 4.14</b> Le résumé du jour, à envoyer par WhatsApp.</figcaption></figure>
+
+  <h3>Les touches de la caisse</h3>
+  <table class="t">
+    <tr><th style="width:18%">Touche</th><th>Action</th><th style="width:18%">Touche</th><th>Action</th></tr>
+    <tr><td><kbd>F1</kbd></td><td>Rechercher un produit</td><td><kbd>F6</kbd></td><td>Remise sur la ligne</td></tr>
+    <tr><td><kbd>F2</kbd></td><td>Réimprimer le ticket</td><td><kbd>F7</kbd></td><td>Listing des ventes</td></tr>
+    <tr><td><kbd>F3</kbd></td><td>Mettre en attente</td><td><kbd>F8</kbd></td><td>Choisir le client</td></tr>
+    <tr><td><kbd>F4</kbd></td><td>Valider le ticket</td><td><kbd>F9</kbd></td><td>Facture A4</td></tr>
+    <tr><td><kbd>F5</kbd></td><td>Ouvrir le tiroir</td><td><kbd>F10</kbd></td><td>Rappeler un ticket en attente</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Encaisser (MoMo, Orange, carte, mixte)</td><td><kbd>Suppr</kbd></td><td>Enlever la ligne</td></tr>
+  </table>
+</section>
+
+<!-- ======================= 5 ======================= -->
+<section class="chapitre" id="ch5">
+  <div class="chap-tete"><div class="chap-num">Chapitre 5</div><h1>Le stock</h1></div>
+  <div class="pourqui">Pour qui : <span class="role gerant">Gérant</span> <span class="role admin">Magasinier</span></div>
+  <p class="intro">Le stock baisse tout seul à chaque vente. Il monte quand vous saisissez une réception. Les inventaires, les pertes et les dates de péremption gardent le stock juste.</p>
+
+  <h2 id="s5-1">Recevoir une livraison</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Achats › Saisir une nouvelle réception (sans commande)</span>. Pour une livraison commandée, passez plutôt par le bon de commande (chapitre 7).</li>
+    <li>Choisissez le <b>dépôt</b> (surface de vente ou réserve), le <b>fournisseur</b> et tapez le <b>numéro du bon de livraison</b>.</li>
+    <li>Scannez chaque produit ou tapez le début de son nom, puis <kbd>Entrée</kbd>.</li>
+    <li>Sur chaque ligne, corrigez la <b>quantité</b> et le <b>coût unitaire</b> si besoin.</li>
+    <li>Pour les produits périssables, tapez le <b>numéro de lot</b> et la <b>date limite</b>. La date est obligatoire.</li>
+    <li>Cliquez sur <span class="btn">Valider la réception</span>. Un bon de réception (BR) est créé et le stock augmente.</li>
+  </ol>
+  <figure><img src="images/05-reception.png" alt=""><figcaption><b>Figure 5.1</b> Réception d'une livraison, avec lot et date limite pour le lait.</figcaption></figure>
+  <p>Pour passer de la marchandise de la réserve à la surface de vente, utilisez le menu <span class="menu">Transfert › Transfert entre dépôts</span>.</p>
+
+  <h2 id="s5-2">Faire un inventaire</h2>
+  <p>L'inventaire se fait sans fermer le magasin : les ventes faites pendant le comptage sont déduites.</p>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Produit › Inventaires</span>.</li>
+    <li>Cliquez sur <span class="btn">Nouvel inventaire global</span> (tous les produits du dépôt) ou <span class="btn">Nouvel inventaire partiel</span> (des rayons choisis, ou des produits ajoutés un par un).</li>
+    <li>Si vous le souhaitez, imprimez la <b>Fiche de comptage</b> pour compter en rayon.</li>
+    <li>Dans la colonne <b>Stock physique compté</b>, tapez la quantité trouvée et <kbd>Entrée</kbd> pour passer à la ligne suivante. Chaque saisie est enregistrée : vous pouvez reprendre plus tard.</li>
+    <li>Les lignes en <b>rose</b> ont un manquant, en <b>bleu</b> un surplus, en <b>vert</b> pas d'écart.</li>
+    <li>Quand tout est compté, le gérant clique sur <span class="btn">Clôturer l'inventaire…</span>. Le stock est corrigé.</li>
+  </ol>
+  <figure><img src="images/05-inventaire.png" alt=""><figcaption><b>Figure 5.2</b> Inventaire partiel du rayon Boissons en cours de comptage.</figcaption></figure>
+  <div class="encadre important"><span class="t">Inventaire global</span>
+    <p>Dans un inventaire global, les produits <b>non comptés passent à zéro</b> à la clôture (le logiciel demande confirmation). Dans un inventaire partiel, ils ne changent pas.</p>
+  </div>
+
+  <h2 id="s5-3">Sortir la casse et les pertes</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Produit › Déstockages (pertes et casse)</span>.</li>
+    <li>Choisissez le dépôt, puis scannez ou tapez le produit.</li>
+    <li>Choisissez le <b>type de sortie</b> : Casse, Vol constaté, Péremption ou Consommation interne.</li>
+    <li>Tapez la <b>quantité</b> et le <b>motif</b>. Le lot est choisi tout seul (le plus proche de sa date).</li>
+    <li>Cliquez sur <span class="btn">Enregistrer la sortie</span>.</li>
+  </ol>
+
+  <h2 id="s5-4">Surveiller les dates de péremption</h2>
+  <p><span class="menu">Produit › Péremptions</span> liste les lots qui périment bientôt, avec une alerte <b>J-7</b>, <b>J-3</b>, <b>J-1</b> ou <b>périmé</b>. Choisissez l'horizon en haut (7 jours par exemple). Mettez ces produits en avant, faites une promotion, ou sortez-les en perte (type Péremption).</p>
+  <figure><img src="images/05-peremptions.png" alt=""><figcaption><b>Figure 5.3</b> Lots qui périment dans les 7 jours.</figcaption></figure>
+  <p>Les stocks bas sont dans <span class="menu">Produit › Stocks critiques</span> et dans les <b>Points d'attention</b>. Le seuil d'alerte se règle sur la fiche de chaque article.</p>
+</section>
+
+<!-- ======================= 6 ======================= -->
+<section class="chapitre" id="ch6">
+  <div class="chap-tete"><div class="chap-num">Chapitre 6</div><h1>Clients à crédit et règlements</h1></div>
+  <div class="pourqui">Pour qui : <span class="role caissier">Caissier</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Un client en compte (restaurant, école, boutique) peut acheter à crédit et payer plus tard. FEDO Gestion suit ce qu'il doit et bloque au-delà de son plafond.</p>
+
+  <h2 id="s6-1">Créer un client</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Client › Liste</span> et cliquez sur <span class="btn">Nouveau client</span>. À la caisse, vous pouvez aussi le créer depuis la fenêtre <kbd>F8</kbd>.</li>
+    <li>Tapez le nom, le téléphone, le NIU si besoin.</li>
+    <li>Réglez le <b>plafond de crédit</b> (le maximum qu'il peut devoir) et le <b>délai de paiement</b> en jours.</li>
+    <li>Choisissez son <b>tarif</b> : Détail, Gros ou Super gros. La caisse applique ses prix dès qu'il est choisi.</li>
+    <li>Enregistrez.</li>
+  </ol>
+
+  <h2 id="s6-2">Vendre à crédit</h2>
+  <ol class="etapes">
+    <li>Ouvrez l'onglet <b>V. crédit</b> (en rouge).</li>
+    <li>Appuyez sur <kbd>F8</kbd>, tapez le nom du client et choisissez-le. Son solde s'affiche en couleur : <b>rouge</b> s'il doit, <b>vert</b> s'il a un avoir.</li>
+    <li>Ajoutez les produits comme pour une vente normale.</li>
+    <li>Si le client donne un <b>acompte</b> en espèces, cliquez sur les billets reçus.</li>
+    <li>Appuyez sur <kbd>F4</kbd>. L'acompte va dans la caisse, le reste va au compte du client avec sa date d'échéance.</li>
+  </ol>
+  <figure><img src="images/06-vente-credit.png" alt=""><figcaption><b>Figure 6.1</b> Vente à crédit au Restaurant Chez Kader, avec un acompte de 10 000 FCFA.</figcaption></figure>
+  <div class="encadre attention"><span class="t">Plafond dépassé</span>
+    <p>Si la vente fait dépasser le plafond du client, le code d'un gérant est demandé. Cette autorisation est enregistrée.</p>
+  </div>
+  <p>Pour lui donner une facture A4 (avec l'échéance), appuyez sur <kbd>F9</kbd> juste après la vente.</p>
+
+  <h2 id="s6-3">Encaisser un règlement</h2>
+  <p><b>À la caisse :</b></p>
+  <ol class="etapes">
+    <li>Dans la fiche de vente, ouvrez la liste <b>Action</b> et choisissez <b>Règlement client (crédit)</b>.</li>
+    <li>Choisissez le client : ce qu'il doit s'affiche.</li>
+    <li>Choisissez le moyen : Espèces, MTN MoMo, Orange Money, Virement, Chèque ou Carte.</li>
+    <li>Tapez le montant (vide = tout le solde) et, hors espèces, la référence.</li>
+    <li>Cliquez sur <span class="btn">Valider le règlement</span>. Un reçu s'imprime. Les espèces reçues entrent dans le tiroir et sur le Z.</li>
+  </ol>
+  <figure><img src="images/06-reglement-client.png" alt=""><figcaption><b>Figure 6.2</b> Règlement de 30 000 FCFA par MTN MoMo.</figcaption></figure>
+  <p><b>Au bureau :</b> ouvrez <span class="menu">Client › Liste</span>, cliquez sur le client puis sur <span class="btn">Encaisser un règlement</span>. Un règlement solde d'abord les ventes les plus anciennes.</p>
+
+  <h2 id="s6-4">Suivre les clients</h2>
+  <ul>
+    <li><span class="menu">Client › Consulter un extrait de compte</span> : toutes les ventes et règlements d'un client, et le relevé à imprimer pour lui.</li>
+    <li><span class="menu">Client › Situation des clients</span> : ce que chacun doit, classé par retard (non échu, 1-30, 31-60, 61-90, plus de 90 jours).</li>
+    <li>Les clients en retard de paiement apparaissent aussi dans les <b>Points d'attention</b>.</li>
+  </ul>
+</section>
+
+<!-- ======================= 7 ======================= -->
+<section class="chapitre" id="ch7">
+  <div class="chap-tete"><div class="chap-num">Chapitre 7</div><h1>Fournisseurs et commandes</h1></div>
+  <div class="pourqui">Pour qui : <span class="role gerant">Gérant</span> <span class="role admin">Responsable d'achat</span></div>
+  <p class="intro">Ce chapitre est un résumé. Les commandes sont facultatives : vous pouvez toujours recevoir sans commande (chapitre 5).</p>
+
+  <h2 id="s7-1">Les fournisseurs</h2>
+  <p>Dans <span class="menu">Fournisseur › Liste des fournisseurs</span>, créez la fiche de chaque fournisseur : téléphone, NIU, délai de paiement, délai de livraison. Ce que vous lui devez se suit dans <span class="menu">Fournisseur › Situation des fournisseurs</span>.</p>
+
+  <h2 id="s7-2">Passer une commande</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Achats › Saisir un nouvel achat (bon de commande)</span>.</li>
+    <li>Choisissez le fournisseur, le dépôt de livraison et la date souhaitée.</li>
+    <li>Ajoutez les articles et tapez les quantités. Le prix d'achat est proposé.</li>
+    <li>Cliquez sur <span class="btn">Enregistrer et envoyer</span> (ou <span class="btn">Enregistrer le brouillon</span> pour finir plus tard). Le bon de commande s'imprime en A4.</li>
+  </ol>
+  <figure><img src="images/07-bon-commande.png" alt=""><figcaption><b>Figure 7.1</b> Un bon de commande pour le dépôt SABC.</figcaption></figure>
+  <ul>
+    <li><b>À la livraison</b> : dans <span class="menu">Achats › Bons de commande</span>, ouvrez le bon et réceptionnez. Une livraison incomplète laisse un reliquat en attente.</li>
+    <li><b>La facture du fournisseur</b> : <span class="menu">Achats › Saisir une facture à partir des BL</span>, ou <span class="menu">Saisir une facture directe</span> sans bon de commande. L'<span class="menu">Échéancier fournisseurs</span> montre ce qu'il faut payer et quand.</li>
+    <li><b>Que commander ?</b> <span class="menu">Achats › Proposition de commande</span> calcule les quantités d'après les ventes des 4 dernières semaines et le stock d'alerte, et crée un bon par fournisseur en un clic.</li>
+  </ul>
+</section>
+
+<!-- ======================= 8 ======================= -->
+<section class="chapitre" id="ch8">
+  <div class="chap-tete"><div class="chap-num">Chapitre 8</div><h1>Comptabilité et états</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span> <span class="role admin">Comptable</span></div>
+  <p class="intro">FEDO Gestion tient une comptabilité au plan SYSCOHADA révisé. Les écritures se passent toutes seules : vous n'avez rien à ressaisir. Ce chapitre est un résumé ; montrez ces écrans à votre comptable.</p>
+
+  <h2 id="s8-1">Les écritures automatiques</h2>
+  <p>Chaque clôture de caisse (Z), règlement de client, facture et paiement de fournisseur, dépense et écart de caisse crée son écriture. Vous les voyez dans <span class="menu">Comptabilité › Journaux</span>. Le comptable peut aussi saisir des écritures à la main (loyer, banque…) avec <span class="btn">Saisir une écriture</span>.</p>
+  <figure><img src="images/08-journaux.png" alt=""><figcaption><b>Figure 8.1</b> Les journaux : ventes, caisse, manquant de caisse, passés automatiquement.</figcaption></figure>
+  <ul>
+    <li><span class="menu">Comptabilité › Grand livre</span> et <span class="menu">Balance générale</span> : le détail et le solde de chaque compte.</li>
+    <li><span class="btn">Export CSV (cabinet comptable)</span> : les écritures à transmettre à votre cabinet.</li>
+    <li>Les dépenses (loyer, ENEO, salaires, transport…) se saisissent dans <span class="menu">Charge › Dépenses</span>. Une dépense payée avec l'argent du tiroir se fait à la caisse : <b>Action › Dépense payée en caisse</b>, avec un bon de sortie à signer.</li>
+  </ul>
+
+  <h2 id="s8-2">La TVA</h2>
+  <p>Par défaut, le magasin n'est pas assujetti à la TVA (régime simplifié) : la TVA n'apparaît nulle part. Si vous êtes au réel, l'administrateur l'active dans <span class="menu">Administration › Paramètres</span>. Chaque mois, <span class="menu">Fiscal › Déclaration de TVA</span> donne le chiffre d'affaires par taux, la TVA collectée et déductible, et un document A4 pour remplir la déclaration DGI.</p>
+
+  <h2 id="s8-3">Bilan et compte de résultat</h2>
+  <p><span class="menu">Comptabilité › Bilan et compte de résultat</span> présente le bilan, le compte de résultat et le tableau des flux de trésorerie du SYSCOHADA, à imprimer en A4 ou à exporter pour la DSF. Les rapports de ventes (par jour, rayon, article, caissier…) sont dans <span class="menu">Vente › Situation des ventes</span>, avec export Excel.</p>
+  <div class="encadre attention"><span class="t">Avec votre comptable</span>
+    <p>Les états financiers ne sont justes que si les factures des fournisseurs et les dépenses sont bien saisies. Faites-les vérifier par votre comptable avant de les déposer.</p>
+  </div>
+</section>
+
+<!-- ======================= 9 ======================= -->
+<section class="chapitre" id="ch9">
+  <div class="chap-tete"><div class="chap-num">Chapitre 9</div><h1>Les sauvegardes</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Toutes vos ventes, votre stock et votre comptabilité sont sur le PC. Si le PC est volé ou tombe en panne, seule une sauvegarde vous les rend. Prenez cinq minutes pour la régler.</p>
+
+  <h2 id="s9-1">Ce que fait le logiciel tout seul</h2>
+  <ul>
+    <li>Une copie de la base chaque jour, sans arrêter la caisse. Chaque copie est vérifiée.</li>
+    <li>Les 14 copies les plus récentes sont gardées (nombre réglable).</li>
+    <li>Après 2 jours sans sauvegarde réussie, la barre d'état affiche <b>Sauvegarde en retard</b> en rouge.</li>
+  </ul>
+
+  <h2 id="s9-2">Régler une copie hors du PC</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="menu">Administration › Sauvegardes</span>.</li>
+    <li>En face de <b>Copie de chaque sauvegarde vers</b>, cliquez sur <span class="btn">Choisir</span> et choisissez une clé USB ou un dossier OneDrive ou Google Drive.</li>
+    <li>Cliquez sur <span class="btn">Sauvegarder maintenant</span> et vérifiez que la sauvegarde apparaît dans la liste.</li>
+  </ol>
+  <figure><img src="images/09-sauvegardes.png" alt=""><figcaption><b>Figure 9.1</b> L'écran des sauvegardes, après une sauvegarde réussie.</figcaption></figure>
+  <p>Le bouton <span class="btn">Copier sur une clé USB…</span> fait une copie à la demande. Ces copies manuelles ne sont jamais effacées par la rotation. Une clé débranchée est signalée sans bloquer la sauvegarde.</p>
+  <div class="encadre astuce"><span class="t">Le bon réflexe</span>
+    <p>Une fois par semaine au moins, copiez la sauvegarde sur une clé USB et rangez la clé hors du magasin.</p>
+  </div>
+
+  <h2 id="s9-3">Restaurer une sauvegarde</h2>
+  <p>La restauration remplace toutes les données du PC par celles de la sauvegarde. Elle est réservée à l'administrateur. En cas de doute, appelez FEDONG avant.</p>
+  <ol class="etapes">
+    <li>Dans <span class="menu">Administration › Sauvegardes</span>, choisissez une sauvegarde dans la liste, ou cliquez sur <span class="btn">Restaurer depuis un fichier…</span>.</li>
+    <li>Le logiciel contrôle le fichier, puis demande de taper <code>RESTAURER</code> pour confirmer.</li>
+    <li>Une copie « Avant restauration » de la base actuelle est faite d'abord, puis le logiciel redémarre.</li>
+  </ol>
+</section>
+
+<!-- ======================= 10 ======================= -->
+<section class="chapitre" id="ch10">
+  <div class="chap-tete"><div class="chap-num">Chapitre 10</div><h1>La licence</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span></div>
+  <p class="intro">FEDO Gestion s'utilise avec une licence liée au PC. Elle est mensuelle, annuelle ou à vie, selon la formule achetée, et fixe le nombre de PC et de magasins.</p>
+
+  <h2 id="s10-1">Activer la licence</h2>
+  <ol class="etapes">
+    <li>Connectez-vous en administrateur et ouvrez <span class="menu">Administration › Licence</span>.</li>
+    <li>Le <b>code machine de ce PC</b> s'affiche (4 groupes de lettres et chiffres). Cliquez sur <span class="btn">Copier</span> ou sur <b>Envoyer par WhatsApp</b> et envoyez-le à FEDONG.</li>
+    <li>FEDONG vous renvoie une <b>clé de licence</b>. Elle commence par <code>SG1.</code></li>
+    <li>Collez la clé entière dans la zone <b>Clé de licence</b>.</li>
+    <li>Cliquez sur <span class="btn">Activer la licence</span>. La date de fin s'affiche.</li>
+  </ol>
+  <figure><img src="images/10-licence.png" alt=""><figcaption><b>Figure 10.1</b> L'écran Licence, pendant l'essai, avec le code machine du PC.</figcaption></figure>
+  <p>Le lien <b>Lire le contrat de licence</b> affiche le contrat accepté à l'installation.</p>
+
+  <h2 id="s10-2">Fin de licence et renouvellement</h2>
+  <table class="t">
+    <tr><th style="width:40%">Barre d'état</th><th>Ce que cela veut dire</th></tr>
+    <tr><td>Version d'essai (N j)</td><td>Essai de 15 jours en cours. Activez une licence.</td></tr>
+    <tr><td>Licence à renouveler (N j)</td><td>La licence finit bientôt. Contactez FEDONG pour la renouveler.</td></tr>
+    <tr><td>Licence expirée : ventes arrêtées dans N j</td><td>La licence est finie. Vous avez 15 jours de grâce pour la renouveler.</td></tr>
+    <tr><td>Licence : ventes bloquées</td><td>La caisse ne vend plus. Consultation, clôture de caisse et sauvegardes restent possibles.</td></tr>
+  </table>
+  <p>Pour renouveler, contactez votre vendeur FEDONG (voir la couverture de ce manuel). Il vous envoie une nouvelle clé : collez-la de la même façon dans <span class="menu">Administration › Licence</span>.</p>
+  <div class="encadre important"><span class="t">Date et heure du PC</span>
+    <p>Une date de Windows reculée bloque aussi la vente. Gardez la date et l'heure du PC à jour.</p>
+  </div>
+  <ul>
+    <li><b>Plusieurs PC reliés au serveur central</b> : activez la licence sur un seul PC. Les autres la reçoivent tout seuls, dans la limite du nombre de PC prévu.</li>
+    <li><b>PC changé ou en panne</b> : demandez à FEDONG de transférer la licence sur le nouveau PC (il faudra son code machine).</li>
+  </ul>
+</section>
+
+<!-- ======================= 11 ======================= -->
+<section class="chapitre" id="ch11">
+  <div class="chap-tete"><div class="chap-num">Chapitre 11</div><h1>Plusieurs PC et serveur central</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span></div>
+  <p class="intro">Avec deux caisses ou plus, ou plusieurs magasins, les PC sont reliés par un <b>serveur central</b>. C'est FEDONG qui installe le serveur et relie les PC. Ce chapitre explique comment cela fonctionne.</p>
+
+  <h2 id="s11-1">Comment ça marche</h2>
+  <ul>
+    <li>Chaque PC garde sa propre base et <b>continue de vendre sans réseau</b>.</li>
+    <li>Dès que la connexion revient, les opérations partent au serveur toutes les 20 secondes. Les autres PC du magasin reçoivent le catalogue, les utilisateurs, les ventes et le stock.</li>
+    <li>Un autre magasin reçoit le catalogue commun, mais pas les ventes ni le stock des autres magasins.</li>
+    <li>La barre d'état montre <b>Serveur : connecté</b>, <b>hors ligne</b> ou <b>non relié</b>. <span class="menu">Fichier › Synchroniser maintenant</span> force l'envoi.</li>
+  </ul>
+
+  <h2 id="s11-2">Ajouter un PC au magasin</h2>
+  <ol class="etapes">
+    <li>Sur le PC principal, dans <span class="menu">Administration › Caisses</span>, créez une caisse et notez son <b>code d'activation</b> (6 chiffres).</li>
+    <li>Installez FEDO Gestion sur le nouveau PC. À la première ouverture, cliquez sur <span class="btn">Rejoindre un magasin existant</span>.</li>
+    <li>Tapez l'adresse du serveur central (donnée par FEDONG) et le code d'activation, puis cliquez sur <span class="btn">Rejoindre</span>.</li>
+    <li>Le PC récupère le catalogue, les utilisateurs et le stock du magasin.</li>
+  </ol>
+  <figure><img src="images/11-rejoindre.png" alt=""><figcaption><b>Figure 11.1</b> Un nouveau PC rejoint le magasin.</figcaption></figure>
+  <p>Le premier PC d'un magasin est relié au serveur dans <span class="menu">Administration › Serveur central</span>, avec la clé d'enrôlement que seul FEDONG connaît.</p>
+</section>
+
+<!-- ======================= 12 ======================= -->
+<section class="chapitre" id="ch12">
+  <div class="chap-tete"><div class="chap-num">Chapitre 12</div><h1>Questions fréquentes et dépannage</h1></div>
+
+  <h2 id="s12-1">Trouver de l'aide dans le logiciel</h2>
+  <ul>
+    <li>Le bouton rond <b>?</b> en haut à droite, ou le lien <b>Comment utiliser cette page ?</b>, explique la page affichée. La touche <kbd>F1</kbd> fait de même partout, sauf à la caisse où elle cherche un produit.</li>
+    <li><kbd>Ctrl</kbd>+<kbd>K</kbd> ouvre un écran en tapant son nom, par exemple « clôture » ou « inventaire ».</li>
+    <li><span class="menu">Aide › Guide de démarrage</span>, <span class="menu">Aide › Quoi de neuf</span> (les nouveautés après une mise à jour) et <span class="menu">Aide › Raccourcis clavier</span>.</li>
+  </ul>
+  <figure><img src="images/12-aide.png" alt=""><figcaption><b>Figure 12.1</b> L'aide de la fiche de vente.</figcaption></figure>
+
+  <h2 id="s12-2">Questions fréquentes</h2>
+  <div class="q"><h3>La fiche de vente dit « La caisse est fermée ».</h3>
+    <p>Ouvrez la caisse : bouton <span class="btn">Ouvrir la caisse dans Trésorerie</span>, puis <span class="btn">Ouvrir la caisse…</span> (chapitre 4). Si un caissier n'a pas de caisse attribuée, l'administrateur doit lui en donner une (chapitre 2).</p></div>
+  <div class="q"><h3>« Vous n'avez pas les droits pour cette action ».</h3>
+    <p>Votre rôle ne permet pas cette action. Demandez au gérant de la faire, ou à l'administrateur de vous donner le droit (<span class="menu">Administration › Privilèges par utilisateur</span>).</p></div>
+  <div class="q"><h3>J'ai oublié mon code, ou mon compte est bloqué.</h3>
+    <p>L'administrateur ouvre <span class="menu">Administration › Utilisateurs</span>, clique sur votre nom et tape un nouveau code, ou clique sur <span class="btn">Débloquer</span>. Si c'est le code de l'administrateur qui est perdu, appelez FEDONG.</p></div>
+  <div class="q"><h3>Le ticket ne s'imprime pas.</h3>
+    <p>Vérifiez que l'imprimante est allumée, a du papier et est branchée. Dans <span class="menu">Administration › Paramètres</span>, partie <b>Imprimante ticket et tiroir-caisse (ce PC)</b>, cliquez sur <span class="btn">Imprimer une page de test</span>. Le ticket se réimprime ensuite avec <kbd>F2</kbd>. Si les accents sortent mal, changez la table de caractères proposée dans ces réglages.</p></div>
+  <div class="q"><h3>Un produit scanné n'est pas trouvé.</h3>
+    <p>Son code-barres n'est sur aucune fiche. Cherchez le produit par son nom, puis ajoutez le code-barres sur sa fiche (chapitre 3).</p></div>
+  <div class="q"><h3>Un produit est marqué « Épuisé » alors qu'il est en rayon.</h3>
+    <p>La réception n'a pas été saisie, ou la marchandise est encore dans la réserve. Saisissez la réception ou le transfert (chapitre 5). Le gérant peut aussi régler <b>Ignorer la gestion des stocks</b> dans <span class="menu">Administration › Paramètres</span> : la caisse vend alors même si le stock en machine est à zéro.</p></div>
+  <div class="q"><h3>Il y a un écart à la clôture.</h3>
+    <p>Recomptez avant de valider (bouton <span class="btn">Recompter</span>). Un écart au-delà du seuil reste « à justifier » : le gérant en parle avec le caissier puis tape le motif (chapitre 4).</p></div>
+  <div class="q"><h3>La barre d'état affiche « Sauvegarde en retard ».</h3>
+    <p>Ouvrez <span class="menu">Administration › Sauvegardes</span> et cliquez sur <span class="btn">Sauvegarder maintenant</span>. Si cela échoue, vérifiez la clé USB ou le dossier choisi (chapitre 9).</p></div>
+  <div class="q"><h3>La caisse ne vend plus à cause de la licence.</h3>
+    <p>Regardez le message de la barre d'état et le chapitre 10. Vérifiez la date du PC, puis contactez FEDONG avec le code machine affiché dans <span class="menu">Administration › Licence</span>.</p></div>
+  <div class="q"><h3>Internet est coupé : puis-je continuer à vendre ?</h3>
+    <p>Oui. Chaque PC vend sans réseau. Les opérations partent au serveur central dès que la connexion revient.</p></div>
+  <div class="q"><h3>Où sont mes données ?</h3>
+    <p>Dans le dossier <code>%APPDATA%\Superette Gestion</code> du PC (ancien nom du logiciel, gardé pour vos données), fichier <code>superette.db</code>. Ne le déplacez pas et ne le supprimez pas : utilisez les sauvegardes (chapitre 9).</p></div>
+  <div class="q"><h3>Comment se passent les mises à jour ?</h3>
+    <p>Les nouvelles versions sont fournies par FEDONG. Vos données, vos réglages et votre licence sont gardés. Après une mise à jour, la fenêtre <b>Quoi de neuf</b> présente les nouveautés.</p></div>
+
+  <div class="encadre astuce" style="margin-top:6mm"><span class="t">Besoin d'aide ?</span>
+    <p>Contactez votre vendeur FEDONG : ses coordonnées sont sur la couverture de ce manuel. Ayez sous la main le nom du magasin, la version (en bas à gauche de l'écran, <b>FEDO Gestion v<span data-version>0.39.0</span></b>) et, pour la licence, le code machine.</p>
+  </div>
+</section>
+
+</main>
+<script>
+  // Sommaire construit à partir des titres ; le rendu PDF y ajoute les numéros de page.
+  (function () {
+    var toc = document.getElementById('toc');
+    document.querySelectorAll('section.chapitre').forEach(function (ch) {
+      var li = document.createElement('li');
+      var a = document.createElement('a');
+      a.className = 'l';
+      a.href = '#' + ch.id;
+      a.innerHTML = '<span class="n"></span><span class="titre"></span><span class="pts"></span><span class="pg"></span>';
+      a.querySelector('.n').textContent = ch.querySelector('.chap-num').textContent.replace('Chapitre ', '');
+      a.querySelector('.titre').textContent = ch.querySelector('h1').textContent;
+      a.querySelector('.pg').setAttribute('data-for', ch.id);
+      li.appendChild(a);
+      var ul = document.createElement('ul');
+      ch.querySelectorAll('h2[id]').forEach(function (h) {
+        var s = document.createElement('li');
+        s.innerHTML = '<a class="l" href="#' + h.id + '"><span class="titre"></span><span class="pts"></span><span class="pg" data-for="' + h.id + '"></span></a>';
+        s.querySelector('.titre').textContent = h.textContent;
+        ul.appendChild(s);
+      });
+      li.appendChild(ul);
+      toc.appendChild(li);
+    });
+  })();
+</script>
+</body>
+</html>

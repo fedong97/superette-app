@@ -343,7 +343,7 @@ export function ArticleForm({
             {previous.name}. Les prix d'achat et les autres diviseurs se recalculent.
           </p>
         )}
-        <LevelGrid levels={levels} buy={buy} rate={rate} piece={piece} unitLabel={unitName.toUpperCase()} onLevels={onLevels} onBuy={setBuy} />
+        <LevelGrid levels={levels} buy={buy} rate={noVat ? 0 : rate} piece={piece} unitLabel={unitName.toUpperCase()} onLevels={onLevels} onBuy={setBuy} />
         {suggested.length > 0 && (
           <p className="muted small">
             Marge de {settings.defaultMarginPct} % sur le revient : {suggested.map((x) => `${x.name} ${fcfa(x.sale)}`).join(', ')}{tx(' TTC')}.{' '}

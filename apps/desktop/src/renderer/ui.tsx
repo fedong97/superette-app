@@ -9,6 +9,18 @@ export const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 export const dateTime = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+/**
+ * Lit un fichier texte (CSV, relevé) : UTF-8, ou Windows-1252 quand Excel
+ * l'a enregistré en « CSV (séparateur point-virgule) », pour garder les accents.
+ */
+export async function readTextFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder('windows-1252').decode(buf);
+  }
+}
 export const dateFr = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('fr-FR');
 
 /** Saisie d'une quantité « 1,5 » ou « 2 » en millièmes. */

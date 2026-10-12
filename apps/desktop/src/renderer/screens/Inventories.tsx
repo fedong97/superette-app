@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { readXlsxRows } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateFr, dateTime, downloadText, fcfa, has, qty, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, dateFr, dateTime, downloadText, fcfa, has, qty, readTextFile, today, useLoad, useToast } from '../ui';
 import { saveXlsx } from './Controls';
 import { ArticlePicker, WarehouseSelect } from './pickers';
 
@@ -408,7 +408,7 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
   const importFile = async (f: File) => {
     try {
       if (/\.xlsx$/i.test(f.name)) return void (await importRows(await readXlsxRows(new Uint8Array(await f.arrayBuffer()))));
-      const text = (await f.text()).replace(/^\uFEFF/, '');
+      const text = (await readTextFile(f)).replace(/^\uFEFF/, '');
       const raw = text.split(/\r?\n/).filter((r) => r.trim());
       if (!raw.length) return toast.error('Fichier vide');
       const sep = raw[0]!.includes(';') ? ';' : raw[0]!.includes('\t') ? '\t' : ',';

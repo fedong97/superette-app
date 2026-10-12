@@ -562,7 +562,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     { menu: 'Accueil', label: "Page d'accueil", run: () => setActive(null) },
   ];
 
-  const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : `Serveur : connecté (${sync.data.pending} en attente)`;
+  const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : sync.data.pending ? `Serveur : ${sync.data.pending} en attente` : 'Serveur : connecté';
   const activeWin = wins.find((w) => w.kind === active);
   const showHome = !activeWin;
   const tiles = ROLE_TILES[user.role].filter((t) => canWin(t.open[0]));
@@ -739,13 +739,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
-            {w.kind === 'admin' && <Admin user={user} onChanged={refresh} initialTab={w.tab as AdminTab | undefined} />}
+            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
           </section>
         ))}
       </main>
       <footer className="statusbar">
-        <span>FEDO Gestion v{state.version}</span>
-        <span>Magasin : {state.station?.store.name}</span>
+        <span title="Version du logiciel">FEDO Gestion v{state.version}</span>
+        <span title="Magasin">{state.station?.store.name}</span>
         {state.canChooseRegister ? (
           <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
             {state.register?.name ?? 'Sans caisse'} · changer
@@ -753,8 +753,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ) : (
           <span>{state.register?.name ?? 'Sans caisse'}</span>
         )}
-        <span>
-          Utilisateur : {user.name} ({ROLE_LABELS[user.role]})
+        <span title="Utilisateur connecté">
+          {user.name} ({ROLE_LABELS[user.role]})
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
         {backupLate.data && canWin('admin') && (
@@ -764,7 +764,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         )}
         {Boolean(chargesLate.data?.count) && canWin('expenses') && (
           <button className="warn" onClick={() => open('expenses', 'schedule', 'Charge › Constats de charges')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
-            {chargesLate.data!.count} charge(s) en retard
+            {chargesLate.data!.count === 1 ? '1 charge en retard' : `${chargesLate.data!.count} charges en retard`}
           </button>
         )}
         {state.license.warn &&
@@ -779,7 +779,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           ))}
         {Boolean(gaps.data?.length) && (
           <button className="warn" onClick={() => open('treasury', 'history', 'Trésorerie › Historique des journées de caisse')} title="Clôtures dont l'écart attend votre motif">
-            {gaps.data!.length} écart(s) de caisse à justifier
+            {gaps.data!.length === 1 ? '1 écart à justifier' : `${gaps.data!.length} écarts à justifier`}
           </button>
         )}
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>

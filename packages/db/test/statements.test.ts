@@ -2,6 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { createServices, openDatabase } from '../src';
 
 describe('états financiers SYSCOHADA', () => {
+  it('signale les marchandises reçues sans facture fournisseur', () => {
+    const s = createServices(openDatabase(':memory:'), () => new Date('2025-03-10T09:00:00Z'));
+    const { store, register, admin } = s.admin.bootstrap({ storeCode: 'DLA1', storeName: 'Superette Akwa', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' });
+    const ctx = { storeId: store.id, registerId: register.id, userId: admin.id };
+    const tva = s.admin.listVatRates()[0]!.id;
+    const riz = s.catalogue.saveArticle(admin.id, { name: 'Riz 5 kg', unit: 'piece', vatRateId: tva, purchasePrice: 3_000, salePrice: 5_000 }).id;
+    const shop = s.admin.salesWarehouse(store.id).id;
+    const year = { from: '2025-01-01', to: '2025-12-31' };
+    s.stock.receive(ctx, { warehouseId: shop, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });
+    expect(s.statements.statements(store.id, year).uninvoiced).toEqual({ amount: 30_000 });
+    const sabc = s.purchases.saveSupplier(admin.id, { name: 'Grossiste Mboppi' });
+    s.purchases.createInvoice(ctx, { supplierId: sabc.id, supplierNumber: 'FA-1', invoiceDate: '2025-03-10', totalHt: 30_000, totalTva: 0 });
+    expect(s.statements.statements(store.id, year).uninvoiced).toEqual({ amount: 0 });
+    // À la fin de février, la réception du 10 mars n'existait pas encore.
+    expect(s.statements.uninvoiced(store.id, '2025-02-28')).toEqual({ amount: 0 });
+  });
+
   it('bilan équilibré, compte de résultat avec variation de stock au CMUP, report sur l’exercice suivant', () => {
     let now = new Date('2025-03-01T09:00:00Z');
     const s = createServices(openDatabase(':memory:'), () => now);
@@ -35,6 +52,8 @@ describe('états financiers SYSCOHADA', () => {
     expect(act).toMatchObject({ BB: 180_000, BJ: 57_750, BS: 2_150_000, BZ: 2_387_750 });
     expect(pas).toMatchObject({ CA: 2_000_000, CJ: -2_285, DJ: 357_750, DK: 32_285, DZ: 2_387_750 });
     expect(y1.unmapped).toEqual([]);
+    // Réception de 300 000 HT facturée 300 000 HT : rien n'attend de facture.
+    expect(y1.uninvoiced).toEqual({ amount: 0 });
 
     // Exercice suivant : la perte 2025 passe en report à nouveau, le stock de départ est celui du 31/12/2025.
     now = new Date('2026-02-01T09:00:00Z');

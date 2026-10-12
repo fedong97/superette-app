@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { type StatementLine, parseStatementCsv } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, readTextFile, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
 import { hasVat, tx } from '../tax';
 
@@ -578,6 +578,13 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
           </div>
         </div>
       )}
+      {d && d.uninvoiced.amount > 0 && (
+        <p className="warn-text">
+          {fcfa(d.uninvoiced.amount)} HT de marchandises sont entrées en stock sans facture fournisseur. Le stock les compte mais pas les achats : le
+          résultat est surévalué d'autant tant que ces factures ne sont pas saisies (Fournisseur › Factures et avoirs fournisseurs). Pour le stock
+          de départ, faites passer une écriture d'à-nouveaux par votre comptable.
+        </p>
+      )}
       {d && d.unmapped.length > 0 && (
         <p className="neg">
           Comptes non repris dans les états, à vérifier :{' '}
@@ -1141,16 +1148,6 @@ type BankState = Result<'bank.state'>;
 type BankLine = BankState['bankOnly'][number];
 type BookLine = BankState['bookOnly'][number];
 
-/** Lit un fichier de relevé : UTF-8, ou Windows-1252 pour les exports Excel des banques. */
-async function readStatementFile(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
-  } catch {
-    return new TextDecoder('windows-1252').decode(buf);
-  }
-}
-
 /** Rapprochement d'un compte de banque ou de Mobile Money avec son relevé. */
 function BankReconciliation() {
   const toast = useToast();
@@ -1203,7 +1200,7 @@ function BankReconciliation() {
             onChange={async (e) => {
               const f = e.target.files?.[0];
               e.target.value = '';
-              if (f) setPreview({ name: f.name, parsed: parseStatementCsv(await readStatementFile(f)) });
+              if (f) setPreview({ name: f.name, parsed: parseStatementCsv(await readTextFile(f)) });
             }}
           />
         </label>

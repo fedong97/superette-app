@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, readTextFile, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 import { type ArticlePhoto, PhotoField } from './photo';
@@ -533,7 +533,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           const file = e.target.files?.[0];
           if (!file) return;
           try {
-            setRows(parseCsv(await file.text()));
+            setRows(parseCsv(await readTextFile(file)));
             setResult(null);
           } catch (err) {
             toast.error(err);

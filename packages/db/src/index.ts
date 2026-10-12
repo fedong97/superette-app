@@ -13,6 +13,7 @@ import { BackupService } from './backup';
 import { CashDeskService } from './cashdesk';
 import { StaffService } from './staff';
 import { LabelService } from './labels';
+import { LicenseService } from './license';
 import { PromotionService } from './promotions';
 import { PurchaseService } from './purchases';
 import { ReceiptService } from './receipts';
@@ -48,6 +49,7 @@ export * from './backup';
 export * from './cashdesk';
 export * from './staff';
 export * from './labels';
+export * from './license';
 export * from './inventories';
 export * from './transfers';
 export * from './monitoring';
@@ -103,9 +105,10 @@ export interface Services {
   notes: NotesService;
   disclosures: DisclosureService;
   sync: SyncService;
+  license: LicenseService;
 }
 
-export function createServices(db: Db, clock: Clock = () => new Date()): Services {
+export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
   const admin = new AdminService(db, clock);
   const catalogue = new CatalogueService(db, clock);
   const stock = new StockService(db, clock);
@@ -138,7 +141,8 @@ export function createServices(db: Db, clock: Clock = () => new Date()): Service
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
   const attention = new AttentionService(db, clock, stock, pos, purchases, customers, rebates);
   const sync = new SyncService(db, clock, stock);
-  return { db, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, expenses, charges, controls, quotes, pos, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, attention, sync };
+  const license = new LicenseService(db, clock, () => sync.credentials() !== null, machineId);
+  return { db, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, expenses, charges, controls, quotes, pos, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, attention, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

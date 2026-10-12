@@ -3,6 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import type { Pool } from 'pg';
 import { CONFIG, type ServerConfig } from './config';
 import { PG } from './database';
+import { readLicense } from './license';
 
 /** Données partagées entre tous les magasins ; le reste ne circule qu'à l'intérieur d'un magasin. */
 export const GLOBAL_ENTITIES = [
@@ -56,7 +57,35 @@ export class SyncService {
     @Inject(CONFIG) private readonly config: ServerConfig,
   ) {}
 
+  /** Licence la plus récente reçue d'un PC, s'il y en a une. */
+  async currentLicense(): Promise<{ key: string; stations: number } | null> {
+    const { rows } = await this.pg.query<{ key: string; stations: number }>('SELECT key, stations FROM licenses ORDER BY issued DESC LIMIT 1');
+    return rows[0] ?? null;
+  }
+
+  /** Un PC envoie la licence activée chez lui ; on rend la plus récente connue. */
+  async uploadLicense(key: string): Promise<{ license: string | null }> {
+    const lic = readLicense(key, this.config.licensePublicKey);
+    if (!lic) throw new BadRequestException('Licence invalide');
+    await this.pg.query(
+      'INSERT INTO licenses (id, key, client, stations, issued) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING',
+      [lic.id, String(key).replace(/\s+/g, ''), lic.client, lic.stations, lic.issued],
+    );
+    return { license: (await this.currentLicense())?.key ?? null };
+  }
+
+  /** Avec une licence, le nombre de PC reliés ne dépasse pas celui qu'elle permet. */
+  private async checkStations() {
+    const license = await this.currentLicense();
+    if (!license) return;
+    const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL');
+    if (Number(rows[0]!.n) >= license.stations) {
+      throw new ForbiddenException(`La licence permet ${license.stations} PC : demandez une licence pour plus de postes.`);
+    }
+  }
+
   private async createDevice(name: string, storeId: string, registerId: string) {
+    await this.checkStations();
     const id = randomUUID();
     const token = randomBytes(32).toString('base64url');
     try {
@@ -139,7 +168,7 @@ export class SyncService {
   }
 
   /** Opérations des autres postes : données partagées + celles du magasin du poste. */
-  async pull(device: Device, since: number, limit: number): Promise<{ events: SyncEvent[]; cursor: number; hasMore: boolean }> {
+  async pull(device: Device, since: number, limit: number): Promise<{ events: SyncEvent[]; cursor: number; hasMore: boolean; license: string | null }> {
     const max = Math.min(Math.max(limit || 1000, 1), 5000);
     const { rows } = await this.pg.query<{
       seq: string;
@@ -176,6 +205,8 @@ export class SyncService {
         })),
       cursor,
       hasMore: rows.length > max,
+      // Licence du magasin : les PC où elle n'a pas été activée la reçoivent ainsi.
+      license: (await this.currentLicense())?.key ?? null,
     };
   }
 }

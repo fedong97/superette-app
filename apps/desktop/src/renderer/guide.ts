@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.35.0',
+    items: [
+      'Licence : Administration › Licence montre le code machine de ce PC (à copier ou envoyer par WhatsApp) et active la clé reçue de votre fournisseur.',
+      'Sans licence, 15 jours d’essai ; à la fin de la licence, la caisse vend encore 15 jours puis s’arrête. Consultation, clôture et sauvegardes restent toujours possibles.',
+      'Les autres PC reliés au serveur central reçoivent la licence tout seuls, dans la limite du nombre de PC qu’elle permet.',
+    ],
+  },
+  {
     version: '0.34.0',
     items: [
       'Opérations de trésorerie : boutons « Encaisser » et « Décaisser » sur chaque volet, comme dans KONTROL, avec le type (client, fournisseur, personnel, charge, reversement, autre), le n° de pièce et le motif.',

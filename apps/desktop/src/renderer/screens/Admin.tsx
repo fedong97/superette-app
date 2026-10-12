@@ -9,7 +9,7 @@ import { Settings } from './AdminSettings';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'backups' | 'server' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'backups' | 'server' | 'license' | 'audit';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -26,6 +26,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['settings', 'Paramètres'],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
+    ['license', 'Licence'],
     ...(can('audit') ? ([['audit', "Journal d'audit"]] as [Tab, string][]) : []),
   ];
   return (
@@ -52,6 +53,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'settings' && <Settings user={user} onChanged={onChanged} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
+      {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'audit' && can('audit') && <Audit />}
     </div>
   );
@@ -597,6 +599,122 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
         </Modal>
       )}
     </>
+  );
+}
+
+const PLAN_LABELS = { monthly: 'Mensuelle', annual: 'Annuelle', lifetime: 'À vie' } as const;
+const frDay = (d: string) => d.split('-').reverse().join('/');
+
+/**
+ * Licence de ce PC : le code machine à envoyer à l'éditeur, puis la clé qu'il
+ * renvoie, collée ici par l'administrateur.
+ */
+function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const status = useLoad(() => call('license.status'));
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const st = status.data;
+  if (!st) return null;
+  const lic = st.license;
+  const digits = lic?.contact?.replace(/\D/g, '') ?? '';
+  const whatsapp = `https://wa.me/${digits.length >= 8 ? digits : ''}?text=${encodeURIComponent(`Bonjour, voici le code machine de mon PC pour la licence Superette Gestion : ${st.machineCode}`)}`;
+  return (
+    <div className="narrow">
+      <p>
+        Superette Gestion s'utilise avec une licence liée à ce PC. Envoyez le code machine à votre fournisseur ; il vous renvoie une clé de licence à
+        coller ci-dessous. Les autres PC reliés au serveur central reçoivent la licence tout seuls.
+      </p>
+      <p className={st.canSell ? (st.warn ? 'warn-text' : 'pos') : 'neg'}>
+        <strong>{st.message}</strong>
+      </p>
+      <table className="list">
+        <tbody>
+          <tr>
+            <th>Code machine de ce PC</th>
+            <td>
+              <strong style={{ fontSize: 18, letterSpacing: 1 }}>{st.machineCode}</strong>{' '}
+              <button
+                type="button"
+                onClick={() =>
+                  navigator.clipboard
+                    .writeText(st.machineCode)
+                    .then(() => toast.ok('Code machine copié'))
+                    .catch(() => toast.error(new Error('Copie impossible : recopiez le code à la main')))
+                }
+              >
+                Copier
+              </button>{' '}
+              <a href={whatsapp} target="_blank" rel="noreferrer">
+                Envoyer par WhatsApp
+              </a>
+            </td>
+          </tr>
+          {lic && (
+            <>
+              <tr>
+                <th>Client</th>
+                <td>{lic.client}</td>
+              </tr>
+              <tr>
+                <th>Formule</th>
+                <td>{PLAN_LABELS[lic.plan]}</td>
+              </tr>
+              <tr>
+                <th>Validité</th>
+                <td>{lic.expires ? `du ${frDay(lic.start)} au ${frDay(lic.expires)}` : `depuis le ${frDay(lic.start)}, sans fin`}</td>
+              </tr>
+              <tr>
+                <th>PC et magasins permis</th>
+                <td>
+                  {lic.stations} PC, {lic.stores} magasin(s)
+                </td>
+              </tr>
+              <tr>
+                <th>N° de licence</th>
+                <td>{lic.id}</td>
+              </tr>
+              {lic.contact && (
+                <tr>
+                  <th>Renouvellement</th>
+                  <td>{lic.contact}</td>
+                </tr>
+              )}
+            </>
+          )}
+        </tbody>
+      </table>
+      {isAdmin ? (
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              const r = await call('license.activate', key);
+              toast.ok(r.message);
+              setKey('');
+              status.reload();
+              onChanged();
+            } catch (err) {
+              toast.error(err);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <Field label="Clé de licence" hint="Collez la clé reçue en entier (elle commence par SG1.)">
+            <textarea rows={4} value={key} onChange={(e) => setKey(e.target.value)} required spellCheck={false} style={{ fontFamily: 'monospace', width: '100%' }} />
+          </Field>
+          <div className="actions">
+            <button className="primary" disabled={busy || !key.trim()}>
+              Activer la licence
+            </button>
+          </div>
+        </form>
+      ) : (
+        <p className="muted">Seul l'administrateur active une licence.</p>
+      )}
+    </div>
   );
 }
 

@@ -304,7 +304,7 @@ export class BackupService extends Base {
 
   /** Réglages propres au PC, gardés quand on restaure une sauvegarde plus ancienne. */
   localSettings(): Record<string, string | null> {
-    return Object.fromEntries(['backup.dir', 'backup.copyDir', 'backup.keep', 'backup.autoTime', 'backup.lastAt', 'backup.lastFile', 'backup.lastError'].map((k) => [k, this.setting(k)]));
+    return Object.fromEntries(['backup.dir', 'backup.copyDir', 'backup.keep', 'backup.autoTime', 'backup.lastAt', 'backup.lastFile', 'backup.lastError', 'license.key', 'license.trialStart', 'license.lastSeen', 'license.sent'].map((k) => [k, this.setting(k)]));
   }
 
   /** Efface les sauvegardes automatiques les plus anciennes au-delà de `keep`. */

@@ -350,6 +350,15 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
       { tab: 'server', title: 'Serveur central', steps: ['Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.'] },
+      {
+        tab: 'license',
+        title: 'Licence',
+        steps: [
+          'Envoyez le code machine de ce PC à votre fournisseur (bouton « Envoyer par WhatsApp »), puis collez la clé reçue et « Activer la licence ».',
+          'Sans licence, le logiciel fonctionne 15 jours en essai. À la fin de la licence, la caisse vend encore 15 jours, puis s’arrête ; la consultation, la clôture et les sauvegardes restent possibles.',
+          'Les autres PC reliés au serveur central reçoivent la licence tout seuls, dans la limite du nombre de PC qu’elle permet.',
+        ],
+      },
     ],
   },
   production: {

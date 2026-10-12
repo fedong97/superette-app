@@ -1,11 +1,20 @@
 import type { INestApplication } from '@nestjs/common';
-import { type Context, type Services, createServices, enrollStation, joinStore, openDatabase, syncOnce } from '@superette/db';
+import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { type Context, LicenseService, type Services, createServices, enrollStation, joinStore, openDatabase, syncOnce } from '@superette/db';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/main';
 
 const DATABASE_URL = process.env['TEST_DATABASE_URL'];
 const KEY = 'cle-enrolement-de-test';
+/** Paire de clés de test : l'application et le serveur vérifient les licences avec la clé publique. */
+const pair = generateKeyPairSync('ed25519');
+const LICENSE_PUB = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+function licenseKey(machine: string, stations: number): string {
+  const payload = { v: 1, id: randomUUID(), client: 'Superette Akwa', machine, plan: 'annual', start: '2026-01-01', expires: '2099-12-31', stations, stores: 1, issued: new Date().toISOString() };
+  const data = Buffer.from(JSON.stringify(payload));
+  return `SG1.${data.toString('base64url')}.${sign(null, data, pair.privateKey).toString('base64url')}`;
+}
 
 /** Deux PC du même magasin, puis un deuxième magasin, reliés par un vrai serveur et une vraie base PostgreSQL. */
 describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
@@ -19,14 +28,19 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
   let firstSaleId: string;
   let code2: string;
 
-  const fresh = () => createServices(openDatabase(':memory:'));
+  const fresh = () => {
+    const s = createServices(openDatabase(':memory:'));
+    const machine = randomUUID();
+    s.license = new LicenseService(s.db, () => new Date(), () => s.sync.credentials() !== null, () => machine, LICENSE_PUB);
+    return s;
+  };
   const stockOf = (s: Services, storeId: string) => s.stock.list(storeId).find((r) => r.article_id === articleId);
 
   beforeAll(async () => {
     const pool = new Pool({ connectionString: DATABASE_URL });
-    await pool.query('DROP TABLE IF EXISTS events, devices, schema_migrations');
+    await pool.query('DROP TABLE IF EXISTS events, devices, licenses, schema_migrations');
     await pool.end();
-    app = await createApp({ databaseUrl: DATABASE_URL!, port: 0, enrollmentKey: KEY });
+    app = await createApp({ databaseUrl: DATABASE_URL!, port: 0, enrollmentKey: KEY, licensePublicKey: LICENSE_PUB });
     await app.listen(0, '127.0.0.1');
     url = await app.getUrl();
 
@@ -397,5 +411,18 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
       expect(qtyIn(s, wh)).toBe(before - 12_000);
       expect(qtyIn(s, wh, pack)).toBe(2_000);
     }
+  });
+
+  it('la licence activée sur le PC 1 arrive sur le PC 2 et limite le nombre de PC', async () => {
+    expect(pc2.license.status().state).toBe('trial');
+    pc1.license.activate(ctx1.userId, licenseKey(pc1.license.machineCode(), 2));
+    await syncOnce(pc1);
+    await syncOnce(pc2);
+    expect(pc2.license.current()?.machine).toBe(pc1.license.machineCode());
+    expect(pc2.license.status()).toMatchObject({ state: 'valid', canSell: true });
+
+    const code3 = pc1.admin.createRegister(ctx1.userId, ctx1.storeId).activation_code;
+    await syncOnce(pc1);
+    await expect(joinStore(fresh(), url, code3, 'PC caisse 3')).rejects.toThrow('permet 2 PC');
   });
 });

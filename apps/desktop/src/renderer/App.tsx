@@ -299,6 +299,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Paramètres', open: ['admin', 'settings'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Serveur central', open: ['admin', 'server'] },
+      { label: 'Licence', open: ['admin', 'license'] },
       { label: "Journal d'audit", open: ['admin', 'audit'], perm: 'audit' },
     ],
   ],
@@ -363,6 +364,21 @@ export function App() {
       )}
     </ToastProvider>
   );
+}
+
+/** Texte court de la barre d'état ; le message complet est dans l'infobulle et Administration › Licence. */
+function licenseLabel(l: AppState['license']): string {
+  const days = l.daysLeft === null ? '' : ` (${l.daysLeft} j)`;
+  switch (l.state) {
+    case 'trial':
+      return `Version d'essai${days}`;
+    case 'valid':
+      return `Licence à renouveler${days}`;
+    case 'grace':
+      return `Licence expirée : ventes arrêtées dans ${l.daysLeft} j`;
+    default:
+      return 'Licence : ventes bloquées';
+  }
 }
 
 function Workspace({ state, user, refresh }: { state: AppState; user: User; refresh: () => void }) {
@@ -737,6 +753,16 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {chargesLate.data!.count} charge(s) en retard
           </button>
         )}
+        {state.license.warn &&
+          (canWin('admin') ? (
+            <button className={state.license.canSell ? 'warn soft' : 'warn'} onClick={() => open('admin', 'license', 'Administration › Licence')} title={state.license.message}>
+              {licenseLabel(state.license)}
+            </button>
+          ) : (
+            <span className={state.license.canSell ? 'warn-text' : 'neg'} title={state.license.message}>
+              {licenseLabel(state.license)}
+            </span>
+          ))}
         {Boolean(gaps.data?.length) && (
           <button className="warn" onClick={() => open('treasury', 'history', 'Trésorerie › Historique des journées de caisse')} title="Clôtures dont l'écart attend votre motif">
             {gaps.data!.length} écart(s) de caisse à justifier

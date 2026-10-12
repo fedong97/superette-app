@@ -7,3 +7,6 @@ release/
 *.db-wal
 *.db-shm
 .DS_Store
+
+# Clé secrète des licences : jamais dans le dépôt
+*.pem

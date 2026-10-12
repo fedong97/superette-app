@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brochure FEDO Gestion</title>
+<!--
+  Brochure commerciale FEDO Gestion, d'une page A4.
+  S'ouvre dans Chrome ou Edge : renseignez votre contact et vos tarifs dans le
+  bandeau du haut (gardés sur ce PC), puis « Enregistrer en PDF » pour
+  l'envoyer par WhatsApp ou l'imprimer. Le bandeau ne s'imprime pas.
+-->
+<style>
+  :root { --green: #1f7a5c; --dark: #12241e; --gold: #f2b705; --text: #1d2939; --muted: #5d6b7e; --line: #dfe5e2; --soft: #eef6f2; }
+  * { box-sizing: border-box; }
+  html { background: #d9dedb; }
+  body { margin: 0; font: 13px/1.45 "Segoe UI", Arial, sans-serif; color: var(--text); }
+  @page { size: A4; margin: 0; }
+
+  .editor { max-width: 210mm; margin: 12px auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  .editor .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 12px; }
+  .editor label { display: block; font-weight: 600; font-size: 12px; }
+  .editor input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .editor button { margin-top: 8px; font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 6px; border: 0; background: var(--green); color: #fff; cursor: pointer; }
+  .editor p { margin: 0 0 6px; color: var(--muted); }
+
+  .page { width: 210mm; height: 297mm; margin: 0 auto 16px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
+  header { background: var(--dark); color: #fff; padding: 11mm 14mm 9mm; position: relative; }
+  header .brand { display: flex; align-items: center; gap: 14px; }
+  header .name { font-size: 34px; font-weight: 800; letter-spacing: .3px; line-height: 1; }
+  header .name span { color: #4fd1a1; }
+  header .by { font-size: 12px; color: #a9c7bb; margin-top: 4px; letter-spacing: .5px; }
+  header h1 { font-size: 23px; line-height: 1.25; margin: 8mm 0 3mm; max-width: 150mm; }
+  header h1 em { font-style: normal; color: var(--gold); }
+  header p { margin: 0; color: #cfe2da; font-size: 14px; max-width: 160mm; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5mm; }
+  .badges span { border: 1px solid #3c5a4f; border-radius: 20px; padding: 4px 11px; font-size: 12px; color: #e6f2ed; }
+
+  main { padding: 7mm 14mm 0; flex: 1; }
+  .features { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm 7mm; }
+  .feature { display: flex; gap: 10px; }
+  .feature svg { flex: none; width: 34px; height: 34px; }
+  .feature h3 { margin: 1px 0 2px; font-size: 14px; color: var(--dark); }
+  .feature p { margin: 0; color: var(--muted); }
+
+  .plus { margin-top: 6mm; background: var(--soft); border-radius: 10px; padding: 4mm 6mm; display: grid; grid-template-columns: 1fr 1fr; gap: 2mm 7mm; }
+  .plus div { padding-left: 16px; position: relative; }
+  .plus div::before { content: ""; position: absolute; left: 0; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+
+  h2 { font-size: 16px; margin: 6mm 0 3mm; color: var(--dark); }
+  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; }
+  .plan { border: 1px solid var(--line); border-radius: 10px; padding: 4mm 5mm; }
+  .plan.best { border: 2px solid var(--green); position: relative; }
+  .plan.best::after { content: "Conseillé"; position: absolute; top: -9px; right: 10px; background: var(--green); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 10px; }
+  .plan h4 { margin: 0; font-size: 15px; }
+  .plan .price { font-size: 20px; font-weight: 800; color: var(--green); margin: 2mm 0 1mm; }
+  .plan .price small { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .plan p { margin: 0; color: var(--muted); font-size: 12px; }
+  .trial { margin-top: 4mm; font-weight: 600; }
+  .trial span { background: var(--gold); color: var(--dark); border-radius: 4px; padding: 1px 6px; }
+
+  footer { background: var(--green); color: #fff; padding: 6mm 14mm; display: flex; align-items: center; justify-content: space-between; gap: 10mm; margin-top: 5mm; }
+  footer .call { font-size: 13px; color: #d7efe5; }
+  footer .contact { font-size: 22px; font-weight: 800; }
+  footer .who { text-align: right; font-size: 12px; color: #d7efe5; }
+
+  @media print {
+    html { background: #fff; }
+    .editor { display: none; }
+    .page { margin: 0; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<section class="editor">
+  <p>Renseignez votre contact et vos tarifs, puis cliquez « Enregistrer en PDF » (choisissez « Enregistrer au format PDF » comme imprimante). Un tarif laissé vide affiche « sur demande ».</p>
+  <div class="grid">
+    <div><label for="eContact">Votre contact</label><input id="eContact" placeholder="ex. 6 77 00 00 00"></div>
+    <div><label for="eMonthly">Mensuelle (FCFA)</label><input id="eMonthly" type="number" min="0" step="500"></div>
+    <div><label for="eAnnual">Annuelle (FCFA)</label><input id="eAnnual" type="number" min="0" step="500"></div>
+    <div><label for="eLifetime">À vie (FCFA)</label><input id="eLifetime" type="number" min="0" step="500"></div>
+  </div>
+  <button type="button" onclick="print()">Enregistrer en PDF</button>
+</section>
+
+<div class="page">
+  <header>
+    <div class="brand">
+      <svg width="58" height="58" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1f7a5c"/><path d="M30 24 H72 V36 H43 V46 H66 V58 H43 V78 H30 Z" fill="#fff"/><circle cx="72" cy="72" r="8" fill="#f2b705"/></svg>
+      <div><div class="name">FEDO <span>Gestion</span></div><div class="by">UN LOGICIEL FEDONG</div></div>
+    </div>
+    <h1>La caisse et la gestion de votre superette, <em>sans pertes ni surprises</em>.</h1>
+    <p>Vendez plus vite, gardez l'œil sur chaque franc de la caisse et sur chaque article du stock, même quand Internet est coupé.</p>
+    <div class="badges"><span>Fait pour le Cameroun</span><span>FCFA et SYSCOHADA</span><span>MTN MoMo et Orange Money</span><span>Fonctionne sans Internet</span></div>
+  </header>
+
+  <main>
+    <div class="features">
+      <div class="feature">
+        <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#eef6f2"/><path d="M11 12h18v18H11z" fill="none" stroke="#1f7a5c" stroke-width="2.5" stroke-linejoin="round"/><path d="M15 17v8M18 17v8M22 17v8M25 17v8" stroke="#1f7a5c" stroke-width="2"/></svg>
+        <div><h3>Caisse rapide</h3><p>Douchette, articles au poids, tickets en attente, remises sous contrôle, imprimante de tickets et tiroir-caisse.</p></div>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#eef6f2"/><rect x="10" y="13" width="20" height="14" rx="2.5" fill="none" stroke="#1f7a5c" stroke-width="2.5"/><circle cx="20" cy="20" r="3" fill="#f2b705"/></svg>
+        <div><h3>Tous les paiements</h3><p>Espèces avec rendu de monnaie, MTN Mobile Money, Orange Money, carte, bons d'achat et ventes à crédit.</p></div>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#eef6f2"/><path d="M20 10l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11v-6z" fill="none" stroke="#1f7a5c" stroke-width="2.5" stroke-linejoin="round"/><path d="M16 20l3 3 5-6" fill="none" stroke="#f2b705" stroke-width="2.5" stroke-linecap="round"/></svg>
+        <div><h3>Caisse sous contrôle</h3><p>Clôture à l'aveugle, écarts justifiés par le gérant, rapport Z, caisse centrale et droits par employé.</p></div>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#eef6f2"/><path d="M11 16l9-5 9 5v10l-9 5-9-5z M11 16l9 5 9-5 M20 21v10" fill="none" stroke="#1f7a5c" stroke-width="2.3" stroke-linejoin="round"/></svg>
+        <div><h3>Stock juste</h3><p>Réceptions, alertes de péremption, inventaires sans fermer le magasin, transferts et proposition de commande.</p></div>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#eef6f2"/><circle cx="16" cy="17" r="4" fill="none" stroke="#1f7a5c" stroke-width="2.3"/><path d="M9 29c1-4 4-6 7-6s6 2 7 6" fill="none" stroke="#1f7a5c" stroke-width="2.3" stroke-linecap="round"/><path d="M25 14h6M25 19h6M27 24h4" stroke="#f2b705" stroke-width="2.3" stroke-linecap="round"/></svg>
+        <div><h3>Clients et fournisseurs</h3><p>Crédit client avec plafond, relevés, ristournes, bons de commande, factures et règlements fournisseurs.</p></div>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#eef6f2"/><path d="M12 29V19M18 29V13M24 29v-8M30 29V16" stroke="#1f7a5c" stroke-width="3" stroke-linecap="round"/></svg>
+        <div><h3>Comptabilité SYSCOHADA</h3><p>Écritures passées toutes seules, déclaration de TVA, bilan, compte de résultat et DSF.</p></div>
+      </div>
+    </div>
+
+    <div class="plus">
+      <div>Plusieurs caisses et plusieurs magasins reliés</div>
+      <div>Continue de vendre sans Internet</div>
+      <div>Chaque employé n'accède qu'à ce qui le concerne</div>
+      <div>Sauvegardes de vos données en un clic</div>
+    </div>
+
+    <h2>Choisissez votre formule</h2>
+    <div class="plans">
+      <div class="plan"><h4>Mensuelle</h4><div class="price" id="pMonthly"></div><p>Pour démarrer en douceur, sans gros investissement.</p></div>
+      <div class="plan best"><h4>Annuelle</h4><div class="price" id="pAnnual"></div><p>Un an de tranquillité, un seul paiement.</p></div>
+      <div class="plan"><h4>À vie</h4><div class="price" id="pLifetime"></div><p>Payez une fois, le logiciel est à vous.</p></div>
+    </div>
+    <p class="trial"><span>Essai gratuit de 15 jours</span> : installez FEDO Gestion et testez-le dans votre magasin avant de choisir.</p>
+  </main>
+
+  <footer>
+    <div><div class="call">Demandez votre démonstration</div><div class="contact" id="fContact"></div></div>
+    <div class="who">FEDO Gestion<br>un logiciel FEDONG</div>
+  </footer>
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const FIELDS = { eContact: 'contact', eMonthly: 'monthly', eAnnual: 'annual', eLifetime: 'lifetime' };
+const PER = { monthly: ' / mois', annual: ' / an', lifetime: '' };
+const load = () => { try { return JSON.parse(localStorage.getItem('brochure') || '{}'); } catch { return {}; } };
+const save = (v) => { try { localStorage.setItem('brochure', JSON.stringify(v)); } catch { /* le navigateur n'enregistre pas : la page reste utilisable */ } };
+const money = (n) => `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`;
+
+// Les valeurs peuvent aussi venir de l'adresse : brochure-fedo-gestion.html?contact=...&monthly=...
+const query = Object.fromEntries(new URLSearchParams(location.search));
+const values = { ...load(), ...query };
+
+function render() {
+  for (const plan of ['monthly', 'annual', 'lifetime']) {
+    const n = parseInt(values[plan], 10);
+    const el = $(`p${plan[0].toUpperCase()}${plan.slice(1)}`);
+    el.innerHTML = Number.isFinite(n) && n > 0 ? `${money(n)}<small>${PER[plan]}</small>` : '<small>Prix sur demande</small>';
+  }
+  $('fContact').textContent = values.contact || 'Contactez FEDONG';
+}
+for (const [id, k] of Object.entries(FIELDS)) {
+  $(id).value = values[k] ?? '';
+  $(id).addEventListener('input', () => { values[k] = $(id).value.trim(); save(values); render(); });
+}
+render();
+</script>
+</body>
+</html>

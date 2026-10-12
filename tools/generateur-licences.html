@@ -41,12 +41,22 @@
   .scroll { overflow-x: auto; }
   .expiry { font-size: 15px; margin-top: 10px; }
   details summary { cursor: pointer; font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .banner { background: var(--card); border: 1px solid var(--warn); border-left: 5px solid var(--warn); border-radius: 8px; padding: 10px 14px; margin: 14px 0 0; }
+  .banner a { color: inherit; font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .tile strong { display: block; font-size: 20px; }
+  .check { display: flex; gap: 6px; align-items: center; font-weight: 500; margin-top: 30px; }
+  .check input { width: auto; }
+  td button { padding: 3px 8px; margin: 0 2px 3px 0; }
 </style>
 </head>
 <body>
 <main>
   <h1>Générateur de licences</h1>
   <p class="muted">FEDO Gestion · réservé à l'éditeur. Gardez une copie du fichier de clé secrète sur une clé USB rangée en lieu sûr.</p>
+  <p id="dueBanner" class="banner" hidden></p>
 
   <section class="card">
     <h2>1. Clé secrète</h2>
@@ -65,6 +75,12 @@
         <select id="pPlan"><option value="monthly">Mensuelle</option><option value="annual">Annuelle</option><option value="lifetime">À vie</option></select></div>
       <div><label for="pStations">Nombre de PC proposé</label><input id="pStations" type="number" min="1" value="1"></div>
       <div><label for="pStores">Nombre de magasins proposé</label><input id="pStores" type="number" min="1" value="1"></div>
+    </div>
+    <div class="grid">
+      <div><label for="pPriceMonthly">Tarif mensuel (FCFA)</label><input id="pPriceMonthly" type="number" min="0" step="500"></div>
+      <div><label for="pPriceAnnual">Tarif annuel (FCFA)</label><input id="pPriceAnnual" type="number" min="0" step="500"></div>
+      <div><label for="pPriceLifetime">Tarif à vie (FCFA)</label><input id="pPriceLifetime" type="number" min="0" step="500"></div>
+      <div><label for="pRemind">Relancer le client (jours avant la fin)</label><input id="pRemind" type="number" min="1" value="30"></div>
     </div>
     <div class="row"><button id="saveParams" type="button">Enregistrer le paramétrage</button><span id="paramsSaved" class="ok"></span></div>
   </section>
@@ -88,6 +104,10 @@
         <div><label for="stations">Nombre de PC</label><input id="stations" type="number" min="1" required></div>
         <div><label for="stores">Nombre de magasins</label><input id="stores" type="number" min="1" required></div>
       </div>
+      <div class="grid">
+        <div><label for="price">Prix de la licence (FCFA)</label><input id="price" type="number" min="0" step="500"></div>
+        <div><label class="check"><input id="paid" type="checkbox" checked> Le client a payé</label></div>
+      </div>
       <p class="expiry" id="expiry"></p>
       <div class="row"><button class="primary" type="submit">Créer la licence</button><span id="formError" class="bad"></span></div>
     </form>
@@ -103,15 +123,22 @@
   </section>
 
   <section class="card">
-    <h2>4. Licences créées</h2>
+    <h2 id="clients">4. Clients et licences</h2>
+    <div class="tiles" id="tiles"></div>
     <div class="row" style="margin-top: 0">
-      <input id="search" placeholder="Rechercher un client ou un code machine" style="max-width: 360px">
+      <input id="search" placeholder="Rechercher un client ou un code machine" style="max-width: 300px">
+      <select id="filter" style="max-width: 200px">
+        <option value="all">Toutes les licences</option>
+        <option value="due">À relancer</option>
+        <option value="unpaid">Non payées</option>
+        <option value="active">En cours</option>
+      </select>
       <button id="exportCsv" type="button">Exporter (Excel CSV)</button>
       <button id="exportJson" type="button">Sauvegarder le registre</button>
       <label class="row" style="margin: 0; font-weight: 500"><input id="importJson" type="file" accept=".json" hidden><span style="text-decoration: underline; cursor: pointer">Restaurer un registre</span></label>
     </div>
     <div class="scroll"><table>
-      <thead><tr><th>N°</th><th>Client</th><th>Code machine</th><th>Formule</th><th>Validité</th><th>PC</th><th>Créée le</th><th></th></tr></thead>
+      <thead><tr><th>Client</th><th>Formule</th><th>Validité</th><th>État</th><th>Prix</th><th>PC</th><th>Code machine</th><th></th></tr></thead>
       <tbody id="register"></tbody>
     </table></div>
   </section>
@@ -203,24 +230,32 @@ $('forgetKey').addEventListener('click', async () => {
 });
 
 // --- Paramétrage ---------------------------------------------------------------
-const params = () => store.get('params', { contact: '', plan: 'annual', stations: 1, stores: 1 });
+const PRICE_FIELDS = { monthly: 'pPriceMonthly', annual: 'pPriceAnnual', lifetime: 'pPriceLifetime' };
+const params = () => ({ contact: '', plan: 'annual', stations: 1, stores: 1, prices: {}, remind: 30, ...store.get('params', {}) });
 function loadParams() {
   const p = params();
   $('pContact').value = p.contact;
   $('pPlan').value = p.plan;
   $('pStations').value = p.stations;
   $('pStores').value = p.stores;
+  for (const [plan, id] of Object.entries(PRICE_FIELDS)) $(id).value = p.prices[plan] ?? '';
+  $('pRemind').value = p.remind;
 }
+const amount = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : null; };
+const money = (n) => `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`;
 $('saveParams').addEventListener('click', () => {
   store.set('params', {
     contact: $('pContact').value.trim(),
     plan: $('pPlan').value,
     stations: Math.max(1, parseInt($('pStations').value, 10) || 1),
     stores: Math.max(1, parseInt($('pStores').value, 10) || 1),
+    prices: Object.fromEntries(Object.entries(PRICE_FIELDS).map(([plan, id]) => [plan, amount($(id).value)]).filter(([, v]) => v !== null)),
+    remind: Math.max(1, parseInt($('pRemind').value, 10) || 30),
   });
   $('paramsSaved').textContent = 'Enregistré';
   setTimeout(() => ($('paramsSaved').textContent = ''), 2000);
   resetForm();
+  renderRegister();
 });
 
 // --- Dates ---------------------------------------------------------------------
@@ -268,9 +303,15 @@ function resetForm(prefill) {
   $('stores').value = prefill?.stores ?? p.stores;
   const chosen = prefill?.plan ?? p.plan;
   document.querySelectorAll('input[name=plan]').forEach((r) => (r.checked = r.value === chosen));
+  $('price').value = p.prices[chosen] ?? prefill?.price ?? '';
+  $('paid').checked = true;
   showExpiry();
 }
-document.querySelectorAll('input[name=plan]').forEach((r) => r.addEventListener('change', showExpiry));
+document.querySelectorAll('input[name=plan]').forEach((r) => r.addEventListener('change', () => {
+  const tarif = params().prices[plan()];
+  if (tarif != null) $('price').value = tarif;
+  showExpiry();
+}));
 $('start').addEventListener('change', showExpiry);
 
 function newId() {
@@ -315,7 +356,7 @@ $('form').addEventListener('submit', async (e) => {
   const key = await sign(payload);
   const phone = $('phone').value.trim();
   const reg = store.get('register', []);
-  reg.unshift({ ...payload, phone, key });
+  reg.unshift({ ...payload, phone, key, price: amount($('price').value), paid: $('paid').checked });
   store.set('register', reg);
   showResult(key, phone, payload);
   renderRegister();
@@ -338,27 +379,87 @@ $('copyKey').addEventListener('click', () => {
 
 // --- Registre ------------------------------------------------------------------
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-function renderRegister() {
-  const q = $('search').value.trim().toLowerCase();
-  const rows = store.get('register', []).filter((r) => !q || `${r.client} ${r.machine} ${r.id}`.toLowerCase().includes(q));
-  $('register').innerHTML = rows.length
-    ? rows.map((r, i) => {
-        const late = r.expires && r.expires < today();
-        return `<tr>
-          <td>${esc(r.id)}</td><td>${esc(r.client)}</td><td>${esc(r.machine)}</td><td>${PLAN_LABELS[r.plan]}</td>
-          <td class="${late ? 'bad' : ''}">${r.expires ? `${fr(r.start)} → ${fr(r.expires)}` : `depuis ${fr(r.start)}`}</td>
-          <td>${r.stations}</td><td>${fr(r.issued.slice(0, 10))}</td>
-          <td><button type="button" data-show="${esc(r.id)}">Clé</button> <button type="button" data-renew="${esc(r.id)}">Renouveler</button></td>
-        </tr>`;
-      }).join('')
-    : '<tr><td colspan="8" class="muted">Aucune licence.</td></tr>';
+const DAY = 86_400_000;
+const daysUntil = (d) => Math.round((parse(d) - parse(today())) / DAY);
+const GRACE = 15;
+
+/** Une licence est remplacée quand une licence créée après, pour le même PC, va plus loin. */
+function replacedBy(r, reg) {
+  return reg.find((x) => x !== r && x.machine === r.machine && x.issued > r.issued && (!x.expires || (r.expires && x.expires > r.expires)));
 }
+/** État d'une licence : texte, couleur, et faut-il relancer le client. */
+function status(r, reg) {
+  if (replacedBy(r, reg)) return { text: 'Renouvelée', cls: 'muted', due: false, active: false };
+  if (!r.expires) return { text: 'À vie', cls: 'ok', due: false, active: true };
+  const n = daysUntil(r.expires);
+  if (n < -GRACE) return { text: `Caisse arrêtée depuis ${-n - GRACE} j`, cls: 'bad', due: true, active: false };
+  if (n < 0) return { text: `Terminée, grâce : arrêt dans ${GRACE + n + 1} j`, cls: 'bad', due: true, active: true };
+  if (n <= params().remind) return { text: n === 0 ? "Se termine aujourd'hui" : `Se termine dans ${n} j`, cls: 'warn', due: true, active: true };
+  return { text: 'En cours', cls: 'ok', due: false, active: true };
+}
+function reminderText(r) {
+  const p = params();
+  const plan = PLAN_LABELS[r.plan].toLowerCase();
+  const tarif = p.prices[r.plan];
+  const price = tarif ? ` (${money(tarif)})` : '';
+  const who = p.contact ? `contactez ${p.contact}` : 'répondez simplement à ce message';
+  const n = daysUntil(r.expires);
+  const stop = fr(addDays(r.expires, GRACE + 1));
+  const end = n >= 0 ? `se termine le ${fr(r.expires)}.`
+    : n < -GRACE ? `s'est terminée le ${fr(r.expires)} et la caisse ne vend plus depuis le ${stop}.`
+    : `s'est terminée le ${fr(r.expires)}. Sans renouvellement, la caisse s'arrêtera de vendre le ${stop}.`;
+  return `Bonjour ${r.client}, votre licence FEDO Gestion ${plan} ${end} Pour la renouveler${price}, ${who} et nous vous enverrons la nouvelle clé. Merci de votre confiance.`;
+}
+function renderRegister() {
+  const reg = store.get('register', []);
+  const all = reg.map((r) => ({ r, st: status(r, reg) }));
+  const due = all.filter((x) => x.st.due);
+  const unpaid = all.filter((x) => x.r.paid === false && x.r.price);
+  const year = today().slice(0, 4);
+  const cashed = reg.filter((r) => r.paid !== false && r.price && r.issued.slice(0, 4) === year).reduce((t, r) => t + r.price, 0);
+  const clients = new Set(all.filter((x) => x.st.active).map((x) => x.r.client.trim().toLowerCase())).size;
+  $('tiles').innerHTML = `
+    <div class="tile"><span class="muted">Clients en cours</span><strong>${clients}</strong></div>
+    <div class="tile"><span class="muted">À relancer</span><strong class="${due.length ? 'warn' : ''}">${due.length}</strong></div>
+    <div class="tile"><span class="muted">Non payé</span><strong class="${unpaid.length ? 'bad' : ''}">${money(unpaid.reduce((t, x) => t + x.r.price, 0))}</strong></div>
+    <div class="tile"><span class="muted">Encaissé en ${year}</span><strong>${money(cashed)}</strong></div>`;
+  $('dueBanner').hidden = !due.length;
+  $('dueBanner').innerHTML = due.length
+    ? `${due.length === 1 ? '1 client est' : `${due.length} clients sont`} à relancer pour le renouvellement : ${due.slice(0, 3).map((x) => esc(x.r.client)).join(', ')}${due.length > 3 ? '…' : ''}. <a href="#clients" id="showDue">Voir la liste</a>`
+    : '';
+
+  const q = $('search').value.trim().toLowerCase();
+  const f = $('filter').value;
+  const rows = all
+    .filter((x) => !q || `${x.r.client} ${x.r.machine} ${x.r.id} ${x.r.phone}`.toLowerCase().includes(q))
+    .filter((x) => f === 'all' || (f === 'due' && x.st.due) || (f === 'unpaid' && x.r.paid === false && x.r.price) || (f === 'active' && x.st.active))
+    .sort((a, b) => f === 'due' ? (a.r.expires < b.r.expires ? -1 : 1) : 0);
+  $('register').innerHTML = rows.length
+    ? rows.map(({ r, st }) => `<tr>
+          <td><strong>${esc(r.client)}</strong><br><span class="muted">${esc(r.phone || '')}</span></td>
+          <td>${PLAN_LABELS[r.plan]}</td>
+          <td>${r.expires ? `${fr(r.start)} → ${fr(r.expires)}` : `depuis ${fr(r.start)}`}</td>
+          <td class="${st.cls}">${st.text}</td>
+          <td>${r.price != null ? money(r.price) : ''}${r.paid === false && r.price ? '<br><span class="bad">non payée</span>' : ''}</td>
+          <td>${r.stations}</td>
+          <td><span class="muted">${esc(r.machine)}</span></td>
+          <td>${st.due && r.phone ? `<button type="button" data-remind="${esc(r.id)}">Relancer</button>` : ''}<button type="button" data-renew="${esc(r.id)}">Renouveler</button><button type="button" data-show="${esc(r.id)}">Clé</button>${r.paid === false ? `<button type="button" data-paid="${esc(r.id)}">Payée</button>` : ''}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="8" class="muted">${reg.length ? 'Aucune licence pour ce filtre.' : 'Aucune licence.'}</td></tr>`;
+}
+$('dueBanner').addEventListener('click', (e) => { if (e.target.id === 'showDue') { $('filter').value = 'due'; renderRegister(); } });
 $('register').addEventListener('click', (e) => {
   const reg = store.get('register', []);
-  const show = e.target.dataset.show, renew = e.target.dataset.renew;
-  const r = reg.find((x) => x.id === (show || renew));
+  const { show, renew, remind, paid } = e.target.dataset;
+  const r = reg.find((x) => x.id === (show || renew || remind || paid));
   if (!r) return;
   if (show) showResult(r.key, r.phone, r);
+  if (remind) window.open(waLink(r.phone, reminderText(r)), '_blank', 'noreferrer');
+  if (paid) {
+    r.paid = true;
+    store.set('register', reg);
+    renderRegister();
+  }
   if (renew) {
     // La nouvelle période commence le lendemain de la fin de l'ancienne, sinon aujourd'hui.
     const start = r.expires && r.expires >= today() ? addDays(r.expires, 1) : today();
@@ -366,6 +467,7 @@ $('register').addEventListener('click', (e) => {
     $('form').scrollIntoView({ behavior: 'smooth' });
   }
 });
+$('filter').addEventListener('change', renderRegister);
 $('search').addEventListener('input', renderRegister);
 
 function download(name, text, type) {
@@ -377,9 +479,10 @@ function download(name, text, type) {
 }
 $('exportCsv').addEventListener('click', () => {
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const lines = [['N°', 'Client', 'Téléphone', 'Code machine', 'Formule', 'Début', 'Fin', 'PC', 'Magasins', 'Créée le', 'Clé'].map(cell).join(';')];
-  for (const r of store.get('register', [])) {
-    lines.push([r.id, r.client, r.phone, r.machine, PLAN_LABELS[r.plan], fr(r.start), r.expires ? fr(r.expires) : 'à vie', r.stations, r.stores, fr(r.issued.slice(0, 10)), r.key].map(cell).join(';'));
+  const reg = store.get('register', []);
+  const lines = [['N°', 'Client', 'Téléphone', 'Code machine', 'Formule', 'Début', 'Fin', 'État', 'Prix (FCFA)', 'Payée', 'PC', 'Magasins', 'Créée le', 'Clé'].map(cell).join(';')];
+  for (const r of reg) {
+    lines.push([r.id, r.client, r.phone, r.machine, PLAN_LABELS[r.plan], fr(r.start), r.expires ? fr(r.expires) : 'à vie', status(r, reg).text, r.price ?? '', r.paid === false ? 'non' : 'oui', r.stations, r.stores, fr(r.issued.slice(0, 10)), r.key].map(cell).join(';'));
   }
   download(`licences-${today()}.csv`, `﻿${lines.join('\r\n')}`, 'text/csv');
 });

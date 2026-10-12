@@ -1,4 +1,4 @@
-import { receiptToEscPos, receiptToText } from '@superette/core';
+import { BUILTIN_TEMPLATES, receiptToEscPos, receiptToText, renderDocHtml } from '@superette/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type Context, type Services, createServices, openDatabase } from '../src';
 
@@ -68,6 +68,31 @@ describe('tickets de caisse', () => {
     expect(receiptToText(s.receipts.ticket(sale.id), 48)).toMatch(/\nRiz parfumé Uncle Ben's 5 kg {15}4 500\n/);
     const bytes = receiptToEscPos(s.receipts.ticket(sale.id), { columns: 48, codepage: 'pc850', kick: true });
     expect(Buffer.from(bytes).includes(Buffer.from([0x1b, 0x70, 0, 25, 250]))).toBe(true);
+  });
+
+  it('ticket et facture suivent le modèle par défaut du magasin', () => {
+    const sale = sell();
+    const base = structuredClone(BUILTIN_TEMPLATES.find((t) => t.id === 'invoice-ticket-cash')!);
+    const mine = { ...base, id: 'tpl-court', builtin: false, name: 'Ticket court', info: { ...base.info, title: 'FACTURE', seller: false }, totals: { ...base.totals, vatDetail: false } };
+    s.admin.saveStoreSettings(ctx.userId, ctx.storeId, { printTemplates: [mine], printDefaults: { 'invoice.ticket.cash': 'tpl-court' } });
+    const text = receiptToText(s.receipts.ticket(sale.id, { duplicate: true }), 32);
+    expect(text).toContain('FACTURE\nDUPLICATA\nN° DLA1-1-000001\n06/10/2026 09:00\n');
+    expect(text).not.toContain('dont TVA');
+    // Vente comptant : modèle A4 comptant, avec le code des articles et le vendeur.
+    expect(s.receipts.saleVariant(sale.id)).toBe('cash');
+    const a4 = s.receipts.saleTemplate(sale.id, 'a4');
+    expect(a4.id).toBe('invoice-a4-cash');
+    const html = renderDocHtml(a4, s.receipts.saleDoc(sale.id));
+    expect(html).toContain('Facture DLA1-1-000001');
+    expect(html).toContain('Vendeur : Steve');
+    expect(html).toContain('<td>Bière Castel 65 cl</td>');
+    // Bon de livraison de la même vente : quantités, sans prix.
+    const bl = s.receipts.saleTemplate(sale.id, 'a4', null, 'delivery');
+    expect(bl.id).toBe('delivery-a4-delivery');
+    expect(s.receipts.saleTemplate(sale.id, null, 'delivery-ticket-delivery').doc).toBe('delivery');
+    const blHtml = renderDocHtml(bl, s.receipts.saleDoc(sale.id));
+    expect(blHtml).toContain('Bon de livraison DLA1-1-000001');
+    expect(blHtml).not.toContain('3 900');
   });
 
   it('rapport Z et page de test', () => {

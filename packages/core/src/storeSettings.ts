@@ -1,3 +1,5 @@
+import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
+
 /**
  * Paramètres du magasin (Administration › Paramètres) : règles de vente, de
  * crédit, de stock, d'achat, de sécurité et de numérotation. Ils voyagent
@@ -68,6 +70,11 @@ export interface StoreSettings {
   prefixQuote: string;
   prefixProforma: string;
   prefixOrder: string;
+
+  /** Modèles d'impression modifiés ou ajoutés (ceux du logiciel servent pour le reste). */
+  printTemplates: DocTemplate[];
+  /** Modèle choisi par emplacement (« invoice.a4.credit ») : identifiant de modèle. */
+  printDefaults: Record<string, string>;
 }
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -99,6 +106,8 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   prefixQuote: 'DV',
   prefixProforma: 'PF',
   prefixOrder: 'BC',
+  printTemplates: [],
+  printDefaults: {},
 };
 
 const ROUNDINGS = [1, 5, 10, 25, 50];
@@ -131,7 +140,11 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
   for (const [k, raw] of Object.entries(patch) as [keyof StoreSettings, unknown][]) {
     if (!(k in DEFAULT_STORE_SETTINGS)) throw new Error(`Paramètre inconnu : ${k}`);
     const def = DEFAULT_STORE_SETTINGS[k];
-    if (typeof def === 'boolean') {
+    if (k === 'printTemplates') {
+      next.printTemplates = normalizeTemplates(raw);
+    } else if (k === 'printDefaults') {
+      next.printDefaults = normalizeDefaults(raw);
+    } else if (typeof def === 'boolean') {
       (next as unknown as Record<string, unknown>)[k] = Boolean(raw);
     } else if (typeof def === 'number') {
       const n = Number(raw);

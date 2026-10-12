@@ -1,3 +1,4 @@
+import { renderDocHtml } from '@superette/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type Context, type Services, createServices, openDatabase } from '../src';
 
@@ -81,5 +82,17 @@ describe('devis et proformas', () => {
     s.quotes.cancel(ctx, other.id);
     expect(s.quotes.get(other.id).state).toBe('cancelled');
     expect(s.quotes.list(ctx.storeId, { search: 'yassa' })).toHaveLength(2);
+  });
+
+  it('s’imprime avec le modèle proforma : validité, observations et montant en lettres', () => {
+    const q = s.quotes.save(ctx, { kind: 'proforma', customerId: restaurant, validDays: 10, notes: 'Livraison à Bonabéri', lines: [{ articleId: riz, qty: 2000 }] });
+    const t = s.receipts.quoteTemplate(q.id, 'a4');
+    expect(t.id).toBe('quote-a4-proforma');
+    const html = renderDocHtml(t, s.receipts.quoteDoc(q.id));
+    expect(html).toContain(`Facture proforma ${q.number}`);
+    expect(html).toContain("Valable jusqu'au 16/10/2026");
+    expect(html).toContain('Livraison à Bonabéri');
+    expect(html).toContain('dix-mille francs CFA');
+    expect(html).toContain('Restaurant Chez Mballa');
   });
 });

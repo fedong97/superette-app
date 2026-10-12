@@ -302,7 +302,11 @@ export class AdminService extends Base {
       this.db.prepare('UPDATE stores SET settings = ? WHERE id = ?').run(JSON.stringify(next), storeId);
       this.enqueue({ storeId, registerId: null }, 'store', storeId, 'upsert', this.getStore(storeId));
       // Le logo n'encombre pas le journal : on note seulement qu'il a changé.
-      const logged = { ...patch, ...(patch.logo !== undefined ? { logo: patch.logo ? 'nouveau logo' : 'logo retiré' } : {}) };
+      const logged = {
+        ...patch,
+        ...(patch.logo !== undefined ? { logo: patch.logo ? 'nouveau logo' : 'logo retiré' } : {}),
+        ...(patch.printTemplates !== undefined ? { printTemplates: `${next.printTemplates.length} modèle(s) d'impression` } : {}),
+      };
       this.audit(userId, 'store.settings', 'store', storeId, logged);
     });
     return next;

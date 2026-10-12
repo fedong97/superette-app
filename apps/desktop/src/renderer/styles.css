@@ -742,3 +742,29 @@ pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; lin
 /* Barre d'état sur une seule ligne : les textes longs (magasin, utilisateur) se raccourcissent. */
 .statusbar > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .statusbar > button { flex: none; }
+
+/* Modèles d'impression : liste des modèles, éditeur et aperçu. */
+.templates-layout { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 14px; align-items: start; }
+.templates-layout tr.selected td { background: var(--brand-soft); font-weight: 600; }
+.side-buttons { display: flex; flex-direction: column; gap: 8px; }
+.tpl-split { display: grid; grid-template-columns: minmax(380px, 460px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tpl-form { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 230px); overflow: auto; padding-right: 6px; }
+.tpl-preview { position: sticky; top: 0; }
+.tpl-section { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.tpl-section summary { cursor: pointer; font-weight: 700; padding: 8px 12px; }
+.tpl-body { padding: 4px 12px 12px; }
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 8px; }
+.tpl-check { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.tpl-columns { table-layout: fixed; }
+.tpl-columns th:nth-child(1) { width: 58px; }
+.tpl-columns th:nth-child(2) { width: 24%; }
+.tpl-columns th:nth-child(4) { width: 76px; }
+.tpl-columns th:last-child { width: 64px; }
+.tpl-columns td { padding: 3px 6px; }
+.tpl-columns input:not([type='checkbox']) { width: 100%; padding: 4px 6px; }
+.tpl-columns td:nth-child(4) input { width: 46px; }
+.tpl-columns td:last-child button { padding: 2px 4px; }
+.tpl-columns td:nth-child(4) .inline { gap: 3px; }
+.tpl-columns td.nowrap { white-space: nowrap; }
+.doc-frame { width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: #8a8f98; display: block; }
+.tpl-form .grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

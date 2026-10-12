@@ -45,6 +45,6 @@ describe('0.35.0 par l’API', () => {
     const detail = api['purchases.invoice']!(inv.id) as { lines: { discount_bp: number }[] };
     expect(detail.lines[0]!.discount_bp).toBe(1_000);
     await api['purchases.printInvoice']!(inv.id);
-    expect(printed).toEqual([`purchaseInvoice:${inv.id}`]);
+    expect(printed).toEqual([`purchaseInvoice:${inv.id},undefined`]);
   });
 });

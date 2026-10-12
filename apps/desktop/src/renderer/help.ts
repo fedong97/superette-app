@@ -374,6 +374,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Les sections « (ce PC) » ne valent que pour ce poste ; les autres valent pour tout le magasin.',
         ],
       },
+      {
+        tab: 'templates',
+        title: 'Modèles d’impression',
+        steps: [
+          'Une ligne par modèle : document (facture client, devis et proforma, bon de livraison, bon de commande, facture d’achat), format (ticket de caisse, A4, listing), variante (comptant, à terme, devis, proforma, commande, facture fournisseur). La coche « Par défaut » désigne le modèle utilisé à l’impression.',
+          '« Modifier » ouvre l’éditeur : papier, marges, police, hauteurs de l’en-tête, du pied et des lignes, champs du magasin et du client, colonnes du tableau (afficher, renommer, largeur, ordre), totaux et mentions. L’aperçu à droite suit chaque changement.',
+          '« Copier » crée un autre modèle à partir de celui choisi ; « Rétablir l’original » remet un modèle du logiciel tel qu’il était livré.',
+          'Dans Ventes ou la fiche d’un client, « Facture… » ouvre l’aperçu avant impression : changez de modèle (facture ou bon de livraison), imprimez ou enregistrez en PDF. Dans la fiche d’un devis, d’une commande fournisseur ou d’une facture d’achat, « Aperçu et impression… » fait de même.',
+        ],
+      },
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
       { tab: 'server', title: 'Serveur central', steps: ['Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.'] },
       {

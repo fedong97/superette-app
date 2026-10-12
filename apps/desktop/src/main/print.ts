@@ -12,7 +12,13 @@ import {
   LABEL_FORMATS,
   type LabelFormatId,
   numberToWordsFr,
+  type DocData,
+  type DocTemplate,
+  pageSize,
+  renderDocTicket,
   receiptToEscPos,
+  receiptToHtml,
+  renderDocHtml,
   splitTtc,
 } from '@superette/core';
 import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, SUPPLIER_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
@@ -45,21 +51,6 @@ const STYLE = `
   .row { display: flex; justify-content: space-between; gap: 6px; }
   .row span:last-child { white-space: nowrap; }
 `;
-
-/** Rendu HTML d'un ticket, pour l'impression par le pilote Windows. */
-function receiptHtml(receipt: Receipt): string {
-  return receipt
-    .map((l) => {
-      if (l.t === 'rule') return '<hr>';
-      if (l.t === 'feed') return '<br>';
-      if (l.t === 'image') return `<div class="c"><img src="${esc(l.src)}" style="max-width:60%;max-height:30mm"></div>`;
-      const cls = [l.bold ? 'b' : '', l.big ? 'big' : ''];
-      if (l.t === 'text') return `<div class="${[...cls, l.align === 'center' ? 'c' : l.align === 'right' ? 'r' : ''].join(' ').trim()}">${esc(l.text)}</div>`;
-      const pad = l.indent ? ` style="padding-left:${l.indent}ch"` : '';
-      return `<div class="row ${cls.join(' ').trim()}"><span${pad}>${esc(l.left)}</span><span>${esc(l.right)}</span></div>`;
-    })
-    .join('\n');
-}
 
 export type PrinterMode = 'driver' | 'windows' | 'network';
 export type DrawerMode = 'never' | 'cash' | 'always';
@@ -101,6 +92,59 @@ export function createPrinter(s: Services): Printer {
     } finally {
       win.destroy();
     }
+  }
+
+  /** Page complète (ticket d'un modèle) envoyée sans fenêtre à l'imprimante du poste. */
+  async function printPage(html: string): Promise<void> {
+    const deviceName = s.admin.getSetting('printer.name') || undefined;
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    try {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await new Promise<void>((resolve, reject) =>
+        win.webContents.print({ silent: true, printBackground: true, deviceName, margins: { marginType: 'none' } }, (ok, reason) =>
+          ok ? resolve() : reject(new Error(`Impression impossible : ${reason}`)),
+        ),
+      );
+    } finally {
+      win.destroy();
+    }
+  }
+
+  /**
+   * Document d'un modèle A4 ou listing : la fenêtre d'impression Windows s'ouvre au format
+   * du modèle, ou la fenêtre « Enregistrer sous » pour un PDF. Renvoie false si annulé.
+   */
+  async function printDocument(html: string, t: DocTemplate, pdfName?: string): Promise<boolean> {
+    const target = pdfName ? await dialog.showSaveDialog({ defaultPath: pdfName, filters: [{ name: 'PDF', extensions: ['pdf'] }] }) : null;
+    if (target && (target.canceled || !target.filePath)) return false;
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    try {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      if (target?.filePath) {
+        await writeFile(target.filePath, await win.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true }));
+        return true;
+      }
+      const { width, height } = pageSize(t);
+      return await new Promise<boolean>((resolve, reject) =>
+        win.webContents.print(
+          { silent: false, printBackground: true, copies: t.page.copies, pageSize: { width: width * 1000, height: (height || 297) * 1000 } },
+          (ok, reason) => (ok ? resolve(true) : reason === 'cancelled' ? resolve(false) : reject(new Error(`Impression impossible : ${reason}`))),
+        ),
+      );
+    } finally {
+      win.destroy();
+    }
+  }
+
+  /** Document selon son modèle : ticket sur l'imprimante de caisse, A4 ou listing par la fenêtre d'impression ou en PDF. */
+  async function printWithTemplate(t: DocTemplate, data: DocData, output: 'print' | 'pdf' | undefined, pdfName: string): Promise<boolean> {
+    const html = renderDocHtml(t, data);
+    if (t.format === 'ticket' && output !== 'pdf') {
+      const receipt = renderDocTicket(t, data);
+      for (let i = 0; i < t.page.copies; i++) await printReceipt(receipt, false, true, html);
+      return true;
+    }
+    return printDocument(html, t, output === 'pdf' ? pdfName : undefined);
   }
 
   /** Réglages d'impression du poste (non synchronisés : chaque caisse a son imprimante). */
@@ -153,13 +197,14 @@ export function createPrinter(s: Services): Printer {
     });
   }
 
-  async function printReceipt(receipt: Receipt, kick: boolean, force = false): Promise<void> {
+  /** `html` : page complète du modèle de ticket, imprimée telle quelle par le pilote Windows. */
+  async function printReceipt(receipt: Receipt, kick: boolean, force = false, html?: string): Promise<void> {
     const cfg = config();
     const print = cfg.enabled || force;
     if (cfg.mode === 'driver') {
       const errors: unknown[] = [];
       if (kick) await sendRaw(cfg, drawerKick()).catch((err) => errors.push(err));
-      if (print) await printHtml(receiptHtml(receipt), true).catch((err) => errors.push(err));
+      if (print) await (html ? printPage(html) : printHtml(receiptToHtml(receipt), true)).catch((err) => errors.push(err));
       if (errors.length) throw errors[0];
       return;
     }
@@ -415,9 +460,14 @@ export function createPrinter(s: Services): Printer {
         const sale = s.pos.getSale(saleId);
         kick = cfg.drawer === 'always' || sale.change_given > 0 || sale.payments.some((p) => p.method === 'CASH');
       }
-      const receipt = s.receipts.ticket(saleId);
-      // Exemplaires réglés dans les paramètres : le tiroir ne s'ouvre qu'au premier.
-      for (let i = 0; i < Math.max(1, opts?.copies ?? 1); i++) await printReceipt(receipt, kick && i === 0);
+      const t = s.receipts.saleTemplate(saleId, 'ticket', opts?.templateId);
+      const ticket = t.format === 'ticket' ? t : s.receipts.saleTemplate(saleId, 'ticket');
+      const data = s.receipts.saleDoc(saleId, { duplicate: !opts?.newSale });
+      const receipt = s.receipts.ticket(saleId, { templateId: ticket.id, duplicate: !opts?.newSale });
+      const html = renderDocHtml(ticket, data);
+      // Exemplaires : ceux des paramètres ou du modèle pour une vente, un seul en réimpression ; le tiroir ne s'ouvre qu'au premier.
+      const copies = opts?.newSale ? Math.max(opts.copies ?? 1, ticket.page.copies) : Math.max(1, opts?.copies ?? 1);
+      for (let i = 0; i < copies; i++) await printReceipt(receipt, kick && i === 0, false, html);
     },
 
     async zReport(sessionId) {
@@ -550,168 +600,50 @@ export function createPrinter(s: Services): Printer {
         <tbody>${rows}</tbody></table>`);
     },
 
-    async purchaseInvoice(invoiceId) {
+    async purchaseInvoice(invoiceId, opts) {
       const i = s.purchases.getInvoice(invoiceId);
-      const sup = s.purchases.getSupplier(i.supplier_id);
-      const store = s.admin.getStore(i.store_id);
-      const lines = s.purchases.invoiceLines(invoiceId);
-      const pays = s.purchases.invoicePayments(invoiceId);
-      const rows = lines
-        .map(
-          (l) => `<tr><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td><td class="r">${formatQty(l.qty, l.unit)}</td>
-            <td class="r">${money(l.gross_cost ?? l.unit_cost)}</td>${termCells(l)}<td class="r">${money(l.unit_cost)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
-        )
-        .join('');
-      const payRows = pays
-        .map((p) => `<tr><td>${dayFr(p.paid_at)} · ${esc(SUPPLIER_PAYMENT_METHODS[p.method] ?? p.method)}${p.reference ? ` (${esc(p.reference)})` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
-        .join('');
-      await printA4(`<div class="head">
-          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
-            .filter(Boolean)
-            .map((v) => esc(v!))
-            .join('<br>')}</div>
-          <div class="box"><b>${esc(sup.name)}</b><br>${[sup.contact, sup.address, sup.phone, sup.email].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
-        </div>
-        <h1>${i.kind === 'invoice' ? 'Facture d’achat' : 'Avoir fournisseur'} ${esc(i.number)}</h1>
-        <div>Facture du fournisseur n° ${esc(i.supplier_number)} du ${dayFr(i.invoice_date)} · Échéance : ${dayFr(i.due_date)}${i.direct ? ' · Saisie directe, sans bon de commande' : ''}</div>
-        ${
-          rows
-            ? `<table><thead><tr><th>Code</th><th>Désignation</th><th class="r">Qté</th><th class="r">${tx('PU HT', store)}</th><th class="r">Remise</th><th class="r">Gratuits</th><th class="r">Coût net</th><th class="r">${tx('Total HT', store)}</th></tr></thead>
-        <tbody>${rows}</tbody></table>`
-            : ''
-        }
-        <table class="totals">
-          ${i.discount ? `<tr><td>Remise globale (déjà déduite des lignes)</td><td class="r">-${money(i.discount)}</td></tr>` : ''}
-          ${store.vat_enabled === 1 || i.total_tva ? `<tr><td>Total HT</td><td class="r">${money(i.total_ht)}</td></tr>` : ''}
-          ${i.total_tva ? `<tr><td>TVA</td><td class="r">${money(i.total_tva)}</td></tr>` : ''}
-          <tr class="total"><td>${store.vat_enabled === 1 || i.total_tva ? 'Total TTC (FCFA)' : 'Total (FCFA)'}</td><td class="r">${money(i.total_ttc)}</td></tr>
-          ${payRows}
-          <tr class="total"><td>Reste à payer</td><td class="r">${money(i.balance)}</td></tr></table>
-        ${i.notes ? `<p>${esc(i.notes)}</p>` : ''}
-        <div class="sign"><div>Contrôlé par</div><div>Visa</div></div>`);
+      const t = s.receipts.purchaseTemplate('purchaseInvoice', i.store_id, opts?.format ?? 'a4', opts?.templateId);
+      return printWithTemplate(t, s.receipts.purchaseInvoiceDoc(invoiceId), opts?.output, `facture-achat-${i.number}.pdf`);
     },
 
-    async purchaseOrder(orderId) {
+    previewPurchaseInvoice(invoiceId, opts) {
+      const i = s.purchases.getInvoice(invoiceId);
+      const t = s.receipts.purchaseTemplate('purchaseInvoice', i.store_id, opts?.format ?? 'a4', opts?.templateId);
+      return { templateId: t.id, html: renderDocHtml(t, s.receipts.purchaseInvoiceDoc(invoiceId)) };
+    },
+
+    async purchaseOrder(orderId, opts) {
       const o = s.purchases.getOrder(orderId);
-      const sup = s.purchases.getSupplier(o.supplier_id);
-      const store = s.admin.getStore(o.store_id);
-      // Remise et gratuits : colonnes affichées seulement si une ligne en a.
-      const terms = o.lines.some((l) => l.discount_bp || l.free_qty);
-      const rows = o.lines
-        .map(
-          (l) => `<tr><td>${esc(l.supplier_ref ?? '')}</td><td>${esc(l.article_code)}</td><td>${esc(l.article_name)}</td>
-            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td>${terms ? termCells(l) : ''}<td class="r">${money(l.total_ht)}</td></tr>`,
-        )
-        .join('');
-      await printA4(`<div class="head">
-          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
-            .filter(Boolean)
-            .map((v) => esc(v!))
-            .join('<br>')}</div>
-          <div class="box"><b>${esc(sup.name)}</b><br>${[sup.contact, sup.address, sup.phone, sup.email].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
-        </div>
-        <h1>Bon de commande ${esc(o.number)}</h1>
-        <div>Date : ${new Date(`${o.order_date}T00:00:00`).toLocaleDateString('fr-FR')}${
-          o.expected_date ? ` · Livraison souhaitée : ${new Date(`${o.expected_date}T00:00:00`).toLocaleDateString('fr-FR')}` : ''
-        } · Livrer à : ${esc(o.warehouse_name)}</div>
-        <table><thead><tr><th>Réf. fournisseur</th><th>Code</th><th>Désignation</th><th class="r">Quantité</th><th class="r">${tx('PU HT', store)}</th>${terms ? '<th class="r">Remise</th><th class="r">Gratuits</th>' : ''}<th class="r">${tx('Total HT', store)}</th></tr></thead>
-        <tbody>${rows}<tr class="total"><td colspan="${terms ? 7 : 5}">${tx('Total HT (FCFA)', store)}</td><td class="r">${money(o.total_ht)}</td></tr></tbody></table>
-        ${o.notes ? `<p>${esc(o.notes)}</p>` : ''}
-        <div class="sign"><div>Établi par : ${esc(o.user_name ?? '')}</div><div>Signature et cachet</div></div>`);
+      const t = s.receipts.purchaseTemplate('purchaseOrder', o.store_id, opts?.format ?? 'a4', opts?.templateId);
+      return printWithTemplate(t, s.receipts.purchaseOrderDoc(orderId), opts?.output, `bon-de-commande-${o.number}.pdf`);
     },
 
-    async invoice(saleId) {
+    previewPurchaseOrder(orderId, opts) {
+      const o = s.purchases.getOrder(orderId);
+      const t = s.receipts.purchaseTemplate('purchaseOrder', o.store_id, opts?.format ?? 'a4', opts?.templateId);
+      return { templateId: t.id, html: renderDocHtml(t, s.receipts.purchaseOrderDoc(orderId)) };
+    },
+
+    async invoice(saleId, opts) {
+      const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId, opts?.doc);
       const sale = s.pos.getSale(saleId);
-      const store = s.admin.getStore(sale.store_id);
-      const c = sale.customer_id ? s.customers.getCustomer(sale.customer_id) : null;
-      // Magasin non assujetti : ni colonne ni total de TVA, la mention « TVA non applicable ».
-      const noVat = store.vat_enabled !== 1 && sale.lines.every((l) => l.vat_rate_bp === 0);
-      const rows = sale.lines
-        .map((l) => {
-          const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
-          const pack = l.pack_name && l.pack_units && l.pack_price !== null;
-          const q = pack ? `${Math.abs(l.qty) / l.pack_units!} ${esc(l.pack_name!)}` : formatQty(Math.abs(l.qty), l.unit);
-          return `<tr><td>${esc(l.label)}</td><td class="r">${q}</td><td class="r">${money(pack ? l.pack_price! : l.unit_price)}</td>
-            <td class="r">${l.discount ? money(l.discount) : ''}</td>${noVat ? '' : `<td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td>`}<td class="r">${money(l.total_ttc)}</td></tr>`;
-        })
-        .join('');
-      const byRate = new Map<number, number>();
-      for (const l of sale.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-      const vat = [...byRate.entries()]
-        .filter(([rate]) => rate > 0)
-        .map(([rate, ttc]) => `<tr><td>TVA ${formatRate(rate)}</td><td class="r">${money(splitTtc(ttc, rate).tva)}</td></tr>`)
-        .join('');
-      const pays = sale.payments
-        .map((p) => `<tr><td>${esc(PAYMENT_METHODS[p.method])}${p.reference ? ` (${esc(p.reference)})` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
-        .join('');
-      const title = sale.kind === 'return' ? 'Avoir' : 'Facture';
-      await printA4(`<div class="head">
-          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
-            .filter(Boolean)
-            .map((v) => esc(v!))
-            .join('<br>')}</div>
-          <div class="box">${
-            c
-              ? `<b>${esc(c.name)}</b><br>${[c.address, c.phone, c.taxpayer_number ? `NIU ${c.taxpayer_number}` : null, `Compte ${c.code}`]
-                  .filter(Boolean)
-                  .map((v) => esc(v!))
-                  .join('<br>')}`
-              : sale.customer_name
-                ? `<b>${esc(sale.customer_name)}</b><br>Client comptoir`
-                : '<b>Client comptoir</b>'
-          }</div>
-        </div>
-        <h1>${title} ${esc(sale.number)}</h1>
-        <div>Date : ${dayFr(sale.created_at)}${sale.due_date ? ` · Échéance : ${dayFr(sale.due_date)}` : ''} · Vendeur : ${esc(sale.user_name)}</div>
-        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">${noVat ? 'Prix unitaire' : 'PU TTC'}</th><th class="r">Remise</th>${noVat ? '' : '<th class="r">TVA</th><th class="r">Total HT</th>'}<th class="r">${noVat ? 'Total' : 'Total TTC'}</th></tr></thead>
-        <tbody>${rows}</tbody></table>
-        <table class="totals">${noVat ? '' : `<tr><td>Total HT</td><td class="r">${money(sale.total_ht)}</td></tr>${vat}`}
-          <tr class="total"><td>${noVat ? 'Total (FCFA)' : 'Total TTC (FCFA)'}</td><td class="r">${money(sale.total_ttc)}</td></tr>${pays}</table>
-        ${noVat ? '<p class="muted">TVA non applicable.</p>' : ''}
-        <div class="sign"><div>Le client</div><div>Pour ${esc(store.name)}</div></div>`);
+      const name = t.doc === 'delivery' ? 'bon-de-livraison' : sale.kind === 'return' ? 'avoir' : 'facture';
+      return printWithTemplate(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate }), opts?.output, `${name}-${sale.number}.pdf`);
     },
 
-    async quote(quoteId) {
-      const q = s.quotes.get(quoteId);
-      const store = s.admin.getStore(q.store_id);
-      const c = q.customer_id ? s.customers.getCustomer(q.customer_id) : null;
-      const noVat = store.vat_enabled !== 1 && q.lines.every((l) => l.vat_rate_bp === 0);
-      const rows = q.lines
-        .map((l) => {
-          const ht = splitTtc(l.total_ttc, l.vat_rate_bp).ht;
-          return `<tr><td>${esc(l.label)}</td><td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_price)}</td>
-            <td class="r">${l.discount ? money(l.discount) : ''}</td>${noVat ? '' : `<td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(ht)}</td>`}<td class="r">${money(l.total_ttc)}</td></tr>`;
-        })
-        .join('');
-      const byRate = new Map<number, number>();
-      for (const l of q.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-      const vat = [...byRate.entries()]
-        .filter(([rate]) => rate > 0)
-        .map(([rate, ttc]) => `<tr><td>TVA ${formatRate(rate)}</td><td class="r">${money(splitTtc(ttc, rate).tva)}</td></tr>`)
-        .join('');
-      const title = q.kind === 'proforma' ? 'Facture proforma' : 'Devis';
-      const words = numberToWordsFr(q.total_ttc);
-      await printA4(`<div class="head">
-          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone, store.taxpayer_number ? `NIU ${store.taxpayer_number}` : null]
-            .filter(Boolean)
-            .map((v) => esc(v!))
-            .join('<br>')}</div>
-          <div class="box">${
-            c
-              ? `<b>${esc(c.name)}</b><br>${[c.address, c.phone, c.taxpayer_number ? `NIU ${c.taxpayer_number}` : null].filter(Boolean).map((v) => esc(v!)).join('<br>')}`
-              : `<b>${esc(q.customer_name ?? '')}</b>`
-          }</div>
-        </div>
-        <h1>${title} ${esc(q.number)}${q.state === 'cancelled' ? ' (annulé)' : ''}</h1>
-        <div>Date : ${dayFr(q.quote_date)} · Valable jusqu'au ${dayFr(q.valid_until)}${q.user_name ? ` · Établi par ${esc(q.user_name)}` : ''}</div>
-        <table><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">${noVat ? 'Prix unitaire' : 'PU TTC'}</th><th class="r">Remise</th>${noVat ? '' : '<th class="r">TVA</th><th class="r">Total HT</th>'}<th class="r">${noVat ? 'Total' : 'Total TTC'}</th></tr></thead>
-        <tbody>${rows}</tbody></table>
-        <table class="totals">${noVat ? '' : `<tr><td>Total HT</td><td class="r">${money(q.total_ht)}</td></tr>${vat}`}
-          <tr class="total"><td>${noVat ? 'Net à payer (FCFA)' : 'Net à payer TTC (FCFA)'}</td><td class="r">${money(q.total_ttc)}</td></tr></table>
-        <p>Arrêté${q.kind === 'proforma' ? 'e la présente facture proforma' : ' le présent devis'} à la somme de <b>${esc(words)} francs CFA</b>${noVat ? ' (TVA non applicable)' : ' toutes taxes comprises'}.</p>
-        ${q.notes ? `<p>${esc(q.notes)}</p>` : ''}
-        <p class="muted">Prix garantis jusqu'au ${dayFr(q.valid_until)} dans la limite des stocks disponibles. Ce document n'est pas une facture définitive.</p>
-        <div class="sign"><div>Bon pour accord, le client<br><br>Date et signature</div><div>Pour ${esc(store.name)}</div></div>`);
+    previewInvoice(saleId, opts) {
+      const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId, opts?.doc);
+      return { templateId: t.id, html: renderDocHtml(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate })) };
+    },
+
+    async quote(quoteId, opts) {
+      const t = s.receipts.quoteTemplate(quoteId, opts?.format ?? 'a4', opts?.templateId);
+      return printWithTemplate(t, s.receipts.quoteDoc(quoteId), opts?.output, `${t.variant === 'proforma' ? 'proforma' : 'devis'}-${s.quotes.get(quoteId).number}.pdf`);
+    },
+
+    previewQuote(quoteId, opts) {
+      const t = s.receipts.quoteTemplate(quoteId, opts?.format ?? 'a4', opts?.templateId);
+      return { templateId: t.id, html: renderDocHtml(t, s.receipts.quoteDoc(quoteId)) };
     },
 
     async statement(storeId, customerId, from, to) {

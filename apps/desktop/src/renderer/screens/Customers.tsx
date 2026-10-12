@@ -5,6 +5,7 @@ import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
 import { tx } from '../tax';
+import { InvoicePreview } from './docPreview';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | `rebates-${RebatesTab}`;
@@ -182,6 +183,7 @@ function Account({ customer }: { customer: Customer }) {
   const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
   const [paying, setPaying] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
   if (!acc.data) return null;
   const a = acc.data;
   return (
@@ -231,8 +233,8 @@ function Account({ customer }: { customer: Customer }) {
                 <td className="neg">{i.days_late ? `${i.days_late} j` : ''}</td>
                 <td>
                   {can('sale_reprint') && (
-                    <button className="ghost" onClick={() => call('pos.printInvoice', i.id).catch(toast.error)}>
-                      Facture A4
+                    <button className="ghost" onClick={() => setPreview(i.id)}>
+                      Facture…
                     </button>
                   )}
                 </td>
@@ -260,6 +262,7 @@ function Account({ customer }: { customer: Customer }) {
           }}
         />
       )}
+      {preview && <InvoicePreview saleId={preview} onClose={() => setPreview(null)} />}
     </>
   );
 }
@@ -345,41 +348,44 @@ export function Statement({ customer }: { customer: Customer }) {
 }
 
 function CustomerSales({ customer }: { customer: Customer }) {
-  const toast = useToast();
   const can = useCan();
   const sales = useLoad(() => call('customers.sales', customer.id), [customer.id]);
+  const [preview, setPreview] = useState<string | null>(null);
   if (sales.data?.length === 0) return <p className="muted">Aucun achat enregistré à son nom dans ce magasin.</p>;
   return (
-    <table className="list compact">
-      <thead>
-        <tr>
-          <th>Ticket</th>
-          <th>Date</th>
-          <th className="r">{tx('Total TTC')}</th>
-          <th>Échéance</th>
-          <th>État</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {(sales.data ?? []).map((s) => (
-          <tr key={s.id} className={s.status === 'cancelled' ? 'inactive' : ''}>
-            <td>{s.number}</td>
-            <td>{dateTime(s.created_at)}</td>
-            <td className="r">{fcfa(s.total_ttc)}</td>
-            <td>{s.due_date ? dateFr(s.due_date) : 'comptant'}</td>
-            <td>{s.status === 'cancelled' ? 'Annulé' : s.kind === 'return' ? 'Retour' : ''}</td>
-            <td>
-              {can('sale_reprint') && (
-                <button className="ghost" onClick={() => call('pos.printInvoice', s.id).catch(toast.error)}>
-                  {s.kind === 'return' ? 'Avoir A4' : 'Facture A4'}
-                </button>
-              )}
-            </td>
+    <>
+      <table className="list compact">
+        <thead>
+          <tr>
+            <th>Ticket</th>
+            <th>Date</th>
+            <th className="r">{tx('Total TTC')}</th>
+            <th>Échéance</th>
+            <th>État</th>
+            <th></th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {(sales.data ?? []).map((s) => (
+            <tr key={s.id} className={s.status === 'cancelled' ? 'inactive' : ''}>
+              <td>{s.number}</td>
+              <td>{dateTime(s.created_at)}</td>
+              <td className="r">{fcfa(s.total_ttc)}</td>
+              <td>{s.due_date ? dateFr(s.due_date) : 'comptant'}</td>
+              <td>{s.status === 'cancelled' ? 'Annulé' : s.kind === 'return' ? 'Retour' : ''}</td>
+              <td>
+                {can('sale_reprint') && (
+                  <button className="ghost" onClick={() => setPreview(s.id)}>
+                    {s.kind === 'return' ? 'Avoir…' : 'Facture…'}
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {preview && <InvoicePreview saleId={preview} onClose={() => setPreview(null)} />}
+    </>
   );
 }
 

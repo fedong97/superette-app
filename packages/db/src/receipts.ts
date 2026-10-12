@@ -1,4 +1,19 @@
-import { PAYMENT_METHODS, PRICE_LEVELS, formatFcfa, formatQty, formatRate, splitTtc, type Receipt } from '@superette/core';
+import {
+  PAYMENT_METHODS,
+  PRICE_LEVELS,
+  type DocData,
+  type DocFormat,
+  type DocTemplate,
+  type DocVariant,
+  effectiveTemplates,
+  formatFcfa,
+  formatQty,
+  formatRate,
+  renderDocTicket,
+  resolveTemplate,
+  splitTtc,
+  type Receipt,
+} from '@superette/core';
 import type { AdminService } from './admin';
 import { CUSTOMER_PAYMENT_METHODS, type CustomerService } from './customers';
 import { EXPENSE_PAYMENT_METHODS, type ExpenseService } from './expenses';
@@ -8,6 +23,8 @@ import type { TreasuryService } from './treasury';
 import type { InventoryService } from './inventories';
 import { REBATE_KINDS, type RebateService } from './rebates';
 import { EmoneyService } from './emoney';
+import type { QuoteService } from './quotes';
+import { SUPPLIER_PAYMENT_METHODS, type PurchaseService } from './purchases';
 import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
@@ -39,6 +56,8 @@ export class ReceiptService extends Base {
     private readonly treasury: TreasuryService,
     private readonly inventories?: InventoryService,
     private readonly rebates?: RebateService,
+    private readonly quotes?: QuoteService,
+    private readonly purchases?: PurchaseService,
   ) {
     super(db, clock);
   }
@@ -60,42 +79,272 @@ export class ReceiptService extends Base {
     ];
   }
 
-  ticket(saleId: string): Receipt {
+  /** Variante d'une vente : à terme quand une partie passe sur le compte du client ou qu'une échéance est fixée. */
+  saleVariant(saleId: string): DocVariant {
     const sale = this.pos.getSale(saleId);
-    const footer = this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !';
-    const r: Receipt = this.header();
-    if (sale.kind === 'return') r.push({ t: 'text', text: 'RETOUR CLIENT', bold: true });
-    r.push({ t: 'text', text: `Ticket ${sale.number}` }, { t: 'text', text: `${dateFr(sale.created_at)} · ${sale.user_name}` });
-    if (sale.customer_name) r.push({ t: 'text', text: `Client : ${sale.customer_name}` });
-    if (sale.price_level && sale.price_level !== 'retail') r.push({ t: 'text', text: `Tarif : ${PRICE_LEVELS[sale.price_level]}` });
-    r.push({ t: 'rule' });
-    for (const l of sale.lines) {
-      r.push({ t: 'row', left: l.label, right: money(l.total_ttc + l.promo) });
-      const discount = l.discount ? ` (remise ${money(l.discount)})` : '';
-      if (l.pack_name && l.pack_units && l.pack_price !== null)
-        r.push({ t: 'row', left: `${Math.abs(l.qty) / l.pack_units} ${l.pack_name} x ${money(l.pack_price)}${discount}`, right: '', indent: 2 });
-      else if (l.qty !== 1000 || l.discount)
-        r.push({ t: 'row', left: `${formatQty(Math.abs(l.qty), l.unit)} x ${money(l.unit_price)}${discount}`, right: '', indent: 2 });
-      if (l.promo) r.push({ t: 'row', left: `Promo ${l.promotion_name ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
-    }
-    r.push({ t: 'rule' }, { t: 'row', left: 'TOTAL FCFA', right: money(sale.total_ttc), bold: true, big: true });
-    if (sale.rounding) r.push({ t: 'row', left: 'dont arrondi espèces', right: `-${money(sale.rounding)}`, indent: 2 });
-    if (sale.total_promo > 0) r.push({ t: 'row', left: 'Vous avez économisé', right: money(sale.total_promo), bold: true });
-    for (const p of sale.payments) r.push({ t: 'row', left: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, right: money(p.amount) });
-    if (sale.change_given) r.push({ t: 'row', left: 'Rendu monnaie', right: money(sale.change_given), bold: true });
-    if (sale.due_date) r.push({ t: 'text', text: `À régler avant le ${dayFr(sale.due_date)}` });
-    r.push({ t: 'rule' });
-    if (sale.lines.every((l) => l.vat_rate_bp === 0) && this.admin.getStore(sale.store_id).vat_enabled !== 1) {
-      // Magasin non assujetti (régime simplifié).
-      r.push({ t: 'text', text: 'TVA non applicable', align: 'center' });
-    } else {
-      const byRate = new Map<number, number>();
-      for (const l of sale.lines) byRate.set(l.vat_rate_bp, (byRate.get(l.vat_rate_bp) ?? 0) + l.total_ttc);
-      for (const [rate, ttc] of byRate) r.push({ t: 'row', left: `TVA ${formatRate(rate)} sur ${money(ttc)}`, right: money(splitTtc(ttc, rate).tva) });
-      r.push({ t: 'row', left: 'dont TVA', right: money(sale.total_tva) });
-    }
-    r.push({ t: 'rule' }, { t: 'text', text: footer, align: 'center' });
-    return r;
+    return sale.due_date || sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') ? 'credit' : 'cash';
+  }
+
+  /**
+   * Modèle d'impression d'une vente : celui demandé (facture ou bon de livraison),
+   * sinon celui par défaut du document, du format et de la variante.
+   */
+  saleTemplate(saleId: string, format: DocFormat | null, templateId?: string | null, doc: 'invoice' | 'delivery' = 'invoice'): DocTemplate {
+    const set = this.admin.storeSettings(this.pos.getSale(saleId).store_id);
+    const asked = templateId ? effectiveTemplates(set.printTemplates).find((t) => t.id === templateId && (t.doc === 'invoice' || t.doc === 'delivery')) : undefined;
+    if (asked) return asked;
+    return doc === 'delivery' ? resolveTemplate(set, 'delivery', format, 'delivery') : resolveTemplate(set, 'invoice', format, this.saleVariant(saleId));
+  }
+
+  /** Modèle d'impression d'un devis ou d'une proforma. */
+  quoteTemplate(quoteId: string, format: DocFormat | null, templateId?: string | null): DocTemplate {
+    const q = this.quotes!.get(quoteId);
+    return resolveTemplate(this.admin.storeSettings(q.store_id), 'quote', format, q.kind, templateId);
+  }
+
+  /** Identité du magasin pour les modèles d'impression. */
+  private docStore(storeId: string): DocData['store'] {
+    const store = this.admin.getStore(storeId);
+    const set = this.admin.storeSettings(storeId);
+    return {
+      name: store.name,
+      address: store.address,
+      phone: store.phone,
+      niu: store.taxpayer_number,
+      rccm: set.rccm,
+      logo: set.logo,
+      message: set.ticketHeader,
+      thanks: this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
+      vatEnabled: store.vat_enabled === 1,
+    };
+  }
+
+  private articleCodes(ids: string[]): Map<string, string> {
+    if (!ids.length) return new Map();
+    const rows = this.db.prepare(`SELECT id, code FROM articles WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: string; code: string }[];
+    return new Map(rows.map((a) => [a.id, a.code]));
+  }
+
+  /** Modèle d'impression d'un bon de commande ou d'une facture d'achat. */
+  purchaseTemplate(doc: 'purchaseOrder' | 'purchaseInvoice', storeId: string, format: DocFormat | null, templateId?: string | null): DocTemplate {
+    return resolveTemplate(this.admin.storeSettings(storeId), doc, format, doc === 'purchaseOrder' ? 'order' : 'supplierInvoice', templateId);
+  }
+
+  private supplierParty(supplierId: string): DocData['customer'] {
+    const sup = this.purchases!.getSupplier(supplierId);
+    return { name: sup.name, code: sup.code, address: sup.address, phone: sup.phone, niu: sup.taxpayer_number, balance: null, counter: false };
+  }
+
+  /** Remise en % et gratuits d'une ligne d'achat (« 12 achetés, 10 payés » rappelé sous les gratuits). */
+  private purchaseTerms(l: { discount_bp: number; free_qty: number; promo_buy: number | null; promo_pay: number | null; unit: 'piece' | 'kg' | 'litre' }) {
+    return {
+      discountLabel: l.discount_bp ? `${(l.discount_bp / 100).toLocaleString('fr-FR')} %` : '',
+      freeQty: l.free_qty ? `${formatQty(l.free_qty, l.unit)}${l.promo_buy && l.promo_pay !== null ? ` (${l.promo_buy} achetés, ${l.promo_pay} payés)` : ''}` : '',
+    };
+  }
+
+  /** Contenu d'un bon de commande fournisseur pour les modèles d'impression. */
+  purchaseOrderDoc(orderId: string): DocData {
+    const o = this.purchases!.getOrder(orderId);
+    return {
+      store: this.docStore(o.store_id),
+      customer: this.supplierParty(o.supplier_id),
+      partyLabel: 'Fournisseur',
+      doc: {
+        kind: 'purchase',
+        number: o.number,
+        date: o.order_date,
+        dueDate: null,
+        seller: o.user_name ?? '',
+        register: null,
+        priceLevel: null,
+        cancelled: o.status === 'cancelled',
+        duplicate: false,
+        notes: o.notes,
+        extra: [...(o.expected_date ? [`Livraison souhaitée : ${dayFr(o.expected_date)}`] : []), `Livrer à : ${o.warehouse_name}`],
+      },
+      lines: o.lines.map((l) => ({
+        code: l.article_code,
+        barcode: null,
+        label: l.article_name,
+        qty: formatQty(l.qty, l.unit),
+        unit: '',
+        unitPrice: l.unit_cost,
+        unitPriceHt: l.unit_cost,
+        discount: 0,
+        vatRate: 0,
+        totalHt: l.total_ht,
+        totalTtc: l.total_ht,
+        promo: 0,
+        promoName: null,
+        detail: true,
+        supplierRef: l.supplier_ref,
+        netCost: l.qty ? Math.round((l.total_ht * 1000) / l.qty) : l.unit_cost,
+        ...this.purchaseTerms(l),
+      })),
+      payments: [],
+      totals: { ht: o.total_ht, tva: 0, ttc: o.total_ht, discount: 0, promo: 0, rounding: 0, change: 0, remaining: 0 },
+    };
+  }
+
+  /** Contenu d'une facture d'achat ou d'un avoir fournisseur pour les modèles d'impression. */
+  purchaseInvoiceDoc(invoiceId: string): DocData {
+    const i = this.purchases!.getInvoice(invoiceId);
+    const lines = this.purchases!.invoiceLines(invoiceId);
+    return {
+      store: this.docStore(i.store_id),
+      customer: this.supplierParty(i.supplier_id),
+      partyLabel: 'Fournisseur',
+      doc: {
+        kind: i.kind === 'invoice' ? 'purchase' : 'return',
+        number: i.number,
+        date: i.invoice_date,
+        dueDate: i.due_date,
+        seller: '',
+        register: null,
+        priceLevel: null,
+        cancelled: false,
+        duplicate: false,
+        notes: i.notes,
+        extra: [`Facture du fournisseur n° ${i.supplier_number} du ${dayFr(i.invoice_date)}`, ...(i.direct ? ['Saisie directe, sans bon de commande'] : [])],
+      },
+      lines: lines.map((l) => ({
+        code: l.article_code,
+        barcode: null,
+        label: l.article_name,
+        qty: formatQty(l.qty, l.unit),
+        unit: '',
+        unitPrice: l.gross_cost ?? l.unit_cost,
+        unitPriceHt: l.gross_cost ?? l.unit_cost,
+        discount: 0,
+        vatRate: l.vat_rate_bp,
+        totalHt: l.total_ht,
+        totalTtc: l.total_ht,
+        promo: 0,
+        promoName: null,
+        detail: true,
+        netCost: l.unit_cost,
+        ...this.purchaseTerms(l),
+      })),
+      payments: this.purchases!.invoicePayments(invoiceId).map((p) => ({
+        label: `${dayFr(p.paid_at)} · ${SUPPLIER_PAYMENT_METHODS[p.method] ?? p.method}${p.reference ? ` (${p.reference})` : ''}`,
+        amount: p.amount,
+      })),
+      totals: { ht: i.total_ht, tva: i.total_tva, ttc: i.total_ttc, discount: i.discount, promo: 0, rounding: 0, change: 0, remaining: i.balance },
+    };
+  }
+
+  /** Contenu d'un devis ou d'une proforma pour les modèles d'impression. */
+  quoteDoc(quoteId: string): DocData {
+    const q = this.quotes!.get(quoteId);
+    const c = q.customer_id ? this.customers.getCustomer(q.customer_id) : null;
+    const codes = this.articleCodes(q.lines.map((l) => l.article_id));
+    return {
+      store: this.docStore(q.store_id),
+      customer: c
+        ? { name: c.name, code: c.code, address: c.address, phone: c.phone, niu: c.taxpayer_number, balance: null, counter: false }
+        : q.customer_name
+          ? { name: q.customer_name, code: null, address: null, phone: null, niu: null, balance: null, counter: false }
+          : null,
+      doc: {
+        kind: 'quote',
+        number: q.number,
+        date: q.quote_date,
+        dueDate: null,
+        seller: q.user_name ?? '',
+        register: null,
+        priceLevel: c && c.price_level !== 'retail' ? PRICE_LEVELS[c.price_level] : null,
+        cancelled: q.state === 'cancelled',
+        duplicate: false,
+        validUntil: q.valid_until,
+        notes: q.notes,
+      },
+      lines: q.lines.map((l) => ({
+        code: codes.get(l.article_id) ?? null,
+        barcode: null,
+        label: l.label,
+        qty: formatQty(l.qty, l.unit),
+        unit: '',
+        unitPrice: l.unit_price,
+        unitPriceHt: splitTtc(l.unit_price, l.vat_rate_bp).ht,
+        discount: l.discount,
+        vatRate: l.vat_rate_bp,
+        totalHt: splitTtc(l.total_ttc, l.vat_rate_bp).ht,
+        totalTtc: l.total_ttc,
+        promo: 0,
+        promoName: null,
+        detail: l.qty !== 1000,
+      })),
+      payments: [],
+      totals: { ht: q.total_ht, tva: q.total_tva, ttc: q.total_ttc, discount: q.total_discount, promo: 0, rounding: 0, change: 0, remaining: 0 },
+    };
+  }
+
+  /** Contenu d'une vente pour les modèles de facture (ticket, A4, listing). */
+  saleDoc(saleId: string, opts?: { duplicate?: boolean }): DocData {
+    const sale = this.pos.getSale(saleId);
+    const codes = this.articleCodes(sale.lines.map((l) => l.article_id));
+    const register = this.db.prepare('SELECT name FROM registers WHERE id = ?').pluck().get(sale.register_id) as string | undefined;
+    const c = sale.customer_id ? this.customers.getCustomer(sale.customer_id) : null;
+    const balance = c ? this.customers.account(sale.store_id, c.id).balance : null;
+    return {
+      store: this.docStore(sale.store_id),
+      customer: c
+        ? { name: c.name, code: c.code, address: c.address, phone: c.phone, niu: c.taxpayer_number, balance, counter: false }
+        : sale.customer_name
+          ? { name: sale.customer_name, code: null, address: null, phone: null, niu: null, balance: null, counter: true }
+          : null,
+      doc: {
+        kind: sale.kind,
+        number: sale.number,
+        date: sale.created_at,
+        dueDate: sale.due_date,
+        seller: sale.user_name,
+        register: register ?? null,
+        priceLevel: sale.price_level && sale.price_level !== 'retail' ? PRICE_LEVELS[sale.price_level] : null,
+        cancelled: sale.status === 'cancelled',
+        duplicate: Boolean(opts?.duplicate),
+      },
+      lines: sale.lines.map((l) => {
+        const pack = Boolean(l.pack_name && l.pack_units && l.pack_price !== null);
+        const unitPrice = pack ? l.pack_price! : l.unit_price;
+        return {
+          code: codes.get(l.article_id) ?? null,
+          barcode: l.barcode,
+          label: l.label,
+          qty: pack ? String(Math.abs(l.qty) / l.pack_units!) : formatQty(Math.abs(l.qty), l.unit),
+          unit: pack ? l.pack_name! : '',
+          unitPrice,
+          unitPriceHt: splitTtc(unitPrice, l.vat_rate_bp).ht,
+          discount: l.discount,
+          vatRate: l.vat_rate_bp,
+          totalHt: splitTtc(l.total_ttc, l.vat_rate_bp).ht,
+          totalTtc: l.total_ttc,
+          promo: l.promo,
+          promoName: l.promotion_name,
+          detail: pack || l.qty !== 1000,
+        };
+      }),
+      payments: sale.payments.map((p) => ({ label: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, amount: p.amount })),
+      totals: {
+        ht: sale.total_ht,
+        tva: sale.total_tva,
+        ttc: sale.total_ttc,
+        discount: sale.total_discount,
+        promo: sale.total_promo,
+        rounding: sale.rounding,
+        change: sale.change_given,
+        remaining: sale.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0),
+      },
+    };
+  }
+
+  /** Ticket de caisse d'une vente, selon le modèle ticket choisi (ou celui par défaut de sa variante). */
+  ticket(saleId: string, opts?: { templateId?: string | null; duplicate?: boolean }): Receipt {
+    const template = this.saleTemplate(saleId, 'ticket', opts?.templateId);
+    // Un modèle A4 ou listing demandé au ticket : on prend le ticket par défaut.
+    const t = template.format === 'ticket' ? template : this.saleTemplate(saleId, 'ticket');
+    return renderDocTicket(t, this.saleDoc(saleId, opts));
   }
 
   zReport(sessionId: string): Receipt {

@@ -4,6 +4,7 @@ import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker } from './pickers';
+import { DocPreview } from './docPreview';
 import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -309,8 +310,10 @@ function QuoteDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
   const toast = useToast();
   const can = useCan();
   const loaded = useLoad(() => call('quotes.get', id), [id]);
+  const [preview, setPreview] = useState(false);
   const q = loaded.data;
   if (!q) return null;
+  if (preview) return <DocPreview source={{ kind: 'quote', id: q.id }} onClose={() => setPreview(false)} />;
   const cancel = async () => {
     if (!confirm(`Annuler ${q.number} ? Le document ne pourra plus être facturé.`)) return;
     try {
@@ -385,8 +388,8 @@ function QuoteDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
             Modifier
           </button>
         )}
-        <button type="button" className="primary" onClick={() => call('quotes.print', q.id).catch(toast.error)}>
-          Imprimer (A4)
+        <button type="button" className="primary" onClick={() => setPreview(true)}>
+          Aperçu et impression…
         </button>
       </div>
     </Modal>

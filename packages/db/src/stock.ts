@@ -10,6 +10,8 @@ import {
   describeInPacks,
   expiryAlert,
   stockLevel,
+  purchaseAmounts,
+  purchaseTermsError,
   weightedAverageCost,
 } from '@superette/core';
 import { AppError, Base, type Context, newId } from './util';
@@ -26,6 +28,14 @@ export interface ReceptionLine {
   /** Prix payé pour un conditionnement (la palette) et unités qu'il contient : garde le prix exact. */
   packCost?: Fcfa;
   packUnits?: Milli;
+  /** Remise en points de base (1 000 = 10 %) sur le prix d'achat. */
+  discountBp?: number;
+  /** Unités reçues gratuitement, comprises dans qty (« N achetés, M payés »). */
+  freeQty?: Milli;
+  promoBuy?: number | null;
+  promoPay?: number | null;
+  /** Part de la remise globale de la facture directe (HT), déduite de la ligne. */
+  globalDiscount?: Fcfa;
 }
 
 export interface StockRow {
@@ -258,7 +268,7 @@ export class StockService extends Base {
    */
   receive(
     ctx: Context,
-    input: { warehouseId: string; reference?: string; supplier?: string; supplierId?: string | null; orderId?: string | null; lines: ReceptionLine[] },
+    input: { warehouseId: string; reference?: string; supplier?: string; supplierId?: string | null; orderId?: string | null; discount?: Fcfa; lines: ReceptionLine[] },
   ): { id: string; number: string } {
     if (input.lines.length === 0) throw new AppError('Réception vide', 'INVALID');
     return this.tx(() => {
@@ -279,22 +289,31 @@ export class StockService extends Base {
         invoice_id: null,
         user_id: ctx.userId,
         received_at: now,
+        discount: input.discount ?? 0,
       };
       this.db
         .prepare(
-          `INSERT INTO receptions (id, number, store_id, warehouse_id, supplier_id, order_id, delivery_note, invoice_id, user_id, received_at)
-           VALUES (@id, @number, @store_id, @warehouse_id, @supplier_id, @order_id, @delivery_note, @invoice_id, @user_id, @received_at)`,
+          `INSERT INTO receptions (id, number, store_id, warehouse_id, supplier_id, order_id, delivery_note, invoice_id, user_id, received_at, discount)
+           VALUES (@id, @number, @store_id, @warehouse_id, @supplier_id, @order_id, @delivery_note, @invoice_id, @user_id, @received_at, @discount)`,
         )
         .run(reception);
       // Magasin non assujetti : le coût saisi est le prix payé, sans TVA récupérable.
       const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
       const insertLine = this.db.prepare(
-        `INSERT INTO reception_lines (id, reception_id, line_no, article_id, order_line_id, qty, unit_cost, vat_rate_bp, lot_id, lot_number, expiry)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO reception_lines (id, reception_id, line_no, article_id, order_line_id, qty, unit_cost, vat_rate_bp, lot_id, lot_number, expiry,
+           gross_cost, discount_bp, free_qty, promo_buy, promo_pay, amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       input.lines.forEach((line, i) => {
         if (line.qty <= 0) throw new AppError('Quantité reçue invalide', 'INVALID');
         if (!Number.isSafeInteger(line.unitCost) || line.unitCost < 0) throw new AppError("Coût d'achat invalide", 'INVALID');
+        const termsError = purchaseTermsError({ qty: line.qty, unitCost: line.unitCost, discountBp: line.discountBp, freeQty: line.freeQty });
+        if (termsError) throw new AppError(termsError, 'INVALID');
+        // Remise, gratuits et part de remise globale : le stock entre au coût net.
+        const amounts = purchaseAmounts({ qty: line.qty, unitCost: line.unitCost, discountBp: line.discountBp, freeQty: line.freeQty });
+        const global = Math.max(0, Math.min(line.globalDiscount ?? 0, amounts.net));
+        const net = amounts.net - global;
+        const netCost = Math.round((net * 1000) / line.qty);
         const article = this.db
           .prepare('SELECT a.perishable, a.name, v.rate_bp FROM articles a JOIN vat_rates v ON v.id = a.vat_rate_id WHERE a.id = ?')
           .get(line.articleId) as { perishable: number; name: string; rate_bp: number } | undefined;
@@ -319,7 +338,7 @@ export class StockService extends Base {
           articleId: line.articleId,
           warehouseId: input.warehouseId,
           qty: line.qty,
-          unitCost: line.unitCost,
+          unitCost: netCost,
           lotId,
           reason: [supplierName, input.reference].filter(Boolean).join(' · ') || null,
           refType: 'reception',
@@ -333,11 +352,17 @@ export class StockService extends Base {
           line.articleId,
           line.orderLineId ?? null,
           line.qty,
-          line.unitCost,
+          netCost,
           vatEnabled ? article.rate_bp : 0,
           lotId,
           line.lotNumber ?? null,
           line.expiry ?? null,
+          line.unitCost,
+          line.discountBp ?? 0,
+          line.freeQty ?? 0,
+          line.promoBuy ?? null,
+          line.promoPay ?? null,
+          net,
         );
         this.updatePurchasePrice(line, now);
         this.enqueue(null, 'article', line.articleId, 'upsert', {});

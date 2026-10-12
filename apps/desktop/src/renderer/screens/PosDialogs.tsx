@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DENOMINATIONS_FCFA, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, paymentRegisterKind, requiresReference, roundCash, settle } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, dateTime, fcfa, parseAmount, qty, useLoad, useToast } from '../ui';
+import { hasVat, tx } from '../tax';
 
 const METHODS: PaymentMethod[] = ['CASH', 'MTN_MOMO', 'ORANGE_MONEY', 'CARD', 'VOUCHER'];
 
@@ -432,7 +433,7 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
           <strong>{z.ticketCount}</strong>
         </div>
         <div>
-          <small>CA net TTC</small>
+          <small>{tx('CA net TTC')}</small>
           <strong>{fcfa(z.netTtc)}</strong>
         </div>
         <div>
@@ -492,28 +493,30 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
             {z.session.float_left !== null && <tr><td>Fond laissé dans le tiroir</td><td className="r">{fcfa(z.session.float_left)}</td></tr>}
           </tbody>
         </table>
-        <table className="list">
-          <caption>TVA</caption>
-          <tbody>
-            {!z.vat.some((v) => v.rate > 0) && (
-              <tr>
-                <td colSpan={2}>TVA non applicable</td>
-              </tr>
-            )}
-            {z.vat.filter((v) => v.rate > 0).map((v) => (
-              <tr key={v.rate}>
-                <td>
-                  {formatRate(v.rate)} sur {fcfa(v.ht)} HT
-                </td>
-                <td className="r">{fcfa(v.tva)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {(hasVat() || z.vat.some((v) => v.rate > 0)) && (
+          <table className="list">
+            <caption>TVA</caption>
+            <tbody>
+              {!z.vat.some((v) => v.rate > 0) && (
+                <tr>
+                  <td colSpan={2}>TVA non applicable</td>
+                </tr>
+              )}
+              {z.vat.filter((v) => v.rate > 0).map((v) => (
+                <tr key={v.rate}>
+                  <td>
+                    {formatRate(v.rate)} sur {fcfa(v.ht)}{tx(' HT')}
+                  </td>
+                  <td className="r">{fcfa(v.tva)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         <table className="list">
           <caption>Contrôles</caption>
           <tbody>
-            <tr><td>Ventes TTC</td><td className="r">{fcfa(z.salesTtc)}</td></tr>
+            <tr><td>{tx('Ventes TTC')}</td><td className="r">{fcfa(z.salesTtc)}</td></tr>
             <tr><td>Retours</td><td className="r">{fcfa(z.returnsTtc)}</td></tr>
             <tr><td>Remises accordées</td><td className="r">{fcfa(z.discounts)}</td></tr>
             <tr><td>Annulations ({z.cancelled.count})</td><td className="r">{fcfa(z.cancelled.amount)}</td></tr>

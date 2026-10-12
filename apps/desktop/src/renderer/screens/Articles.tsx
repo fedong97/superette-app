@@ -4,6 +4,8 @@ import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
+import { type ArticlePhoto, PhotoField } from './photo';
+import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -56,12 +58,13 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
         <table className="list">
           <thead>
             <tr>
+              <th />
               <th>Code</th>
               <th>Désignation</th>
               <th>Rayon</th>
               <th>Code-barres</th>
               <th className="r">Achat</th>
-              <th className="r">Vente TTC</th>
+              <th className="r">{tx('Vente TTC')}</th>
               <th className="r">Marge</th>
               <th />
             </tr>
@@ -72,6 +75,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
               const margin = ht > 0 && a.purchase_price > 0 ? Math.round(((ht - a.purchase_price) / ht) * 100) : null;
               return (
                 <tr key={a.id} className={a.active ? 'clickable' : 'clickable inactive'} onClick={() => setEditing(a)}>
+                  <td className="thumb-cell">{a.photo_thumb && <img className="thumb" src={a.photo_thumb} alt="" />}</td>
                   <td>{a.code}</td>
                   <td>
                     {a.name}
@@ -206,6 +210,7 @@ export function ArticleForm({
     }
     setLevels(next);
   };
+  const [photo, setPhoto] = useState<ArticlePhoto | null | undefined>(undefined);
   const [newDept, setNewDept] = useState('');
   const [storePrice, setStorePrice] = useState(article && article.store_price !== article.sale_price ? String(article.store_price) : '');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -269,6 +274,7 @@ export function ArticleForm({
         const current = article && article.store_price !== article.sale_price ? article.store_price : null;
         if (sp !== current) await call('catalogue.setStorePrice', saved.id, sp);
       }
+      if (photo !== undefined) await call('catalogue.setPhoto', saved.id, photo);
       toast.ok('Article enregistré');
       onSaved(saved);
     } catch (err) {
@@ -279,6 +285,7 @@ export function ArticleForm({
   return (
     <Modal title={article ? `${article.code} · ${article.name}` : 'Nouvel article'} onClose={onClose} wide>
       <form onSubmit={save}>
+        <div className="article-top">
         <div className="grid3">
           <Field label="Désignation">
             <input autoFocus value={f.name} onChange={set('name')} required />
@@ -310,15 +317,19 @@ export function ArticleForm({
               <option value="litre">Litre</option>
             </select>
           </Field>
-          <Field label="TVA" hint={noVat ? 'Magasin sans TVA : taux gardé pour le jour où la TVA sera activée' : undefined}>
-            <select value={vatId} onChange={set('vatRateId')}>
-              {(rates.data ?? []).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {!noVat && (
+            <Field label="TVA">
+              <select value={vatId} onChange={set('vatRateId')}>
+                {(rates.data ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+        </div>
+        <PhotoField articleId={article?.id ?? null} value={photo} onChange={setPhoto} />
         </div>
         <h3>Conditionnements et prix</h3>
         <p className="muted small">
@@ -335,7 +346,7 @@ export function ArticleForm({
         <LevelGrid levels={levels} buy={buy} rate={rate} piece={piece} unitLabel={unitName.toUpperCase()} onLevels={onLevels} onBuy={setBuy} />
         {suggested.length > 0 && (
           <p className="muted small">
-            Marge de {settings.defaultMarginPct} % sur le revient : {suggested.map((x) => `${x.name} ${fcfa(x.sale)}`).join(', ')} TTC.{' '}
+            Marge de {settings.defaultMarginPct} % sur le revient : {suggested.map((x) => `${x.name} ${fcfa(x.sale)}`).join(', ')}{tx(' TTC')}.{' '}
             <button type="button" className="link" onClick={() => setLevels(levels.map((l, i) => (suggested.some((x) => x.i === i) ? { ...l, sale: String(suggested.find((x) => x.i === i)!.sale) } : l)))}>
               Appliquer aux prix vides
             </button>

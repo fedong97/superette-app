@@ -3,6 +3,7 @@ import { type StatementLine, parseStatementCsv } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
+import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
@@ -89,7 +90,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
             ['bank', 'Rapprochement bancaire'],
             ['accounts', 'Plan comptable'],
           ] as [AccountingTab, string][]
-        ).filter(([k]) => allowed[k])}
+        ).filter(([k]) => allowed[k] && (k !== 'vat' || hasVat()))}
       />
       {!allowed[tab] && <Empty>Vous n'avez pas accès à cet onglet.</Empty>}
       {tab === 'journals' && allowed.journals && <Journals />}
@@ -97,7 +98,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'balance' && allowed.balance && <Balance onOpen={openLedger} />}
       {tab === 'statements' && allowed.statements && <Statements onOpen={openLedger} />}
       {tab === 'dsf' && allowed.dsf && <Disclosures />}
-      {tab === 'vat' && allowed.vat && <VatReturn />}
+      {tab === 'vat' && allowed.vat && hasVat() && <VatReturn />}
       {tab === 'tax' && allowed.tax && <TaxReturn />}
       {tab === 'treasury' && allowed.treasury && <Treasury onOpen={openLedger} />}
       {tab === 'bank' && allowed.bank && <BankReconciliation />}
@@ -751,7 +752,7 @@ function VatReturn() {
         <>
           <div className="kpis">
             <div>
-              <small>Chiffre d'affaires HT</small>
+              <small>{tx("Chiffre d'affaires HT")}</small>
               <strong>{fcfa(v.turnoverHt)}</strong>
               <small>dont exonéré {fcfa(v.exemptHt)}</small>
             </div>
@@ -784,8 +785,8 @@ function VatReturn() {
               <thead>
                 <tr>
                   <th>Taux</th>
-                  <th className="r">TTC</th>
-                  <th className="r">HT</th>
+                  <th className="r">{tx('TTC')}</th>
+                  <th className="r">{tx('HT')}</th>
                   <th className="r">TVA</th>
                 </tr>
               </thead>
@@ -914,7 +915,7 @@ function TaxReturn() {
       {a && (
         <div className="kpis">
           <div>
-            <span>Chiffre d'affaires HT {a.provisional ? 'à ce jour' : year}</span>
+            <span>{tx("Chiffre d'affaires HT")} {a.provisional ? 'à ce jour' : year}</span>
             <strong>{fcfa(a.turnoverHt)}</strong>
           </div>
           <div>
@@ -1069,7 +1070,7 @@ function TaxReturn() {
             <thead>
               <tr>
                 <th>Mois</th>
-                <th className="r">CA HT</th>
+                <th className="r">{tx('CA HT')}</th>
                 <th className="r">Acompte</th>
               </tr>
             </thead>

@@ -300,7 +300,7 @@ export class ControlService extends Base {
     const rows = this.db
       .prepare(
         `SELECT a.id AS article_id, a.code, a.name, a.unit, COUNT(DISTINCT r.id) AS receptions,
-                SUM(l.qty) AS qty, SUM(ROUND(l.qty * l.unit_cost / 1000.0)) AS amount_ht,
+                SUM(l.qty) AS qty, SUM(COALESCE(l.amount, ROUND(l.qty * l.unit_cost / 1000.0))) AS amount_ht,
                 MIN(l.unit_cost) AS min_cost, MAX(l.unit_cost) AS max_cost,
                 (SELECT l2.unit_cost FROM reception_lines l2 JOIN receptions r2 ON r2.id = l2.reception_id
                   WHERE l2.article_id = a.id AND r2.store_id = @storeId ORDER BY r2.received_at DESC LIMIT 1) AS last_cost,
@@ -445,6 +445,87 @@ export class ControlService extends Base {
     }
     const articles = [...byArticle.values()].filter((a) => !opts.inStockOnly || Object.values(a.qty).some((q) => q !== 0));
     return { warehouses, articles };
+  }
+
+  /**
+   * Stock multi-magasin : chaque article, son stock dans chaque magasin et chaque dépôt.
+   * Ce magasin compte ses propres mouvements ; les autres viennent de leur dernier envoi
+   * (`stock_levels`), daté pour savoir s'il est récent.
+   */
+  stockByStore(storeId: string, opts: { search?: string | null; familyId?: string | null; shortage?: boolean } = {}) {
+    const stores = this.db.prepare('SELECT id, code, name FROM stores WHERE active = 1 ORDER BY id = @storeId DESC, name').all({ storeId }) as {
+      id: string;
+      code: string;
+      name: string;
+    }[];
+    const warehouses = this.db
+      .prepare('SELECT id, store_id, name FROM warehouses WHERE active = 1 AND store_id IN (SELECT id FROM stores WHERE active = 1) ORDER BY name')
+      .all() as { id: string; store_id: string; name: string }[];
+    const updated = new Map(
+      (this.db.prepare('SELECT w.store_id, MAX(l.updated_at) AS at FROM stock_levels l JOIN warehouses w ON w.id = l.warehouse_id GROUP BY w.store_id').all() as { store_id: string; at: string }[]).map(
+        (r) => [r.store_id, r.at],
+      ),
+    );
+    const levels = this.db
+      .prepare(
+        `SELECT s.article_id, s.warehouse_id, s.qty FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = @storeId
+         UNION ALL
+         SELECT l.article_id, l.warehouse_id, l.qty FROM stock_levels l JOIN warehouses w ON w.id = l.warehouse_id WHERE w.store_id <> @storeId`,
+      )
+      .all({ storeId }) as { article_id: string; warehouse_id: string; qty: Milli }[];
+    const storeOf = new Map(warehouses.map((w) => [w.id, w.store_id]));
+    const byArticle = new Map<string, { byStore: Record<string, Milli>; byWarehouse: Record<string, Milli> }>();
+    for (const l of levels) {
+      const store = storeOf.get(l.warehouse_id);
+      if (!store) continue;
+      const a = byArticle.get(l.article_id) ?? { byStore: {}, byWarehouse: {} };
+      a.byWarehouse[l.warehouse_id] = (a.byWarehouse[l.warehouse_id] ?? 0) + l.qty;
+      a.byStore[store] = (a.byStore[store] ?? 0) + l.qty;
+      byArticle.set(l.article_id, a);
+    }
+    const articles = this.db
+      .prepare(
+        `SELECT a.id, a.code, a.name, a.unit, a.unit_name, a.alert_qty, COALESCE(f.name, '') AS family_name,
+                (SELECT name || '|' || units FROM article_packs p WHERE p.article_id = a.id ORDER BY units DESC LIMIT 1) AS pack
+         FROM articles a LEFT JOIN families f ON f.id = a.family_id
+         WHERE a.active = 1 AND (@search IS NULL OR a.name LIKE @search OR a.code LIKE @search) AND (@familyId IS NULL OR a.family_id = @familyId)
+         ORDER BY a.name`,
+      )
+      .all({ search: opts.search?.trim() ? `%${opts.search.trim()}%` : null, familyId: opts.familyId || null }) as {
+      id: string;
+      code: string;
+      name: string;
+      unit: 'piece' | 'kg' | 'litre';
+      unit_name: string | null;
+      alert_qty: Milli | null;
+      family_name: string;
+      pack: string | null;
+    }[];
+    const rows = articles
+      .map((a) => {
+        const st = byArticle.get(a.id) ?? { byStore: {}, byWarehouse: {} };
+        const [packName, packUnits] = a.pack ? [a.pack.slice(0, a.pack.lastIndexOf('|')), Number(a.pack.slice(a.pack.lastIndexOf('|') + 1))] : [null, null];
+        return {
+          article_id: a.id,
+          code: a.code,
+          name: a.name,
+          unit: a.unit,
+          unit_name: a.unit_name,
+          alert_qty: a.alert_qty,
+          family_name: a.family_name,
+          pack: packName && packUnits && packUnits > 1000 ? { name: packName, units: packUnits } : null,
+          byStore: st.byStore,
+          byWarehouse: st.byWarehouse,
+          total: Object.values(st.byStore).reduce((t, q) => t + q, 0),
+        };
+      })
+      // En rupture dans au moins un magasin : stock nul ou négatif (un magasin qui n'a encore rien envoyé ne compte pas).
+      .filter((r) => !opts.shortage || stores.some((s) => (s.id === storeId || updated.has(s.id)) && (r.byStore[s.id] ?? 0) <= 0));
+    return {
+      stores: stores.map((s) => ({ ...s, own: s.id === storeId, updated_at: s.id === storeId ? null : (updated.get(s.id) ?? null) })),
+      warehouses,
+      rows,
+    };
   }
 
   /** Rayonnage : chaque rayon et famille avec ses articles, son stock et ses ruptures. */

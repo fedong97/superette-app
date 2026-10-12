@@ -4,6 +4,7 @@ import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, 
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
+import { tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | `rebates-${RebatesTab}`;
@@ -354,7 +355,7 @@ function CustomerSales({ customer }: { customer: Customer }) {
         <tr>
           <th>Ticket</th>
           <th>Date</th>
-          <th className="r">Total TTC</th>
+          <th className="r">{tx('Total TTC')}</th>
           <th>Échéance</th>
           <th>État</th>
           <th></th>

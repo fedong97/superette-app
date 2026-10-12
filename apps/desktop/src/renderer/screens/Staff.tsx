@@ -92,6 +92,7 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
               <th>Poste</th>
               <th>Téléphone</th>
               <th className="r">Salaire de base</th>
+              <th>Rattachement</th>
               <th>Comptes</th>
               <th className="r">Salaire dû</th>
               <th className="r">Avances</th>
@@ -110,6 +111,7 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
                 <td>{r.position ?? ''}</td>
                 <td>{r.phone ?? ''}</td>
                 <td className="r">{fcfa(r.base_salary)}</td>
+                <td>{r.parent_label ?? r.parent_account}</td>
                 <td className="muted">
                   {r.salary_account} · {r.advance_account}
                 </td>
@@ -168,7 +170,9 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
 function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const users = useLoad(() => call('staff.users'), []);
+  const parents = useLoad(() => call('staff.parents'), []);
   const [f, setF] = useState({
+    parentAccount: staff?.parent_account ?? '4211',
     name: staff?.name ?? '',
     position: staff?.position ?? '',
     phone: staff?.phone ?? '',
@@ -196,6 +200,7 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
                 baseSalary: parseAmount(f.baseSalary) ?? 0,
                 hiredOn: f.hiredOn || null,
                 userId: f.userId || null,
+                parentAccount: f.parentAccount,
                 active: f.active,
                 notes: f.notes || null,
               },
@@ -240,18 +245,41 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
           <Field label="Notes">
             <input value={f.notes} onChange={set('notes')} />
           </Field>
+          <Field label="Compte de rattachement" hint="Son sous-compte est créé sous ce compte : salaires constatés, paiements et extrait passent par lui">
+            <select value={f.parentAccount} onChange={set('parentAccount')}>
+              <optgroup label="Proposés">
+                {(parents.data ?? [])
+                  .filter((p) => p.suggested)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.id} · {p.label}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="Autre compte de tiers (classe 4)">
+                {(parents.data ?? [])
+                  .filter((p) => !p.suggested)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.id} · {p.label}
+                    </option>
+                  ))}
+              </optgroup>
+            </select>
+          </Field>
         </div>
         {staff && (
           <>
             <p className="muted">
-              Sous-comptes : {staff.salary_account} (rémunérations dues) et {staff.advance_account} (avances).
+              Sous-comptes : {staff.salary_account} ({staff.parent_label ?? 'rattachement'}) et {staff.advance_account} (avances).
+              {f.parentAccount !== staff.parent_account && ' Changer le rattachement crée un nouveau sous-compte ; refusé si le collaborateur a déjà des écritures.'}
             </p>
             <label className="check">
               <input type="checkbox" checked={!f.active} onChange={(e) => setF({ ...f, active: !e.target.checked })} /> A quitté le magasin
             </label>
           </>
         )}
-        {!staff && <p className="muted">Ses sous-comptes 4211… (rémunérations dues) et 4251… (avances) sont créés à son nom dans le plan comptable.</p>}
+        {!staff && <p className="muted">Ses sous-comptes {f.parentAccount}… (compte de rattachement) et 4251… (avances) sont créés à son nom dans le plan comptable.</p>}
         <div className="actions">
           <button type="button" onClick={onClose}>
             Annuler
@@ -528,7 +556,9 @@ function Statement({ initial }: { initial: string | null }) {
         <>
           <div className="staff-cards">
             <div>
-              <small>Salaire dû ({d.staff.salary_account})</small>
+              <small>
+                Salaire dû ({d.staff.salary_account}, {d.staff.parent_label ?? d.staff.parent_account})
+              </small>
               <b>{fcfa(d.staff.due)}</b>
             </div>
             <div>

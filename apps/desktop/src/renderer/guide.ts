@@ -109,11 +109,28 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
-    version: '0.35.0',
+    version: '0.37.0',
     items: [
       'Licence : Administration › Licence montre le code machine de ce PC (à copier ou envoyer par WhatsApp) et active la clé reçue de votre fournisseur.',
       'Sans licence, 15 jours d’essai ; à la fin de la licence, la caisse vend encore 15 jours puis s’arrête. Consultation, clôture et sauvegardes restent toujours possibles.',
       'Les autres PC reliés au serveur central reçoivent la licence tout seuls, dans la limite du nombre de PC qu’elle permet.',
+    ],
+  },
+  {
+    version: '0.36.0',
+    items: [
+      'TVA désactivée dans les paramètres : les articles passent à « Exonéré », un nouvel article est exonéré, et la TVA, le HT et le TTC disparaissent des écrans, des impressions et des exports. La déclaration de TVA est masquée.',
+      'TVA réactivée : un bouton propose de remettre d’un coup les articles exonérés à 19,25 %.',
+      'Stock MM devient « Stock multi-magasin » : le stock de chaque article dans chaque magasin, avec le total, le détail par dépôt, l’impression A4 et l’export Excel.',
+    ],
+  },
+  {
+    version: '0.35.0',
+    items: [
+      'Photo de l’article sur sa fiche, en miniature dans la liste des produits et dans la recherche de la caisse.',
+      'Achats › Saisir une facture directe : la facture avec ses articles, sans bon de commande. Le stock entre, le bon de réception est créé, et la facture peut être réglée tout de suite.',
+      'Remise % et promo « N achetés, M payés » sur chaque ligne du bon de commande, de la réception et de la facture directe ; remise globale sur la facture directe. Le stock entre au coût net.',
+      'Collaborateurs : compte de rattachement au choix (Personnel 4211, CNPS 4311, État 4471, Associés 4621 ou autre compte de la classe 4), son sous-compte est créé dessous.',
     ],
   },
   {

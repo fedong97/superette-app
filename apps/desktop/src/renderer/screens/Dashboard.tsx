@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Tabs, fcfa, qty, today, useLoad } from '../ui';
+import { tx } from '../tax';
 
 export type DashboardTab = 'day' | 'attention';
 type Item = Result<'attention.list'>[number];
@@ -84,7 +85,7 @@ function Day() {
       {d && (
         <div className="kpis">
           <div>
-            <small>Chiffre d'affaires TTC</small>
+            <small>{tx("Chiffre d'affaires TTC")}</small>
             <strong>{fcfa(d.revenueTtc)}</strong>
           </div>
           <div>
@@ -96,7 +97,7 @@ function Day() {
             <strong>{fcfa(d.averageBasket)}</strong>
           </div>
           <div>
-            <small>Marge brute HT</small>
+            <small>{tx('Marge brute HT')}</small>
             <strong>{fcfa(d.grossMargin)}</strong>
             <small>{d.revenueHt ? `${Math.round((d.grossMargin / d.revenueHt) * 100)} %` : ''}</small>
           </div>
@@ -126,7 +127,7 @@ function Day() {
               {(d?.byDepartment ?? []).map((r) => (
                 <tr key={r.department}>
                   <td>{r.department}</td>
-                  <td className="r">{fcfa(r.revenueHt)} HT</td>
+                  <td className="r">{fcfa(r.revenueHt)}{tx(' HT')}</td>
                   <td className="r">{fcfa(r.margin)}</td>
                 </tr>
               ))}

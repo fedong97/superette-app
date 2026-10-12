@@ -123,6 +123,10 @@ export interface Printer {
   /** Bon de transfert A4 : bon de route (expédition) ou bon de réception. */
   transferNote(transferId: string): Promise<void>;
   productionNote(orderId: string): Promise<void>;
+  /** Facture fournisseur A4 : en-tête, lignes (prix, remise, gratuits, net) et règlements. */
+  purchaseInvoice(invoiceId: string): Promise<void>;
+  /** Stock multi-magasin : un article par ligne, une colonne par magasin. */
+  stockByStore(storeId: string, opts: { search?: string | null; familyId?: string | null; shortage?: boolean }): Promise<void>;
   reorderSheet(storeId: string, lines: { articleId: string; supplierId: string | null; qty: Milli; unitCost: Fcfa }[]): Promise<void>;
 }
 
@@ -355,6 +359,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'admin.unlockUser': (id: string) => s.admin.unlockUser(requireUser(['users_manage']).id, id),
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
+    /** TVA réactivée : remettre d'un coup les articles exonérés à 19,25 %. */
+    'admin.articlesStandardRate': () => s.admin.setArticlesRate(requireAdmin().id, 'standard'),
     'admin.settings': () => {
       requireUser();
       return Object.fromEntries(LOCAL_SETTINGS.map((k) => [k, s.admin.getSetting(k)])) as Record<string, string | null>;
@@ -421,13 +427,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.catalogue.searchArticles(query, ctx().storeId, opts),
     'catalogue.suggest': (query: string) => s.catalogue.suggestArticles(query, ctx().storeId),
     'catalogue.get': (id: string) => s.catalogue.getArticle(id, ctx().storeId),
+    'catalogue.photo': (id: string) => (requireUser(), s.catalogue.photo(id)),
+    // Photo : qui crée ou modifie un article peut lui mettre une photo.
+    'catalogue.setPhoto': (id: string, input: { photo: string; thumb: string } | null) =>
+      s.catalogue.setPhoto(requireUser(['article_create', 'article_edit', 'sale_new_article']).id, id, input),
     'catalogue.save': (input: ArticleInput, id?: string) => {
       const u = requireUser(['article_create', 'article_edit', 'article_price', 'article_deactivate', 'sale_new_article']);
+      // Magasin sans TVA : un nouvel article est exonéré, un article existant garde son taux.
+      const noVat = s.admin.vatDisabled(ctx().storeId);
       if (!id) {
         if (!can(u, ['article_create', 'sale_new_article'])) throw new AppError("Vous n'avez pas le droit d'ajouter des produits", 'FORBIDDEN');
-        return s.catalogue.saveArticle(u.id, input, id);
+        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id);
       }
       const cur = s.catalogue.getArticle(id, ctx().storeId);
+      if (noVat) input = { ...input, vatRateId: cur.vat_rate_id };
       const priceChanged =
         input.salePrice !== cur.sale_price ||
         input.purchasePrice !== cur.purchase_price ||
@@ -458,7 +471,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'catalogue.newInternalBarcode': () => (requireUser(['article_create', 'article_edit', 'sale_new_article']), s.catalogue.generateInternalBarcode()),
     'catalogue.quickKeys': () => s.catalogue.quickKeys(ctx().storeId),
     'catalogue.scan': (code: string) => s.catalogue.scan(code, ctx().storeId),
-    'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) => s.catalogue.importArticles(requireUser(['import']).id, rows),
+    'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) =>
+      s.catalogue.importArticles(requireUser(['import']).id, rows, { noVat: s.admin.vatDisabled(ctx().storeId) }),
 
     // --- Stock --------------------------------------------------------------
     'stock.list': (opts?: { warehouseId?: string; search?: string; level?: StockLevel }) => s.stock.list(ctx().storeId, opts),
@@ -543,6 +557,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'stock.movements': (articleId?: string, types?: MovementType[]) => s.stock.movements(ctx(['stock_moves', 'stock']).storeId, { articleId, types }),
     'stock.shelving': () => s.controls.shelving(ctx().storeId),
     'stock.byWarehouse': (opts: { search?: string | null; inStockOnly?: boolean }) => s.controls.stockByWarehouse(ctx().storeId, opts),
+    /** Stock multi-magasin (onglet Stock MM) : même droit que l'état du stock. */
+    'stock.byStore': (opts: { search?: string | null; familyId?: string | null; shortage?: boolean }) => s.controls.stockByStore(ctx().storeId, opts),
+    'stock.printByStore': (opts: { search?: string | null; familyId?: string | null; shortage?: boolean }) => printer.stockByStore(ctx().storeId, opts),
 
     // --- Fournisseurs et achats -----------------------------------------------
     'suppliers.list': (opts?: { search?: string; includeInactive?: boolean }) => (requireUser(), s.purchases.listSuppliers(opts)),
@@ -575,8 +592,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'purchases.invoices': (opts?: { supplierId?: string; unpaid?: boolean }) => s.purchases.listInvoices(ctx(['purchase_invoices', 'supplier_pay', 'purchase_due']).storeId, opts),
     'purchases.invoice': (id: string) => {
       requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']);
-      return { invoice: s.purchases.getInvoice(id), payments: s.purchases.invoicePayments(id) };
+      return { invoice: s.purchases.getInvoice(id), payments: s.purchases.invoicePayments(id), lines: s.purchases.invoiceLines(id) };
     },
+    // Facture directe : elle fait entrer la marchandise, il faut aussi le droit de réceptionner ; la payer tout de suite demande le droit de régler.
+    'purchases.directInvoice': (input: Parameters<Services['purchases']['directInvoice']>[1]) => {
+      const c = ctx(['purchase_invoices']);
+      if (!can(user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
+      if (input.payment && !can(user!, ['supplier_pay'])) throw new AppError("Vous n'avez pas le droit de régler les fournisseurs", 'FORBIDDEN');
+      return s.purchases.directInvoice(c, input);
+    },
+    'purchases.printInvoice': (id: string) => (requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']), printer.purchaseInvoice(id)),
     'purchases.pay': (input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null; registerId?: string | null }) =>
       s.purchases.paySupplier(ctx(['supplier_pay']), input),
     'purchases.due': () => s.purchases.dueSchedule(ctx(['purchase_due']).storeId),
@@ -972,6 +997,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Collaborateurs et paie ------------------------------------------------------
     'staff.list': (includeInactive?: boolean) => s.staff.list(ctx(STAFF).storeId, { includeInactive }),
     'staff.users': () => (requireUser(['staff_edit']), s.admin.listUsers().filter((u) => u.active).map((u) => ({ id: u.id, name: u.name, role: u.role }))),
+    'staff.parents': () => (requireUser(['staff', 'staff_edit']), s.staff.parents()),
     'staff.save': (input: StaffInput, id?: string | null) => s.staff.save(ctx(['staff_edit']), input, id ?? undefined),
     'staff.statement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), s.staff.statement(id, { from: from ?? undefined, to: to ?? undefined })),
     'staff.printStatement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), printer.staffStatement(id, from, to)),

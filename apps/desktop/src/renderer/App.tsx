@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
+import logo from './assets/logo.svg';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Admin, type AdminTab } from './screens/Admin';
@@ -470,7 +471,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     };
   }, [idleMinutes]);
   useEffect(() => {
-    document.title = `Superette Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
+    document.title = `FEDO Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
     if (!menu && !ctxMenu) return;
@@ -742,7 +743,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ))}
       </main>
       <footer className="statusbar">
-        <span>Superette Gestion v{state.version}</span>
+        <span>FEDO Gestion v{state.version}</span>
         <span>Magasin : {state.station?.store.name}</span>
         {state.canChooseRegister ? (
           <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
@@ -906,9 +907,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       {help === 'about' && (
         <Modal title="À propos" onClose={() => setHelp(null)}>
           <p>
-            Superette Gestion v{state.version}
+            <img src={logo} alt="" width={48} height={48} style={{ float: 'left', marginRight: 12 }} />
+            <strong>FEDO Gestion</strong> v{state.version}
             <br />
-            Gestion commerciale pour superettes au Cameroun : caisse, stock, multi-magasins.
+            Gestion commerciale pour superettes et boutiques au Cameroun : caisse, stock, multi-magasins.
+            <br />© FEDONG
           </p>
         </Modal>
       )}

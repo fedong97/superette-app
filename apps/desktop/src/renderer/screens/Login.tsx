@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Result, call } from '../api';
+import logo from '../assets/logo.svg';
 import { Field, useToast } from '../ui';
 
 export function Login({ station, onDone }: { station: Result<'app.state'>['station']; onDone: () => void }) {
@@ -23,7 +24,11 @@ export function Login({ station, onDone }: { station: Result<'app.state'>['stati
   return (
     <div className="center-page">
       <form className="card login" onSubmit={submit}>
-        <h1>{station?.store.name ?? 'Superette Gestion'}</h1>
+        <div className="brand">
+          <img src={logo} alt="" width={40} height={40} />
+          <span>FEDO Gestion</span>
+        </div>
+        <h1>{station?.store.name ?? 'FEDO Gestion'}</h1>
         <p className="muted">{station?.register?.name ?? 'Poste de gestion'}</p>
         <Field label="Identifiant">
           <input ref={loginRef} value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Générateur de licences</title>
 <!--
-  Générateur de licences Superette Gestion, réservé à l'éditeur.
+  Générateur de licences FEDO Gestion, réservé à l'éditeur.
   S'ouvre dans Chrome ou Edge, sans Internet. La clé secrète est chargée une
   fois depuis son fichier .pem puis gardée par le navigateur sans pouvoir être
   relue ; elle ne quitte jamais ce PC. Le logiciel des clients ne contient que
@@ -46,7 +46,7 @@
 <body>
 <main>
   <h1>Générateur de licences</h1>
-  <p class="muted">Superette Gestion · réservé à l'éditeur. Gardez une copie du fichier de clé secrète sur une clé USB rangée en lieu sûr.</p>
+  <p class="muted">FEDO Gestion · réservé à l'éditeur. Gardez une copie du fichier de clé secrète sur une clé USB rangée en lieu sûr.</p>
 
   <section class="card">
     <h2>1. Clé secrète</h2>
@@ -178,7 +178,7 @@ async function showKeyState() {
   const ok = await matchesSoftware(privateKey);
   el.className = ok ? 'ok' : 'bad';
   el.textContent = ok
-    ? 'Clé secrète chargée : elle correspond au logiciel Superette Gestion.'
+    ? 'Clé secrète chargée : elle correspond au logiciel FEDO Gestion.'
     : 'Cette clé ne correspond pas au logiciel : les licences créées seraient refusées.';
 }
 
@@ -325,7 +325,7 @@ function showResult(key, phone, payload) {
   $('result').hidden = false;
   $('keyOut').value = key;
   const until = payload.expires ? `jusqu'au ${fr(payload.expires)}` : 'à vie';
-  $('sendWa').href = waLink(phone, `Bonjour, voici votre licence Superette Gestion (${PLAN_LABELS[payload.plan].toLowerCase()}, ${until}). Collez-la dans Administration › Licence :\n\n${key}`);
+  $('sendWa').href = waLink(phone, `Bonjour, voici votre licence FEDO Gestion (${PLAN_LABELS[payload.plan].toLowerCase()}, ${until}). Collez-la dans Administration › Licence :\n\n${key}`);
   $('keyOut').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 $('copyKey').addEventListener('click', () => {

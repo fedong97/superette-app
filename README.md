@@ -1,4 +1,6 @@
-# Superette Gestion
+# FEDO Gestion
+
+Logiciel de FEDONG (anciennement « Superette Gestion »).
 
 Logiciel de gestion de superette pour le Cameroun (FCFA, TVA 19,25 %, MTN Mobile Money, Orange Money), inspiré de Sage 100.
 Application de bureau Windows (installateur `.exe`), base locale hors ligne, multi-magasins et multi-caisses.
@@ -214,7 +216,7 @@ Sur un PC Windows :
 
 ```bash
 npm install
-npm run build:win        # produit apps/desktop/release/SuperetteGestion-Setup-<version>.exe
+npm run build:win        # produit apps/desktop/release/FedoGestion-Setup-<version>.exe
 ```
 
 La mise à jour automatique lit les nouvelles versions à l'adresse `publish.url` de `apps/desktop/electron-builder.yml` (à remplacer par celle du serveur central).

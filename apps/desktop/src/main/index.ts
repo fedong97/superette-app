@@ -7,6 +7,10 @@ import { type ApiName, type SystemHooks, createApi } from './api';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 
+// Le logiciel s'appelait « Superette Gestion » : on garde son dossier de données
+// (%APPDATA%\Superette Gestion) pour que les magasins retrouvent leur base après la mise à jour.
+app.setPath('userData', join(app.getPath('appData'), 'Superette Gestion'));
+
 // Une seule instance par PC : la base locale n'accepte qu'un écrivain.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -19,7 +23,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     show: false,
-    title: 'Superette Gestion',
+    title: 'FEDO Gestion',
     autoHideMenuBar: true,
     backgroundColor: '#f4f5f7',
     webPreferences: {
@@ -82,7 +86,7 @@ void app.whenReady().then(() => {
       const r = await dialog.showOpenDialog({
         title: 'Choisir la sauvegarde à restaurer',
         defaultPath: services.backups.status().dir ?? undefined,
-        filters: [{ name: 'Sauvegarde Superette Gestion', extensions: ['db'] }],
+        filters: [{ name: 'Sauvegarde FEDO Gestion', extensions: ['db'] }],
         properties: ['openFile'],
       });
       return r.canceled ? null : (r.filePaths[0] ?? null);

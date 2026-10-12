@@ -1,10 +1,10 @@
 {
   "name": "@superette/desktop",
-  "productName": "Superette Gestion",
-  "version": "0.37.0",
+  "productName": "FEDO Gestion",
+  "version": "0.38.0",
   "private": true,
   "description": "Caisse et gestion de superette",
-  "author": "Superette Gestion",
+  "author": "FEDONG",
   "main": "out/main/index.js",
   "scripts": {
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3 -m ../..",

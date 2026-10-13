@@ -221,3 +221,32 @@ describe('écritures : modifier, supprimer, corriger', () => {
     expect(s.accounting.listAccounts().find((a) => a.id === '6052')!.label).toBe('Eau et électricité');
   });
 });
+
+describe('caisse : stock par dépôt et complément', () => {
+  it("complète la ligne dans l'autre dépôt du vendeur et montre le stock de chacun", () => {
+    const { s, ctx, store, shop, reserve, castel, qty } = setup();
+    s.stock.receive(ctx, { warehouseId: shop.id, lines: [{ articleId: castel.id, qty: 2_000, unitCost: 400 }] });
+    s.stock.receive(ctx, { warehouseId: reserve.id, lines: [{ articleId: castel.id, qty: 10_000, unitCost: 500 }] });
+    s.pos.openSession(ctx, 0);
+    const cashier = s.admin.createUser(ctx.userId, { name: 'Awa', login: 'awa', pin: '5678', role: 'cashier', storeId: store.id, registerId: ctx.registerId });
+    const awa = { ...ctx, userId: cashier.id };
+    // Par défaut, la caissière ne vend que sur la surface de vente.
+    expect(s.admin.saleWarehousesFor(store.id, cashier.id).map((w) => w.id)).toEqual([shop.id]);
+    expect(() => s.pos.completeSale(awa, { lines: [{ articleId: castel.id, qty: 5_000 }], payments: [{ method: 'CASH', amount: 3_250 }] })).toThrow(/Stock insuffisant/);
+
+    s.admin.updateUser(ctx.userId, cashier.id, { saleWarehouses: [reserve.id] });
+    const row = s.pos.searchForSale(store.id, 'castel', { userId: cashier.id })[0]!;
+    expect([row.stock, row.available, row.stocks.map((w) => [w.name, w.qty])]).toEqual([2_000, 12_000, [[shop.name, 2_000], ['Réserve', 10_000]]]);
+
+    const sale = s.pos.completeSale(awa, { lines: [{ articleId: castel.id, qty: 5_000 }], payments: [{ method: 'CASH', amount: 3_250 }] });
+    expect([qty(shop.id), qty(reserve.id)]).toEqual([0, 7_000]);
+    // Coût moyen pondéré : 2 à 400 et 3 à 500.
+    expect(s.db.prepare('SELECT unit_cost FROM sale_lines WHERE sale_id = ?').pluck().get(sale.id)).toBe(460);
+    expect(s.db.prepare("SELECT COUNT(*) FROM audit_log WHERE action = 'sale.complement' AND entity_id = ?").pluck().get(sale.id)).toBe(1);
+    // Annulée : chaque bouteille retourne dans son dépôt.
+    s.pos.cancelSale(ctx, sale.id, ctx.userId, 'erreur');
+    expect([qty(shop.id), qty(reserve.id)]).toEqual([2_000, 10_000]);
+    // Au-delà du total des deux dépôts : refusé.
+    expect(() => s.pos.completeSale(awa, { lines: [{ articleId: castel.id, qty: 13_000 }], payments: [{ method: 'CASH', amount: 8_450 }] })).toThrow(/CASTEL 65CL : il reste 12 /);
+  });
+});

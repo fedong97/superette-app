@@ -404,12 +404,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.admin.listUsers().map((u) => ({ ...u, locked: locked.has(u.id), privileges: privileged[u.id] ?? null }));
     },
     // Seul l'administrateur crée un administrateur ou touche à son compte.
-    'admin.createUser': (input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null }) => {
+    'admin.createUser': (input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null }) => {
       const u = requireUser(['users_manage']);
       if (input.role === 'admin' && u.role !== 'admin') throw new AppError("Seul l'administrateur crée un administrateur", 'FORBIDDEN');
       return s.admin.createUser(u.id, input);
     },
-    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }) => {
+    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null }) => {
       const u = requireUser(['users_manage']);
       if (u.role !== 'admin' && (patch.role === 'admin' || s.admin.getUser(id).role === 'admin')) throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
       return s.admin.updateUser(u.id, id, patch);
@@ -713,7 +713,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
-      s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
+      s.pos.searchForSale(ctx().storeId, query, { ...opts, userId: user?.id ?? null }),
+    /** Dépôts où l'utilisateur vend sans code du gérant ; la vente s'y complète. */
+    'pos.saleWarehouses': () => s.admin.saleWarehousesFor(ctx().storeId, ctx().userId).map((w) => w.id),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
@@ -738,8 +740,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
       const otherLevel = Boolean(input.priceLevel) && input.priceLevel !== usual;
-      const otherWarehouse = Boolean(input.warehouseId) && s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1;
-      if ((otherLevel && !can(user!, ['sale_tariff'])) || (otherWarehouse && !can(user!, ['sale_warehouse']))) {
+      const otherWarehouse =
+        Boolean(input.warehouseId) &&
+        s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1 &&
+        !s.admin.saleWarehousesFor(c.storeId, c.userId).some((w) => w.id === input.warehouseId);
+      if ((otherLevel && !can(user!, ['sale_tariff'])) || otherWarehouse) {
         if (!input.optionsPin) throw new AppError('Tarif ou dépôt soumis à validation du gérant', 'OPTIONS_SUPERVISOR');
         supervisor(input.optionsPin);
       }

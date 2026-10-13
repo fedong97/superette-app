@@ -385,6 +385,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     () => (stores.data ? Promise.all(stores.data.map((st) => call('admin.registers', st.id))).then((l) => l.flat()) : Promise.resolve([])),
     [stores.data],
   );
+  const warehouses = useLoad(() => call('admin.warehouses'), []);
   const registerLabel = (id: string | null) => {
     const r = id ? registers.data?.find((x) => x.id === id) : undefined;
     if (!r) return '';
@@ -401,6 +402,8 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     registerId: string;
     emoneyRegisterId: string;
     bankRegisterId: string;
+    /** Dépôts de vente cochés ; null = selon le droit « vendre depuis un autre dépôt ». */
+    saleWarehouses: string[] | null;
     active: boolean;
   }>(null);
   const sells = (role: Role) => role === 'cashier' || role === 'seller';
@@ -436,6 +439,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   registerId: u.register_id ?? '',
                   emoneyRegisterId: u.emoney_register_id ?? '',
                   bankRegisterId: u.bank_register_id ?? '',
+                  saleWarehouses: u.sale_warehouses ? (JSON.parse(u.sale_warehouses) as string[]) : null,
                   active: u.active === 1,
                 })
               }
@@ -497,7 +501,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
       </table>
       {canManage && (
         <div className="actions">
-          <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', active: true })}>
+          <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', saleWarehouses: null, active: true })}>
             Ajouter un utilisateur
           </button>
         </div>
@@ -516,6 +520,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     registerId: form.registerId || null,
                     emoneyRegisterId: form.emoneyRegisterId || null,
                     bankRegisterId: form.bankRegisterId || null,
+                    saleWarehouses: form.saleWarehouses,
                     active: form.active,
                     pin: form.pin || undefined,
                   });
@@ -529,6 +534,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     registerId: form.registerId || null,
                     emoneyRegisterId: form.emoneyRegisterId || null,
                     bankRegisterId: form.bankRegisterId || null,
+                    saleWarehouses: form.saleWarehouses,
                   });
                 }
                 setForm(null);
@@ -605,6 +611,38 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   </select>
                 </Field>
               ))}
+              {(warehouses.data?.length ?? 0) > 1 && (
+                <Field
+                  label="Dépôts de vente"
+                  hint="À la facturation, il voit le stock de ces dépôts ; ce qui manque dans le dépôt choisi se complète dans les autres."
+                >
+                  <label className="inline">
+                    <input
+                      type="checkbox"
+                      checked={form.saleWarehouses !== null}
+                      onChange={(e) => setForm({ ...form, saleWarehouses: e.target.checked ? [] : null })}
+                    />{' '}
+                    Choisir ses dépôts
+                  </label>
+                  {form.saleWarehouses === null ? (
+                    <small className="muted">Selon son droit : tous les dépôts s’il peut « vendre depuis un autre dépôt », sinon la surface de vente.</small>
+                  ) : (
+                    warehouses.data!.map((w) => (
+                      <label key={w.id} className="inline">
+                        <input
+                          type="checkbox"
+                          disabled={w.is_sales_default === 1}
+                          checked={w.is_sales_default === 1 || form.saleWarehouses!.includes(w.id)}
+                          onChange={(e) =>
+                            setForm({ ...form, saleWarehouses: e.target.checked ? [...form.saleWarehouses!, w.id] : form.saleWarehouses!.filter((x) => x !== w.id) })
+                          }
+                        />{' '}
+                        {w.name}
+                      </label>
+                    ))
+                  )}
+                </Field>
+              )}
               {form.id && (
                 <label className="inline">
                   <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Compte actif

@@ -7,7 +7,7 @@ import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
-import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockIn, useSaleRows } from './SaleSearch';
+import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
 import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 import { tx } from '../tax';
 
@@ -148,6 +148,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const session = useLoad(() => call('pos.session'), []);
   const quickKeys = useLoad(() => call('catalogue.quickKeys'), []);
   const warehouses = useLoad(() => call('admin.warehouses'), []);
+  // Dépôts où ce vendeur vend sans le code du gérant.
+  const myWarehouses = useLoad(() => call('pos.saleWarehouses'), []);
   const [lines, setLines] = useState<PosLine[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [input, setInput] = useState('');
@@ -988,7 +990,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     chooseOption(`Passer cette fiche au tarif ${PRICE_LEVELS[k].toLowerCase()}.`, 'sale_tariff', k === usualLevel, () => setLevelChoice(k === usualLevel ? null : k));
   const pickWarehouse = (id: string) => {
     const w = warehouses.data?.find((x) => x.id === id);
-    if (w) chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', w.id === salesWarehouse?.id, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id));
+    const mine = w?.id === salesWarehouse?.id || Boolean(w && myWarehouses.data?.includes(w.id));
+    if (w) chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', mine, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id));
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
   const heldCount = held.data?.length ?? 0;
@@ -1671,8 +1674,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                   <button
                     type="button"
                     key={rowKey(r)}
-                    className={`pos-tile ${i === suggestions.active ? 'hit' : ''} ${r.out_of_stock ? 'out' : r.stock < r.units * 5 ? 'low' : ''}`}
+                    className={`pos-tile ${i === suggestions.active ? 'hit' : ''} ${r.out_of_stock ? 'out' : r.available < r.units * 5 ? 'low' : ''}`}
                     style={tileColor(r.name)}
+                    title={stockByDepot(r) || undefined}
                     // mousedown : choisir avant que la zone de saisie perde le focus.
                     onMouseDown={(e) => {
                       e.preventDefault();

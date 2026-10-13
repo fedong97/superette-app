@@ -41,6 +41,8 @@ export interface User {
   emoney_register_id: string | null;
   /** Caisse banque (virements, chèques) qui reçoit ses paiements bancaires. */
   bank_register_id: string | null;
+  /** Dépôts où il vend et complète une ligne (JSON d'ids) ; null = selon son droit « vendre depuis un autre dépôt ». */
+  sale_warehouses: string | null;
   active: number;
 }
 
@@ -330,6 +332,25 @@ export class AdminService extends Base {
       .all(storeId) as Warehouse[];
   }
 
+  /**
+   * Dépôts où l'utilisateur vend, dépôt de vente en premier : ceux cochés sur
+   * sa fiche (plus le dépôt de vente), sinon tous s'il a le droit « vendre
+   * depuis un autre dépôt », sinon le seul dépôt de vente.
+   */
+  saleWarehousesFor(storeId: string, userId: string): Warehouse[] {
+    const all = this.listWarehouses(storeId);
+    const main = this.salesWarehouse(storeId);
+    const user = this.getUser(userId);
+    let chosen: string[] | null = null;
+    try {
+      chosen = user.sale_warehouses ? (JSON.parse(user.sale_warehouses) as string[]) : null;
+    } catch {
+      chosen = null;
+    }
+    if (chosen) return all.filter((w) => w.id === main.id || chosen!.includes(w.id));
+    return this.hasRight(user, 'sale_warehouse') ? all : [main];
+  }
+
   salesWarehouse(storeId: string): Warehouse {
     const wh = this.db
       .prepare('SELECT * FROM warehouses WHERE store_id = ? AND is_sales_default = 1 AND active = 1')
@@ -415,7 +436,7 @@ export class AdminService extends Base {
   /** Utilisateurs à qui une caisse est attribuée. */
   registerUsers(registerId: string): User[] {
     return this.db
-      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
+      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
       .all(registerId) as User[];
   }
 
@@ -443,18 +464,18 @@ export class AdminService extends Base {
   // --- Utilisateurs ---------------------------------------------------------
 
   listUsers(): User[] {
-    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, active FROM users ORDER BY name').all() as User[];
+    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active FROM users ORDER BY name').all() as User[];
   }
 
   getUser(id: string): User {
-    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, active FROM users WHERE id = ?').get(id) as User | undefined;
+    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active FROM users WHERE id = ?').get(id) as User | undefined;
     if (!user) throw new AppError('Utilisateur introuvable', 'NOT_FOUND');
     return user;
   }
 
   createUser(
     byUserId: string,
-    input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null },
+    input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null },
   ): User {
     this.checkPinLength(input.pin, input.storeId);
     const id = newId();
@@ -471,6 +492,7 @@ export class AdminService extends Base {
       if (String(e).includes('UNIQUE')) throw new AppError('Identifiant déjà utilisé', 'DUPLICATE');
       throw e;
     }
+    if (input.saleWarehouses) this.db.prepare('UPDATE users SET sale_warehouses = ? WHERE id = ?').run(JSON.stringify([...new Set(input.saleWarehouses)]), id);
     const user = this.getUser(id);
     this.enqueue(null, 'user', id, 'upsert', user);
     this.audit(byUserId, 'user.create', 'user', id, { role: input.role });
@@ -480,9 +502,13 @@ export class AdminService extends Base {
   updateUser(
     byUserId: string,
     id: string,
-    patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string },
+    patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null },
   ): User {
     const current = this.getUser(id);
+    if (patch.saleWarehouses !== undefined) {
+      const ids = patch.saleWarehouses ? [...new Set(patch.saleWarehouses)] : null;
+      this.db.prepare('UPDATE users SET sale_warehouses = ? WHERE id = ?').run(ids ? JSON.stringify(ids) : null, id);
+    }
     if (patch.pin) this.checkPinLength(patch.pin, patch.storeId === undefined ? current.store_id : patch.storeId);
     this.db
       .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, emoney_register_id = ?, bank_register_id = ?, active = ? WHERE id = ?')

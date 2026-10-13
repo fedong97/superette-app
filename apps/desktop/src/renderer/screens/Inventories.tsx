@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { readXlsxRows } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateFr, dateTime, downloadText, fcfa, has, qty, readTextFile, today, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, dateFr, dateTime, downloadText, fcfa, has, qty, readTextFile, today, useLoad, useToast } from '../ui';
 import { saveXlsx } from './Controls';
 import { ArticlePicker, WarehouseSelect } from './pickers';
 
@@ -453,7 +453,7 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
             <button
               className="ghost"
               onClick={async () => {
-                if (!confirm(`Annuler l'inventaire n° ${inv.number} ? Le stock ne sera pas modifié.`)) return;
+                if (!(await askConfirm(`Annuler l'inventaire n° ${inv.number} ? Le stock ne sera pas modifié.`))) return;
                 try {
                   await call('inventories.cancel', id);
                   reload();

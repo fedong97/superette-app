@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PAYMENT_METHODS } from '@superette/core';
 import { call } from '../api';
-import { Field, Modal, dateTime, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
+import { askConfirm, Field, Modal, dateTime, fcfa, parseAmount, today, useLoad, useToast } from '../ui';
 
 const METHODS = ['MTN_MOMO', 'ORANGE_MONEY'] as const;
 type Method = (typeof METHODS)[number] | 'CARD';
@@ -157,10 +157,10 @@ export function EmoneyCentral({ onSettings }: { onSettings?: () => void }) {
           register={shown}
           others={d.registers.filter((r) => r.id !== shown.id)}
           onClose={() => setDialog(null)}
-          onDone={(id) => {
+          onDone={async (id) => {
             setDialog(null);
             state.reload();
-            if (confirm('Imprimer le bon ?')) print(id);
+            if (await askConfirm('Imprimer le bon ?')) print(id);
           }}
         />
       )}

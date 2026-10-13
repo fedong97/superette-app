@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateTime, fcfa, parseQty, qty, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, dateTime, fcfa, parseQty, qty, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker } from './pickers';
 import { qtyText } from './packs';
 
@@ -436,8 +436,8 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
             <button
               className="danger"
               disabled={busy}
-              onClick={() => {
-                if (!confirm(status === 'shipped' ? 'Annuler ce transfert ? La marchandise revient dans le dépôt de départ.' : 'Annuler ce brouillon ?')) return;
+              onClick={async () => {
+                if (!(await askConfirm(status === 'shipped' ? 'Annuler ce transfert ? La marchandise revient dans le dépôt de départ.' : 'Annuler ce brouillon ?'))) return;
                 void run(async () => {
                   await call('transfers.cancel', transfer.id);
                   await load(transfer.id);

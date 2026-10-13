@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.41.1',
+    items: [
+      'Correction : la barre de recherche (caisse, clients, fournisseurs) ne se bloque plus après une question « OK / Annuler » ou une impression. Les questions s’affichent maintenant dans le logiciel.',
+    ],
+  },
+  {
     version: '0.41.0',
     items: [
       'Nouvelle présentation aux couleurs de FEDO : barre verte à gauche avec les menus, onglets arrondis en haut, et « Tous les menus » pour voir chaque écran d’un coup.',

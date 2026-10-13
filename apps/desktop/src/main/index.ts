@@ -37,6 +37,9 @@ function createWindow(): BrowserWindow {
     win.maximize();
     win.show();
   });
+  // Sous Windows, après une question ou une fenêtre d'impression, la page peut
+  // rester sans clavier : quand la fenêtre redevient active, on le lui rend.
+  win.on('focus', () => win.webContents.focus());
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: 'deny' };

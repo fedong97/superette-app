@@ -1,7 +1,7 @@
 import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useToast, has } from '../ui';
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
@@ -339,7 +339,7 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
   const o = order.data;
   if (!o) return null;
   const setStatus = async (status: 'sent' | 'closed' | 'cancelled', question?: string) => {
-    if (question && !confirm(question)) return;
+    if (question && !(await askConfirm(question))) return;
     try {
       await call('purchases.setOrderStatus', o.id, status);
       order.reload();

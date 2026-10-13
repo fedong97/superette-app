@@ -2,7 +2,7 @@ import { CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type StoreSettings } 
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
-import { Empty, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StoreIdentity = { name: string; address: string; phone: string; taxpayer_number: string };
@@ -97,7 +97,7 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
       const store = await call('admin.storeOptions', options);
       toast.ok(store.articlesExempted ? `${message} : ${store.articlesExempted} article(s) passé(s) à « Exonéré »` : message);
       // TVA réactivée : proposer de remettre les articles exonérés au taux normal.
-      if (options.vatEnabled === true && confirm('Mettre tous les articles exonérés à 19,25 % ? (Annuler : vous réglerez le taux article par article)')) {
+      if (options.vatEnabled === true && (await askConfirm('Mettre tous les articles exonérés à 19,25 % ? (Annuler : vous réglerez le taux article par article)'))) {
         const n = await call('admin.articlesStandardRate');
         toast.ok(`${n} article(s) remis à 19,25 %`);
       }
@@ -168,14 +168,14 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
               type="checkbox"
               disabled={!isAdmin}
               checked={st.vat_enabled === 1}
-              onChange={(e) => {
+              onChange={async (e) => {
                 const on = e.target.checked;
                 if (
-                  !confirm(
+                  !(await askConfirm(
                     on
                       ? 'Activer la TVA ? Les prochaines ventes, factures, achats et dépenses porteront la TVA (19,25 % par défaut). Les pièces déjà enregistrées ne changent pas.'
                       : 'Désactiver la TVA (régime simplifié) ? Les prochaines pièces seront sans TVA, les articles passent à « Exonéré » et la TVA disparaît des écrans et des impressions. Les pièces déjà enregistrées ne changent pas.',
-                  )
+                  ))
                 )
                   return;
                 void saveOptions({ vatEnabled: on }, on ? 'TVA activée' : 'TVA désactivée');

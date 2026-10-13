@@ -18,7 +18,7 @@ import {
 } from '@superette/core';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, useLoad, useToast } from '../ui';
 import { DocFrame, ZOOMS } from './docPreview';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -69,8 +69,8 @@ export function PrintTemplates({ user }: { user: User }) {
     }
   };
   const makeDefault = (t: DocTemplate) => save(stored(), { ...data.defaults, [slotKey(t.doc, t.format, t.variant)]: t.id }, `« ${t.name} » est le modèle par défaut`);
-  const remove = (t: DocTemplate) => {
-    if (!confirm(t.builtin ? `Rétablir « ${t.name} » tel qu'il est livré avec le logiciel ?` : `Supprimer le modèle « ${t.name} » ?`)) return;
+  const remove = async (t: DocTemplate) => {
+    if (!(await askConfirm(t.builtin ? `Rétablir « ${t.name} » tel qu'il est livré avec le logiciel ?` : `Supprimer le modèle « ${t.name} » ?`))) return;
     const defaults = { ...data.defaults };
     const slot = slotKey(t.doc, t.format, t.variant);
     if (!t.builtin && defaults[slot] === t.id) delete defaults[slot];

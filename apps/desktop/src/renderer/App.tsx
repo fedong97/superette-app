@@ -25,7 +25,7 @@ import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
 
 type AppState = Result<'app.state'>;
@@ -413,6 +413,7 @@ export function App() {
       ) : (
         <Workspace key={state.user.id} state={state} user={state.user} refresh={refresh} />
       )}
+      <AskHost />
     </ToastProvider>
   );
 }

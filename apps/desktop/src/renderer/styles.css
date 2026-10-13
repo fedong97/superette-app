@@ -838,3 +838,10 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: rgb
 .quick-tabs button.active:hover:not(:disabled) { background: var(--brand-dark); color: #fff; }
 .pos-tile { color: var(--ink); }
 .pos-tile:disabled { opacity: 0.5; }
+
+/* Questions « OK / Annuler » dans la page (remplacent confirm()). */
+.ask-back { z-index: 80; }
+.modal.ask { width: min(460px, 94vw); padding-top: 22px; }
+.modal.ask p { margin: 0 0 14px; font-size: 15px; line-height: 1.45; white-space: pre-line; }
+.modal.ask input { width: 100%; margin-bottom: 12px; }
+.modal.ask .actions { display: flex; justify-content: flex-end; gap: 8px; }

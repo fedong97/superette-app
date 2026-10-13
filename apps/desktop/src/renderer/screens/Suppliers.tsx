@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 import { tx } from '../tax';
@@ -285,7 +285,7 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
                     className="ghost"
                     onClick={async (e) => {
                       e.stopPropagation();
-                      if (!confirm(`Ne plus référencer « ${a.article_name} » chez ce fournisseur ?`)) return;
+                      if (!(await askConfirm(`Ne plus référencer « ${a.article_name} » chez ce fournisseur ?`))) return;
                       await call('suppliers.removeArticle', a.id).catch(toast.error);
                       list.reload();
                     }}

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { call } from '../api';
 import { ROLE_LABELS } from '../App';
 import { fold } from '../nav';
-import { Empty, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, useLoad, useToast } from '../ui';
 
 type Role = keyof typeof ROLE_LABELS;
 
@@ -218,9 +218,10 @@ export function UserPrivileges({ isAdmin, initialUserId, onChanged }: { isAdmin:
           Utilisateur{' '}
           <select
             value={current ?? ''}
-            onChange={(e) => {
-              if (dirty && !confirm('Les changements de cet utilisateur ne sont pas enregistrés. Les abandonner ?')) return;
-              setUserId(e.target.value);
+            onChange={async (e) => {
+              const next = e.target.value;
+              if (dirty && !(await askConfirm('Les changements de cet utilisateur ne sont pas enregistrés. Les abandonner ?'))) return;
+              setUserId(next);
               setSelected(null);
             }}
           >

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CartLine, type Permission, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
@@ -912,7 +912,10 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         <button onClick={onListing} title="Listing des factures" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
         </button>
-        <button disabled={!lines.length} onClick={() => confirm('Vider la fiche en cours ?') && clear()} style={{ '--c': '#dc2626' } as React.CSSProperties}>
+        <button disabled={!lines.length} onClick={async () => {
+            if (await askConfirm('Vider la fiche en cours ?')) clear();
+            focusScan();
+          }} style={{ '--c': '#dc2626' } as React.CSSProperties}>
           <i aria-hidden>🗑</i>Vider
         </button>
         <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>

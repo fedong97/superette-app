@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BANK_METHODS, DENOMINATIONS_FCFA, ELECTRONIC_METHODS, PAYMENT_METHODS, type PaymentMethod, type RegisterKind, countedTotal } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { CashInDialog, CashOutDialog, DeskActions, type DeskProps, type DeskRow, NatureTotals } from './CashDesk';
 import { EmoneyCentral } from './EmoneyCentral';
 import { ZView } from './PosDialogs';
@@ -305,10 +305,10 @@ function FullTreasury({
           kind={dialog === 'central-in' ? 'IN' : 'OUT'}
           balance={state.data.centralBalance ?? 0}
           onClose={() => setDialog(null)}
-          onDone={(id) => {
+          onDone={async (id) => {
             setDialog(null);
             reload();
-            if (confirm('Imprimer le bon ?')) call('treasury.printVoucher', id).catch(toast.error);
+            if (await askConfirm('Imprimer le bon ?')) call('treasury.printVoucher', id).catch(toast.error);
           }}
         />
       )}

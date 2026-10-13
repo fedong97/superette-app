@@ -110,6 +110,97 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
+// --- Questions (remplacent confirm() et prompt()) ---------------------------
+// Les fenêtres natives confirm()/prompt() font perdre le clavier à la fenêtre
+// sous Windows (défaut d'Electron) : après « OK », les champs ne prennent plus
+// la saisie. Ces questions s'affichent dans la page et rendent le clavier.
+
+type Ask = { id: number; message: string; input: boolean; resolve: (v: string | null) => void };
+let askSeq = 0;
+let showAsk: ((a: Ask) => void) | null = null;
+
+function ask(message: string, input: boolean): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!showAsk) return resolve(null);
+    showAsk({ id: ++askSeq, message, input, resolve });
+  });
+}
+
+/** « OK / Annuler » dans la page : vrai si l'utilisateur confirme. */
+export const askConfirm = (message: string) => ask(message, false).then((v) => v !== null);
+/** Demande un texte ; null si l'utilisateur annule ou laisse vide. */
+export const askText = (message: string) => ask(message, true).then((v) => (v && v.trim() ? v.trim() : null));
+
+/** Affiche les questions posées par askConfirm / askText, une à la fois. */
+export function AskHost() {
+  const [queue, setQueue] = useState<Ask[]>([]);
+  const [text, setText] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+  const ok = useRef<HTMLButtonElement>(null);
+  const back = useRef<Element | null>(null);
+  const cur = queue[0];
+  useEffect(() => {
+    showAsk = (a) => setQueue((q) => [...q, a]);
+    return () => void (showAsk = null);
+  }, []);
+  const answer = useCallback(
+    (v: string | null) => {
+      if (!cur) return;
+      cur.resolve(v);
+      setText('');
+      setQueue((q) => q.slice(1));
+      // Rend le clavier au champ qui l'avait (la recherche de la caisse…).
+      const prev = back.current;
+      setTimeout(() => prev instanceof HTMLElement && prev.isConnected && document.activeElement === document.body && prev.focus(), 0);
+    },
+    [cur],
+  );
+  useEffect(() => {
+    if (!cur) return;
+    if (!box.current?.contains(document.activeElement)) back.current = document.activeElement;
+    (cur.input ? field.current : ok.current)?.focus();
+    // Capture : la question passe avant les raccourcis des écrans (F4, Entrée…).
+    const onKey = (e: KeyboardEvent) => {
+      const inside = box.current?.contains(e.target as Node);
+      if (e.key === 'Escape' || (e.key === 'Enter' && !(inside && e.target instanceof HTMLButtonElement))) {
+        e.preventDefault();
+        e.stopPropagation();
+        answer(e.key === 'Escape' ? null : cur.input ? (field.current?.value ?? '') : '');
+      } else if (!inside) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    // Bulle : les touches tapées dans la question ne vont pas aux écrans.
+    const stop = (e: KeyboardEvent) => e.stopPropagation();
+    const el = box.current;
+    window.addEventListener('keydown', onKey, true);
+    el?.addEventListener('keydown', stop);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      el?.removeEventListener('keydown', stop);
+    };
+  }, [cur, answer]);
+  if (!cur) return null;
+  return (
+    <div className="modal-back ask-back">
+      <div className="modal ask" ref={box} role="dialog" aria-modal="true">
+        <p>{cur.message}</p>
+        {cur.input && <input ref={field} value={text} onChange={(e) => setText(e.target.value)} />}
+        <div className="actions">
+          <button type="button" className="ghost" onClick={() => answer(null)}>
+            Annuler
+          </button>
+          <button type="button" ref={ok} className="primary" onClick={() => answer(cur.input ? text : '')}>
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
     <label className="field">

@@ -6,6 +6,7 @@ import {
   DOC_KIND_VARIANTS,
   DOC_KINDS,
   DOC_PAPERS,
+  DOC_STYLES,
   DOC_VARIANTS,
   type DocColumn,
   type DocData,
@@ -345,6 +346,17 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                 </select>
               </Field>
               {!ticket && (
+                <Field label="Présentation" hint="Encadrée : cadre, cases DATE / CLIENT, NET À PAYER et nombre de colis (facture listing)">
+                  <select disabled={off} value={t.page.style} onChange={(e) => set('page', { style: e.target.value as DocTemplate['page']['style'] })}>
+                    {Object.entries(DOC_STYLES).map(([k, l]) => (
+                      <option key={k} value={k}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {!ticket && (
                 <Field label="Orientation">
                   <select disabled={off} value={t.page.landscape ? '1' : '0'} onChange={(e) => set('page', { landscape: e.target.value === '1' })}>
                     <option value="0">Portrait</option>
@@ -511,7 +523,12 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
             <Field label="Mentions" hint="Conditions de vente, coordonnées bancaires…">
               <textarea disabled={off} rows={3} maxLength={300} value={t.footer.text} onChange={(e) => set('footer', { text: e.target.value })} />
             </Field>
-            <Field label="Message de remerciement" hint={ticket ? 'Vide : le pied de ticket des paramètres' : undefined}>
+            {t.page.style === 'framed' && !ticket && (
+              <Field label="Remarque" hint="À gauche du montant en lettres">
+                <input disabled={off} maxLength={300} value={t.footer.remark} onChange={(e) => set('footer', { remark: e.target.value })} />
+              </Field>
+            )}
+            <Field label={t.page.style === 'framed' && !ticket ? 'Slogan' : 'Message de remerciement'} hint={ticket ? 'Vide : le pied de ticket des paramètres' : t.page.style === 'framed' ? 'En gras, centré au-dessus des mentions, par exemple « {magasin} : la qualité d’abord !!! »' : undefined}>
               <input disabled={off} maxLength={300} value={t.footer.thanks} onChange={(e) => set('footer', { thanks: e.target.value })} />
             </Field>
             <div className="checks">

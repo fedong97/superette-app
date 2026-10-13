@@ -76,8 +76,9 @@ const A4_STYLE = `
  * reprend le clavier : sinon, sous Windows, après une impression les champs
  * (recherche de la caisse, des clients…) ne prennent plus la saisie.
  */
-function renderWindow(back = BrowserWindow.getFocusedWindow()): BrowserWindow {
-  const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+function renderWindow(back = BrowserWindow.getFocusedWindow(), measure = false): BrowserWindow {
+  // Le JavaScript ne sert qu'à mesurer la hauteur d'un document sur papier continu (nos pages n'ont pas de script).
+  const win = new BrowserWindow({ show: false, webPreferences: { javascript: measure, sandbox: true } });
   win.once('closed', () => giveFocusBack(back));
   return win;
 }
@@ -141,17 +142,29 @@ export function createPrinter(s: Services): Printer {
     const back = BrowserWindow.getFocusedWindow();
     const target = pdfName ? await saveDialog(back, pdfName) : null;
     if (target && (target.canceled || !target.filePath)) return (giveFocusBack(back), false);
-    const win = renderWindow(back);
+    const { width, height } = pageSize(t);
+    const win = renderWindow(back, !height);
     try {
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      // Papier continu (listing) : la page fait la hauteur du document.
+      const pageHeight = height || Math.max(60, Math.ceil(((await win.webContents.executeJavaScript('document.querySelector(".sheet").getBoundingClientRect().height')) as number) * (25.4 / 96)) + 2);
+      const size = { width: width * 1000, height: pageHeight * 1000 };
       if (target?.filePath) {
-        await writeFile(target.filePath, await win.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true }));
+        await writeFile(target.filePath, await win.webContents.printToPDF(height ? { preferCSSPageSize: true, printBackground: true } : { pageSize: { width: width / 25.4, height: pageHeight / 25.4 }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, printBackground: true }));
         return true;
       }
-      const { width, height } = pageSize(t);
+      // Facture listing : directement sur l'imprimante listing de ce PC quand elle est choisie (Paramètres).
+      const listing = t.format === 'listing' ? s.admin.getSetting('printer.listing') || undefined : undefined;
       return await new Promise<boolean>((resolve, reject) =>
         win.webContents.print(
-          { silent: false, printBackground: true, copies: t.page.copies, pageSize: { width: width * 1000, height: (height || 297) * 1000 } },
+          {
+            silent: Boolean(listing),
+            deviceName: listing,
+            printBackground: true,
+            copies: t.page.copies,
+            pageSize: size,
+            ...(height ? {} : { margins: { marginType: 'none' as const } }),
+          },
           (ok, reason) => (ok ? resolve(true) : reason === 'cancelled' ? resolve(false) : reject(new Error(`Impression impossible : ${reason}`))),
         ),
       );
@@ -219,6 +232,14 @@ export function createPrinter(s: Services): Printer {
       }
       return { ...l, raster: { width, height, data } };
     });
+  }
+
+  /** Le tiroir s'ouvre-t-il pour cette vente (réglage du poste : jamais, espèces, toujours) ? */
+  function saleKick(saleId: string): boolean {
+    const cfg = config();
+    if (cfg.drawer === 'never') return false;
+    const sale = s.pos.getSale(saleId);
+    return cfg.drawer === 'always' || sale.change_given > 0 || sale.payments.some((p) => p.method === 'CASH');
   }
 
   /** `html` : page complète du modèle de ticket, imprimée telle quelle par le pilote Windows. */
@@ -479,12 +500,7 @@ export function createPrinter(s: Services): Printer {
     },
 
     async ticket(saleId, opts) {
-      const cfg = config();
-      let kick = false;
-      if (opts?.newSale && cfg.drawer !== 'never') {
-        const sale = s.pos.getSale(saleId);
-        kick = cfg.drawer === 'always' || sale.change_given > 0 || sale.payments.some((p) => p.method === 'CASH');
-      }
+      const kick = Boolean(opts?.newSale) && saleKick(saleId);
       const t = s.receipts.saleTemplate(saleId, 'ticket', opts?.templateId);
       const ticket = t.format === 'ticket' ? t : s.receipts.saleTemplate(saleId, 'ticket');
       const data = s.receipts.saleDoc(saleId, { duplicate: !opts?.newSale });
@@ -492,7 +508,11 @@ export function createPrinter(s: Services): Printer {
       const html = renderDocHtml(ticket, data);
       // Exemplaires : ceux des paramètres ou du modèle pour une vente, un seul en réimpression ; le tiroir ne s'ouvre qu'au premier.
       const copies = opts?.newSale ? Math.max(opts.copies ?? 1, ticket.page.copies) : Math.max(1, opts?.copies ?? 1);
-      for (let i = 0; i < copies; i++) await printReceipt(receipt, kick && i === 0, false, html);
+      for (let i = 0; i < copies; i++) await printReceipt(receipt, kick && i === 0, Boolean(opts?.force), html);
+    },
+
+    async saleDrawer(saleId) {
+      if (saleKick(saleId)) await sendRaw(config(), drawerKick());
     },
 
     async zReport(sessionId) {

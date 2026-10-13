@@ -302,6 +302,23 @@ export class ReceiptService extends Base {
     const register = this.db.prepare('SELECT name FROM registers WHERE id = ?').pluck().get(sale.register_id) as string | undefined;
     const c = sale.customer_id ? this.customers.getCustomer(sale.customer_id) : null;
     const balance = c ? this.customers.account(sale.store_id, c.id).balance : null;
+    const unitNames = new Map(
+      sale.lines.length
+        ? (
+            this.db
+              .prepare(`SELECT id, unit, unit_name FROM articles WHERE id IN (${sale.lines.map(() => '?').join(',')})`)
+              .all(...sale.lines.map((l) => l.article_id)) as { id: string; unit: string; unit_name: string | null }[]
+          ).map((a) => [a.id, a.unit === 'piece' ? (a.unit_name ?? 'Pièce') : ''])
+        : [],
+    );
+    // Dépôt de sortie : celui choisi à la caisse, sinon celui des mouvements de stock de la vente.
+    const warehouse = this.db
+      .prepare(
+        `SELECT w.name FROM warehouses w WHERE w.id = COALESCE((SELECT warehouse_id FROM sales WHERE id = ?),
+           (SELECT warehouse_id FROM stock_movements WHERE ref_type = 'sale' AND ref_id = ? LIMIT 1))`,
+      )
+      .pluck()
+      .get(sale.id, sale.id) as string | undefined;
     return {
       store: this.docStore(sale.store_id),
       customer: c
@@ -319,6 +336,7 @@ export class ReceiptService extends Base {
         priceLevel: sale.price_level && sale.price_level !== 'retail' ? PRICE_LEVELS[sale.price_level] : null,
         cancelled: sale.status === 'cancelled',
         duplicate: Boolean(opts?.duplicate),
+        warehouse: warehouse ?? null,
         ...this.deliveryInfo(sale.id),
       },
       lines: sale.lines.map((l) => {
@@ -339,6 +357,7 @@ export class ReceiptService extends Base {
           promo: l.promo,
           promoName: l.promotion_name,
           detail: pack || l.qty !== 1000,
+          unitName: pack ? undefined : unitNames.get(l.article_id),
         };
       }),
       payments: sale.payments.map((p) => ({ label: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, amount: p.amount })),

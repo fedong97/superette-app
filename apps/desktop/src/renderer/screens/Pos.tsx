@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, type Permission, type PriceLevel, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
+import { type CartLine, type Permission, type PosLayout, type PriceLevel, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -7,7 +7,7 @@ import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
-import { QtyPrompt, type SaleRow, SaleSearchDialog, rowKey, stockIn, useSaleRows } from './SaleSearch';
+import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockIn, useSaleRows } from './SaleSearch';
 import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 import { tx } from '../tax';
 
@@ -83,6 +83,7 @@ function lineQty(l: PosLine): string {
 type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
+type PrintChoice = 'none' | 'ticket' | 'listing';
 
 /** Livraison en cours de saisie dans l'onglet Livraison du ticket. */
 type DeliveryDraft = { on: boolean; address: string; phone: string; courier: string; slot: string; date: string; fee: string; note: string };
@@ -120,8 +121,10 @@ const tileColor = (name: string) => {
  * Tous les raccourcis clavier restent actifs.
  * Plusieurs fiches peuvent être ouvertes en même temps (Caisse 1, Caisse 2).
  */
-export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onListing, onTreasury, mode = 'cash' }: {
+
+export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onListing, onTreasury, mode = 'cash', layout = 'modern' }: {
   mode?: 'cash' | 'credit';
+  layout?: PosLayout;
   user: User;
   hasRegister: boolean;
   /** Caisse de travail : la journée affichée se recharge quand elle change. */
@@ -153,6 +156,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const [pane, setPane] = useState<Pane>('lines');
   const [cashGiven, setCashGiven] = useState(0);
   const [showTaxes, setShowTaxes] = useState(false);
+  /** Classique : colonne Remise affichée ; Conventionnel : quantité saisie avant le produit. */
+  const [showDiscount, setShowDiscount] = useState(false);
+  const [entryQty, setEntryQty] = useState('1');
   const [now, setNow] = useState(() => new Date());
   /** Recherche complète (F1) et ligne choisie dont on demande la quantité. */
   const [searchQuery, setSearchQuery] = useState('');
@@ -187,6 +193,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const [pending, setPending] = useState<{ payments: SellPayments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string } | null>(null);
   const credit = mode === 'credit';
   const scanRef = useRef<HTMLInputElement>(null);
+  /** Impression demandée à la validation : F2 ticket, F7 listing, F4 (VALIDER) aucune. */
+  const printRef = useRef<PrintChoice>('none');
   /** Promotions du jour : appliquées à l'écran comme elles le seront à l'encaissement. */
   const promoRules = useLoad(() => call('promotions.active'), []);
   const usualLevel = customer?.price_level ?? 'retail';
@@ -259,8 +267,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setPicked({ row, initial });
     setDialog('qty');
   };
-  const pickSuggestion = (row: SaleRow) => {
-    const mult = multiplied?.[1];
+  /** `qtyText` : quantité saisie à part (case Quantité de la présentation Conventionnel). */
+  const pickSuggestion = (row: SaleRow, qtyText?: string) => {
+    const mult = multiplied?.[1] ?? qtyText;
     setInput('');
     askQty(row, mult);
   };
@@ -277,9 +286,10 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setDialog('search');
   };
 
-  const onScan = async (e: React.FormEvent) => {
+  const onScan = async (e: React.FormEvent, qtyText?: string) => {
     e.preventDefault();
-    const raw = input.trim();
+    const typed = input.trim();
+    const raw = qtyText && typed && !typed.includes('*') ? `${qtyText}*${typed}` : typed;
     if (!raw) {
       if (lines.length) void validate();
       return;
@@ -378,7 +388,14 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setQuote(null);
     const delivered = delivery.on;
     resetOptions();
-    call('pos.printTicket', sale.id, { newSale: true }).catch((err) => toast.error(err));
+    const print = printRef.current;
+    printRef.current = 'none';
+    if (print === 'ticket') call('pos.printTicket', sale.id, { newSale: true, force: true }).catch((err) => toast.error(err));
+    else {
+      // Sans ticket, le tiroir s'ouvre quand même pour une vente en espèces (réglage du poste).
+      call('pos.saleDrawer', sale.id).catch((err) => toast.error(err));
+      if (print === 'listing') call('pos.printInvoice', sale.id, { format: 'listing' }).catch((err) => toast.error(err));
+    }
     // Le bon de livraison part avec le livreur.
     if (delivered) {
       call('pos.printInvoice', sale.id, { doc: 'delivery' }).catch((err) => toast.error(err));
@@ -430,8 +447,9 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
    * choix du règlement. À crédit : l'encaissé est un acompte, le reste va au
    * compte du client.
    */
-  const validate = async () => {
+  const validate = async (print: PrintChoice = 'none') => {
     if (!lines.length) return;
+    printRef.current = print;
     if (credit) {
       if (!customer) {
         toast.error('Choisissez le client de la vente à crédit');
@@ -512,12 +530,14 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
       if (dialog) return;
       const fn: Record<string, () => void> = {
         F1: () => openSearch(input),
-        F2: reprint,
+        // Fiche en cours : F2 valide et imprime le ticket, F7 le listing, F4 enregistre sans imprimer.
+        // Fiche vide : F2 réimprime le dernier ticket, F7 ouvre « Mes factures ».
+        F2: () => (lines.length ? void validate('ticket') : reprint()),
         F3: () => void hold(),
-        F4: () => void validate(),
+        F4: () => void validate('none'),
         F5: openDrawer,
         F6: () => selected !== null && setDialog('discount'),
-        F7: onListing,
+        F7: () => (lines.length ? void validate('listing') : onListing()),
         F8: () => setDialog('customer'),
         F9: printA4,
         F10: () => can('sale_resume') && setDialog('held'),
@@ -527,6 +547,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         fn[e.key]!();
       } else if (e.ctrlKey && e.key.toLowerCase() === 'e' && lines.length) {
         e.preventDefault();
+        printRef.current = 'none';
         setDialog('pay');
       } else if (e.target instanceof HTMLInputElement && e.target !== scanRef.current) {
         // Saisie dans une cellule (quantité) : les touches gardent leur sens.
@@ -562,6 +583,1008 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const change = lines.length ? Math.max(0, cashGiven - cashDue) : (lastSale?.change_given ?? 0);
   // Après validation : espèces réellement reçues (rien pour une vente entièrement à crédit).
   const given = lines.length ? cashGiven : lastSale ? lastSale.payments.filter((p) => p.method === 'CASH').reduce((t, p) => t + p.amount, 0) : 0;
+
+
+  /** Morceaux communs aux trois présentations de la caisse (Moderne, Classique, Conventionnel). */
+  const paymentsPane = (
+    <div className="tk-pane">
+      {lastSale && !lines.length ? (
+        <table className="list">
+          <caption>Règlement du ticket {lastSale.number}</caption>
+          <tbody>
+            {lastSale.payments.map((p, i) => (
+              <tr key={i}>
+                <td>{PAYMENT_METHODS[p.method]}</td>
+                <td>{p.reference ?? ''}</td>
+                <td className="r">{fcfa(p.amount)}</td>
+              </tr>
+            ))}
+            {lastSale.change_given > 0 && (
+              <tr>
+                <td>Rendu monnaie</td>
+                <td></td>
+                <td className="r">−{fcfa(lastSale.change_given)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      ) : (
+        <p className="muted">
+          Le règlement se fait à la validation (F4) : espèces avec les billets, ou Encaisser (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
+          d'achat et paiements mixtes.
+        </p>
+      )}
+    </div>
+  );
+  const deliveryPane = (
+    <div className="tk-pane tk-delivery">
+      <label className="dl-switch">
+        <input
+          type="checkbox"
+          checked={delivery.on}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setDelivery((d) => ({
+              ...d,
+              on,
+              // Adresse et téléphone repris de la fiche du client.
+              address: d.address || (on ? (customer?.address ?? '') : ''),
+              phone: d.phone || (on ? (customer?.phone ?? '') : ''),
+            }));
+          }}
+        />
+        À livrer chez le client
+      </label>
+      {delivery.on ? (
+        <>
+          <Field label="Adresse de livraison">
+            <input value={delivery.address} maxLength={200} onChange={(e) => setDelivery((d) => ({ ...d, address: e.target.value }))} placeholder="Quartier, rue, repère" />
+          </Field>
+          <div className="grid2">
+            <Field label="Téléphone">
+              <input value={delivery.phone} maxLength={40} onChange={(e) => setDelivery((d) => ({ ...d, phone: e.target.value }))} />
+            </Field>
+            <Field label="Livreur">
+              <input value={delivery.courier} maxLength={60} list="pos-couriers" onChange={(e) => setDelivery((d) => ({ ...d, courier: e.target.value }))} />
+              <datalist id="pos-couriers">
+                {(couriers.data ?? []).map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </Field>
+          </div>
+          <div className="dl-chips">
+            <b>Quand ?</b>
+            {[
+              ['', "Aujourd'hui"],
+              [dayPlus(1), 'Demain'],
+            ].map(([d, label]) => (
+              <button key={label} type="button" className={delivery.date === d ? 'on' : ''} onClick={() => setDelivery((x) => ({ ...x, date: d! }))}>
+                {label}
+              </button>
+            ))}
+            <input
+              type="date"
+              value={delivery.date}
+              min={dayPlus(0)}
+              onChange={(e) => setDelivery((x) => ({ ...x, date: e.target.value }))}
+              title="Autre jour"
+            />
+          </div>
+          <div className="dl-chips">
+            {SLOTS.map((sl) => (
+              <button key={sl} type="button" className={delivery.slot === sl ? 'on' : ''} onClick={() => setDelivery((x) => ({ ...x, slot: sl }))}>
+                {sl}
+              </button>
+            ))}
+          </div>
+          <div className="grid2">
+            <Field label="Frais de livraison (FCFA)">
+              <input inputMode="numeric" value={delivery.fee} onChange={(e) => setDelivery((d) => ({ ...d, fee: e.target.value }))} placeholder="0" />
+            </Field>
+            <Field label="Note pour le livreur">
+              <input value={delivery.note} maxLength={300} onChange={(e) => setDelivery((d) => ({ ...d, note: e.target.value }))} />
+            </Field>
+          </div>
+          <p className="muted">
+            Au VALIDER, le bon de livraison s'imprime avec le ticket et la vente apparaît dans Vente › Livraisons du jour.{credit ? ' La part à crédit est à encaisser par le livreur.' : ''}
+          </p>
+        </>
+      ) : (
+        <p className="muted">Cochez « À livrer » pour porter cette vente chez le client : adresse, créneau, livreur et frais de livraison.</p>
+      )}
+    </div>
+  );
+  const extraPane = (
+    <div className="tk-pane">
+      <table className="list compact">
+        <tbody>
+          <tr>
+            <th>Fiche</th>
+            <td>{title}</td>
+          </tr>
+          <tr>
+            <th>Caisse ouverte par</th>
+            <td>{session.data.user_name}</td>
+          </tr>
+          <tr>
+            <th>Ouverture</th>
+            <td>{new Date(session.data.opened_at).toLocaleString('fr-FR')}</td>
+          </tr>
+          <tr>
+            <th>Fond de caisse</th>
+            <td>{fcfa(session.data.opening_float)}</td>
+          </tr>
+          <tr>
+            <th>Vendeur</th>
+            <td>{user.name}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+  const nameInput = (
+    <div className="tk-name">
+      <input
+        value={clientName}
+        maxLength={80}
+        onChange={(e) => setClientName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && scanRef.current?.focus()}
+        placeholder="Nom du client sur le ticket (facultatif)"
+        title="Imprimé sur le ticket et la facture"
+      />
+      {(namesake.data?.length ?? 0) > 0 && (
+        <div className="namesake">
+          <small>Client déjà enregistré ?</small>
+          {namesake.data!.slice(0, 4).map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                setCustomer(c);
+                setClientName('');
+              }}
+            >
+              {c.name}
+              <span className={c.balance > 0 ? 'neg' : c.balance < 0 ? 'pos' : 'muted'}>
+                {' '}
+                {c.balance > 0 ? '−' : c.balance < 0 ? '+' : ''}
+                {amount(Math.abs(c.balance))}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+  const actionsMenu = (
+  <select
+    className="opt action"
+    value=""
+    onChange={(e) => {
+      const v = e.target.value as Dialog | 'close';
+      if (v === 'close') {
+        if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+        return onTreasury();
+      }
+      setDialog(v);
+    }}
+  >
+    <option value="" disabled>
+      ⋯ Actions
+    </option>
+    <option value="cashIn">Apport espèces</option>
+    <option value="cashOut">Prélèvement</option>
+    <option value="cancel">Annuler un ticket</option>
+    <option value="return">Retour client</option>
+    <option value="custPay">Règlement client (crédit)</option>
+    <option value="quote">Facturer un devis / proforma</option>
+    <option value="expense">Dépense payée en caisse</option>
+    <option value="close">Clôture de caisse (Trésorerie)</option>
+  </select>
+  );
+
+  const dialogs = (
+    <>
+    {dialog === 'pay' && (
+      <PaymentDialog
+        total={totals.totalTtc}
+        needsSupervisor={discountNeedsCode}
+        cashRounding={settings.cashRounding}
+        allowCredit={Boolean(customer)}
+        onClose={() => setDialog(null)}
+        onPaid={async (payments, supervisorPin) => {
+          setDialog(null);
+          await sell(payments, { supervisorPin });
+        }}
+      />
+    )}
+    {dialog === 'customer' && (
+      <CustomerPickDialog
+        user={user}
+        onClose={() => setDialog(null)}
+        onPick={(c) => {
+          setCustomer(c);
+          // Livraison déjà cochée : l'adresse et le téléphone viennent de la fiche du client.
+          setDelivery((d) => (d.on ? { ...d, address: d.address || (c.address ?? ''), phone: d.phone || (c.phone ?? '') } : d));
+          setDialog(null);
+        }}
+      />
+    )}
+    {dialog === 'options' && askOption && (
+      <SupervisorPrompt
+        action={`${askOption.label} Vous n'avez pas ce droit : le code d'un gérant est demandé.`}
+        onCancel={() => setDialog(null)}
+        onConfirm={(pin) =>
+          call('auth.checkSupervisor', pin).then(() => {
+            setOptionsPin(pin);
+            askOption.apply();
+            setAskOption(null);
+            setDialog(null);
+          }, toast.error)
+        }
+      />
+    )}
+    {dialog === 'custPay' && (
+      <CustomerPaymentDialog
+        atRegister
+        onClose={() => setDialog(null)}
+        onPaid={(id) => {
+          setDialog(null);
+          call('customers.printReceipt', id).catch(toast.error);
+        }}
+      />
+    )}
+    {dialog === 'quote' && <QuotePickDialog onClose={() => setDialog(null)} onPick={(id) => void loadQuote(id)} />}
+    {dialog === 'expense' && (
+      <ExpenseDialog
+        atRegister
+        user={user}
+        needsSupervisor={!has(user, 'cashout')}
+        onClose={() => setDialog(null)}
+        onSaved={(e) => {
+          setDialog(null);
+          call('expenses.print', e.id).catch(toast.error);
+        }}
+      />
+    )}
+    {pending && (
+      <SupervisorPrompt
+        action={pending.message}
+        onCancel={() => setPending(null)}
+        onConfirm={(pin) => {
+          const p = pending;
+          setPending(null);
+          void sell(p.payments, p.reason === 'credit' ? { supervisorPin: p.supervisorPin, creditPin: pin } : { supervisorPin: pin });
+        }}
+      />
+    )}
+    {dialog === 'search' && (
+      <SaleSearchDialog
+        initialQuery={searchQuery}
+        customerId={customer?.id ?? null}
+        opts={saleOpts}
+        canCreate={canCreate}
+        onClose={() => setDialog(null)}
+        onPick={(row) => askQty(row)}
+        onCreateArticle={(name) => {
+          setCreating({ article: null, name });
+          setDialog('create');
+        }}
+        onCreateLevel={async (articleId, where) => {
+          try {
+            const article = await call('catalogue.get', articleId);
+            if (article.unit !== 'piece') return toast.error('Les conditionnements ne valent que pour les articles vendus à la pièce');
+            if (article.packs.length >= 3) return toast.error(`${article.name} a déjà 4 conditionnements`);
+            setCreating({ article, addLevel: where });
+            setDialog('create');
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      />
+    )}
+    {dialog === 'qty' && picked && (
+      <QtyPrompt
+        row={picked.row}
+        initial={picked.initial}
+        onClose={() => setDialog(null)}
+        inCart={lines.filter((l) => l.articleId === picked.row.article_id).reduce((t, l) => t + l.qty, 0)}
+        canPrice={has(user, 'price')}
+        ignoreStock={ignoreStock}
+        onDone={(q, price) => {
+          setDialog(null);
+          void addRow(picked.row, q, price);
+        }}
+      />
+    )}
+    {dialog === 'create' && creating && (
+      <ArticleForm
+        article={creating.article}
+        initialName={creating.name}
+        addLevel={creating.addLevel}
+        canSetStorePrice={false}
+        onClose={() => openSearch(searchQuery)}
+        onSaved={(a) => {
+          setCreating(null);
+          openSearch(creating.article ? searchQuery : a.name);
+        }}
+      />
+    )}
+    {dialog === 'weight' && weightFor && (
+      <WeightDialog
+        article={weightFor}
+        onClose={() => setDialog(null)}
+        onDone={(q) => {
+          addLine(toLine(weightFor, q, null));
+          setDialog(null);
+        }}
+      />
+    )}
+    {dialog === 'discount' && sel && (
+      <DiscountDialog
+        line={sel}
+        onClose={() => setDialog(null)}
+        onDone={(discount) => {
+          setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, discount } : l)));
+          setDialog(null);
+        }}
+      />
+    )}
+    {dialog === 'vary' && sel && (
+      <VaryDialog
+        line={sel}
+        level={level}
+        onClose={() => setDialog(null)}
+        onDiscount={() => setDialog('discount')}
+        onDone={(q, packId) => {
+          // Le prix saisi valait pour l'ancien conditionnement : on revient au tarif si l'on en change.
+          setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, qty: q, packId, price: packId === l.packId ? l.price : undefined } : l)));
+          setDialog(null);
+        }}
+      />
+    )}
+    {dialog === 'held' && (
+      <HeldDialog
+        onClose={() => {
+          setDialog(null);
+          held.reload();
+        }}
+        onResume={resume}
+      />
+    )}
+    {dialog === 'statement' && customer && (
+      <Modal title={`Extrait de compte : ${customer.name}`} onClose={() => setDialog(null)} wide>
+        <Statement customer={customer} />
+      </Modal>
+    )}
+    {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
+    {dialog === 'return' && <ReturnDialog onClose={() => setDialog(null)} />}
+    {(dialog === 'cashIn' || dialog === 'cashOut') && (
+      <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={!has(user, 'cashout')} onClose={() => setDialog(null)} />
+    )}
+    </>
+  );
+
+
+  // --- Actions communes aux trois présentations ---------------------------------
+  const openPay = () => {
+    printRef.current = 'none';
+    setDialog('pay');
+  };
+  const askClear = async () => {
+    if (await askConfirm('Vider la fiche en cours ?')) clear();
+    focusScan();
+  };
+  const closeFiche = () => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose());
+  /** F2 et F7 : valident la fiche en cours ; sur une fiche vide, réimpriment le dernier ticket ou ouvrent « Mes factures ». */
+  const ticketKey = () => (lines.length ? void validate('ticket') : reprint());
+  const listingKey = () => (lines.length ? void validate('listing') : onListing());
+  const pickLevel = (k: PriceLevel) =>
+    chooseOption(`Passer cette fiche au tarif ${PRICE_LEVELS[k].toLowerCase()}.`, 'sale_tariff', k === usualLevel, () => setLevelChoice(k === usualLevel ? null : k));
+  const pickWarehouse = (id: string) => {
+    const w = warehouses.data?.find((x) => x.id === id);
+    if (w) chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', w.id === salesWarehouse?.id, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id));
+  };
+  const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
+  const heldCount = held.data?.length ?? 0;
+  const ficheNumber = lines.length ? (quote ? `Devis ${quote.number}` : 'Nouveau') : (lastSale?.number ?? 'Nouveau');
+  const done = !lines.length && Boolean(lastSale);
+  const tariffSelect = (
+    <select value={level} onChange={(e) => pickLevel(e.target.value as PriceLevel)} title="Tarif de cette fiche ; par défaut celui du client">
+      {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
+        <option key={k} value={k}>
+          {PRICE_LEVELS[k]}
+        </option>
+      ))}
+    </select>
+  );
+  const depotSelect =
+    (warehouses.data?.length ?? 0) > 1 ? (
+      <select value={warehouseChoice ?? salesWarehouse?.id ?? ''} onChange={(e) => pickWarehouse(e.target.value)} title="Dépôt d'où sort la marchandise de cette fiche">
+        {warehouses.data!.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </select>
+    ) : null;
+  const staleNote = stale && (
+    <div className="tre-warning">
+      Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
+      <button className="link" onClick={onTreasury}>
+        Trésorerie
+      </button>{' '}
+      puis rouvrez la caisse.
+    </div>
+  );
+  const bandText =
+    credit && customer && account.data
+      ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
+      : !lines.length && lastSale?.customer_name
+        ? `${lastSale.customer_name}${lastSale.due_date ? ` · à régler avant le ${new Date(`${lastSale.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`
+        : quote && lines.length
+          ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
+          : delivery.on
+            ? `À livrer${delivery.address ? ` : ${delivery.address}` : ''}`
+            : 'Livraison immédiate';
+  const optionChips = (level !== 'retail' || warehouseChoice) && (
+    <>
+      {level !== 'retail' && <span className="tag surstock">Tarif {PRICE_LEVELS[level].toLowerCase()}</span>}
+      {warehouseChoice && <span className="tag surstock">Sortie {warehouses.data?.find((w) => w.id === warehouseChoice)?.name}</span>}
+    </>
+  );
+  const balanceChip = customer && account.data && (
+    <span className={`solde-chip ${account.data.balance > 0 ? 'neg' : account.data.balance < 0 ? 'pos' : 'zero'}`}>
+      Solde : {account.data.balance > 0 ? '−' : account.data.balance < 0 ? '+' : ''}
+      {amount(Math.abs(account.data.balance))} FCFA
+      <small>{account.data.balance > 0 ? ' (doit)' : account.data.balance < 0 ? ' (avoir)' : ''}</small>
+    </span>
+  );
+  const keyStrip = (
+    <div className="pos-keys">
+      <span>
+        <kbd>F1</kbd> Rechercher
+      </span>
+      <span>
+        <kbd>F2</kbd> Valider + ticket
+      </span>
+      <span>
+        <kbd>F7</kbd> Valider + listing
+      </span>
+      <span>
+        <kbd>F4</kbd> Enregistrer
+      </span>
+      <span>
+        <kbd>F3</kbd> Attente
+      </span>
+      <span>
+        <kbd>F10</kbd> Rappeler
+      </span>
+      <span>
+        <kbd>F5</kbd> Tiroir
+      </span>
+      <span>
+        <kbd>F6</kbd> Remise
+      </span>
+      <span>
+        <kbd>F8</kbd> Client
+      </span>
+      <span>
+        <kbd>F9</kbd> Facture A4
+      </span>
+      <span>
+        <kbd>Ctrl+E</kbd> Encaisser
+      </span>
+      <span>
+        <kbd>Suppr</kbd> Enlever
+      </span>
+    </div>
+  );
+  const withDiscount = showDiscount || totals.totalDiscount > 0;
+  const gridRows = Math.max(10, priced.length);
+
+  // --- Présentation Classique : la fiche de facturation d'avant la 0.41 -------------
+  if (layout === 'classic')
+    return (
+      <div className={`pc ${credit ? 'credit' : ''}`}>
+        <div className="pc-band">
+          <h2>{title}</h2>
+          <div className="pc-mode">{credit ? 'Vente à crédit' : 'Vente au comptant'}</div>
+          <div className="pc-info">{bandText}</div>
+        </div>
+        {staleNote}
+        <div className="pc-body">
+          <div className="pc-main">
+            <div className="pc-head">
+              <label>N°</label>
+              <input readOnly value={ficheNumber} />
+              <button className={`pc-client ${credit && !customer ? 'missing' : ''}`} title="Choisir le client (F8)" onClick={() => setDialog('customer')}>
+                {customer ? customer.name.toUpperCase() : credit ? 'CHOISIR LE CLIENT (F8)' : 'CLIENT COMPTOIR'}
+              </button>
+              {customer ? (
+                <button className="pc-small" title="Revenir au client comptoir" onClick={() => setCustomer(null)}>
+                  ✕ {customer.code}
+                </button>
+              ) : (
+                <button className="pc-small" onClick={() => setDialog('customer')}>
+                  Client… <kbd>F8</kbd>
+                </button>
+              )}
+              <span className="pc-count">{totals.itemCount} art.</span>
+              <div className={`pc-total ${done ? 'done' : ''}`}>
+                {amount(shownTotal)}
+                <small>{tx('TTC')}</small>
+              </div>
+              <label>Date</label>
+              <input readOnly value={now.toLocaleString('fr-FR')} />
+              <div className="pc-second">
+                {customer ? (
+                  <>
+                    {balanceChip}
+                    <button className="pc-small" title="Extrait de compte du client" onClick={() => setDialog('statement')}>
+                      Extrait
+                    </button>
+                  </>
+                ) : (
+                  !credit && nameInput
+                )}
+              </div>
+              <div className="pc-opts">
+                <label>Tarif</label>
+                {tariffSelect}
+                {depotSelect && <label>Dépôt</label>}
+                {depotSelect}
+                {optionChips}
+              </div>
+            </div>
+            <div className="pc-tabs">
+              <button className={pane === 'lines' ? 'active' : ''} onClick={() => setPane('lines')}>
+                Produits commandés
+              </button>
+              <button className={pane === 'payments' ? 'active' : ''} onClick={() => setPane('payments')}>
+                Règlements
+              </button>
+              <button className={pane === 'delivery' ? 'active' : ''} onClick={() => setPane('delivery')}>
+                Livraison{delivery.on ? ' 🚚' : ''}
+              </button>
+              <button className={pane === 'extra' ? 'active' : ''} onClick={() => setPane('extra')}>
+                Infos
+              </button>
+            </div>
+            {pane === 'lines' ? (
+              <>
+                <form onSubmit={(e) => void onScan(e)} className="pc-tools">
+                  <div className="pc-scan">
+                    <input
+                      ref={scanRef}
+                      className="scan-input"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => suggestions.onKeyDown(e, pickSuggestion)}
+                      onBlur={suggestions.close}
+                      autoComplete="off"
+                      placeholder="Taper le début du nom produit ou scanner (3*code pour la quantité) · F1 recherche"
+                    />
+                    <SaleRowList s={suggestions} onPick={(r) => pickSuggestion(r)} />
+                  </div>
+                  {actionsMenu}
+                </form>
+                <div className="pc-grid">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th className="n">N°</th>
+                        <th className="ref">Réf.</th>
+                        <th>Produit</th>
+                        <th className="r">Qté</th>
+                        <th>Cond.</th>
+                        <th className="r">{tx('PU TTC')}</th>
+                        {withDiscount && <th className="r">Remise</th>}
+                        <th className="r">{tx('Total TTC')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: gridRows }, (_, i) => {
+                        const l = priced[i];
+                        if (!l)
+                          return (
+                            <tr key={`empty-${i}`} className="empty">
+                              <td colSpan={withDiscount ? 8 : 7}>&nbsp;</td>
+                            </tr>
+                          );
+                        return (
+                          <tr key={l.key} className={l.key === selected ? 'sel' : ''} onClick={() => setSelected(l.key)} onDoubleClick={() => setDialog('vary')}>
+                            <td className="n">{i + 1}</td>
+                            <td className="ref">{l.ref}</td>
+                            <td>
+                              {l.label}
+                              {l.promo > 0 && (
+                                <span className="tag normal promo" title={l.promotionName ?? ''}>
+                                  Promo −{amount(l.promo)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="r">
+                              <QtyCell line={l} onChange={(q) => setLineQty(l.key, q)} />
+                            </td>
+                            <td>{l.packId ? l.packs.find((p) => p.id === l.packId)?.name : l.unitName}</td>
+                            <td className="r">{amount(l.packPrice ?? l.unitPrice)}</td>
+                            {withDiscount && <td className="r">{l.discount ? amount(l.discount) : ''}</td>}
+                            <td className="r">{amount(lineTotal(l))}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={3}>
+                          Total{fee > 0 && lines.length > 0 && ` (dont livraison ${amount(fee)})`}
+                          {totals.totalPromo > 0 && <span className="tag normal promo">Promotions −{amount(totals.totalPromo)}</span>}
+                        </td>
+                        <td className="r">{lines.length ? totals.itemCount : ''}</td>
+                        <td colSpan={withDiscount ? 3 : 2} className="r">
+                          {withDiscount && totals.totalDiscount ? `remises −${amount(totals.totalDiscount)}` : ''}
+                        </td>
+                        <td className="r">{amount(totals.totalTtc)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="pc-pane">{pane === 'payments' ? paymentsPane : pane === 'delivery' ? deliveryPane : extraPane}</div>
+            )}
+            <div className="pc-foot">
+              <div className="pc-checks">
+                <label>
+                  <input type="checkbox" checked={showDiscount} onChange={(e) => setShowDiscount(e.target.checked)} /> Remise ?
+                </label>
+                {vatEnabled && (
+                  <label>
+                    <input type="checkbox" checked={showTaxes} onChange={(e) => setShowTaxes(e.target.checked)} /> Taxes ?
+                  </label>
+                )}
+              </div>
+              <div className="pc-taxes">
+                {showTaxes && vatEnabled ? (
+                  <>
+                    <div>HT {amount(totals.totalHt)}</div>
+                    {totals.vat
+                      .filter((v) => v.tva > 0)
+                      .map((v) => (
+                        <div key={v.rate}>
+                          TVA {(v.rate / 100).toLocaleString('fr-FR')} % : {amount(v.tva)}
+                        </div>
+                      ))}
+                  </>
+                ) : lines.length > 0 && cashDue < totals.totalTtc ? (
+                  <>
+                    <div>Espèces : {amount(cashDue)}</div>
+                    <div className="muted">arrondi −{amount(totals.totalTtc - cashDue)}</div>
+                  </>
+                ) : null}
+              </div>
+              <div className="pc-bills">
+                {BILLS.map((b) => (
+                  <button key={b} type="button" disabled={!lines.length} onClick={() => setCashGiven((c) => c + b)}>
+                    {amount(b)}
+                  </button>
+                ))}
+                <button type="button" disabled={!lines.length} onClick={() => setCashGiven(cashDue)} title="Montant exact (arrondi espèces compris)">
+                  =
+                </button>
+                <button type="button" disabled={!cashGiven} onClick={() => setCashGiven(0)} title="Remettre l'encaissé à zéro">
+                  C
+                </button>
+              </div>
+              <div className="pc-er">
+                <span>E:</span> {given ? amount(given) : ''}
+              </div>
+              <div className="pc-er">
+                <span>R:</span> {change ? amount(change) : ''}
+              </div>
+            </div>
+          </div>
+          <aside className="pc-actions">
+            <button className="main" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la vente sans imprimer">
+              Valider / Nouv. <kbd>F4</kbd>
+            </button>
+            <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()}>
+              Mise en attente <kbd>F3</kbd>
+            </button>
+            <button disabled={!can('sale_resume')} onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente">
+              <span>
+                Ouvrir (en attente)
+                {heldCount > 0 && <b className="held-count">{heldCount}</b>}
+              </span>
+              <kbd>F10</kbd>
+            </button>
+            <button disabled={!lines.length} onClick={openPay}>
+              Encaisser <kbd>Ctrl+E</kbd>
+            </button>
+            <hr />
+            <button onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Liste des factures'}>
+              Listing <kbd>F7</kbd>
+            </button>
+            <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket' : 'Réimprimer le dernier ticket'}>
+              Ticket <kbd>F2</kbd>
+            </button>
+            <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
+              Facture A4 <kbd>F9</kbd>
+            </button>
+            <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
+              Tiroir <kbd>F5</kbd>
+            </button>
+            <hr />
+            <button disabled={!sel} onClick={() => setDialog('vary')}>
+              Varier
+            </button>
+            <button disabled={!sel} onClick={() => setDialog('discount')}>
+              Remise <kbd>F6</kbd>
+            </button>
+            <button disabled={!sel} onClick={() => sel && removeLine(sel.key)}>
+              Enlever <kbd>Suppr</kbd>
+            </button>
+            <button className="danger" disabled={!lines.length} onClick={() => void askClear()}>
+              Vider
+            </button>
+            <button className="close" onClick={closeFiche}>
+              Fermer
+            </button>
+          </aside>
+        </div>
+        {keyStrip}
+        {dialogs}
+      </div>
+    );
+
+  // --- Présentation Conventionnel : grand total en haut, ligne de saisie, cadre Règlement ---
+  if (layout === 'conventional')
+    return (
+      <div className={`pv ${credit ? 'credit' : ''}`}>
+        <div className="pv-tool">
+          <button onClick={() => void askClear()} disabled={!lines.length} title="Vider la fiche et en commencer une nouvelle">
+            <i>＋</i>Nouveau
+          </button>
+          <button onClick={() => setDialog('customer')}>
+            <i>👤</i>Client <kbd>F8</kbd>
+          </button>
+          <button onClick={() => openSearch(input)}>
+            <i>🔍</i>Rechercher <kbd>F1</kbd>
+          </button>
+          <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()}>
+            <i>⏸</i>Attente <kbd>F3</kbd>
+          </button>
+          <button disabled={!can('sale_resume')} onClick={() => setDialog('held')}>
+            <i>↺</i>Rappeler{heldCount > 0 && <b className="held-count">{heldCount}</b>} <kbd>F10</kbd>
+          </button>
+          <button disabled={!sel} onClick={() => setDialog('vary')}>
+            <i>✎</i>Varier
+          </button>
+          <button disabled={!sel} onClick={() => setDialog('discount')}>
+            <i>％</i>Remise <kbd>F6</kbd>
+          </button>
+          <button disabled={!can('drawer_open')} onClick={openDrawer}>
+            <i>🗃</i>Tiroir <kbd>F5</kbd>
+          </button>
+          <button className={pane === 'delivery' ? 'on' : ''} onClick={() => setPane(pane === 'delivery' ? 'lines' : 'delivery')}>
+            <i>🚚</i>Livraison{delivery.on ? ' ✓' : ''}
+          </button>
+          <span className="pv-spacer" />
+          <div className="pv-mode" role="group" aria-label="Type de vente">
+            <button className={credit ? '' : 'on'} disabled={!credit} onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onSwitchMode?.())}>
+              Comptant
+            </button>
+            <button className={credit ? 'on' : ''} disabled={credit} onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onSwitchMode?.())}>
+              Crédit
+            </button>
+          </div>
+          {actionsMenu}
+        </div>
+        {staleNote}
+        <div className="pv-top">
+          <div className="pv-fields">
+            <label>Caissier</label>
+            <span className="pv-box">{user.name}</span>
+            <label>Date</label>
+            <span className="pv-box">{now.toLocaleDateString('fr-FR')}</span>
+            <label>N°</label>
+            <span className="pv-box">{ficheNumber}</span>
+            <label>Client</label>
+            <div className="pv-client">
+              <button className={`pv-box pv-pick ${credit && !customer ? 'missing' : ''}`} onClick={() => setDialog('customer')} title="Choisir le client (F8)">
+                {customer ? customer.name : credit ? 'Choisir le client (F8)' : 'Client comptoir'}
+              </button>
+              {customer && (
+                <button className="pv-x" title="Revenir au client comptoir" onClick={() => setCustomer(null)}>
+                  ✕
+                </button>
+              )}
+              {balanceChip}
+            </div>
+            <label>Tarif</label>
+            {tariffSelect}
+            {depotSelect ? <label>Dépôt</label> : <span />}
+            {depotSelect ?? <span />}
+          </div>
+          <div className={`pv-total ${done ? 'done' : ''}`}>
+            <span>{tx('Total TTC')}</span>
+            <b>{amount(shownTotal)}</b>
+          </div>
+        </div>
+        {pane === 'delivery' ? (
+          <div className="pv-delivery">{deliveryPane}</div>
+        ) : (
+          <>
+            <form
+              className="pv-entry"
+              onSubmit={(e) => {
+                const q = entryQty.trim() && entryQty.trim() !== '1' ? entryQty.trim() : undefined;
+                setEntryQty('1');
+                void onScan(e, q);
+              }}
+            >
+              <label className="pv-grow">
+                Référence / Désignation
+                <div className="pv-scan">
+                  <input
+                    ref={scanRef}
+                    className="scan-input"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) =>
+                      suggestions.onKeyDown(e, (r) => {
+                        const q = entryQty.trim() && entryQty.trim() !== '1' ? entryQty.trim() : undefined;
+                        setEntryQty('1');
+                        pickSuggestion(r, q);
+                      })
+                    }
+                    onBlur={suggestions.close}
+                    autoComplete="off"
+                    placeholder="Taper le nom ou scanner le code-barres"
+                  />
+                  <SaleRowList
+                    s={suggestions}
+                    onPick={(r) => {
+                      const q = entryQty.trim() && entryQty.trim() !== '1' ? entryQty.trim() : undefined;
+                      setEntryQty('1');
+                      pickSuggestion(r, q);
+                    }}
+                  />
+                </div>
+              </label>
+              <label>
+                Quantité
+                <input className="pv-qty" inputMode="decimal" value={entryQty} onChange={(e) => setEntryQty(e.target.value)} onFocus={(e) => e.target.select()} />
+              </label>
+              <button type="button" disabled={!sel} onClick={() => sel && removeLine(sel.key)} title="Enlever la ligne choisie (Suppr)">
+                Supprimer
+              </button>
+              <button type="submit" className="g" title="Ajouter le produit (Entrée)">
+                Enregistrer la ligne
+              </button>
+            </form>
+            <div className="pv-grid">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Référence</th>
+                    <th>Désignation</th>
+                    <th className="r">{tx('P.U. TTC')}</th>
+                    <th className="r">Quantité</th>
+                    <th>Cond.</th>
+                    <th className="r">Remise</th>
+                    <th className="r">{tx('Montant TTC')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priced.map((l) => (
+                    <tr key={l.key} className={l.key === selected ? 'sel' : ''} onClick={() => setSelected(l.key)} onDoubleClick={() => setDialog('vary')}>
+                      <td>{l.ref}</td>
+                      <td>
+                        {l.label}
+                        {l.promo > 0 && <span className="tag normal promo">Promo −{amount(l.promo)}</span>}
+                      </td>
+                      <td className="r">{amount(l.packPrice ?? l.unitPrice)}</td>
+                      <td className="r">
+                        <QtyCell line={l} onChange={(q) => setLineQty(l.key, q)} />
+                      </td>
+                      <td>{l.packId ? l.packs.find((p) => p.id === l.packId)?.name : l.unitName}</td>
+                      <td className="r">{l.discount ? amount(l.discount) : ''}</td>
+                      <td className="r">{amount(lineTotal(l))}</td>
+                    </tr>
+                  ))}
+                  {!priced.length && (
+                    <tr className="empty">
+                      <td colSpan={7}>{lastSale ? `Facture ${lastSale.number} enregistrée. Saisissez le produit suivant.` : 'Aucun article : saisissez ou scannez un produit.'}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        <div className="pv-low">
+          <div className="pv-pan">
+            <h4>Informations</h4>
+            {!customer && !credit && nameInput}
+            <div className="pv-line">
+              {optionChips}
+              {delivery.on && <span className="tag info">À livrer{delivery.courier ? ` · ${delivery.courier}` : ''}</span>}
+            </div>
+            <div className="pv-line muted">
+              {totals.itemCount} article{totals.itemCount > 1 ? 's' : ''}
+              {fee > 0 && lines.length > 0 && ` · livraison ${amount(fee)}`}
+              {totals.totalDiscount > 0 && ` · remises −${amount(totals.totalDiscount)}`}
+              {totals.totalPromo > 0 && ` · promotions −${amount(totals.totalPromo)}`}
+            </div>
+            {vatEnabled && (
+              <div className="pv-line muted">
+                {tx('Total HT')} {amount(totals.totalHt)}
+                {totals.vat
+                  .filter((v) => v.tva > 0)
+                  .map((v) => ` · TVA ${(v.rate / 100).toLocaleString('fr-FR')} % : ${amount(v.tva)}`)
+                  .join('')}
+              </div>
+            )}
+          </div>
+          <div className="pv-pan pv-pay">
+            <h4>Règlement</h4>
+            <div className="pv-payrow">
+              <label>Mode de règlement</label>
+              <select
+                value="cash"
+                onChange={(e) => {
+                  if (e.target.value === 'other') openPay();
+                }}
+                disabled={!lines.length}
+              >
+                <option value="cash">{credit ? 'Espèces (acompte), reste au compte' : 'Espèces'}</option>
+                <option value="other">Mobile Money, carte, bon, mixte…</option>
+              </select>
+            </div>
+            <div className="pv-payrow">
+              <label>Montant réglé</label>
+              <input
+                inputMode="numeric"
+                disabled={!lines.length}
+                value={lines.length ? (cashGiven ? amount(cashGiven) : '') : given ? amount(given) : ''}
+                onChange={(e) => setCashGiven(parseAmount(e.target.value) ?? 0)}
+                placeholder={lines.length ? amount(cashDue) : ''}
+              />
+              <button type="button" disabled={!lines.length} onClick={() => setCashGiven(cashDue)} title="Montant exact">
+                =
+              </button>
+            </div>
+            <div className="pv-rendre">
+              <span>A rendre</span>
+              <b>{change ? amount(change) : '0'}</b>
+            </div>
+          </div>
+        </div>
+        <div className="pv-actions">
+          <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket' : 'Réimprimer le dernier ticket'}>
+            Ticket <kbd>F2</kbd>
+          </button>
+          <button onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Liste des factures'}>
+            Listing <kbd>F7</kbd>
+          </button>
+          <button disabled={!lastSale || lines.length > 0} onClick={printA4}>
+            Facture A4 <kbd>F9</kbd>
+          </button>
+          <button disabled={!lines.length} onClick={openPay}>
+            Encaisser <kbd>Ctrl+E</kbd>
+          </button>
+          <button className="g" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la vente sans imprimer">
+            Valider <kbd>F4</kbd>
+          </button>
+          <span className="pv-spacer" />
+          <button onClick={closeFiche}>Fermer</button>
+        </div>
+        {keyStrip}
+        {dialogs}
+      </div>
+    );
 
   return (
     <div className={`pos-screen ${credit ? 'credit' : ''}`}>
@@ -607,7 +1630,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                   key={k}
                   type="button"
                   className={level === k ? 'on' : ''}
-                  onClick={() => chooseOption(`Passer cette fiche au tarif ${PRICE_LEVELS[k].toLowerCase()}.`, 'sale_tariff', k === usualLevel, () => setLevelChoice(k === usualLevel ? null : k))}
+                  onClick={() => pickLevel(k)}
                 >
                   {PRICE_LEVELS[k]}
                 </button>
@@ -621,39 +1644,14 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                     key={w.id}
                     type="button"
                     className={(warehouseChoice ?? salesWarehouse?.id) === w.id ? 'on' : ''}
-                    onClick={() =>
-                      chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', w.id === salesWarehouse?.id, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id))
-                    }
+                    onClick={() => pickWarehouse(w.id)}
                   >
                     {w.name}
                   </button>
                 ))}
               </div>
             )}
-            <select
-              className="opt action"
-              value=""
-              onChange={(e) => {
-                const v = e.target.value as Dialog | 'close';
-                if (v === 'close') {
-                  if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
-                  return onTreasury();
-                }
-                setDialog(v);
-              }}
-            >
-              <option value="" disabled>
-                ⋯ Actions
-              </option>
-              <option value="cashIn">Apport espèces</option>
-              <option value="cashOut">Prélèvement</option>
-              <option value="cancel">Annuler un ticket</option>
-              <option value="return">Retour client</option>
-              <option value="custPay">Règlement client (crédit)</option>
-              <option value="quote">Facturer un devis / proforma</option>
-              <option value="expense">Dépense payée en caisse</option>
-              <option value="close">Clôture de caisse (Trésorerie)</option>
-            </select>
+            {actionsMenu}
             <span className="opts-count">
               {suggestions.items.length
                 ? `${suggestions.items.length} produit${suggestions.items.length > 1 ? 's' : ''} trouvé${suggestions.items.length > 1 ? 's' : ''} · touchez pour ajouter`
@@ -765,39 +1763,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                 )}
               </div>
             )}
-            {!customer && !credit && (
-              <div className="tk-name">
-                <input
-                  value={clientName}
-                  maxLength={80}
-                  onChange={(e) => setClientName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && scanRef.current?.focus()}
-                  placeholder="Nom du client sur le ticket (facultatif)"
-                  title="Imprimé sur le ticket et la facture"
-                />
-                {(namesake.data?.length ?? 0) > 0 && (
-                  <div className="namesake">
-                    <small>Client déjà enregistré ?</small>
-                    {namesake.data!.slice(0, 4).map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => {
-                          setCustomer(c);
-                          setClientName('');
-                        }}
-                      >
-                        {c.name}
-                        <span className={c.balance > 0 ? 'neg' : c.balance < 0 ? 'pos' : 'muted'}>
-                          {' '}
-                          {c.balance > 0 ? '−' : c.balance < 0 ? '+' : ''}
-                          {amount(Math.abs(c.balance))}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            {!customer && !credit && nameInput}
             <div className="tk-tabs">
               <button className={pane === 'lines' ? 'on' : ''} onClick={() => setPane('lines')}>
                 Articles{lines.length ? ` (${lines.length})` : ''}
@@ -875,145 +1841,11 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             </div>
           )}
 
-          {pane === 'payments' && (
-            <div className="tk-pane">
-              {lastSale && !lines.length ? (
-                <table className="list">
-                  <caption>Règlement du ticket {lastSale.number}</caption>
-                  <tbody>
-                    {lastSale.payments.map((p, i) => (
-                      <tr key={i}>
-                        <td>{PAYMENT_METHODS[p.method]}</td>
-                        <td>{p.reference ?? ''}</td>
-                        <td className="r">{fcfa(p.amount)}</td>
-                      </tr>
-                    ))}
-                    {lastSale.change_given > 0 && (
-                      <tr>
-                        <td>Rendu monnaie</td>
-                        <td></td>
-                        <td className="r">−{fcfa(lastSale.change_given)}</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="muted">
-                  Le règlement se fait à la validation (F4) : espèces avec les billets, ou Encaisser (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
-                  d'achat et paiements mixtes.
-                </p>
-              )}
-            </div>
-          )}
+          {pane === 'payments' && paymentsPane}
 
-          {pane === 'delivery' && (
-            <div className="tk-pane tk-delivery">
-              <label className="dl-switch">
-                <input
-                  type="checkbox"
-                  checked={delivery.on}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setDelivery((d) => ({
-                      ...d,
-                      on,
-                      // Adresse et téléphone repris de la fiche du client.
-                      address: d.address || (on ? (customer?.address ?? '') : ''),
-                      phone: d.phone || (on ? (customer?.phone ?? '') : ''),
-                    }));
-                  }}
-                />
-                À livrer chez le client
-              </label>
-              {delivery.on ? (
-                <>
-                  <Field label="Adresse de livraison">
-                    <input value={delivery.address} maxLength={200} onChange={(e) => setDelivery((d) => ({ ...d, address: e.target.value }))} placeholder="Quartier, rue, repère" />
-                  </Field>
-                  <div className="grid2">
-                    <Field label="Téléphone">
-                      <input value={delivery.phone} maxLength={40} onChange={(e) => setDelivery((d) => ({ ...d, phone: e.target.value }))} />
-                    </Field>
-                    <Field label="Livreur">
-                      <input value={delivery.courier} maxLength={60} list="pos-couriers" onChange={(e) => setDelivery((d) => ({ ...d, courier: e.target.value }))} />
-                      <datalist id="pos-couriers">
-                        {(couriers.data ?? []).map((c) => (
-                          <option key={c} value={c} />
-                        ))}
-                      </datalist>
-                    </Field>
-                  </div>
-                  <div className="dl-chips">
-                    <b>Quand ?</b>
-                    {[
-                      ['', "Aujourd'hui"],
-                      [dayPlus(1), 'Demain'],
-                    ].map(([d, label]) => (
-                      <button key={label} type="button" className={delivery.date === d ? 'on' : ''} onClick={() => setDelivery((x) => ({ ...x, date: d! }))}>
-                        {label}
-                      </button>
-                    ))}
-                    <input
-                      type="date"
-                      value={delivery.date}
-                      min={dayPlus(0)}
-                      onChange={(e) => setDelivery((x) => ({ ...x, date: e.target.value }))}
-                      title="Autre jour"
-                    />
-                  </div>
-                  <div className="dl-chips">
-                    {SLOTS.map((sl) => (
-                      <button key={sl} type="button" className={delivery.slot === sl ? 'on' : ''} onClick={() => setDelivery((x) => ({ ...x, slot: sl }))}>
-                        {sl}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="grid2">
-                    <Field label="Frais de livraison (FCFA)">
-                      <input inputMode="numeric" value={delivery.fee} onChange={(e) => setDelivery((d) => ({ ...d, fee: e.target.value }))} placeholder="0" />
-                    </Field>
-                    <Field label="Note pour le livreur">
-                      <input value={delivery.note} maxLength={300} onChange={(e) => setDelivery((d) => ({ ...d, note: e.target.value }))} />
-                    </Field>
-                  </div>
-                  <p className="muted">
-                    Au VALIDER, le bon de livraison s'imprime avec le ticket et la vente apparaît dans Vente › Livraisons du jour.{credit ? ' La part à crédit est à encaisser par le livreur.' : ''}
-                  </p>
-                </>
-              ) : (
-                <p className="muted">Cochez « À livrer » pour porter cette vente chez le client : adresse, créneau, livreur et frais de livraison.</p>
-              )}
-            </div>
-          )}
+          {pane === 'delivery' && deliveryPane}
 
-          {pane === 'extra' && (
-            <div className="tk-pane">
-              <table className="list compact">
-                <tbody>
-                  <tr>
-                    <th>Fiche</th>
-                    <td>{title}</td>
-                  </tr>
-                  <tr>
-                    <th>Caisse ouverte par</th>
-                    <td>{session.data.user_name}</td>
-                  </tr>
-                  <tr>
-                    <th>Ouverture</th>
-                    <td>{new Date(session.data.opened_at).toLocaleString('fr-FR')}</td>
-                  </tr>
-                  <tr>
-                    <th>Fond de caisse</th>
-                    <td>{fcfa(session.data.opening_float)}</td>
-                  </tr>
-                  <tr>
-                    <th>Vendeur</th>
-                    <td>{user.name}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
+          {pane === 'extra' && extraPane}
 
           <div className="tk-foot">
             <div className="tk-sum">
@@ -1078,13 +1910,13 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)" style={{ '--c': '#0891b2' } as React.CSSProperties}>
           <i aria-hidden>🗃</i>Tiroir <kbd>F5</kbd>
         </button>
-        <button disabled={!lastSale || !can('sale_reprint')} onClick={reprint} title="Réimprimer le dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+        <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket de caisse' : 'Réimprimer le dernier ticket'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>🧾</i>Ticket <kbd>F2</kbd>
         </button>
         <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>📄</i>Facture A4 <kbd>F9</kbd>
         </button>
-        <button onClick={onListing} title="Listing des factures" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+        <button onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Mes factures'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
         </button>
         <button disabled={!lines.length} onClick={async () => {
@@ -1096,195 +1928,19 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>
           <i aria-hidden>✕</i>Fermer
         </button>
-        <button className="pay" disabled={!lines.length} onClick={() => setDialog('pay')} title="Mobile Money, carte, bon d'achat, paiements mixtes">
+        <button className="pay" disabled={!lines.length} onClick={openPay} title="Mobile Money, carte, bon d'achat, paiements mixtes">
           <i aria-hidden>💳</i>Encaisser <kbd>Ctrl+E</kbd>
         </button>
-        <button className="go" disabled={!lines.length} onClick={() => void validate()}>
+        <button className="go" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la fiche sans rien imprimer">
           <i aria-hidden>✓</i>
           <span>
             VALIDER
-            <small>et nouvelle fiche · F4</small>
+            <small>sans imprimer · F4</small>
           </span>
         </button>
       </div>
 
-      {dialog === 'pay' && (
-        <PaymentDialog
-          total={totals.totalTtc}
-          needsSupervisor={discountNeedsCode}
-          cashRounding={settings.cashRounding}
-          allowCredit={Boolean(customer)}
-          onClose={() => setDialog(null)}
-          onPaid={async (payments, supervisorPin) => {
-            setDialog(null);
-            await sell(payments, { supervisorPin });
-          }}
-        />
-      )}
-      {dialog === 'customer' && (
-        <CustomerPickDialog
-          user={user}
-          onClose={() => setDialog(null)}
-          onPick={(c) => {
-            setCustomer(c);
-            // Livraison déjà cochée : l'adresse et le téléphone viennent de la fiche du client.
-            setDelivery((d) => (d.on ? { ...d, address: d.address || (c.address ?? ''), phone: d.phone || (c.phone ?? '') } : d));
-            setDialog(null);
-          }}
-        />
-      )}
-      {dialog === 'options' && askOption && (
-        <SupervisorPrompt
-          action={`${askOption.label} Vous n'avez pas ce droit : le code d'un gérant est demandé.`}
-          onCancel={() => setDialog(null)}
-          onConfirm={(pin) =>
-            call('auth.checkSupervisor', pin).then(() => {
-              setOptionsPin(pin);
-              askOption.apply();
-              setAskOption(null);
-              setDialog(null);
-            }, toast.error)
-          }
-        />
-      )}
-      {dialog === 'custPay' && (
-        <CustomerPaymentDialog
-          atRegister
-          onClose={() => setDialog(null)}
-          onPaid={(id) => {
-            setDialog(null);
-            call('customers.printReceipt', id).catch(toast.error);
-          }}
-        />
-      )}
-      {dialog === 'quote' && <QuotePickDialog onClose={() => setDialog(null)} onPick={(id) => void loadQuote(id)} />}
-      {dialog === 'expense' && (
-        <ExpenseDialog
-          atRegister
-          user={user}
-          needsSupervisor={!has(user, 'cashout')}
-          onClose={() => setDialog(null)}
-          onSaved={(e) => {
-            setDialog(null);
-            call('expenses.print', e.id).catch(toast.error);
-          }}
-        />
-      )}
-      {pending && (
-        <SupervisorPrompt
-          action={pending.message}
-          onCancel={() => setPending(null)}
-          onConfirm={(pin) => {
-            const p = pending;
-            setPending(null);
-            void sell(p.payments, p.reason === 'credit' ? { supervisorPin: p.supervisorPin, creditPin: pin } : { supervisorPin: pin });
-          }}
-        />
-      )}
-      {dialog === 'search' && (
-        <SaleSearchDialog
-          initialQuery={searchQuery}
-          customerId={customer?.id ?? null}
-          opts={saleOpts}
-          canCreate={canCreate}
-          onClose={() => setDialog(null)}
-          onPick={(row) => askQty(row)}
-          onCreateArticle={(name) => {
-            setCreating({ article: null, name });
-            setDialog('create');
-          }}
-          onCreateLevel={async (articleId, where) => {
-            try {
-              const article = await call('catalogue.get', articleId);
-              if (article.unit !== 'piece') return toast.error('Les conditionnements ne valent que pour les articles vendus à la pièce');
-              if (article.packs.length >= 3) return toast.error(`${article.name} a déjà 4 conditionnements`);
-              setCreating({ article, addLevel: where });
-              setDialog('create');
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        />
-      )}
-      {dialog === 'qty' && picked && (
-        <QtyPrompt
-          row={picked.row}
-          initial={picked.initial}
-          onClose={() => setDialog(null)}
-          inCart={lines.filter((l) => l.articleId === picked.row.article_id).reduce((t, l) => t + l.qty, 0)}
-          canPrice={has(user, 'price')}
-          ignoreStock={ignoreStock}
-          onDone={(q, price) => {
-            setDialog(null);
-            void addRow(picked.row, q, price);
-          }}
-        />
-      )}
-      {dialog === 'create' && creating && (
-        <ArticleForm
-          article={creating.article}
-          initialName={creating.name}
-          addLevel={creating.addLevel}
-          canSetStorePrice={false}
-          onClose={() => openSearch(searchQuery)}
-          onSaved={(a) => {
-            setCreating(null);
-            openSearch(creating.article ? searchQuery : a.name);
-          }}
-        />
-      )}
-      {dialog === 'weight' && weightFor && (
-        <WeightDialog
-          article={weightFor}
-          onClose={() => setDialog(null)}
-          onDone={(q) => {
-            addLine(toLine(weightFor, q, null));
-            setDialog(null);
-          }}
-        />
-      )}
-      {dialog === 'discount' && sel && (
-        <DiscountDialog
-          line={sel}
-          onClose={() => setDialog(null)}
-          onDone={(discount) => {
-            setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, discount } : l)));
-            setDialog(null);
-          }}
-        />
-      )}
-      {dialog === 'vary' && sel && (
-        <VaryDialog
-          line={sel}
-          level={level}
-          onClose={() => setDialog(null)}
-          onDiscount={() => setDialog('discount')}
-          onDone={(q, packId) => {
-            // Le prix saisi valait pour l'ancien conditionnement : on revient au tarif si l'on en change.
-            setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, qty: q, packId, price: packId === l.packId ? l.price : undefined } : l)));
-            setDialog(null);
-          }}
-        />
-      )}
-      {dialog === 'held' && (
-        <HeldDialog
-          onClose={() => {
-            setDialog(null);
-            held.reload();
-          }}
-          onResume={resume}
-        />
-      )}
-      {dialog === 'statement' && customer && (
-        <Modal title={`Extrait de compte : ${customer.name}`} onClose={() => setDialog(null)} wide>
-          <Statement customer={customer} />
-        </Modal>
-      )}
-      {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
-      {dialog === 'return' && <ReturnDialog onClose={() => setDialog(null)} />}
-      {(dialog === 'cashIn' || dialog === 'cashOut') && (
-        <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={!has(user, 'cashout')} onClose={() => setDialog(null)} />
-      )}
+      {dialogs}
     </div>
   );
 }

@@ -20,13 +20,13 @@ export interface PageHelp {
 
 const POS_KEYS: [string, string][] = [
   ['F1', 'Rechercher un produit'],
-  ['Entrée sur saisie vide ou F4', 'Valider la fiche'],
+  ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier ticket)'],
+  ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+  ['Entrée sur saisie vide ou F4', 'Enregistrer la fiche sans imprimer'],
   ['Ctrl+E', 'Encaisser : Mobile Money, carte, chèque, paiements mixtes'],
   ['F3 / F10', 'Mettre en attente / rappeler un ticket en attente'],
-  ['F2', 'Réimprimer le dernier ticket'],
   ['F5', 'Ouvrir le tiroir'],
   ['F6', 'Remise sur la ligne choisie'],
-  ['F7', 'Listing des factures'],
   ['F8', 'Choisir le client'],
   ['F9', 'Facture A4 du ticket'],
   ['+ / −', 'Quantité de la ligne choisie'],
@@ -45,7 +45,8 @@ const POS: PageHelp = {
         'Sans saisie, les tuiles montrent vos touches rapides (fiche du produit › « Touche rapide en caisse »).',
         'Pour plusieurs pièces, tapez « 3*code » ou « 3*riz ». Touchez une ligne du ticket pour ses boutons − et +, Varier, Remise et Enlever (ou les touches +, −, F6 et Suppr).',
         'Touchez les billets reçus (1 000, 2 000…) ou « Exact » : « Reçu » et « À rendre » s’affichent sous le total.',
-        'Le grand bouton vert VALIDER (F4, ou Entrée sur la zone de saisie vide) valide le ticket en espèces et l’imprime.',
+        'Pour finir : F2 valide et imprime le ticket de caisse, F7 valide et imprime la facture listing, et VALIDER (F4, ou Entrée sur la zone de saisie vide) enregistre seulement, sans imprimer. Le tiroir s’ouvre quand même pour une vente en espèces.',
+        'L’administrateur choisit la présentation de cet écran dans Administration › Paramètres › Écran de caisse : Moderne, Classique ou Conventionnel. Les fonctions et les touches sont les mêmes.',
       ],
     },
     {

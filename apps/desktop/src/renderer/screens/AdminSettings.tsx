@@ -1,7 +1,10 @@
-import { CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type StoreSettings } from '@superette/core';
+import { CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, POS_LAYOUTS, type PosLayout, type StoreSettings } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
+import classicShot from '../assets/caisse/classique.png';
+import conventionalShot from '../assets/caisse/conventionnel.png';
+import modernShot from '../assets/caisse/moderne.png';
 import { askConfirm, Empty, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -12,7 +15,16 @@ interface Item {
   label: string;
   hint?: string;
   render: () => ReactNode;
+  /** Sur toute la largeur de la section (les cartes de l'écran de caisse). */
+  wide?: boolean;
 }
+
+/** Les trois présentations de l'écran de caisse, avec leur vignette. */
+const LAYOUT_CARDS: { id: PosLayout; shot: string; text: string }[] = [
+  { id: 'modern', shot: modernShot, text: 'Tuiles des produits, ticket à droite, gros boutons. Idéal pour un écran tactile.' },
+  { id: 'classic', shot: classicShot, text: 'Tableau des lignes, boutons à droite, touches F en bas.' },
+  { id: 'conventional', shot: conventionalShot, text: 'Grand total en haut, ligne de saisie, cadre Règlement et « A rendre ».' },
+];
 
 /** Image choisie réduite à 512 points de large au plus, en PNG : elle reste légère pour le ticket. */
 function readLogo(file: File): Promise<string> {
@@ -152,6 +164,44 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
                 </button>
               )}
             </span>
+          ),
+        },
+      ],
+    ],
+    [
+      'Écran de caisse',
+      'Le modèle choisi s’applique à toutes les caisses du magasin. Les trois ont les mêmes fonctions et les mêmes touches (F2 ticket, F7 listing, F4 enregistrer).',
+      [
+        {
+          label: 'Modèle de l’écran de caisse moderne classique conventionnel',
+          wide: true,
+          render: () => (
+            <div className="layout-cards" role="radiogroup" aria-label="Modèle de l’écran de caisse">
+              {LAYOUT_CARDS.map((c) => (
+                <label key={c.id} className={`layout-card ${sv('posLayout') === c.id ? 'on' : ''} ${isAdmin ? '' : 'disabled'}`}>
+                  <img src={c.shot} alt="" />
+                  <span className="layout-name">
+                    <input type="radio" name="posLayout" disabled={!isAdmin} checked={sv('posLayout') === c.id} onChange={() => sset('posLayout', c.id)} />
+                    {POS_LAYOUTS[c.id]}
+                  </span>
+                  <small className="muted">{c.text}</small>
+                </label>
+              ))}
+            </div>
+          ),
+        },
+        {
+          label: `Exception pour ce poste (${state.data?.register?.name ?? 'ce PC'})`,
+          hint: isAdmin ? 'Choisissez un autre modèle seulement pour ce PC.' : 'Seul un administrateur peut changer l’écran de caisse.',
+          render: () => (
+            <select disabled={!isAdmin} value={v('pos.layout')} onChange={set('pos.layout')}>
+              <option value="">Comme le magasin</option>
+              {(Object.keys(POS_LAYOUTS) as PosLayout[]).map((k) => (
+                <option key={k} value={k}>
+                  {POS_LAYOUTS[k]}
+                </option>
+              ))}
+            </select>
           ),
         },
       ],
@@ -439,6 +489,20 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
             </select>
           ),
         },
+        {
+          label: 'Imprimante listing (factures F7)',
+          hint: 'Imprimante à papier continu : la facture listing y part directement, sans fenêtre Windows.',
+          render: () => (
+            <select disabled={!canEdit} value={v('printer.listing')} onChange={set('printer.listing')}>
+              <option value="">Demander à chaque fois (fenêtre d’impression)</option>
+              {(printers.data ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
         { label: 'Pied de ticket', render: () => <input disabled={!canEdit} value={v('ticket.footer', 'Merci de votre visite !')} onChange={set('ticket.footer')} /> },
         {
           label: 'Page de test',
@@ -538,13 +602,19 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
           <h3>{title}</h3>
           {intro && <p className="muted">{intro}</p>}
           {items.map((i) => (
-            <div key={i.label} className="settings-row">
-              <div>
-                <div>{i.label}</div>
-                {i.hint && <small className="muted">{i.hint}</small>}
+            i.wide ? (
+              <div key={i.label} className="settings-row wide">
+                {i.render()}
               </div>
-              <div>{i.render()}</div>
-            </div>
+            ) : (
+              <div key={i.label} className="settings-row">
+                <div>
+                  <div>{i.label}</div>
+                  {i.hint && <small className="muted">{i.hint}</small>}
+                </div>
+                <div>{i.render()}</div>
+              </div>
+            )
           ))}
         </section>
       ))}

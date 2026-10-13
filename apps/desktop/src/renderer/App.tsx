@@ -850,6 +850,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 onRegisterChosen={refresh}
                 vatEnabled={state.station?.store.vat_enabled !== 0}
                 ignoreStock={state.station?.store.ignore_stock === 1}
+                layout={state.posLayout}
                 active={w.kind === active}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
@@ -1053,13 +1054,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               {[
                 ['Ctrl+K', 'Rechercher un écran par son nom'],
                 ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
-                ['F4 ou Entrée sur saisie vide', 'Valider la fiche (espèces si l’encaissé couvre le total)'],
+                ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
+                ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+                ['F4 ou Entrée sur saisie vide', 'Enregistrer la fiche sans imprimer'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],
                 ['F10', 'Rappeler un ticket en attente'],
-                ['F2', 'Réimprimer le dernier ticket'],
                 ['F6', 'Remise sur la ligne sélectionnée'],
-                ['F7', 'Listing des factures'],
                 ['+ / −', 'Quantité de la ligne sélectionnée'],
                 ['Suppr', 'Enlever la ligne sélectionnée'],
                 ['3*code', 'Ajouter 3 unités du code scanné'],

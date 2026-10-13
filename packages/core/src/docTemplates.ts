@@ -42,10 +42,13 @@ export const DOC_KIND_VARIANTS: Record<DocKind, DocVariant[]> = {
   purchaseOrder: ['order'],
   purchaseInvoice: ['supplierInvoice'],
 };
-export const DOC_PAPERS = { '80mm': 'Rouleau 80 mm', '58mm': 'Rouleau 58 mm', A4: 'A4', A5: 'A5' } as const;
+export const DOC_PAPERS = { '80mm': 'Rouleau 80 mm', '58mm': 'Rouleau 58 mm', A4: 'A4', A5: 'A5', listing: 'Listing 240 mm (hauteur selon le contenu)' } as const;
 export type DocPaper = keyof typeof DOC_PAPERS;
 export const DOC_FONTS = { sans: 'Arial (sans empattement)', serif: 'Times (avec empattement)', mono: 'Courier (machine à écrire)' } as const;
 export type DocFont = keyof typeof DOC_FONTS;
+/** Présentation d'un document A4 ou listing : « encadré », celle des factures listing (cadre, cases DATE / CLIENT, NET À PAYER). */
+export const DOC_STYLES = { plain: 'Simple', framed: 'Encadrée (facture listing)' } as const;
+export type DocStyle = keyof typeof DOC_STYLES;
 
 /** Colonnes possibles du tableau des articles, avec leur titre par défaut. */
 export const DOC_COLUMNS = {
@@ -102,6 +105,8 @@ export interface DocTemplate {
     copies: number;
     /** Cadres autour des cellules du tableau. */
     borders: boolean;
+    /** Présentation simple ou encadrée. */
+    style: DocStyle;
   };
   header: {
     logo: boolean;
@@ -154,6 +159,8 @@ export interface DocTemplate {
     signRight: string;
     /** « DUPLICATA » sur les réimpressions. */
     duplicate: boolean;
+    /** Remarque à gauche du montant en lettres (présentation encadrée), « Merci de votre fidélité ». */
+    remark: string;
   };
 }
 
@@ -203,6 +210,8 @@ export interface DocData {
     validUntil?: string | null;
     /** Observations saisies sur le document. */
     notes?: string | null;
+    /** Dépôt d'où sort la marchandise (« MAG. DE LIVR. » sur la facture listing). */
+    warehouse?: string | null;
     /** Autres informations du document (« Facture fournisseur n° 123 du 10/10/2026 », « Livrer à : Magasin »). */
     extra?: string[];
   };
@@ -231,6 +240,8 @@ export interface DocLine {
   promoName: string | null;
   /** Plus d'une unité ou un conditionnement : le ticket détaille « 6 x 650 ». */
   detail: boolean;
+  /** Unité de vente d'un article à la pièce (« Sac », « Pièce ») : colonne COND. de la facture listing. */
+  unitName?: string;
   /** Achats : référence chez le fournisseur, remise en %, gratuits, coût net. */
   supplierRef?: string | null;
   discountLabel?: string;
@@ -252,36 +263,60 @@ const TICKET_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   doc: 'invoice',
   format: 'ticket',
   builtin: true,
-  page: { paper: '80mm', landscape: false, margin: 4, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false },
+  page: { paper: '80mm', landscape: false, margin: 4, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false, style: 'plain' },
   header: { logo: true, logoSize: 25, logoAlign: 'center', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: false, address: false, phone: false, niu: false, balance: false },
   info: { title: '', number: true, date: true, time: true, seller: true, register: false, priceLevel: true, dueDate: true, validUntil: false },
   columns: cols({ label: 0, qty: 0, unitPrice: 0, discount: 0, totalTtc: 0 }),
   totals: { ttc: true, ht: false, vatDetail: true, discount: false, promo: true, rounding: true, payments: true, change: true, remaining: false, words: false },
-  footer: { text: '', thanks: '', signatures: false, signLeft: 'Le client', signRight: '', duplicate: true },
+  footer: { text: '', thanks: '', signatures: false, signLeft: 'Le client', signRight: '', duplicate: true, remark: '' },
 };
 
 const A4_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   doc: 'invoice',
   format: 'a4',
   builtin: true,
-  page: { paper: 'A4', landscape: false, margin: 15, font: 'sans', fontSize: 12, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: true },
+  page: { paper: 'A4', landscape: false, margin: 15, font: 'sans', fontSize: 12, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: true, style: 'plain' },
   header: { logo: true, logoSize: 22, logoAlign: 'left', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: true, address: true, phone: true, niu: true, balance: false },
   info: { title: 'Facture', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: true, validUntil: false },
   columns: cols({ label: 0, qty: 10, unitPrice: 12, discount: 9, vat: 9, totalHt: 12, totalTtc: 13 }),
   totals: { ttc: true, ht: true, vatDetail: true, discount: false, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
-  footer: { text: '', thanks: '', signatures: true, signLeft: 'Le client', signRight: 'Pour {magasin}', duplicate: true },
+  footer: { text: '', thanks: '', signatures: true, signLeft: 'Le client', signRight: 'Pour {magasin}', duplicate: true, remark: '' },
 };
 
 const LISTING_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   ...A4_BASE,
   format: 'listing',
-  page: { paper: 'A4', landscape: false, margin: 10, font: 'mono', fontSize: 10, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false },
+  page: { paper: 'A4', landscape: false, margin: 10, font: 'mono', fontSize: 10, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false, style: 'plain' },
   header: { ...A4_BASE.header, logo: false },
   customer: { show: true, code: true, address: false, phone: true, niu: true, balance: false },
   columns: cols({ code: 12, label: 0, qty: 11, unitPrice: 12, discount: 10, totalTtc: 13 }),
   totals: { ttc: true, ht: true, vatDetail: true, discount: true, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
+};
+
+/**
+ * Facture listing (touche F7) : imprimante à papier continu, 240 mm de large,
+ * hauteur selon le contenu ; cadre, cases DATE / CLIENT / RÉF., tableau
+ * encadré, montant en lettres, nombre de colis et NET À PAYER.
+ */
+const LISTING_INVOICE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
+  ...LISTING_BASE,
+  page: { ...LISTING_BASE.page, paper: 'listing', margin: 6, fontSize: 11, lineHeight: 0, borders: true, style: 'framed' },
+  header: { ...LISTING_BASE.header, logo: true, logoSize: 22, logoAlign: 'left' },
+  customer: { show: true, code: true, address: false, phone: false, niu: false, balance: false },
+  info: { ...LISTING_BASE.info, title: 'Facture', time: true, dueDate: false },
+  columns: cols({ code: [13, 'RÉF'], label: [0, 'DÉSIGNATION'], qty: [7, 'QTÉ'], unit: [9, 'COND.'], unitPrice: [10, 'PU'], totalTtc: [12, 'TOTAL'] }),
+  totals: { ttc: true, ht: false, vatDetail: false, discount: false, promo: false, rounding: false, payments: false, change: false, remaining: false, words: true },
+  footer: {
+    text: 'Veuillez toujours vérifier la qualité et la quantité de vos marchandises avant de les emporter.',
+    thanks: '',
+    signatures: false,
+    signLeft: '',
+    signRight: '',
+    duplicate: true,
+    remark: 'Merci de votre fidélité',
+  },
 };
 
 /** Modèles livrés avec le logiciel, un par emplacement. */
@@ -307,15 +342,15 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
     info: { ...A4_BASE.info, title: 'Facture à terme' },
     totals: { ...A4_BASE.totals, remaining: true, words: true },
   },
-  { ...LISTING_BASE, id: 'invoice-listing-cash', variant: 'cash', name: 'Facture listing comptant' },
+  { ...LISTING_INVOICE, id: 'invoice-listing-cash', variant: 'cash', name: 'Facture listing comptant' },
   {
-    ...LISTING_BASE,
+    ...LISTING_INVOICE,
     id: 'invoice-listing-credit',
     variant: 'credit',
     name: 'Facture listing à terme',
-    info: { ...LISTING_BASE.info, title: 'Facture à terme' },
-    customer: { ...LISTING_BASE.customer, balance: true },
-    totals: { ...LISTING_BASE.totals, remaining: true, words: true },
+    info: { ...LISTING_INVOICE.info, title: 'Facture à terme', dueDate: true },
+    customer: { ...LISTING_INVOICE.customer, balance: true },
+    totals: { ...LISTING_INVOICE.totals, remaining: true },
   },
   ...(['quote', 'proforma'] as const).flatMap((variant): DocTemplate[] => {
     const proforma = variant === 'proforma';
@@ -329,6 +364,7 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
       signLeft: 'Bon pour accord, le client\nDate et signature',
       signRight: 'Pour {magasin}',
       duplicate: false,
+      remark: '',
     };
     return [
       { ...A4_BASE, doc: 'quote', id: `quote-a4-${variant}`, variant, name: `${label} A4`, info, totals, footer },
@@ -356,6 +392,7 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
       signLeft: 'Livré par',
       signRight: 'Reçu par\n(nom, date et signature)',
       duplicate: true,
+      remark: '',
     };
     const customer = { show: true, code: true, address: true, phone: true, niu: false, balance: false };
     return [
@@ -381,12 +418,12 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
     const order = {
       info: { title: 'Bon de commande', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: false, validUntil: false },
       totals: { ...noTotals, ht: true },
-      footer: { text: '', thanks: '', signatures: true, signLeft: 'Établi par {vendeur}', signRight: 'Signature et cachet', duplicate: false },
+      footer: { text: '', thanks: '', signatures: true, signLeft: 'Établi par {vendeur}', signRight: 'Signature et cachet', duplicate: false, remark: '' },
     };
     const invoice = {
       info: { title: 'Facture d’achat', number: true, date: true, time: false, seller: false, register: false, priceLevel: false, dueDate: true, validUntil: false },
       totals: { ...noTotals, ttc: true, ht: true, vatDetail: true, discount: true, payments: true, remaining: true },
-      footer: { text: '', thanks: '', signatures: true, signLeft: 'Contrôlé par', signRight: 'Visa', duplicate: false },
+      footer: { text: '', thanks: '', signatures: true, signLeft: 'Contrôlé par', signRight: 'Visa', duplicate: false, remark: '' },
     };
     const ticket = { ...TICKET_BASE, customer: { ...supplier, address: false, niu: false } };
     return [
@@ -510,6 +547,7 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
       lineHeight: clamp(p.lineHeight, 0, 30, 0),
       copies: clamp(p.copies, 1, 5, 1),
       borders: bool(p.borders, base.page.borders),
+      style: pick(p.style, Object.keys(DOC_STYLES) as DocStyle[], base.page.style),
     },
     header: {
       ...bools(h, base.header),
@@ -691,7 +729,7 @@ const FONTS: Record<DocFont, string> = {
   serif: "'Times New Roman', Georgia, serif",
   mono: "Consolas, 'Courier New', monospace",
 };
-const PAPER_MM: Record<DocPaper, [number, number]> = { '80mm': [80, 0], '58mm': [58, 0], A4: [210, 297], A5: [148, 210] };
+const PAPER_MM: Record<DocPaper, [number, number]> = { '80mm': [80, 0], '58mm': [58, 0], A4: [210, 297], A5: [148, 210], listing: [240, 0] };
 
 /** Dimensions de la page en mm (largeur, hauteur ; hauteur 0 : rouleau). */
 export function pageSize(t: DocTemplate): { width: number; height: number } {
@@ -707,7 +745,7 @@ function pageCss(t: DocTemplate): string {
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body { font: ${t.page.fontSize}px/1.35 ${FONTS[t.page.font]}; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sheet { ${height ? '' : `width: ${width}mm; padding: 0 ${m}mm;`} }
+  .sheet { ${height ? '' : `width: ${width}mm; padding: ${t.format === 'ticket' ? `0 ${m}mm` : `${m}mm`};`} }
   @media screen {
     html { background: #8a8f98; }
     body { padding: 16px 0; }
@@ -765,6 +803,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   const wrap = (css: string, body: string) =>
     `<!doctype html><html><head><meta charset="utf-8"><style>${pageCss(t)}${css}</style></head><body><div class="sheet">${body}</div></body></html>`;
   if (t.format === 'ticket') return wrap(`${TICKET_CSS} .c img { max-height: ${t.header.logoSize}mm !important; }`, receiptToHtml(renderDocTicket(t, d)));
+  if (t.page.style === 'framed') return wrap(framedCss(t), framedBody(t, d));
 
   const noVat = docWithoutVat(d);
   const h = t.header;
@@ -868,13 +907,165 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   );
 }
 
+/** Nombre de colis : somme des quantités entières, une ligne au poids compte pour un colis. */
+export function parcelCount(lines: readonly DocLine[]): number {
+  return lines.reduce((n, l) => {
+    const q = Number(/^-?[\d\s ]*[.,]?\d*/.exec(l.qty)?.[0].replace(/[\s ]/g, '').replace(',', '.') ?? 0);
+    return n + (Number.isFinite(q) && q > 0 ? (Number.isInteger(q) ? q : 1) : 0);
+  }, 0);
+}
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter((w) => /^[\p{L}\d]/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('');
+
+function framedCss(t: DocTemplate): string {
+  const lh = t.page.lineHeight;
+  return `
+  .frame { border: 2px solid #111; padding: 3mm 3.5mm; }
+  .fhead { display: flex; gap: 4mm; align-items: center; }
+  .fhead img { height: ${t.header.logoSize}mm; width: auto; }
+  .flogo { width: ${t.header.logoSize}mm; height: ${t.header.logoSize}mm; border: 3px solid #111; border-radius: 50%; display: grid; place-items: center; font: 900 ${Math.round(t.header.logoSize * 1.3)}px Georgia, serif; flex: none; }
+  .fhead h1 { margin: 0; font: 900 1.75em Arial, sans-serif; }
+  .fhead p { margin: 0; }
+  .fhead .notes { white-space: pre-line; }
+  .ftitle { display: flex; flex-direction: column; align-items: center; margin: 2mm 0 1.5mm; }
+  .ftitle h2 { margin: 0 0 1mm; font: 900 1.6em Georgia, serif; }
+  table { border-collapse: collapse; }
+  .fbox td, .fbox th, .fsum td, .fsum th { border: 1px solid #111; padding: 1px 3mm; text-align: center; }
+  .fbox th, .fsum th, .flines th { background: #eee; font-weight: bold; }
+  .fmag { margin: 1.5mm 0 2mm; }
+  .flines { width: 100%; table-layout: fixed; border: 1px solid #111; }
+  .flines th { border: 1px solid #111; padding: 1px 1.5mm; text-align: left; }
+  .flines td { border-left: 1px solid #111; border-right: 1px solid #111; padding: 0 1.5mm; vertical-align: top; overflow-wrap: anywhere; ${lh ? `height: ${lh}mm;` : ''} }
+  .flines tbody tr.fill td { height: 12mm; }
+  .flines tbody td.up { text-transform: uppercase; }
+  .flines thead { display: table-header-group; }
+  .r { text-align: right !important; }
+  .ftotal { display: flex; justify-content: flex-end; }
+  .ftotal div { border: 1px solid #111; border-top: none; padding: 1px 1.5mm; font-weight: bold; text-align: right; font-size: 1.1em; }
+  .fbottom { display: flex; gap: 4mm; align-items: flex-start; margin-top: 2.5mm; break-inside: avoid; }
+  .fremark { flex: 0 0 34%; font-style: italic; padding: 0 1.5mm; white-space: pre-line; }
+  .fsum { flex: 1; width: 100%; }
+  .fsum td { padding: 1px 2mm; }
+  .fsum .words { width: 62%; }
+  .fextra { margin-top: 1.5mm; }
+  .fslogan { text-align: center; font: bold 1.15em Arial, sans-serif; margin-top: 2.5mm; text-transform: uppercase; }
+  .notes { white-space: pre-line; }
+  .fids, .fby { display: flex; justify-content: space-between; margin-top: 1.5mm; }
+  .dup { font-weight: bold; letter-spacing: 2px; color: #a00; }
+  .muted { color: #444; }`;
+}
+
+/** Facture encadrée (listing) : cadre, cases DATE / CLIENT / RÉF., tableau, montant en lettres, NB COLIS, NET À PAYER. */
+function framedBody(t: DocTemplate, d: DocData): string {
+  const noVat = docWithoutVat(d);
+  const h = t.header;
+  const logo = !h.logo ? '' : d.store.logo ? `<img src="${esc(d.store.logo)}" alt="">` : `<div class="flogo">${esc(initials(d.store.name))}</div>`;
+  const ident = [
+    h.storeName ? `<h1>${esc(d.store.name)}</h1>` : '',
+    h.message ? `<p class="notes">${nl(fill(h.message, d))}</p>` : '',
+    h.address && d.store.address ? `<p>${esc(d.store.address)}</p>` : '',
+    h.phone && d.store.phone ? `<p>Tél ${esc(d.store.phone)}</p>` : '',
+  ].join('');
+  const c = d.customer;
+  const cu = t.customer;
+  const title = docTitle(t, d);
+  const when = t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date);
+  const heads = [t.info.date ? 'DATE' : '', cu.show ? (d.partyLabel ?? 'Client').toUpperCase() : '', cu.show && cu.code ? 'RÉF.' : ''];
+  const vals = [t.info.date ? esc(when) : '', cu.show ? esc((c?.name ?? 'Client comptoir').toUpperCase()) : '', cu.show && cu.code ? esc(c?.code ?? '') : ''];
+  const box = heads.some(Boolean)
+    ? `<table class="fbox"><tr>${heads.filter(Boolean).map((x) => `<th>${x}</th>`).join('')}</tr><tr>${vals.filter((_, i) => heads[i]).map((x) => `<td>${x}</td>`).join('')}</tr></table>`
+    : '';
+  const extra = [
+    d.doc.warehouse ? `MAG. DE LIVR. : ${esc(d.doc.warehouse.toUpperCase())}` : '',
+    cu.show && c && !c.counter && cu.phone && c.phone ? `Tél. client : ${esc(c.phone)}` : '',
+    cu.show && c && !c.counter && cu.address && c.address ? esc(c.address) : '',
+    cu.show && c && !c.counter && cu.niu && c.niu ? `NIU client : ${esc(c.niu)}` : '',
+    t.info.dueDate && d.doc.dueDate ? `Échéance : ${dayFr(d.doc.dueDate)}` : '',
+    t.info.validUntil && d.doc.validUntil ? `Valable jusqu'au ${dayFr(d.doc.validUntil)}` : '',
+    t.info.priceLevel && d.doc.priceLevel ? `Tarif : ${esc(d.doc.priceLevel)}` : '',
+    t.info.register && d.doc.register ? `Caisse : ${esc(d.doc.register)}` : '',
+    ...(d.doc.extra ?? []).map(esc),
+  ].filter(Boolean);
+
+  const columns = shown(t, d);
+  const showUnit = columns.some((x) => x.key === 'unit');
+  const cell = (key: DocColumnKey, l: DocLine, i: number): string => {
+    switch (key) {
+      case 'line': return String(i + 1);
+      case 'supplierRef': return esc(l.supplierRef ?? '');
+      case 'freeQty': return esc(l.freeQty ?? '');
+      case 'netCost': return l.netCost === undefined ? '' : money(l.netCost);
+      case 'code': return esc(l.code ?? '');
+      case 'barcode': return esc(l.barcode ?? '');
+      case 'label': return esc(l.label);
+      case 'qty': return esc(`${l.qty}${!showUnit && l.unit ? ` ${l.unit}` : ''}`);
+      case 'unit': return esc(l.unit || l.unitName || '');
+      case 'unitPrice': return money(l.unitPrice);
+      case 'unitPriceHt': return money(l.unitPriceHt);
+      case 'discount': return l.discountLabel ? esc(l.discountLabel) : l.discount ? money(l.discount) : '';
+      case 'vat': return formatRate(l.vatRate);
+      case 'totalHt': return money(l.totalHt);
+      case 'totalTtc': return money(l.totalTtc);
+    }
+  };
+  const cls = (k: DocColumnKey) => (NUMERIC_COLUMNS.includes(k) ? ' class="r"' : k === 'label' || k === 'unit' ? ' class="up"' : '');
+  const lastWidth = columns.at(-1)?.width || 12;
+  const table = `<table class="flines"><colgroup>${columns.map((x) => `<col${x.width ? ` style="width:${x.width}%"` : ''}>`).join('')}</colgroup>
+    <thead><tr>${columns.map((x) => `<th${NUMERIC_COLUMNS.includes(x.key) ? ' class="r"' : ''}>${esc(tx(x.label, noVat))}</th>`).join('')}</tr></thead>
+    <tbody>${d.lines.map((l, i) => `<tr>${columns.map((x) => `<td${cls(x.key)}>${cell(x.key, l, i)}</td>`).join('')}</tr>`).join('')}<tr class="fill">${columns.map(() => '<td></td>').join('')}</tr></tbody></table>`;
+  const tot = d.totals;
+  const total = t.totals.ttc || t.totals.ht ? `<div class="ftotal"><div style="width:${lastWidth}%">${money(t.totals.ttc ? tot.ttc : tot.ht)}</div></div>` : '';
+  const sumHeads = [t.totals.words ? '<th class="words">MONTANT EN LETTRES</th>' : '', '<th>NB COLIS</th>', t.totals.ttc ? '<th>NET À PAYER</th>' : ''].join('');
+  const sumVals = [
+    t.totals.words ? `<td class="words">${esc(cap(numberToWordsFr(Math.max(0, tot.ttc))))}</td>` : '',
+    `<td>${parcelCount(d.lines)}</td>`,
+    t.totals.ttc ? `<td><b>${money(tot.ttc)}</b></td>` : '',
+  ].join('');
+  const after = [
+    t.totals.ht && !noVat ? `${tx('Total HT', false)} : ${money(tot.ht)}` : '',
+    t.totals.vatDetail && !noVat ? vatRows(d).filter((v) => v.tva).map((v) => `${v.label} : ${money(v.tva)}`).join(' · ') : '',
+    t.totals.vatDetail && noVat ? 'TVA non applicable' : '',
+    t.totals.discount && tot.discount ? `Remises accordées : ${money(tot.discount)}` : '',
+    t.totals.payments ? d.payments.map((p) => `${esc(p.label)} : ${money(p.amount)}`).join(' · ') : '',
+    t.totals.change && tot.change ? `Rendu monnaie : ${money(tot.change)}` : '',
+    t.totals.remaining && tot.remaining ? `<b>Reste à payer : ${money(tot.remaining)}</b>` : '',
+    cu.show && cu.balance && c?.balance != null ? `Solde de votre compte : <b>${money(c.balance)}</b>` : '',
+  ].filter(Boolean);
+  const ids = [h.niu && d.store.niu ? `N° CONTR. : ${esc(d.store.niu)}` : '', h.rccm && d.store.rccm ? `RCCM : ${esc(d.store.rccm)}` : ''];
+  const body = `<div class="frame">
+    <div class="fhead">${logo}<div>${ident}</div></div>
+    <div class="ftitle"><h2>${esc(title.toUpperCase())}${t.info.number ? ` N° ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (ANNULÉE)' : ''}${
+      d.doc.duplicate && t.footer.duplicate ? ' <span class="dup">DUPLICATA</span>' : ''
+    }</h2>${box}</div>
+    ${extra.length ? `<div class="fmag">${extra.join(' · ')}</div>` : ''}
+    ${table}${total}
+    <div class="fbottom"><div class="fremark">${nl(fill(t.footer.remark, d))}</div><table class="fsum"><tr>${sumHeads}</tr><tr>${sumVals}</tr></table></div>
+    ${after.length ? `<div class="fextra">${after.join(' · ')}</div>` : ''}
+    ${d.doc.notes ? `<div class="fextra notes">${nl(d.doc.notes)}</div>` : ''}
+    ${t.footer.thanks ? `<div class="fslogan">${nl(fill(t.footer.thanks, d))}</div>` : ''}
+    ${t.footer.text ? `<div class="notes">${nl(fill(t.footer.text, d))}</div>` : ''}
+    ${ids.some(Boolean) ? `<div class="fids"><span>${ids[0]}</span><span>${ids[1]}</span></div>` : ''}
+    ${t.footer.signatures ? `<div class="fids" style="min-height:18mm"><span>${nl(fill(t.footer.signLeft, d))}</span><span>${nl(fill(t.footer.signRight, d))}</span></div>` : ''}
+    <div class="fby"><span>${t.info.seller && d.doc.seller ? `${d.partyLabel ? 'ÉTABLI' : 'FACTURÉ'} PAR : ${esc(d.doc.seller.toUpperCase())}` : ''}</span><span>FEDO Gestion</span><span></span></div>
+  </div>`;
+  return body;
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** Facture d'exemple pour l'aperçu d'un modèle quand le magasin n'a pas encore vendu. */
 export function sampleDocData(variant: DocVariant, store?: Partial<DocData['store']>): DocData {
   const credit = variant === 'credit';
   const line = (code: string, label: string, qty: number, unit: string, unitPrice: number, vatRate: number, discount = 0): DocLine => {
     const totalTtc = qty * unitPrice - discount;
     const totalHt = splitTtc(totalTtc, vatRate).ht;
-    return { code, barcode: `61${code.replace(/\D/g, '').padStart(11, '0')}`, label, qty: String(qty), unit, unitPrice, unitPriceHt: splitTtc(unitPrice, vatRate).ht, discount, vatRate, totalHt, totalTtc, promo: 0, promoName: null, detail: qty !== 1 || Boolean(unit) };
+    return { code, barcode: `61${code.replace(/\D/g, '').padStart(11, '0')}`, label, qty: String(qty), unit, unitPrice, unitPriceHt: splitTtc(unitPrice, vatRate).ht, discount, vatRate, totalHt, totalTtc, promo: 0, promoName: null, detail: qty !== 1 || Boolean(unit), unitName: unit ? undefined : 'Pièce' };
   };
   const lines = [
     line('BOI012', 'Bière Castel 65 cl', 2, 'CASIER', 7800, 1925),
@@ -905,6 +1096,7 @@ export function sampleDocData(variant: DocVariant, store?: Partial<DocData['stor
       duplicate: false,
       validUntil: quote ? inDays(15) : null,
       notes: quote ? 'Livraison possible à Bonabéri.' : null,
+      warehouse: quote ? null : 'Surface de vente',
     },
     lines,
     payments: credit ? [{ label: 'Espèces', amount: 10000 }, { label: 'Crédit client', amount: ttc - 10000 }] : quote ? [] : [{ label: 'Espèces', amount: paid }],

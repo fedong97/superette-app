@@ -4,6 +4,7 @@ import {
   effectiveTemplates,
   mergeStoreSettings,
   normalizeTemplate,
+  parcelCount,
   receiptToText,
   renderDocHtml,
   renderDocTicket,
@@ -112,5 +113,23 @@ describe('modèles d’impression', () => {
     expect(text).toContain('Le client :');
     // Le même modèle en aperçu HTML.
     expect(renderDocHtml(builtin('invoice-ticket-credit'), d)).toContain('size: 80mm auto');
+  });
+
+  it('facture listing (F7) : encadrée, papier continu, cases DATE / CLIENT, montant en lettres, nombre de colis, net à payer', () => {
+    const t = builtin('invoice-listing-cash');
+    expect(t.page).toMatchObject({ paper: 'listing', style: 'framed' });
+    const d = sampleDocData('credit');
+    const html = renderDocHtml(t, { ...d, doc: { ...d.doc, warehouse: 'Surface de vente' } });
+    for (const s of ['class="frame"', 'DATE', 'CLIENT', 'MAG. DE LIVR. : SURFACE DE VENTE', 'MONTANT EN LETTRES', 'NB COLIS', 'NET À PAYER', 'Merci de votre fidélité', 'FACTURÉ PAR : AWA', 'size: 240mm auto'])
+      expect(html).toContain(s);
+    expect(parcelCount([{ qty: '2' }, { qty: '3' }, { qty: '1,250 kg' }] as never)).toBe(6);
+    // Un ancien modèle enregistré sans présentation reste « simple ».
+    expect(normalizeTemplate({ id: 'x', name: 'Ancien', doc: 'invoice', format: 'a4', variant: 'cash' }).page.style).toBe('plain');
+  });
+
+  it('écran de caisse : moderne par défaut, seulement les trois présentations', () => {
+    expect(mergeStoreSettings(null, {}).posLayout).toBe('modern');
+    expect(mergeStoreSettings(null, { posLayout: 'classic' }).posLayout).toBe('classic');
+    expect(() => mergeStoreSettings(null, { posLayout: 'autre' as never })).toThrow('écran de caisse');
   });
 });

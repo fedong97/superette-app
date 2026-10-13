@@ -14,6 +14,8 @@ import {
   type StockLevel,
   type RegisterKind,
   type StoreSettings,
+  type PosLayout,
+  POS_LAYOUTS,
   type DocFormat,
   type DocTemplate,
   type DocVariant,
@@ -96,7 +98,9 @@ export interface InvoicePrintOptions {
 
 export interface Printer {
   /** `newSale` : ticket d'une vente qui vient d'être encaissée (ouvre le tiroir selon les réglages). */
-  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null }): Promise<void>;
+  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null; force?: boolean }): Promise<void>;
+  /** Tiroir d'une vente enregistrée sans ticket (F4) : il s'ouvre selon les réglages, comme avec le ticket. */
+  saleDrawer(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
@@ -172,6 +176,8 @@ const LOCAL_SETTINGS = [
   'drawer.mode',
   'ticket.footer',
   'display.size',
+  'pos.layout',
+  'printer.listing',
   'backup.autoTime',
 ];
 
@@ -316,6 +322,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
       /** Taille du texte réglée sur ce PC (Paramètres › Affichage). */
       display: s.admin.getSetting('display.size') === 'large' ? 'large' : 'normal',
+      /** Présentation de l'écran de caisse : celle de ce PC s'il a une exception, sinon celle du magasin. */
+      posLayout: ((): PosLayout => {
+        const own = s.admin.getSetting('pos.layout');
+        if (own && own in POS_LAYOUTS) return own as PosLayout;
+        const station = s.admin.station();
+        return station ? s.admin.storeSettings(station.store.id).posLayout : 'modern';
+      })(),
     }),
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
     'setup.bootstrap': (input: BootstrapInput) => {
@@ -405,6 +418,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireUser(['settings_edit']);
       for (const [k, v] of Object.entries(values)) {
         if (!LOCAL_SETTINGS.includes(k)) throw new AppError(`Réglage inconnu : ${k}`, 'INVALID');
+        if (k === 'pos.layout') {
+          requireAdmin();
+          if (v && !(v in POS_LAYOUTS)) throw new AppError("Présentation de l'écran de caisse inconnue", 'INVALID');
+        }
         if (k === 'backup.autoTime') s.backups.configure(user!.id, { autoTime: v || null });
         else s.admin.setSetting(k, v);
       }
@@ -431,6 +448,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.storeSettings': () => s.admin.storeSettings(ctx().storeId),
     'admin.saveStoreSettings': (patch: Partial<StoreSettings>) => {
       const c = ctx(['settings_edit']);
+      if (patch.posLayout !== undefined) requireAdmin();
       return s.admin.saveStoreSettings(c.userId, c.storeId, patch);
     },
     'admin.audit': () => (requireUser(['audit']), s.admin.auditLog()),
@@ -753,11 +771,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.zReport': (sessionId: string) => (requireAmounts(), requireUser(['cash_z']), s.pos.zReport(sessionId)),
     'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(['cash_history']).storeId)),
     /** Ticket d'une vente qui vient d'être faite (autant d'exemplaires que réglé), ou réimpression avec le droit. */
-    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean; templateId?: string | null }) => {
+    /** `force` : ticket demandé à la validation (F2), imprimé même si l'impression automatique est coupée. */
+    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean; templateId?: string | null; force?: boolean }) => {
       const u = requireSaleAccess(saleId);
       const fresh = Boolean(opts?.newSale && can(u, POS));
       if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer un ticket", 'FORBIDDEN');
-      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId });
+      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId, force: Boolean(opts?.force) });
+    },
+    /** Vente enregistrée sans ticket ou en listing : le tiroir s'ouvre comme au ticket, juste après la vente par son vendeur. */
+    'pos.saleDrawer': (saleId: string) => {
+      if (!invoiceAccess(saleId)) return;
+      return printer.saleDrawer(saleId);
     },
     /** Ouverture du tiroir sans encaissement : tracée dans le journal d'audit. */
     'pos.openDrawer': async () => {

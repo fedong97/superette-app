@@ -71,11 +71,18 @@ export interface StoreSettings {
   prefixProforma: string;
   prefixOrder: string;
 
+  /** Présentation de l'écran de caisse pour tout le magasin ; un poste peut avoir son exception (Paramètres). */
+  posLayout: PosLayout;
+
   /** Modèles d'impression modifiés ou ajoutés (ceux du logiciel servent pour le reste). */
   printTemplates: DocTemplate[];
   /** Modèle choisi par emplacement (« invoice.a4.credit ») : identifiant de modèle. */
   printDefaults: Record<string, string>;
 }
+
+/** Présentations de l'écran de caisse : mêmes fonctions et mêmes touches, disposition différente. */
+export type PosLayout = 'modern' | 'classic' | 'conventional';
+export const POS_LAYOUTS: Record<PosLayout, string> = { modern: 'Moderne', classic: 'Classique', conventional: 'Conventionnel' };
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   rccm: '',
@@ -106,6 +113,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   prefixQuote: 'DV',
   prefixProforma: 'PF',
   prefixOrder: 'BC',
+  posLayout: 'modern',
   printTemplates: [],
   printDefaults: {},
 };
@@ -160,6 +168,7 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
         if (!/^[A-Z0-9]{0,6}$/.test(s)) throw new Error('Préfixe : 6 lettres ou chiffres au plus, sans espace');
       }
       if (k === 'logo' && s && !s.startsWith('data:image/')) throw new Error('Logo : image attendue');
+      if (k === 'posLayout' && !(s in POS_LAYOUTS)) throw new Error("Présentation de l'écran de caisse : moderne, classique ou conventionnel");
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);

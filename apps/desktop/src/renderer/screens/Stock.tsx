@@ -87,6 +87,24 @@ function StockState({ critical = false }: { critical?: boolean }) {
   const rows = { ...loaded, data: level === 'critical' ? loaded.data?.filter((r) => r.level === 'rupture' || r.level === 'alerte') : loaded.data };
   const wh = useLoad(() => call('admin.warehouses'));
   const total = (rows.data ?? []).reduce((s, r) => s + r.value, 0);
+  // Tous les dépôts : une colonne par dépôt, puis le total ; un clic détaille l'article par dépôt et par lot.
+  const perWarehouse = !warehouseId && (wh.data?.length ?? 0) > 1 ? wh.data! : [];
+  const [detail, setDetail] = useState<StockRowT | null>(null);
+  const exportXlsx = () =>
+    saveXlsx(`etat-du-stock-${today()}.xlsx`, {
+      name: 'État du stock',
+      title: ['État du stock', `${warehouseId ? (wh.data?.find((w) => w.id === warehouseId)?.name ?? '') : 'Tous les dépôts'} · au ${dateFr(today())}`],
+      columns: [
+        { header: 'Code', width: 14 },
+        { header: 'Article', width: 32 },
+        { header: 'Rayon', width: 18 },
+        ...perWarehouse.map((w) => ({ header: w.name, format: 'qty' as const, width: 14 })),
+        { header: perWarehouse.length ? 'Total' : 'Quantité', format: 'qty' as const },
+        { header: 'CMUP', format: 'money' as const },
+        { header: 'Valeur', format: 'money' as const },
+      ],
+      rows: (rows.data ?? []).map((r) => [r.code, r.name, r.department_name, ...perWarehouse.map((w) => (r.by_warehouse[w.id] ?? 0) / 1000), r.qty / 1000, r.avg_cost, r.value]),
+    });
   return (
     <>
       <div className="filters">
@@ -107,13 +125,21 @@ function StockState({ critical = false }: { critical?: boolean }) {
         </select>
         <input className="search" placeholder="Rechercher" value={search} onChange={(e) => setSearch(e.target.value)} />
         <span className="muted">Valeur du stock (CMUP) : {fcfa(total)}</span>
+        <button disabled={!rows.data} onClick={exportXlsx}>
+          Exporter vers Excel
+        </button>
       </div>
       <table className="list">
         <thead>
           <tr>
             <th>Article</th>
             <th>Rayon</th>
-            <th className="r">Quantité</th>
+            {perWarehouse.map((w) => (
+              <th key={w.id} className="r">
+                {w.name}
+              </th>
+            ))}
+            <th className="r">{perWarehouse.length ? 'Total' : 'Quantité'}</th>
             <th className="r">CMUP</th>
             <th className="r">Valeur</th>
             <th>Prochaine DLC</th>
@@ -122,10 +148,18 @@ function StockState({ critical = false }: { critical?: boolean }) {
         </thead>
         <tbody>
           {(rows.data ?? []).map((r) => (
-            <tr key={r.article_id}>
+            <tr key={r.article_id} className="clickable" title="Détail par dépôt et par lot" onClick={() => setDetail(r)}>
               <td>{r.name}</td>
               <td>{r.department_name ?? '—'}</td>
-              <td className={`r ${r.qty < 0 ? 'neg' : ''}`}>
+              {perWarehouse.map((w) => {
+                const v = r.by_warehouse[w.id] ?? 0;
+                return (
+                  <td key={w.id} className={`r ${v < 0 ? 'neg' : v === 0 ? 'muted' : ''}`}>
+                    {qty(v, r.unit)}
+                  </td>
+                );
+              })}
+              <td className={`r ${r.qty < 0 ? 'neg' : ''} ${perWarehouse.length ? 'b' : ''}`}>
                 {qty(r.qty, r.unit)}
                 {r.in_packs && <small className="muted block">{r.in_packs}</small>}
               </td>
@@ -139,7 +173,75 @@ function StockState({ critical = false }: { critical?: boolean }) {
           ))}
         </tbody>
       </table>
+      {detail && <StockDetail row={detail} warehouses={wh.data ?? []} onClose={() => setDetail(null)} />}
     </>
+  );
+}
+
+type StockRowT = Result<'stock.list'>[number];
+
+/** Aperçu d'un article : stock de chaque dépôt, puis ses lots (numéro, péremption) dépôt par dépôt. */
+function StockDetail({ row, warehouses, onClose }: { row: StockRowT; warehouses: Result<'admin.warehouses'>; onClose: () => void }) {
+  const lots = useLoad(() => call('stock.lots', row.article_id), [row.article_id]);
+  return (
+    <Modal title={`${row.name} · stock par dépôt`} onClose={onClose}>
+      <table className="list compact">
+        <thead>
+          <tr>
+            <th>Dépôt</th>
+            <th className="r">Stock</th>
+          </tr>
+        </thead>
+        <tbody>
+          {warehouses.map((w) => {
+            const v = row.by_warehouse[w.id] ?? 0;
+            return (
+              <tr key={w.id}>
+                <td>
+                  {w.name}
+                  {w.is_sales_default ? <small className="muted"> · dépôt de vente</small> : null}
+                </td>
+                <td className={`r ${v < 0 ? 'neg' : ''}`}>{qty(v, row.unit)}</td>
+              </tr>
+            );
+          })}
+          <tr className="total">
+            <td>Total</td>
+            <td className="r">
+              {qty(row.qty, row.unit)}
+              {row.in_packs && <small className="muted block">{row.in_packs}</small>}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      {Boolean(lots.data?.length) && (
+        <>
+          <h3>Lots</h3>
+          <table className="list compact">
+            <thead>
+              <tr>
+                <th>Dépôt</th>
+                <th>N° de lot</th>
+                <th>Péremption</th>
+                <th>Entré le</th>
+                <th className="r">Quantité</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lots.data!.map((l) => (
+                <tr key={l.id}>
+                  <td>{l.warehouse_name}</td>
+                  <td>{l.lot_number ?? '—'}</td>
+                  <td>{l.expiry ? dateFr(l.expiry) : '—'}</td>
+                  <td>{dateFr(l.received_at.slice(0, 10))}</td>
+                  <td className="r">{qty(l.qty, row.unit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </Modal>
   );
 }
 

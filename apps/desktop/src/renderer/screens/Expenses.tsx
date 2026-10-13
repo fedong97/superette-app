@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Field, askConfirm, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
 import { hasVat } from '../tax';
+import { AccountPicker } from './accountPicker';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Expense = Result<'expenses.get'>;
@@ -632,6 +633,7 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
   const accounts = useLoad(() => call('accounting.accounts'), []);
   const [name, setName] = useState(category?.name ?? '');
   const [accountId, setAccountId] = useState(category?.account_id ?? '');
+  const [browsing, setBrowsing] = useState(false);
   const [active, setActive] = useState(category ? category.active === 1 : true);
   return (
     <Modal title={category ? category.name : 'Nouvelle catégorie'} onClose={onClose}>
@@ -650,18 +652,35 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
         <Field label="Nom">
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
-        <Field label="Compte de charges" hint="Les dépenses déjà saisies gardent leur compte">
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} required>
-            <option value="">Choisir…</option>
-            {(accounts.data ?? [])
-              .filter((a) => a.id.startsWith('6'))
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.id} · {a.label}
-                </option>
-              ))}
-          </select>
+        <Field label="Compte de charges" hint="Les dépenses déjà saisies gardent leur compte. 📖 ouvre le plan comptable pour chercher le compte.">
+          <div className="inline-pick">
+            <select value={accountId} onChange={(e) => setAccountId(e.target.value)} required>
+              <option value="">Choisir…</option>
+              {(accounts.data ?? [])
+                .filter((a) => a.id.startsWith('6'))
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.id} · {a.label}
+                  </option>
+                ))}
+            </select>
+            <button type="button" title="Ouvrir le plan comptable" onClick={() => setBrowsing(true)}>
+              📖 Plan comptable
+            </button>
+          </div>
         </Field>
+        {browsing && (
+          <AccountPicker
+            only="6"
+            value={accountId}
+            onClose={() => setBrowsing(false)}
+            onPick={(a) => {
+              setBrowsing(false);
+              setAccountId(a.id);
+              accounts.reload();
+            }}
+          />
+        )}
         <label>
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Catégorie utilisée
         </label>

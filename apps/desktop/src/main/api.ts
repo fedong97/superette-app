@@ -1312,6 +1312,23 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.accounting.saveAccount(requireUser(['chart_accounts']).id, input),
     'accounting.entries': (opts: { from?: string; to?: string; journal?: JournalCode }) => s.accounting.entries(ctx(ACCOUNTING).storeId, opts),
     'accounting.addEntry': (input: Parameters<Services['accounting']['addManualEntry']>[1]) => s.accounting.addManualEntry(ctx(['journal_entry']), input),
+    /** Droit « Modifier, supprimer ou corriger une écriture comptable ». */
+    'accounting.updateEntry': (id: string, input: Parameters<Services['accounting']['updateManualEntry']>[2]) => s.accounting.updateManualEntry(ctx(['journal_edit']), id, input),
+    'accounting.deleteEntry': (id: string) => s.accounting.deleteManualEntry(ctx(['journal_edit']), id),
+    'accounting.correctEntry': (key: string, input: Parameters<Services['accounting']['correctEntry']>[2]) => s.accounting.correctEntry(ctx(['journal_edit']), key, input),
+    // --- Exercices comptables --------------------------------------------------
+    'fiscal.list': () => {
+      const storeId = ctx([...ACCOUNTING, 'fiscal_years']).storeId;
+      return s.fiscal.list(storeId).map((f) => ({ ...f, stale: f.status === 'closed' && s.fiscal.stale(storeId, f.id) }));
+    },
+    /** Exercice en cours : période proposée par défaut dans les journaux, la balance et le grand livre. */
+    'fiscal.current': () => s.fiscal.at(ctx().storeId),
+    'fiscal.open': (input: { start: string; end: string }) => s.fiscal.open(ctx(['fiscal_years']), input),
+    'fiscal.openNext': () => s.fiscal.openNext(ctx(['fiscal_years'])),
+    'fiscal.setDates': (id: string, input: { start: string; end: string }) => s.fiscal.setDates(ctx(['fiscal_years']), id, input),
+    'fiscal.close': (id: string) => s.fiscal.close(ctx(['fiscal_years']), id),
+    'fiscal.reopen': (id: string) => s.fiscal.reopen(ctx(['fiscal_years']), id),
+    'fiscal.remove': (id: string) => s.fiscal.remove(ctx(['fiscal_years']), id),
     'accounting.ledger': (opts: { account: string; aux?: string; from?: string; to?: string }) => s.accounting.ledger(ctx(ACCOUNTING).storeId, opts),
     'accounting.trialBalance': (opts: { from?: string; to?: string }) => s.accounting.trialBalance(ctx(ACCOUNTING).storeId, opts),
     'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),

@@ -1,14 +1,17 @@
 import { Fragment, useState } from 'react';
 import { type StatementLine, parseStatementCsv } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, downloadText, fcfa, parseAmount, readTextFile, today, useCan, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, askConfirm, dateFr, dateTime, downloadText, fcfa, parseAmount, readTextFile, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
+import { AccountPicker } from './accountPicker';
 import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal';
+type Entry = Result<'accounting.entries'>[number];
+type FiscalYear = Result<'fiscal.list'>[number];
 
 const JOURNALS: Record<JournalCode, string> = {
   VE: 'Ventes',
@@ -61,6 +64,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
     treasury: can('accounting'),
     bank: can('bank_reconciliation'),
     accounts: true,
+    fiscal: can('accounting', 'fiscal_years'),
   };
   const [tab, setTab] = useState<AccountingTab>(allowed[initialTab] ? initialTab : ((Object.keys(allowed) as AccountingTab[]).find((k) => allowed[k]) ?? 'accounts'));
   const [ledgerAccount, setLedgerAccount] = useState('571');
@@ -89,6 +93,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
             ['treasury', 'Trésorerie'],
             ['bank', 'Rapprochement bancaire'],
             ['accounts', 'Plan comptable'],
+            ['fiscal', 'Exercices'],
           ] as [AccountingTab, string][]
         ).filter(([k]) => allowed[k] && (k !== 'vat' || hasVat()))}
       />
@@ -103,6 +108,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'treasury' && allowed.treasury && <Treasury onOpen={openLedger} />}
       {tab === 'bank' && allowed.bank && <BankReconciliation />}
       {tab === 'accounts' && <Accounts user={user} />}
+      {tab === 'fiscal' && allowed.fiscal && <FiscalYears />}
     </div>
   );
 }
@@ -127,6 +133,19 @@ function Journals() {
   const [to, setTo] = useState(today());
   const [journal, setJournal] = useState<JournalCode | ''>('');
   const [adding, setAdding] = useState(false);
+  // Écriture saisie à modifier, ou écriture automatique à corriger.
+  const [editing, setEditing] = useState<{ entry: Entry; mode: 'edit' | 'correct' } | null>(null);
+  const canEdit = can('journal_edit');
+  const remove = async (e: Entry) => {
+    if (!(await askConfirm(`Supprimer l'écriture ${e.ref} du ${dateFr(e.date)} ?\nElle reste dans le journal d'audit.`))) return;
+    try {
+      await call('accounting.deleteEntry', e.id!);
+      toast.ok(`Écriture ${e.ref} supprimée`);
+      list.reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   const list = useLoad(() => call('accounting.entries', { from: from || undefined, to: to || undefined, journal: journal || undefined }), [from, to, journal]);
   const entries = list.data ?? [];
   const total = entries.reduce((t, e) => t + e.lines.reduce((s, l) => s + l.debit, 0), 0);
@@ -179,6 +198,7 @@ function Journals() {
               <th>Libellé</th>
               <th className="r">Débit</th>
               <th className="r">Crédit</th>
+              {canEdit && <th />}
             </tr>
           </thead>
           <tbody>
@@ -188,12 +208,36 @@ function Journals() {
                   <tr key={j} className={j === 0 ? 'entry-first' : ''}>
                     <td>{j === 0 ? dateFr(e.date) : ''}</td>
                     <td>{j === 0 ? <span className="tag">{e.journal}</span> : ''}</td>
-                    <td className="nowrap">{j === 0 ? e.ref : ''}</td>
+                    <td className="nowrap">
+                      {j === 0 ? e.ref : ''}
+                      {j === 0 && e.closing && <small className="muted block">clôture</small>}
+                      {j === 0 && e.corrects && <small className="muted block">correction de {e.corrects.split('|')[2]}</small>}
+                      {j === 0 && e.corrected_by && <small className="warn-text block">corrigée ({e.corrected_by.join(', ')})</small>}
+                    </td>
                     <td>{l.account}</td>
                     <td>{l.aux_name ?? l.aux ?? ''}</td>
                     <td>{l.label}</td>
                     <td className="r">{amount(l.debit)}</td>
                     <td className="r">{amount(l.credit)}</td>
+                    {canEdit && (
+                      <td className="nowrap">
+                        {j === 0 && e.source === 'manual' && !e.closing && (
+                          <>
+                            <button className="link" onClick={() => setEditing({ entry: e, mode: 'edit' })}>
+                              Modifier
+                            </button>
+                            <button className="link danger-text" onClick={() => void remove(e)}>
+                              Supprimer
+                            </button>
+                          </>
+                        )}
+                        {j === 0 && e.source === 'auto' && (
+                          <button className="link" title="Écriture tirée d'une pièce : la correction passe en OD, liée à cette écriture" onClick={() => setEditing({ entry: e, mode: 'correct' })}>
+                            Corriger
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </Fragment>
@@ -204,6 +248,7 @@ function Journals() {
               </td>
               <td className="r">{fcfa(total)}</td>
               <td className="r">{fcfa(total)}</td>
+              {canEdit && <td />}
             </tr>
           </tbody>
         </table>
@@ -213,6 +258,17 @@ function Journals() {
           onClose={() => setAdding(false)}
           onSaved={() => {
             setAdding(false);
+            list.reload();
+          }}
+        />
+      )}
+      {editing && (
+        <ManualEntryDialog
+          entry={editing.entry}
+          mode={editing.mode}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
             list.reload();
           }}
         />
@@ -231,42 +287,59 @@ interface DraftLine {
 const emptyLine = (): DraftLine => ({ account: '', aux: '', label: '', debit: '', credit: '' });
 
 /** Saisie d'une écriture : à-nouveaux, frais bancaires, versement d'espèces à la banque, loyer… */
-function ManualEntryDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function ManualEntryDialog({ entry, mode, onClose, onSaved }: { entry?: Entry; mode?: 'edit' | 'correct'; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const accounts = useLoad(() => call('accounting.accounts'), []);
-  const [journal, setJournal] = useState<JournalCode>('OD');
-  const [date, setDate] = useState(today());
-  const [label, setLabel] = useState('');
-  const [lines, setLines] = useState<DraftLine[]>([emptyLine(), emptyLine()]);
+  const correcting = mode === 'correct' && entry;
+  const [journal, setJournal] = useState<JournalCode>(entry && mode === 'edit' ? entry.journal : 'OD');
+  const [date, setDate] = useState(entry?.date ?? today());
+  const [label, setLabel] = useState(entry ? (correcting ? `Correction de ${entry.journal} ${entry.ref} du ${dateFr(entry.date)}` : entry.label) : '');
+  const [lines, setLines] = useState<DraftLine[]>(
+    entry
+      ? entry.lines.map((l) => ({ account: l.account, aux: l.aux ?? '', label: l.label === entry.label ? '' : l.label, debit: l.debit ? String(l.debit) : '', credit: l.credit ? String(l.credit) : '' }))
+      : [emptyLine(), emptyLine()],
+  );
+  // Ligne dont le compte se choisit dans le plan comptable (📖).
+  const [browsing, setBrowsing] = useState<number | null>(null);
   const set = (i: number, patch: Partial<DraftLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const num = (v: string) => (v ? (parseAmount(v) ?? NaN) : 0);
   const debit = lines.reduce((t, l) => t + num(l.debit), 0);
   const credit = lines.reduce((t, l) => t + num(l.credit), 0);
   const gap = debit - credit;
   return (
-    <Modal title="Saisir une écriture" onClose={onClose} wide>
+    <Modal title={correcting ? `Corriger l'écriture ${entry.journal} ${entry.ref}` : entry ? `Modifier l'écriture ${entry.ref}` : 'Saisir une écriture'} onClose={onClose} wide>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
+          const payload = lines
+            .filter((l) => l.account)
+            .map((l) => ({ account: l.account, aux: l.aux || null, label: l.label || null, debit: num(l.debit), credit: num(l.credit) }));
           try {
-            const entry = await call('accounting.addEntry', {
-              journal,
-              date,
-              label,
-              lines: lines
-                .filter((l) => l.account)
-                .map((l) => ({ account: l.account, aux: l.aux || null, label: l.label || null, debit: num(l.debit), credit: num(l.credit) })),
-            });
-            toast.ok(`Écriture ${entry.ref} enregistrée`);
+            if (correcting) {
+              const fix = await call('accounting.correctEntry', `${entry.journal}|${entry.date}|${entry.ref}`, { label, lines: payload });
+              toast.ok(`Correction ${fix.ref} enregistrée`);
+            } else if (entry?.id) {
+              await call('accounting.updateEntry', entry.id, { journal, date, label, lines: payload });
+              toast.ok(`Écriture ${entry.ref} modifiée`);
+            } else {
+              const saved = await call('accounting.addEntry', { journal, date, label, lines: payload });
+              toast.ok(`Écriture ${saved.ref} enregistrée`);
+            }
             onSaved();
           } catch (err) {
             toast.error(err);
           }
         }}
       >
+        {correcting && (
+          <p className="muted">
+            Cette écriture se calcule à partir de sa pièce : elle ne se réécrit pas. Corrigez les comptes ou les montants ci-dessous ; la différence est enregistrée au
+            journal OD, à la même date, comme correction de cette écriture.
+          </p>
+        )}
         <div className="grid3">
           <Field label="Journal">
-            <select value={journal} onChange={(e) => setJournal(e.target.value as JournalCode)}>
+            <select value={journal} disabled={Boolean(correcting)} onChange={(e) => setJournal(e.target.value as JournalCode)}>
               {MANUAL_JOURNALS.map((j) => (
                 <option key={j} value={j}>
                   {j} · {JOURNALS[j]}
@@ -275,7 +348,7 @@ function ManualEntryDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
             </select>
           </Field>
           <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+            <input type="date" value={date} disabled={Boolean(correcting)} onChange={(e) => setDate(e.target.value)} required />
           </Field>
           <Field label="Libellé">
             <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Loyer d'octobre, frais bancaires…" required />
@@ -302,8 +375,11 @@ function ManualEntryDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
           <tbody>
             {lines.map((l, i) => (
               <tr key={i}>
-                <td>
+                <td className="nowrap">
                   <input list="accounts-list" value={l.account} onChange={(e) => set(i, { account: e.target.value.trim() })} style={{ width: 90 }} />
+                  <button type="button" className="ghost" title="Choisir dans le plan comptable" onClick={() => setBrowsing(i)}>
+                    📖
+                  </button>
                 </td>
                 <td className="muted">{accounts.data?.find((a) => a.id === l.account)?.label ?? ''}</td>
                 <td>
@@ -341,10 +417,21 @@ function ManualEntryDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
             Annuler
           </button>
           <button type="submit" className="primary" disabled={gap !== 0 || debit === 0}>
-            Enregistrer l'écriture
+            {correcting ? 'Enregistrer la correction' : "Enregistrer l'écriture"}
           </button>
         </div>
       </form>
+      {browsing !== null && (
+        <AccountPicker
+          value={lines[browsing]?.account}
+          onClose={() => setBrowsing(null)}
+          onPick={(a) => {
+            set(browsing, { account: a.id });
+            setBrowsing(null);
+            accounts.reload();
+          }}
+        />
+      )}
     </Modal>
   );
 }
@@ -426,6 +513,13 @@ function Ledger({ account, onAccount }: { account: string; onAccount: (v: string
 function Balance({ onOpen }: { onOpen: (account: string) => void }) {
   const toast = useToast();
   const [from, setFrom] = useState(`${today().slice(0, 4)}-01-01`);
+  // Par défaut : depuis le début de l'exercice en cours.
+  const current = useLoad(() => call('fiscal.current'), []);
+  const [startSet, setStartSet] = useState(false);
+  if (!startSet && current.data !== undefined) {
+    setStartSet(true);
+    if (current.data) setFrom(current.data.start_date);
+  }
   const [to, setTo] = useState(today());
   const tb = useLoad(() => call('accounting.trialBalance', { from: from || undefined, to: to || undefined }), [from, to]);
   const rows = tb.data?.rows ?? [];
@@ -1623,3 +1717,164 @@ function AccountDialog({ account, onClose, onSaved }: { account: Account | null;
     </Modal>
   );
 }
+
+/**
+ * Exercices comptables : ouverture, clôture (à-nouveaux générés au premier jour
+ * de l'exercice suivant) et réouverture. Un exercice clôturé n'accepte plus
+ * aucune écriture datée dedans.
+ */
+export function FiscalYears() {
+  const toast = useToast();
+  const can = useCan();
+  const canManage = can('fiscal_years');
+  const list = useLoad(() => call('fiscal.list'), []);
+  const [form, setForm] = useState<{ id?: string; start: string; end: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast.ok(ok);
+      list.reload();
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const close = async (f: FiscalYear) => {
+    if (
+      !(await askConfirm(
+        `Clôturer l'exercice du ${dateFr(f.start_date)} au ${dateFr(f.end_date)} ?\n\nLes à-nouveaux (comptes de bilan, stock, clients, fournisseurs et résultat en report à nouveau) sont générés au ${dateFr(nextDay(f.end_date))}. Ensuite, plus aucune écriture ne peut être datée dans cet exercice, sauf à le rouvrir.\n\nPensez à passer l'impôt sur le résultat avant de clôturer.`,
+      ))
+    )
+      return;
+    await run(() => call('fiscal.close', f.id), 'Exercice clôturé');
+  };
+  const reopen = async (f: FiscalYear) => {
+    if (!(await askConfirm(`Rouvrir l'exercice du ${dateFr(f.start_date)} au ${dateFr(f.end_date)} ? Ses à-nouveaux sont supprimés ; clôturez-le de nouveau une fois les corrections faites.`))) return;
+    await run(() => call('fiscal.reopen', f.id), 'Exercice rouvert');
+  };
+  const rows = list.data ?? [];
+  return (
+    <>
+      <div className="filters">
+        <span className="muted">
+          Un exercice dure en général 12 mois (du 1er janvier au 31 décembre). À sa clôture, les soldes passent en à-nouveaux et plus rien ne se saisit dedans.
+        </span>
+        {canManage && (
+          <>
+            <button style={{ marginLeft: 'auto' }} disabled={busy} onClick={() => void run(() => call('fiscal.openNext'), 'Exercice suivant ouvert')}>
+              Ouvrir l'exercice suivant
+            </button>
+            <button className="primary" onClick={() => setForm({ start: '', end: '' })}>
+              Nouvel exercice…
+            </button>
+          </>
+        )}
+      </div>
+      <table className="list">
+        <thead>
+          <tr>
+            <th>Exercice</th>
+            <th>Du</th>
+            <th>Au</th>
+            <th>État</th>
+            <th className="r">Résultat reporté</th>
+            <th>Clôturé le</th>
+            <th>À-nouveaux</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((f, i) => (
+            <tr key={f.id}>
+              <td className="b">{f.start_date.slice(0, 4) === f.end_date.slice(0, 4) ? f.start_date.slice(0, 4) : `${f.start_date.slice(0, 4)}-${f.end_date.slice(0, 4)}`}</td>
+              <td>{dateFr(f.start_date)}</td>
+              <td>{dateFr(f.end_date)}</td>
+              <td>
+                {f.status === 'closed' ? <span className="tag rupture">Clôturé</span> : <span className="tag normal">Ouvert</span>}
+                {f.stale && (
+                  <small className="warn-text block" title="Une pièce est arrivée (d'un autre PC) après la clôture">
+                    soldes changés depuis la clôture : rouvrez puis clôturez de nouveau
+                  </small>
+                )}
+              </td>
+              <td className={`r ${f.result !== null && f.result < 0 ? 'neg' : ''}`}>{f.result === null ? '' : `${fcfa(f.result)} ${f.result >= 0 ? '(bénéfice)' : '(perte)'}`}</td>
+              <td>{f.closed_at ? `${dateTime(f.closed_at)}${f.closed_by_name ? ` par ${f.closed_by_name}` : ''}` : ''}</td>
+              <td>{f.closing_ref ?? ''}</td>
+              <td className="nowrap">
+                {canManage && f.status === 'open' && (
+                  <>
+                    <button className="link" disabled={busy} onClick={() => void close(f)}>
+                      Clôturer
+                    </button>
+                    <button className="link" onClick={() => setForm({ id: f.id, start: f.start_date, end: f.end_date })}>
+                      Dates
+                    </button>
+                    {i === 0 && rows.length > 1 && (
+                      <button
+                        className="link danger-text"
+                        onClick={async () => {
+                          if (await askConfirm(`Supprimer l'exercice du ${dateFr(f.start_date)} au ${dateFr(f.end_date)} ? Les écritures ne sont pas touchées.`))
+                            void run(() => call('fiscal.remove', f.id), 'Exercice supprimé');
+                        }}
+                      >
+                        Supprimer
+                      </button>
+                    )}
+                  </>
+                )}
+                {canManage && f.status === 'closed' && (
+                  <button className="link" disabled={busy} onClick={() => void reopen(f)}>
+                    Rouvrir
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!canManage && <p className="muted">Le droit « Ouvrir, clôturer et rouvrir un exercice comptable » permet de gérer les exercices.</p>}
+      {form && (
+        <Modal title={form.id ? "Dates de l'exercice" : 'Nouvel exercice'} onClose={() => setForm(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (form.id) await call('fiscal.setDates', form.id, { start: form.start, end: form.end });
+                else await call('fiscal.open', { start: form.start, end: form.end });
+                toast.ok('Exercice enregistré');
+                setForm(null);
+                list.reload();
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          >
+            <div className="grid2">
+              <Field label="Premier jour">
+                <input type="date" value={form.start} disabled={Boolean(form.id)} onChange={(e) => setForm({ ...form, start: e.target.value, end: form.end || lastDayOfYear(e.target.value) })} required />
+              </Field>
+              <Field label="Dernier jour" hint="18 mois au plus (premier exercice plus long)">
+                <input type="date" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} required />
+              </Field>
+            </div>
+            <div className="actions">
+              <button type="button" onClick={() => setForm(null)}>
+                Annuler
+              </button>
+              <button type="submit" className="primary">
+                Enregistrer
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+const nextDay = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+/** Veille du même jour l'année suivante : fin d'un exercice de 12 mois. */
+const lastDayOfYear = (start: string) => (start ? new Date(Date.parse(`${Number(start.slice(0, 4)) + 1}${start.slice(4)}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10) : '');

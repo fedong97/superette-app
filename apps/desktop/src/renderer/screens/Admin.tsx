@@ -7,12 +7,13 @@ import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
 import { PrintTemplates } from './PrintTemplates';
+import { FiscalYears } from './Accounting';
 import contract from '../../../build/contrat-licence.txt?raw';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -29,6 +30,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
     ['settings', 'Paramètres'],
+    ...(can('accounting') || can('fiscal_years') ? ([['fiscal', 'Exercices comptables']] as [Tab, string][]) : []),
     ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
@@ -67,6 +69,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
           }}
         />
       )}
+      {tab === 'fiscal' && (can('accounting') || can('fiscal_years')) && <FiscalYears />}
       {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}

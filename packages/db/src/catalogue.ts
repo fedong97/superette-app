@@ -204,7 +204,7 @@ export class CatalogueService extends Base {
         `${ARTICLE_SELECT}
          WHERE (a.name LIKE @q OR a.code LIKE @q OR a.brand LIKE @q OR a.other_ref LIKE @q
                 OR a.id IN (SELECT article_id FROM barcodes WHERE code LIKE @q))
-           AND (@all = 1 OR a.active = 1)
+           AND (@all = 1 OR a.active = 1) AND a.is_service = 0
            AND (@familyId IS NULL OR a.family_id = @familyId)
          ORDER BY a.name LIMIT @limit`,
       )

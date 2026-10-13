@@ -58,6 +58,7 @@ describe('livraisons', () => {
     // Le service n'apparaît pas dans les recherches ni dans le stock.
     expect(s.pos.searchForSale(ctx.storeId, 'livraison')).toEqual([]);
     expect(s.catalogue.getArticle(DELIVERY_FEE_ARTICLE_ID, ctx.storeId).active).toBe(0);
+    expect(s.catalogue.searchArticles('livraison', ctx.storeId, { includeInactive: true })).toEqual([]);
 
     const [d] = s.deliveries.list(ctx.storeId, { from: '2026-10-13', to: '2026-10-13' });
     expect([d!.status, d!.planned_date, d!.sale_number, d!.fee, d!.to_collect]).toEqual(['pending', '2026-10-13', sale.number, 1_000, 0]);

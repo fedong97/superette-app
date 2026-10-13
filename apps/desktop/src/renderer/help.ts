@@ -269,10 +269,19 @@ export const HELP: Record<WinKind, PageHelp> = {
     ],
   },
   labels: {
-    title: 'Étiquettes de rayon',
-    intro: 'Imprimer les étiquettes des prix à jour, avec le code-barres.',
+    title: 'Étiquettes et codes-barres',
+    intro: 'Imprimer les étiquettes des prix à jour, et les codes-barres à coller sur les articles.',
     sections: [
-      { title: 'Imprimer', steps: ['La liste « À refaire » montre les produits reçus jamais étiquetés et les prix changés.', 'Choisissez la planche (24, 40 ou 65 par page) ou le rouleau, vérifiez l’aperçu puis imprimez.'] },
+      { title: 'Étiquettes de rayon', steps: ['La liste « À refaire » montre les produits reçus jamais étiquetés et les prix changés.', 'Choisissez la planche (24, 40 ou 65 par page) ou le rouleau, vérifiez l’aperçu puis imprimez.'] },
+      {
+        title: 'Codes-barres produit',
+        steps: [
+          'Un article sans code fabricant reçoit un code interne EAN-8 (commence par 2) à son enregistrement, pour l’unité et pour chaque carton.',
+          '« Leur donner un code interne » équipe d’un coup les articles créés avant.',
+          'Cochez les articles, le nombre d’étiquettes, puis « Imprimer les codes-barres… » : rouleau 30 × 20, 40 × 25, 50 × 30 mm ou planche A4.',
+          'Aussi depuis la fiche article (« Imprimer les codes-barres… ») et après chaque réception d’achat.',
+        ],
+      },
     ],
   },
   reports: {

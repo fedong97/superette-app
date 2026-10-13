@@ -1030,3 +1030,19 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .layout-card small { font-weight: 500 !important; }
 .settings-row .layout-name input[type='radio'] { width: auto; margin: 0; }
 .tpl-pick { display: flex; gap: 8px; width: 100%; } .tpl-pick select { flex: 1; }
+
+/* Étiquettes produit : fenêtre d'impression des codes-barres */
+.bc-print { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; }
+.bc-lbl { font-size: 12px; font-weight: 800; color: var(--muted, #5b6f66); text-transform: uppercase; letter-spacing: 0.04em; margin: 12px 0 6px; }
+.bc-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.bc-chips button { padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-weight: 700; font-size: 13px; }
+.bc-chips button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.bc-checks label { display: flex; gap: 8px; align-items: center; font-weight: 600; margin: 4px 0; }
+.bc-checks input, .bc-print td input[type='checkbox'] { width: auto; }
+.bc-skip { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; }
+.bc-preview { background: repeating-linear-gradient(45deg, #f3f6f4, #f3f6f4 8px, #eaf0ec 8px, #eaf0ec 16px); border: 1px solid var(--line); border-radius: 12px; min-height: 240px; max-height: 60vh; overflow: auto; display: grid; place-items: center; padding: 12px; }
+.bc-preview iframe { border: 0; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); border-radius: 4px; }
+.bc-num { font: 700 14px/1 Consolas, 'Courier New', monospace; letter-spacing: 0.05em; }
+.bc-codes td { vertical-align: middle; }
+@media (max-width: 900px) { .bc-print { grid-template-columns: 1fr; } }
+.tag.internal { background: #e3f3ea; color: var(--brand); font-weight: 700; }

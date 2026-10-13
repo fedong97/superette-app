@@ -1,4 +1,4 @@
-import { BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -78,6 +78,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   const local = useLoad(() => call('admin.settings'));
   const store = useLoad(() => call('admin.storeSettings'));
   const printers = useLoad(() => call('admin.printers'));
+  const barcodeInfo = useLoad(() => call('barcode.info'));
   const emoney = useLoad(() => call('emoney.registers'));
   const templates = useLoad(() => call('docs.templates'));
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -181,6 +182,111 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
               )}
             </span>
           ),
+        },
+      ],
+    ],
+    [
+      'Codes-barres et étiquettes',
+      'Codes internes pour les articles sans code fabricant, et étiquettes produit à coller sur les articles et les cartons.',
+      [
+        {
+          label: 'Créer un code-barres automatiquement',
+          hint: "Pour chaque nouvel article sans code fabricant, à l'enregistrement : l'unité, chaque carton et pack.",
+          render: () => yes('barcodeAuto'),
+        },
+        {
+          label: 'Format des codes internes',
+          hint: 'EAN-8 : court, tient sur les petites étiquettes. EAN-13 : même longueur que les codes fabricants.',
+          render: () => (
+            <select disabled={!canEdit} value={sv('barcodeKind')} onChange={(e) => sset('barcodeKind', e.target.value as StoreSettings['barcodeKind'])}>
+              <option value="ean8">EAN-8 · 2xxxxxxx (recommandé)</option>
+              <option value="ean13">EAN-13 · 20xxxxxxxxxxx</option>
+            </select>
+          ),
+        },
+        {
+          label: 'Prochain code',
+          hint: "Les codes déjà pris sont sautés. Chaque poste a son chiffre, pour qu'aucun code ne se répète entre deux PC.",
+          render: () =>
+            barcodeInfo.data ? (
+              <span>
+                <b className="bc-num">{barcodeInfo.data.next}</b> <small className="muted">· {barcodeInfo.data.created} code(s) interne(s) déjà donné(s)</small>
+              </span>
+            ) : (
+              <span className="muted">…</span>
+            ),
+        },
+        {
+          label: 'Articles sans code-barres',
+          hint: 'Donne en une fois un code interne à tous les articles et conditionnements qui n’en ont pas (sauf articles vendus à la balance).',
+          render: () => (
+            <button
+              disabled={!canEdit}
+              onClick={async () => {
+                if (!(await askConfirm('Donner un code-barres interne à tous les articles et cartons qui n’en ont pas ?'))) return;
+                try {
+                  const n = await call('catalogue.assignMissingBarcodes');
+                  toast.ok(n ? `${n} code(s)-barres créé(s)` : 'Tous les articles ont déjà un code-barres');
+                  barcodeInfo.reload();
+                } catch (e) {
+                  toast.error(e);
+                }
+              }}
+            >
+              Donner un code aux articles sans code
+            </button>
+          ),
+        },
+        {
+          label: "Imprimante d'étiquettes (ce poste)",
+          hint: 'Rouleau d’étiquettes : impression directe, sans fenêtre Windows.',
+          render: () => (
+            <select disabled={!canEdit} value={v('printer.labels')} onChange={set('printer.labels')}>
+              <option value="">Demander à chaque fois (fenêtre d’impression)</option>
+              {(printers.data ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+        {
+          label: "Format d'étiquette par défaut",
+          render: () => (
+            <select disabled={!canEdit} value={sv('labelFormat')} onChange={(e) => sset('labelFormat', e.target.value as StoreSettings['labelFormat'])}>
+              {Object.entries(BARCODE_LABEL_FORMATS).map(([id, f]) => (
+                <option key={id} value={id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+        {
+          label: "Sur l'étiquette par défaut nom prix magasin",
+          title: "Sur l'étiquette par défaut",
+          hint: 'Le code-barres et ses chiffres sont toujours imprimés.',
+          render: () => (
+            <span className="inline bc-checks">
+              {(
+                [
+                  ['labelName', 'Nom'],
+                  ['labelPrice', 'Prix'],
+                  ['labelStore', 'Magasin'],
+                ] as const
+              ).map(([k, l]) => (
+                <label key={k}>
+                  <input type="checkbox" disabled={!canEdit} checked={sv(k)} onChange={(e) => sset(k, e.target.checked)} /> {l}
+                </label>
+              ))}
+            </span>
+          ),
+        },
+        {
+          label: "Après une réception d'achat",
+          hint: 'Proposer d’imprimer les étiquettes des articles reçus qui ont un code interne.',
+          render: () => yes('labelAfterReception'),
         },
       ],
     ],
@@ -624,6 +730,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       setIdentity({});
       local.reload();
       store.reload();
+      barcodeInfo.reload();
       templates.reload();
       state.reload();
       onChanged();

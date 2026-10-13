@@ -65,3 +65,20 @@ export function internalEan13(sequence: number): string {
   const body = `20${sequence.toString().padStart(10, '0')}`;
   return body + eanCheckDigit(body);
 }
+
+/**
+ * Code interne court (EAN-8) : 2 + chiffre du poste + numéro sur 5 chiffres + clé.
+ * Le préfixe 2 est la zone GS1 réservée au magasin : jamais un code fabricant.
+ */
+export function internalEan8(sequence: number): string {
+  if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > 999_999) {
+    throw new Error(`Numéro de code interne hors plage : ${sequence}`);
+  }
+  const body = `2${sequence.toString().padStart(6, '0')}`;
+  return body + eanCheckDigit(body);
+}
+
+/** Code créé par le magasin (préfixe 2) plutôt qu'imprimé par le fabricant. */
+export function isInternalBarcode(code: string): boolean {
+  return /^2\d{7}$/.test(code) || /^20\d{11}$/.test(code);
+}

@@ -1,6 +1,9 @@
 import {
   type DenominationCount,
+  type BarcodeLabelFormatId,
+  type BarcodeLabelOptions,
   type LabelFormatId,
+  barcodeLabelsHtml,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -145,6 +148,8 @@ export interface Printer {
   list(): Promise<{ name: string; isDefault: boolean }[]>;
   /** Planche d'étiquettes déjà mise en page ; false si l'utilisateur annule. */
   labels(html: string, format: LabelFormatId): Promise<boolean>;
+  /** Étiquettes produit : directement sur l'imprimante d'étiquettes du poste pour un rouleau, sinon fenêtre d'impression. */
+  barcodeLabels(html: string, format: BarcodeLabelFormatId): Promise<boolean>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
   /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
   inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
@@ -178,6 +183,7 @@ const LOCAL_SETTINGS = [
   'display.size',
   'pos.layout',
   'printer.listing',
+  'printer.labels',
   'backup.autoTime',
 ];
 
@@ -244,6 +250,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const PRODUCTION: Permission[] = ['production', 'production_recipes', 'production_create', 'production_validate', 'production_cancel', ...STOCK];
   /** Paramètres du magasin de ce poste. */
   const settings = () => s.admin.storeSettings(ctx().storeId);
+  /** Code interne donné à l'enregistrement d'un article sans code, si le magasin l'a choisi. */
+  const autoBarcode = () => (settings().barcodeAuto ? settings().barcodeKind : null);
   const SALES: Permission[] = ['sales', 'reports', 'receivables'];
   /** Montants de la caisse : attendu, entrées, ventes de la journée, historique des journées et Z. */
   const AMOUNTS: Permission[] = ['cash_amounts'];
@@ -490,7 +498,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const noVat = s.admin.vatDisabled(ctx().storeId);
       if (!id) {
         if (!can(u, ['article_create', 'sale_new_article'])) throw new AppError("Vous n'avez pas le droit d'ajouter des produits", 'FORBIDDEN');
-        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id);
+        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id, { autoBarcode: autoBarcode() });
       }
       const cur = s.catalogue.getArticle(id, ctx().storeId);
       if (noVat) input = { ...input, vatRateId: cur.vat_rate_id };
@@ -511,7 +519,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         (input.alertQty ?? null) !== cur.alert_qty ||
         (input.maxQty ?? null) !== cur.max_qty;
       if (otherChanged && !can(u, ['article_edit'])) throw new AppError("Vous n'avez pas le droit de modifier la fiche d'un produit", 'FORBIDDEN');
-      return s.catalogue.saveArticle(u.id, input, id);
+      return s.catalogue.saveArticle(u.id, input, id, { autoBarcode: autoBarcode() });
     },
     'catalogue.setStorePrice': (articleId: string, price: Fcfa | null) => {
       const c = ctx(['store_price']);
@@ -521,7 +529,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'catalogue.departments': () => (requireUser(), s.catalogue.listDepartments()),
     'catalogue.createDepartment': (name: string) => (requireUser(['article_families']), s.catalogue.createDepartment(name)),
     'catalogue.createFamily': (departmentId: string, name: string) => (requireUser(['article_families']), s.catalogue.createFamily(departmentId, name)),
-    'catalogue.newInternalBarcode': () => (requireUser(['article_create', 'article_edit', 'sale_new_article']), s.catalogue.generateInternalBarcode()),
+    'catalogue.newInternalBarcode': () => (requireUser(['article_create', 'article_edit', 'sale_new_article']), s.catalogue.generateInternalBarcode(settings().barcodeKind)),
+    'catalogue.assignMissingBarcodes': () => s.catalogue.assignMissingBarcodes(requireUser(['article_edit']).id, settings().barcodeKind),
+    'barcode.info': () => (requireUser(), s.catalogue.internalBarcodeInfo(settings().barcodeKind)),
     'catalogue.quickKeys': () => s.catalogue.quickKeys(ctx().storeId),
     'catalogue.scan': (code: string) => s.catalogue.scan(code, ctx().storeId),
     'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) =>
@@ -604,6 +614,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const printed = await printer.labels(labelsHtml(s.labels.build(storeId, items), format, skip), format);
       if (printed) s.labels.markPrinted(storeId, items);
       return printed;
+    },
+    'barcode.preview': (items: LabelItem[], format: BarcodeLabelFormatId, opts: BarcodeLabelOptions, skip?: number) => {
+      const storeId = ctx().storeId;
+      return barcodeLabelsHtml(s.labels.barcodeLabels(storeId, items, s.admin.getStore(storeId).name), format, opts, skip);
+    },
+    'barcode.print': (items: LabelItem[], format: BarcodeLabelFormatId, opts: BarcodeLabelOptions, skip?: number) => {
+      const storeId = ctx().storeId;
+      return printer.barcodeLabels(barcodeLabelsHtml(s.labels.barcodeLabels(storeId, items, s.admin.getStore(storeId).name), format, opts, skip), format);
     },
     'stock.expiring': (days?: number) => s.stock.expiringLots(ctx().storeId, days ?? settings().expiryAlertDays),
     'stock.lots': (articleId: string) => s.stock.lotsOf(articleId, ctx().storeId),

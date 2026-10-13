@@ -165,3 +165,123 @@ body { font-family: Arial, Helvetica, sans-serif; color: #000; }
     .map((p) => `<div class="page">${p.map(label).join('')}</div>`)
     .join('')}</body></html>`;
 }
+
+/* ---------- Étiquettes produit : le code-barres à coller sur l'article ---------- */
+
+export type BarcodeLabelFormatId = 'roll_30x20' | 'roll_40x25' | 'roll_50x30' | 'a4_24' | 'a4_40' | 'a4_65';
+
+const roll = (w: number, h: number): LabelFormat => ({ name: `Rouleau ${w} × ${h} mm`, pageW: w, pageH: h, cols: 1, rows: 1, w, h, top: 0, left: 0, gap: 0 });
+
+/** Rouleaux d'imprimante d'étiquettes (une étiquette par page) et planches A4 autocollantes. */
+export const BARCODE_LABEL_FORMATS: Record<BarcodeLabelFormatId, LabelFormat> = {
+  roll_30x20: roll(30, 20),
+  roll_40x25: roll(40, 25),
+  roll_50x30: roll(50, 30),
+  a4_24: { ...LABEL_FORMATS.a4_24, name: 'Planche A4 · 24 étiquettes (70 × 37 mm)' },
+  a4_40: { ...LABEL_FORMATS.a4_40, name: 'Planche A4 · 40 étiquettes (52,5 × 29,7 mm)' },
+  a4_65: { ...LABEL_FORMATS.a4_65, name: 'Planche A4 · 65 étiquettes (38 × 21 mm)' },
+};
+
+export const isBarcodeLabelFormat = (v: unknown): v is BarcodeLabelFormatId => typeof v === 'string' && v in BARCODE_LABEL_FORMATS;
+
+/** Une étiquette produit : le code-barres, et ce qu'on veut lire à côté. */
+export interface BarcodeLabel {
+  barcode: string;
+  name: string;
+  price: Fcfa | null;
+  store?: string | null;
+}
+
+/** Ce qui figure sur l'étiquette en plus du code-barres et de ses chiffres. */
+export interface BarcodeLabelOptions {
+  name: boolean;
+  price: boolean;
+  store: boolean;
+}
+
+/**
+ * Code-barres avec ses chiffres, en millimètres réels. Comme sur les produits :
+ * barres de garde plus longues, chiffres de l'EAN par moitié (4 + 4, ou
+ * 1 + 6 + 6). Le module est ramené à un multiple de 1/8 mm pour que chaque
+ * barre tombe sur des points entiers d'une imprimante thermique à 203 dpi.
+ */
+export function barcodeWithDigitsSvg(code: string, maxWidthMm: number, heightMm: number): string {
+  const b = barcodeModules(code);
+  if (!b) return '';
+  const qL = b.kind === 'ean13' ? 11 : b.kind === 'ean8' ? 7 : 10;
+  const qR = b.kind === 'code128' ? 10 : 7;
+  const total = qL + b.modules.length + qR;
+  let m = maxWidthMm / total;
+  const snapped = Math.floor(m / 0.125) * 0.125;
+  if (snapped >= 0.25) m = snapped;
+  const w = total * m;
+  const fs = Math.min(heightMm * 0.3, m * (b.kind === 'code128' ? 8 : 9));
+  const barBottom = heightMm - fs * 0.95;
+  const guardBottom = heightMm - fs * 0.45;
+  const guards =
+    b.kind === 'ean8' ? new Set([0, 1, 2, 31, 32, 33, 34, 35, 64, 65, 66]) : b.kind === 'ean13' ? new Set([0, 1, 2, 45, 46, 47, 48, 49, 92, 93, 94]) : new Set<number>();
+  const r = (v: number) => Math.round(v * 1000) / 1000;
+  let rects = '';
+  for (let i = 0; i < b.modules.length; ) {
+    if (b.modules[i] === '0') {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (b.modules[j] === '1') j++;
+    const h = b.kind === 'code128' || !guards.has(i) ? barBottom : guardBottom;
+    rects += `<rect x="${r((qL + i) * m)}" y="0" width="${r((j - i) * m)}" height="${r(h)}"/>`;
+    i = j;
+  }
+  const text = (s: string, centerModule: number, spanModules: number | null) =>
+    `<text x="${r(centerModule * m)}" y="${r(heightMm - fs * 0.08)}" font-size="${r(fs)}" text-anchor="middle"${
+      spanModules ? ` textLength="${r(spanModules * m)}" lengthAdjust="spacing"` : ''
+    }>${s}</text>`;
+  let digits = '';
+  if (b.kind === 'ean8') digits = text(code.slice(0, 4), qL + 17, 24) + text(code.slice(4), qL + 50, 24);
+  else if (b.kind === 'ean13') digits = text(code[0]!, qL - 4.5, null) + text(code.slice(1, 7), qL + 24, 38) + text(code.slice(7), qL + 71, 38);
+  else digits = text(esc(code), total / 2, null);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${r(w)}mm" height="${r(heightMm)}mm" viewBox="0 0 ${r(w)} ${r(heightMm)}" shape-rendering="crispEdges" font-family="Arial, Helvetica, sans-serif">${rects}${digits}</svg>`;
+}
+
+/** Planches ou rouleau d'étiquettes produit, prêts à imprimer (et à afficher en aperçu). */
+export function barcodeLabelsHtml(labels: readonly BarcodeLabel[], formatId: BarcodeLabelFormatId, opts: BarcodeLabelOptions, skip = 0): string {
+  const f = BARCODE_LABEL_FORMATS[formatId];
+  const perPage = f.cols * f.rows;
+  const cells: (BarcodeLabel | null)[] = [...Array<null>(f.cols === 1 ? 0 : Math.max(0, Math.min(skip, perPage - 1))).fill(null), ...labels];
+  const pages: (BarcodeLabel | null)[][] = [];
+  for (let i = 0; i < cells.length; i += perPage) pages.push(cells.slice(i, i + perPage));
+  const padY = f.h < 24 ? 1 : 1.5;
+  const nameSize = f.h < 24 ? 2.4 : f.h < 32 ? 2.8 : 3.4;
+  const priceSize = f.h < 24 ? 3.4 : f.h < 32 ? 4.4 : 5.6;
+  const storeSize = f.h < 24 ? 1.8 : 2.1;
+  const label = (l: BarcodeLabel | null) => {
+    if (!l) return '<div class="label"></div>';
+    const store = opts.store && l.store ? l.store : '';
+    const price = opts.price && l.price !== null ? l.price : null;
+    const used = 2 * padY + (store ? storeSize * 1.2 : 0) + (opts.name ? nameSize * 1.25 : 0) + (price !== null ? priceSize * 1.15 + 0.4 : 0);
+    const bar = barcodeWithDigitsSvg(l.barcode, Math.min(f.w - 3, 40), Math.max(6, Math.min(f.h - used, 22)));
+    return `<div class="label">${store ? `<div class="store">${esc(store)}</div>` : ''}${opts.name ? `<div class="name">${esc(l.name)}</div>` : ''}<div class="bar">${bar}</div>${
+      price !== null ? `<div class="price">${formatFcfa(price, false)}<small> F</small></div>` : ''
+    }</div>`;
+  };
+  const style = `
+@page { size: ${f.pageW}mm ${f.pageH}mm; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; color: #000; }
+.page { width: ${f.pageW}mm; height: ${f.pageH}mm; padding: ${f.top}mm 0 0 ${f.left}mm; display: grid;
+  grid-template-columns: repeat(${f.cols}, ${f.w}mm); grid-auto-rows: ${f.h}mm; column-gap: ${f.gap}mm; overflow: hidden; break-after: page; }
+.page:last-child { break-after: auto; }
+.label { overflow: hidden; padding: ${padY}mm 1.5mm; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.store { font-size: ${storeSize}mm; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.1mm; white-space: nowrap; overflow: hidden; max-width: 100%; }
+.name { font-size: ${nameSize}mm; font-weight: bold; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.bar { line-height: 0; margin-bottom: 0.4mm; }
+.bar svg { display: block; }
+.price { font-size: ${priceSize}mm; font-weight: bold; line-height: 1.1; white-space: nowrap; }
+.price small { font-size: ${priceSize * 0.45}mm; }
+`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Codes-barres</title><style>${style}</style></head><body>${pages
+    .map((p) => `<div class="page">${p.map(label).join('')}</div>`)
+    .join('')}</body></html>`;
+}

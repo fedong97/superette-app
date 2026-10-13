@@ -1,4 +1,5 @@
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
+import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
 
 /**
  * Paramètres du magasin (Administration › Paramètres) : règles de vente, de
@@ -74,11 +75,25 @@ export interface StoreSettings {
   /** Présentation de l'écran de caisse pour tout le magasin ; un poste peut avoir son exception (Paramètres). */
   posLayout: PosLayout;
 
+  /** Donner un code-barres interne à l'enregistrement d'un article sans code (unité, cartons et packs). */
+  barcodeAuto: boolean;
+  /** Format des codes internes : EAN-8 (2xxxxxxx), court, ou EAN-13 (20xxxxxxxxxxx). */
+  barcodeKind: BarcodeKind;
+  /** Étiquettes produit : format et contenu proposés par défaut. */
+  labelFormat: BarcodeLabelFormatId;
+  labelName: boolean;
+  labelPrice: boolean;
+  labelStore: boolean;
+  /** Après une réception d'achat, proposer les étiquettes des articles à code interne. */
+  labelAfterReception: boolean;
+
   /** Modèles d'impression modifiés ou ajoutés (ceux du logiciel servent pour le reste). */
   printTemplates: DocTemplate[];
   /** Modèle choisi par emplacement (« invoice.a4.credit ») : identifiant de modèle. */
   printDefaults: Record<string, string>;
 }
+
+export type BarcodeKind = 'ean8' | 'ean13';
 
 /** Présentations de l'écran de caisse : mêmes fonctions et mêmes touches, disposition différente. */
 export type PosLayout = 'modern' | 'classic' | 'conventional';
@@ -114,6 +129,13 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   prefixProforma: 'PF',
   prefixOrder: 'BC',
   posLayout: 'modern',
+  barcodeAuto: true,
+  barcodeKind: 'ean8',
+  labelFormat: 'roll_30x20',
+  labelName: true,
+  labelPrice: true,
+  labelStore: false,
+  labelAfterReception: true,
   printTemplates: [],
   printDefaults: {},
 };
@@ -169,6 +191,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       }
       if (k === 'logo' && s && !s.startsWith('data:image/')) throw new Error('Logo : image attendue');
       if (k === 'posLayout' && !(s in POS_LAYOUTS)) throw new Error("Présentation de l'écran de caisse : moderne, classique ou conventionnel");
+      if (k === 'barcodeKind' && s !== 'ean8' && s !== 'ean13') throw new Error('Format des codes internes : EAN-8 ou EAN-13');
+      if (k === 'labelFormat' && !isBarcodeLabelFormat(s)) throw new Error("Format d'étiquette inconnu");
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);

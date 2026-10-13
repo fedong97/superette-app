@@ -238,7 +238,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Recherche', open: ['articles', 'search'], perm: 'articles' },
       SEP,
       { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
-      { label: 'Étiquettes de rayon', open: ['labels'] },
+      { label: 'Étiquettes et codes-barres', open: ['labels'] },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Stock multi-magasin', open: ['stock', 'multi'], perm: 'stock' },
@@ -318,7 +318,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Pertes et casse', open: ['stock', 'loss'], perm: 'stock_loss' },
       { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count', 'inventory_close', 'inventory_print'] },
       { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
-      { label: 'Étiquettes de rayon', open: ['labels'] },
+      { label: 'Étiquettes et codes-barres', open: ['labels'] },
     ],
   ],
   [

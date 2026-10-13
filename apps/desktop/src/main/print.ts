@@ -9,6 +9,8 @@ import {
   formatFcfa,
   formatQty,
   formatRate,
+  BARCODE_LABEL_FORMATS,
+  type BarcodeLabelFormatId,
   LABEL_FORMATS,
   type LabelFormatId,
   numberToWordsFr,
@@ -289,6 +291,34 @@ export function createPrinter(s: Services): Printer {
     }
   }
 
+  /**
+   * Étiquettes produit. Rouleau avec l'imprimante d'étiquettes du poste choisie
+   * dans les Paramètres : impression directe, sans fenêtre. Sinon (planche A4,
+   * ou pas d'imprimante choisie) : la fenêtre d'impression de Windows.
+   */
+  async function printBarcodeLabelsHtml(html: string, format: BarcodeLabelFormatId): Promise<boolean> {
+    const f = BARCODE_LABEL_FORMATS[format];
+    const device = format.startsWith('roll_') ? s.admin.getSetting('printer.labels') || undefined : undefined;
+    const win = renderWindow();
+    try {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      return await new Promise<boolean>((resolve, reject) =>
+        win.webContents.print(
+          {
+            silent: Boolean(device),
+            ...(device ? { deviceName: device } : {}),
+            printBackground: true,
+            pageSize: { width: f.pageW * 1000, height: f.pageH * 1000 },
+            margins: { marginType: 'none' },
+          },
+          (ok, reason) => (ok ? resolve(true) : reason === 'cancelled' ? resolve(false) : reject(new Error(`Impression impossible : ${reason}`))),
+        ),
+      );
+    } finally {
+      win.destroy();
+    }
+  }
+
   /** Planche d'étiquettes : la fenêtre d'impression s'ouvre au format de la planche ou du rouleau. Renvoie false si annulé. */
   async function printLabelsHtml(html: string, format: LabelFormatId): Promise<boolean> {
     const f = LABEL_FORMATS[format];
@@ -324,6 +354,7 @@ export function createPrinter(s: Services): Printer {
 
   return {
     labels: printLabelsHtml,
+    barcodeLabels: printBarcodeLabelsHtml,
 
     async countSheet(storeId, warehouseId, departmentId) {
       const store = s.admin.getStore(storeId);

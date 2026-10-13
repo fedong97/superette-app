@@ -112,6 +112,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.41.1',
     items: [
       'Correction : la barre de recherche (caisse, clients, fournisseurs) ne se bloque plus après une question « OK / Annuler » ou une impression. Les questions s’affichent maintenant dans le logiciel.',
+      'Correction : sur « Tous les menus », la barre verte de gauche répond de nouveau (le menu s’ouvrait derrière la page).',
     ],
   },
   {

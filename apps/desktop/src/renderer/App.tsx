@@ -26,7 +26,7 @@ import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { AskHost, Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
 
@@ -41,6 +41,8 @@ interface Win {
   crumb?: string;
   /** Change à chaque réouverture sur un autre onglet, pour repartir de cet onglet. */
   nonce: number;
+  /** Augmente à chaque actualisation (⟳ ou F5) : les données de la fenêtre se rechargent. */
+  rev?: number;
 }
 
 
@@ -553,11 +555,15 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       } else if (e.key === 'F1' && !onPos) {
         e.preventDefault();
         setHelp('page');
+      } else if (e.key === 'F5' && !onPos && !e.ctrlKey) {
+        // F5 actualise la fenêtre de devant (à la caisse, F5 ouvre le tiroir).
+        e.preventDefault();
+        if (active) refreshWin(active);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onPos]);
+  }, [onPos, active]);
 
   // Taille de la zone de travail : les fenêtres restent dedans quand l'écran change.
   useEffect(() => {
@@ -594,6 +600,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     // Un écran déjà ouvert revient devant au lieu de s'ouvrir une deuxième fois.
     focus(kind);
   };
+  /** ⟳ : recharge les données de la fenêtre sans la fermer. */
+  const refreshWin = (kind: WinKind) => setWins((ws) => ws.map((w) => (w.kind === kind ? { ...w, rev: (w.rev ?? 0) + 1 } : w)));
   const close = (kind: WinKind | null) => {
     if (!kind) return;
     setWins(wins.filter((w) => w.kind !== kind));
@@ -839,7 +847,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             onFocus={() => focus(w.kind)}
             onChange={(g) => saveGeo(w.kind, g)}
             onClose={() => close(w.kind)}
+            onRefresh={() => refreshWin(w.kind)}
           >
+            <RefreshCtx.Provider value={w.rev ?? 0}>
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
               <Pos
                 user={user}
@@ -855,7 +865,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
                 onSwitchMode={() => (w.kind === 'credit' ? open('cash1', undefined, 'Facturation › Vente au comptant 1') : open('credit', undefined, 'Facturation › Vente à crédit'))}
-                onListing={() => open('sales', 'tickets', 'Facturation › Mes factures')}
                 onTreasury={() => open('treasury', 'day', 'Trésorerie › Opérations de trésorerie')}
               />
             )}
@@ -877,6 +886,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
+            </RefreshCtx.Provider>
           </MdiWindow>
         ))}
       </main>
@@ -1055,7 +1065,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['Ctrl+K', 'Rechercher un écran par son nom'],
                 ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
                 ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
-                ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+                ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière en listing)'],
+                ['F5', 'Actualiser la page (à la caisse : ouvrir le tiroir)'],
                 ['F4 ou Entrée sur saisie vide', 'Enregistrer la fiche sans imprimer'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],

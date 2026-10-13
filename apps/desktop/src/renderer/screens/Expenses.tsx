@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
+import { Empty, Field, askConfirm, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
 import { hasVat } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -697,6 +697,8 @@ const shiftMonth = (m: string, n: number) => {
 function ChargePlans() {
   const plans = useLoad(() => call('charges.plans', true), []);
   const [open, setOpen] = useState<Plan | 'new' | null>(null);
+  const [showStopped, setShowStopped] = useState(false);
+  const shown = (plans.data ?? []).filter((p) => showStopped || p.active);
   const monthly = (plans.data ?? [])
     .filter((p) => p.active)
     .reduce((t, p) => t + Math.round(p.amount / (p.frequency === 'monthly' ? 1 : p.frequency === 'quarterly' ? 3 : 12)), 0);
@@ -704,11 +706,14 @@ function ChargePlans() {
     <>
       <div className="filters">
         <span className="muted">Loyer, ENEO, CAMWATER, salaires, CNPS, gardiennage… : l'échéancier rappelle chaque échéance jusqu'à ce qu'une dépense la constate.</span>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+        <label style={{ marginLeft: 'auto' }}>
+          <input type="checkbox" checked={showStopped} onChange={(e) => setShowStopped(e.target.checked)} /> Afficher les charges arrêtées
+        </label>
+        <button className="primary" onClick={() => setOpen('new')}>
           Nouvelle charge fixe
         </button>
       </div>
-      {plans.data?.length === 0 ? (
+      {shown.length === 0 && plans.data ? (
         <Empty>Aucune charge fixe. Définissez vos charges qui reviennent pour ne plus en oublier.</Empty>
       ) : (
         <table className="list compact">
@@ -726,7 +731,7 @@ function ChargePlans() {
             </tr>
           </thead>
           <tbody>
-            {plans.data?.map((p) => (
+            {shown.map((p) => (
               <tr key={p.id} className={`clickable ${p.active ? '' : 'inactive'}`} onClick={() => setOpen(p)}>
                 <td>{p.label}</td>
                 <td>{p.category_name}</td>
@@ -845,6 +850,25 @@ function ChargePlanDialog({ plan, onClose, onSaved }: { plan: Plan | null; onClo
           </label>
         )}
         <div className="actions">
+          {plan && (
+            <button
+              type="button"
+              className="danger"
+              style={{ marginRight: 'auto' }}
+              onClick={async () => {
+                if (!(await askConfirm(`Supprimer la charge fixe « ${plan.label} » ?\nSi des échéances sont déjà constatées, la charge est arrêtée et son historique reste.`))) return;
+                try {
+                  const r = await call('charges.deletePlan', plan.id);
+                  toast.ok(r.deleted ? 'Charge supprimée' : `Charge arrêtée après ${monthLabel(r.plan!.end_month!)} : ses échéances constatées restent`);
+                  onSaved();
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Supprimer
+            </button>
+          )}
           <button type="button" onClick={onClose}>
             Annuler
           </button>

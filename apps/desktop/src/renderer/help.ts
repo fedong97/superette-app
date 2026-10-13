@@ -21,7 +21,7 @@ export interface PageHelp {
 const POS_KEYS: [string, string][] = [
   ['F1', 'Rechercher un produit'],
   ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier ticket)'],
-  ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+  ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière facture en listing)'],
   ['Entrée sur saisie vide ou F4', 'Enregistrer la fiche sans imprimer'],
   ['Ctrl+E', 'Encaisser : Mobile Money, carte, chèque, paiements mixtes'],
   ['F3 / F10', 'Mettre en attente / rappeler un ticket en attente'],

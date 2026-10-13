@@ -1379,6 +1379,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'controls.creditControl': () => s.controls.creditControl(ctx(['receivables']).storeId),
     'charges.plans': (includeInactive?: boolean) => s.charges.listPlans(ctx(['charge_plans']).storeId, includeInactive),
     'charges.savePlan': (input: ChargePlanInput, id?: string | null) => s.charges.savePlan(ctx(['charge_plans']), input, id),
+    'charges.deletePlan': (id: string) => s.charges.deletePlan(ctx(['charge_plans']), id),
     'charges.schedule': (from: string, to: string) => s.charges.schedule(ctx(['charge_plans']).storeId, from, to),
     'charges.late': () => (user && can(user, ['charge_plans']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
 

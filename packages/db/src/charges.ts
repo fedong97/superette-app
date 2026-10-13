@@ -163,6 +163,30 @@ export class ChargeService extends Base {
   }
 
   /**
+   * Supprime une charge fixe. Sans dépense rattachée, elle est effacée. Avec des
+   * échéances déjà constatées, l'effacer ferait perdre leur historique : elle est
+   * arrêtée (plus d'échéance après le dernier mois constaté) et quitte la liste.
+   */
+  deletePlan(ctx: Context, id: string): { deleted: boolean; plan: ChargePlan | null } {
+    const plan = this.getPlan(id);
+    if (plan.store_id !== ctx.storeId) throw new AppError('Cette charge appartient à un autre magasin', 'INVALID');
+    return this.tx(() => {
+      const used = this.db.prepare('SELECT MAX(plan_period) AS last, COUNT(*) AS n FROM expenses WHERE plan_id = ?').get(id) as { last: string | null; n: number };
+      if (!used.n) {
+        this.db.prepare('DELETE FROM charge_plans WHERE id = ?').run(id);
+        this.enqueue(ctx, 'charge_plan', id, 'delete', {});
+        this.audit(ctx.userId, 'charge.delete', 'charge_plan', id, { label: plan.label });
+        return { deleted: true, plan: null };
+      }
+      const end = used.last && used.last >= plan.start_month ? used.last : plan.start_month;
+      this.db.prepare('UPDATE charge_plans SET active = 0, end_month = ?, updated_at = ? WHERE id = ?').run(end, this.now(), id);
+      this.enqueue(ctx, 'charge_plan', id, 'upsert', {});
+      this.audit(ctx.userId, 'charge.stop', 'charge_plan', id, { label: plan.label, end });
+      return { deleted: false, plan: this.getPlan(id) };
+    });
+  }
+
+  /**
    * Échéancier des charges entre deux mois (AAAA-MM) : chaque échéance avec la
    * dépense qui l'a constatée. Une échéance non payée est « en retard » après
    * sa date, « à payer » dans les 7 jours qui viennent.

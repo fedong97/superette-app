@@ -63,6 +63,7 @@ const TABLES: Record<string, string> = {
   staff_salary: 'staff_salaries',
   treasury_entry: 'treasury_entries',
   sale_delivery: 'sale_deliveries',
+  fiscal_year: 'fiscal_years',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -465,6 +466,7 @@ export class SyncService extends Base {
     if (this.applyDocument(event)) return;
     const doc = WITH_LINES[event.entity];
     if (doc && (event.op === 'delete' || !p)) {
+      this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
       this.db.prepare(`DELETE FROM ${doc.table} WHERE id = ?`).run(event.entityId);
       return;
     }
@@ -480,10 +482,11 @@ export class SyncService extends Base {
         if (local && local !== 'open') return;
       }
       this.upsert(doc.table, p);
-      // Un bon de commande brouillon peut être réécrit : on remplace ses lignes.
+      // Un bon de commande brouillon, un devis ou une écriture saisie peuvent être réécrits : on remplace leurs lignes.
       // Les lignes d'une réception ne changent jamais.
-      if (event.entity === 'purchase_order' || event.entity === 'quote') this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
-      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], event.entity !== 'purchase_order' && event.entity !== 'quote');
+      const rewritable = event.entity === 'purchase_order' || event.entity === 'quote' || event.entity === 'manual_entry';
+      if (rewritable) this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
+      for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], !rewritable);
       return;
     }
     switch (event.entity) {
@@ -504,6 +507,12 @@ export class SyncService extends Base {
         // Paramètres fiscaux modifiés sur deux PC : la modification la plus récente l'emporte.
         if (this.keepsLocal('tax_years', event.entityId, p)) return;
         this.upsert('tax_years', p);
+        return;
+      }
+      case 'fiscal_year': {
+        // Exercice clôturé ou rouvert sur deux PC : la modification la plus récente l'emporte.
+        if (this.keepsLocal('fiscal_years', event.entityId, p)) return;
+        this.upsert('fiscal_years', p);
         return;
       }
       case 'charge_plan': {

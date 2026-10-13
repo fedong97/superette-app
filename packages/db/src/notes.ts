@@ -222,7 +222,7 @@ export class NotesService extends Base {
     const sheet = new Map<string, Movement>();
     const period = new Map<string, number>();
     let reopenedStock = 0;
-    for (const e of this.accounting.entries(storeId, { to })) {
+    for (const e of this.accounting.entries(storeId, { to, since: from })) {
       const opening = e.date < from || e.journal === 'AN';
       for (const l of e.lines) {
         if (l.account[0]! >= '6') {

@@ -4,6 +4,7 @@ import {
   effectiveTemplates,
   mergeStoreSettings,
   normalizeTemplate,
+  parcelCount,
   receiptToText,
   renderDocHtml,
   renderDocTicket,
@@ -18,7 +19,8 @@ describe('modèles d’impression', () => {
     const slots = BUILTIN_TEMPLATES.map((t) => `${t.doc}.${t.format}.${t.variant}`);
     // Facture (comptant, à terme), devis (devis, proforma), bon de livraison, bon de commande, facture d'achat : 7 variantes × 3 formats.
     expect(new Set(slots).size).toBe(21);
-    expect(slots.length).toBe(21);
+    // Plus les dispositions encadrée et détaillée du ticket et le listing sans logo, comptant et à terme.
+    expect(slots.length).toBe(27);
     expect(resolveTemplate({}, 'invoice', 'listing', 'credit').id).toBe('invoice-listing-credit');
   });
 
@@ -112,5 +114,42 @@ describe('modèles d’impression', () => {
     expect(text).toContain('Le client :');
     // Le même modèle en aperçu HTML.
     expect(renderDocHtml(builtin('invoice-ticket-credit'), d)).toContain('size: 80mm auto');
+  });
+
+  it('facture listing (F7) : encadrée, papier continu, cases DATE / CLIENT, montant en lettres, nombre de colis, net à payer', () => {
+    const t = builtin('invoice-listing-cash');
+    expect(t.page).toMatchObject({ paper: 'listing', style: 'framed' });
+    const d = sampleDocData('credit');
+    const html = renderDocHtml(t, { ...d, doc: { ...d.doc, warehouse: 'Surface de vente' } });
+    for (const s of ['class="frame"', 'DATE', 'CLIENT', 'MAG. DE LIVR. : SURFACE DE VENTE', 'MONTANT EN LETTRES', 'NB COLIS', 'NET À PAYER', 'Merci de votre fidélité', 'FACTURÉ PAR : AWA', 'size: 240mm auto'])
+      expect(html).toContain(s);
+    expect(parcelCount([{ qty: '2' }, { qty: '3' }, { qty: '1,250 kg' }] as never)).toBe(6);
+    // Un ancien modèle enregistré sans présentation reste « simple ».
+    expect(normalizeTemplate({ id: 'x', name: 'Ancien', doc: 'invoice', format: 'a4', variant: 'cash' }).page.style).toBe('plain');
+  });
+
+  it('écran de caisse : moderne par défaut, seulement les trois présentations', () => {
+    expect(mergeStoreSettings(null, {}).posLayout).toBe('modern');
+    expect(mergeStoreSettings(null, { posLayout: 'classic' }).posLayout).toBe('classic');
+    expect(() => mergeStoreSettings(null, { posLayout: 'autre' as never })).toThrow('écran de caisse');
+  });
+
+  it('ticket encadré, ticket détaillé et listing sans logo : la partie TVA disparaît pour un magasin sans TVA', () => {
+    const d = sampleDocData('cash');
+    const noVat = { ...d, store: { ...d.store, vatEnabled: false }, lines: d.lines.map((l) => ({ ...l, vatRate: 0 })) };
+    const boxed = builtin('invoice-ticket-cash-boxed');
+    expect(renderDocHtml(boxed, d)).toContain('TVA');
+    expect(renderDocHtml(boxed, noVat)).not.toContain('TVA');
+    expect(receiptToText(renderDocTicket(boxed, noVat), 42)).not.toContain('TVA');
+    const detailed = builtin('invoice-ticket-cash-detailed');
+    const html = renderDocHtml(detailed, d);
+    for (const s of ['CODE', 'TOTAL HT', 'NB COLIS', 'MONTANT TTC']) expect(html).toContain(s);
+    const plainHtml = renderDocHtml(detailed, noVat);
+    expect(plainHtml).not.toContain('TVA');
+    expect(plainHtml).not.toContain('TOTAL HT');
+    // Partie TVA décochée : rien sur la TVA, même avec TVA.
+    expect(renderDocHtml({ ...detailed, totals: { ...detailed.totals, ht: false, vatDetail: false } }, d)).not.toContain('TVA');
+    const side = renderDocHtml(builtin('invoice-listing-cash-side'), d);
+    for (const s of ['class="fside"', 'LE GESTIONNAIRE', 'LE CHAUFFEUR', 'LE CONTRÔLEUR', 'LE CLIENT']) expect(side).toContain(s);
   });
 });

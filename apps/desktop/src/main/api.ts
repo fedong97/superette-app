@@ -1,6 +1,9 @@
 import {
   type DenominationCount,
+  type BarcodeLabelFormatId,
+  type BarcodeLabelOptions,
   type LabelFormatId,
+  barcodeLabelsHtml,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -14,6 +17,8 @@ import {
   type StockLevel,
   type RegisterKind,
   type StoreSettings,
+  type PosLayout,
+  POS_LAYOUTS,
   type DocFormat,
   type DocTemplate,
   type DocVariant,
@@ -68,6 +73,8 @@ import {
   type ProductionStatus,
   type StoreOptions,
   type User,
+  type DeliveryInput,
+  type DeliveryStatus,
 } from '@superette/db';
 
 import type { SyncRunner } from './sync';
@@ -94,7 +101,9 @@ export interface InvoicePrintOptions {
 
 export interface Printer {
   /** `newSale` : ticket d'une vente qui vient d'être encaissée (ouvre le tiroir selon les réglages). */
-  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null }): Promise<void>;
+  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null; force?: boolean }): Promise<void>;
+  /** Tiroir d'une vente enregistrée sans ticket (F4) : il s'ouvre selon les réglages, comme avec le ticket. */
+  saleDrawer(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
@@ -139,6 +148,8 @@ export interface Printer {
   list(): Promise<{ name: string; isDefault: boolean }[]>;
   /** Planche d'étiquettes déjà mise en page ; false si l'utilisateur annule. */
   labels(html: string, format: LabelFormatId): Promise<boolean>;
+  /** Étiquettes produit : directement sur l'imprimante d'étiquettes du poste pour un rouleau, sinon fenêtre d'impression. */
+  barcodeLabels(html: string, format: BarcodeLabelFormatId): Promise<boolean>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
   /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
   inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
@@ -170,6 +181,9 @@ const LOCAL_SETTINGS = [
   'drawer.mode',
   'ticket.footer',
   'display.size',
+  'pos.layout',
+  'printer.listing',
+  'printer.labels',
   'backup.autoTime',
 ];
 
@@ -236,6 +250,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const PRODUCTION: Permission[] = ['production', 'production_recipes', 'production_create', 'production_validate', 'production_cancel', ...STOCK];
   /** Paramètres du magasin de ce poste. */
   const settings = () => s.admin.storeSettings(ctx().storeId);
+  /** Code interne donné à l'enregistrement d'un article sans code, si le magasin l'a choisi. */
+  const autoBarcode = () => (settings().barcodeAuto ? settings().barcodeKind : null);
   const SALES: Permission[] = ['sales', 'reports', 'receivables'];
   /** Montants de la caisse : attendu, entrées, ventes de la journée, historique des journées et Z. */
   const AMOUNTS: Permission[] = ['cash_amounts'];
@@ -314,6 +330,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
       /** Taille du texte réglée sur ce PC (Paramètres › Affichage). */
       display: s.admin.getSetting('display.size') === 'large' ? 'large' : 'normal',
+      /** Présentation de l'écran de caisse : celle de ce PC s'il a une exception, sinon celle du magasin. */
+      posLayout: ((): PosLayout => {
+        const own = s.admin.getSetting('pos.layout');
+        if (own && own in POS_LAYOUTS) return own as PosLayout;
+        const station = s.admin.station();
+        return station ? s.admin.storeSettings(station.store.id).posLayout : 'modern';
+      })(),
     }),
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
     'setup.bootstrap': (input: BootstrapInput) => {
@@ -403,6 +426,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireUser(['settings_edit']);
       for (const [k, v] of Object.entries(values)) {
         if (!LOCAL_SETTINGS.includes(k)) throw new AppError(`Réglage inconnu : ${k}`, 'INVALID');
+        if (k === 'pos.layout') {
+          requireAdmin();
+          if (v && !(v in POS_LAYOUTS)) throw new AppError("Présentation de l'écran de caisse inconnue", 'INVALID');
+        }
         if (k === 'backup.autoTime') s.backups.configure(user!.id, { autoTime: v || null });
         else s.admin.setSetting(k, v);
       }
@@ -429,6 +456,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.storeSettings': () => s.admin.storeSettings(ctx().storeId),
     'admin.saveStoreSettings': (patch: Partial<StoreSettings>) => {
       const c = ctx(['settings_edit']);
+      if (patch.posLayout !== undefined) requireAdmin();
       return s.admin.saveStoreSettings(c.userId, c.storeId, patch);
     },
     'admin.audit': () => (requireUser(['audit']), s.admin.auditLog()),
@@ -470,7 +498,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const noVat = s.admin.vatDisabled(ctx().storeId);
       if (!id) {
         if (!can(u, ['article_create', 'sale_new_article'])) throw new AppError("Vous n'avez pas le droit d'ajouter des produits", 'FORBIDDEN');
-        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id);
+        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id, { autoBarcode: autoBarcode() });
       }
       const cur = s.catalogue.getArticle(id, ctx().storeId);
       if (noVat) input = { ...input, vatRateId: cur.vat_rate_id };
@@ -491,7 +519,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         (input.alertQty ?? null) !== cur.alert_qty ||
         (input.maxQty ?? null) !== cur.max_qty;
       if (otherChanged && !can(u, ['article_edit'])) throw new AppError("Vous n'avez pas le droit de modifier la fiche d'un produit", 'FORBIDDEN');
-      return s.catalogue.saveArticle(u.id, input, id);
+      return s.catalogue.saveArticle(u.id, input, id, { autoBarcode: autoBarcode() });
     },
     'catalogue.setStorePrice': (articleId: string, price: Fcfa | null) => {
       const c = ctx(['store_price']);
@@ -501,7 +529,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'catalogue.departments': () => (requireUser(), s.catalogue.listDepartments()),
     'catalogue.createDepartment': (name: string) => (requireUser(['article_families']), s.catalogue.createDepartment(name)),
     'catalogue.createFamily': (departmentId: string, name: string) => (requireUser(['article_families']), s.catalogue.createFamily(departmentId, name)),
-    'catalogue.newInternalBarcode': () => (requireUser(['article_create', 'article_edit', 'sale_new_article']), s.catalogue.generateInternalBarcode()),
+    'catalogue.newInternalBarcode': () => (requireUser(['article_create', 'article_edit', 'sale_new_article']), s.catalogue.generateInternalBarcode(settings().barcodeKind)),
+    'catalogue.assignMissingBarcodes': () => s.catalogue.assignMissingBarcodes(requireUser(['article_edit']).id, settings().barcodeKind),
+    'barcode.info': () => (requireUser(), s.catalogue.internalBarcodeInfo(settings().barcodeKind)),
     'catalogue.quickKeys': () => s.catalogue.quickKeys(ctx().storeId),
     'catalogue.scan': (code: string) => s.catalogue.scan(code, ctx().storeId),
     'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) =>
@@ -585,6 +615,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (printed) s.labels.markPrinted(storeId, items);
       return printed;
     },
+    'barcode.preview': (items: LabelItem[], format: BarcodeLabelFormatId, opts: BarcodeLabelOptions, skip?: number) => {
+      const storeId = ctx().storeId;
+      return barcodeLabelsHtml(s.labels.barcodeLabels(storeId, items, s.admin.getStore(storeId).name), format, opts, skip);
+    },
+    'barcode.print': (items: LabelItem[], format: BarcodeLabelFormatId, opts: BarcodeLabelOptions, skip?: number) => {
+      const storeId = ctx().storeId;
+      return printer.barcodeLabels(barcodeLabelsHtml(s.labels.barcodeLabels(storeId, items, s.admin.getStore(storeId).name), format, opts, skip), format);
+    },
     'stock.expiring': (days?: number) => s.stock.expiringLots(ctx().storeId, days ?? settings().expiryAlertDays),
     'stock.lots': (articleId: string) => s.stock.lotsOf(articleId, ctx().storeId),
     'stock.movements': (articleId?: string, types?: MovementType[]) => s.stock.movements(ctx(['stock_moves', 'stock']).storeId, { articleId, types }),
@@ -663,7 +701,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (type === 'OUT' && !can(user!, ['cashout'])) supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
-    'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean }) => s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
+    'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
+      s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
@@ -678,9 +717,21 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       creditPin?: string;
       quoteId?: string | null;
       clientName?: string | null;
+      priceLevel?: PriceLevel | null;
+      warehouseId?: string | null;
+      /** Code du gérant qui a permis le tarif ou le dépôt choisis, si le caissier n'en a pas le droit. */
+      optionsPin?: string;
+      delivery?: DeliveryInput | null;
     }) => {
       const c = ctx(POS);
       s.license.assertCanSell();
+      const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
+      const otherLevel = Boolean(input.priceLevel) && input.priceLevel !== usual;
+      const otherWarehouse = Boolean(input.warehouseId) && s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1;
+      if ((otherLevel && !can(user!, ['sale_tariff'])) || (otherWarehouse && !can(user!, ['sale_warehouse']))) {
+        if (!input.optionsPin) throw new AppError('Tarif ou dépôt soumis à validation du gérant', 'OPTIONS_SUPERVISOR');
+        supervisor(input.optionsPin);
+      }
       if (input.lines.some((l) => l.price != null) && !can(user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
       const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(user!, ['discount']) ? user!.id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
@@ -692,8 +743,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         creditAuthorizedBy: creditBy,
         quoteId: input.quoteId ?? null,
         clientName: input.clientName ?? null,
+        priceLevel: input.priceLevel ?? null,
+        warehouseId: input.warehouseId ?? null,
+        delivery: input.delivery ?? null,
       });
     },
+    /** Taux de TVA des frais de livraison, pour le total affiché à la caisse. */
+    'deliveries.feeVat': () => {
+      const c = ctx(POS);
+      return s.pos.deliveryFeeLine(c, 1).vatRate;
+    },
+    'deliveries.list': (opts: { from?: string; to?: string; open?: boolean; courier?: string | null }) => s.deliveries.list(ctx(['deliveries']).storeId, opts),
+    'deliveries.couriers': () => s.deliveries.couriers(ctx(POS).storeId),
+    'deliveries.forSale': (saleId: string) => (requireSaleAccess(saleId), s.deliveries.forSale(saleId)),
+    'deliveries.setStatus': (id: string, status: Exclude<DeliveryStatus, 'pending'>, patch?: { courier?: string | null }) => s.deliveries.setStatus(ctx(['deliveries']), id, status, patch),
     'pos.cancel': (saleId: string, supervisorPin: string, reason: string) => {
       const c = ctx(['sale_cancel']);
       const limit = settings().cancelMinutes;
@@ -726,11 +789,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.zReport': (sessionId: string) => (requireAmounts(), requireUser(['cash_z']), s.pos.zReport(sessionId)),
     'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(['cash_history']).storeId)),
     /** Ticket d'une vente qui vient d'être faite (autant d'exemplaires que réglé), ou réimpression avec le droit. */
-    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean; templateId?: string | null }) => {
+    /** `force` : ticket demandé à la validation (F2), imprimé même si l'impression automatique est coupée. */
+    'pos.printTicket': (saleId: string, opts?: { newSale?: boolean; templateId?: string | null; force?: boolean }) => {
       const u = requireSaleAccess(saleId);
       const fresh = Boolean(opts?.newSale && can(u, POS));
       if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer un ticket", 'FORBIDDEN');
-      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId });
+      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId, force: Boolean(opts?.force) });
+    },
+    /** Vente enregistrée sans ticket ou en listing : le tiroir s'ouvre comme au ticket, juste après la vente par son vendeur. */
+    'pos.saleDrawer': (saleId: string) => {
+      if (!invoiceAccess(saleId)) return;
+      return printer.saleDrawer(saleId);
     },
     /** Ouverture du tiroir sans encaissement : tracée dans le journal d'audit. */
     'pos.openDrawer': async () => {

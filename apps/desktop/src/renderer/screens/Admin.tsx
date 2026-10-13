@@ -18,6 +18,8 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
   // Utilisateur ouvert depuis la liste (« Privilèges… ») dans l'onglet des privilèges.
   const [privUser, setPrivUser] = useState<string | null>(null);
+  // Modèle ouvert depuis Paramètres (« Modifier… ») dans l'onglet des modèles.
+  const [editTpl, setEditTpl] = useState<string | null>(null);
   const can = (p: Permission) => user.rights.includes(p);
   const tabs: [Tab, string][] = [
     ...(user.role === 'admin' ? ([['stores', 'Magasins']] as [Tab, string][]) : []),
@@ -55,8 +57,17 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       )}
       {tab === 'rights' && <RoleRights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'privileges' && <UserPrivileges key={privUser ?? ''} isAdmin={user.role === 'admin'} initialUserId={privUser} onChanged={onChanged} />}
-      {tab === 'settings' && <Settings user={user} onChanged={onChanged} />}
-      {tab === 'templates' && <PrintTemplates user={user} />}
+      {tab === 'settings' && (
+        <Settings
+          user={user}
+          onChanged={onChanged}
+          onEditTemplate={(id) => {
+            setEditTpl(id);
+            setTab('templates');
+          }}
+        />
+      )}
+      {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}

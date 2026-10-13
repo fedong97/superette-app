@@ -1,4 +1,4 @@
-import { type Fcfa, type LabelData, type Milli, type PromotionRule, formatFcfa, promotionLabel } from '@superette/core';
+import { type BarcodeLabel, type Fcfa, type LabelData, type Milli, type PromotionRule, formatFcfa, promotionLabel } from '@superette/core';
 import type { Article, CatalogueService } from './catalogue';
 import type { Db } from './database';
 import type { PromotionService } from './promotions';
@@ -21,6 +21,8 @@ export interface LabelCandidate {
   pack: string;
   /** « Ampoule », « Carton de 100 ». */
   pack_label: string;
+  /** Code-barres de ce niveau ; null s'il n'en a pas encore. */
+  barcode: string | null;
   price: Fcfa;
   /** Prix de la dernière étiquette imprimée sur ce poste ; null si jamais imprimée. */
   last_price: Fcfa | null;
@@ -102,8 +104,8 @@ export class LabelService extends Base {
       if (departments && !(a.family_id && departments.has(a.family_id))) continue;
       const unitName = a.unit_name || 'Pièce';
       const levels = [
-        ...a.packs.map((p) => ({ pack: p.name, label: `${p.name} de ${p.units / 1000}` })),
-        { pack: '', label: a.unit === 'piece' ? unitName : UNIT_WORD[a.unit] },
+        ...a.packs.map((p) => ({ pack: p.name, label: `${p.name} de ${p.units / 1000}`, barcode: p.barcode })),
+        { pack: '', label: a.unit === 'piece' ? unitName : UNIT_WORD[a.unit], barcode: unitBarcode(a) },
       ];
       const qty = stock.get(a.id) ?? 0;
       for (const l of levels) {
@@ -118,6 +120,7 @@ export class LabelService extends Base {
           department_name: a.department_name,
           pack: l.pack,
           pack_label: l.label,
+          barcode: l.barcode,
           price,
           last_price: last?.price ?? null,
           printed_at: last?.printed_at ?? null,
@@ -180,6 +183,29 @@ export class LabelService extends Base {
     return out;
   }
 
+  /**
+   * Étiquettes produit (le code-barres à coller sur l'article ou le carton),
+   * chacune répétée `copies` fois. Un niveau sans code-barres est refusé.
+   */
+  barcodeLabels(storeId: string, items: readonly LabelItem[], storeName?: string | null): BarcodeLabel[] {
+    const total = items.reduce((s, i) => s + Math.max(0, Math.floor(i.copies)), 0);
+    if (total === 0) throw new AppError('Aucune étiquette à imprimer', 'INVALID');
+    if (total > MAX_LABELS) throw new AppError(`${MAX_LABELS} étiquettes au plus par impression`, 'INVALID');
+    const rules = this.rules(storeId);
+    const out: BarcodeLabel[] = [];
+    for (const item of items) {
+      if (Math.floor(item.copies) < 1) continue;
+      const a = this.catalogue.getArticle(item.articleId, storeId);
+      const pack = item.pack ?? '';
+      const p = pack ? a.packs.find((x) => x.name === pack) : null;
+      const barcode = pack ? (p?.barcode ?? null) : unitBarcode(a);
+      if (!barcode) throw new AppError(`${a.name}${pack ? ` · ${pack}` : ''} n'a pas de code-barres : donnez-lui un code depuis sa fiche`, 'INVALID');
+      const label: BarcodeLabel = { barcode, name: pack ? `${a.name} · ${pack}` : a.name, price: this.priceOf(a, pack, rules), store: storeName ?? null };
+      for (let i = 0; i < Math.floor(item.copies); i++) out.push(label);
+    }
+    return out;
+  }
+
   /** Retient le prix imprimé : l'étiquette sort de la liste « à refaire ». */
   markPrinted(storeId: string, items: readonly LabelItem[]): void {
     const rules = this.rules(storeId);
@@ -197,5 +223,8 @@ export class LabelService extends Base {
     })();
   }
 }
+
+/** Code-barres de l'unité de détail (celui qui contient une seule unité). */
+const unitBarcode = (a: Article) => a.barcodes.find((b) => b.pack_qty === 1000 && !a.packs.some((p) => p.barcode === b.code))?.code ?? null;
 
 const plural = (w: string) => (/[sxz]$/.test(w) ? w : `${w}s`);

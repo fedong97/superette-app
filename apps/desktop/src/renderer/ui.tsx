@@ -90,17 +90,23 @@ export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []): { da
 // --- Composants --------------------------------------------------------------
 
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const back = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    // Fenêtre ouverte par-dessus une autre : Échap ne ferme que celle du dessus.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const all = document.querySelectorAll('.modal-back');
+      if (!back.current || all[all.length - 1] === back.current) onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={back} className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? 'wide' : ''}`}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="ghost" onClick={onClose} aria-label="Fermer">
+          <button type="button" className="ghost" onClick={onClose} aria-label="Fermer">
             ✕
           </button>
         </div>

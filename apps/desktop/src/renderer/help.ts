@@ -20,13 +20,13 @@ export interface PageHelp {
 
 const POS_KEYS: [string, string][] = [
   ['F1', 'Rechercher un produit'],
-  ['Entrée sur saisie vide ou F4', 'Valider la fiche'],
+  ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier ticket)'],
+  ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+  ['Entrée sur saisie vide ou F4', 'Enregistrer la fiche sans imprimer'],
   ['Ctrl+E', 'Encaisser : Mobile Money, carte, chèque, paiements mixtes'],
   ['F3 / F10', 'Mettre en attente / rappeler un ticket en attente'],
-  ['F2', 'Réimprimer le dernier ticket'],
   ['F5', 'Ouvrir le tiroir'],
   ['F6', 'Remise sur la ligne choisie'],
-  ['F7', 'Listing des factures'],
   ['F8', 'Choisir le client'],
   ['F9', 'Facture A4 du ticket'],
   ['+ / −', 'Quantité de la ligne choisie'],
@@ -45,7 +45,8 @@ const POS: PageHelp = {
         'Sans saisie, les tuiles montrent vos touches rapides (fiche du produit › « Touche rapide en caisse »).',
         'Pour plusieurs pièces, tapez « 3*code » ou « 3*riz ». Touchez une ligne du ticket pour ses boutons − et +, Varier, Remise et Enlever (ou les touches +, −, F6 et Suppr).',
         'Touchez les billets reçus (1 000, 2 000…) ou « Exact » : « Reçu » et « À rendre » s’affichent sous le total.',
-        'Le grand bouton vert VALIDER (F4, ou Entrée sur la zone de saisie vide) valide le ticket en espèces et l’imprime.',
+        'Pour finir : F2 valide et imprime le ticket de caisse, F7 valide et imprime la facture listing, et VALIDER (F4, ou Entrée sur la zone de saisie vide) enregistre seulement, sans imprimer. Le tiroir s’ouvre quand même pour une vente en espèces.',
+        'L’administrateur choisit la présentation de cet écran dans Administration › Paramètres › Écran de caisse : Moderne, Classique ou Conventionnel. Les fonctions et les touches sont les mêmes.',
       ],
     },
     {
@@ -62,6 +63,14 @@ const POS: PageHelp = {
         'Touchez « Client comptoir » en haut du ticket (ou F8) pour choisir un client : ses prix (gros, super gros) s’appliquent et son solde s’affiche. « Comptant » et « Crédit » passent d’une vente à l’autre.',
         'F6 fait une remise sur la ligne ; sans le droit, le code d’un gérant est demandé.',
         '« En attente » (F3) met la fiche de côté pour servir un autre client ; « Rappeler » (F10) la reprend.',
+      ],
+    },
+    {
+      title: 'Tarif, dépôt et livraison',
+      steps: [
+        'Les boutons Tarif (Détail, Gros, Super gros) et Dépôt (Surface de vente, Réserve…) changent le tarif et le dépôt de sortie pour cette fiche seulement ; sans le droit, le code d’un gérant est demandé.',
+        'Onglet « Livraison » du ticket : cochez « À livrer », vérifiez l’adresse (reprise de la fiche client), choisissez le jour, le créneau, le livreur et les frais. Au VALIDER, le bon de livraison s’imprime avec le ticket.',
+        'Les livraisons se suivent dans Vente › Livraisons du jour.',
       ],
     },
     {
@@ -237,6 +246,20 @@ export const HELP: Record<WinKind, PageHelp> = {
       { title: 'Facturer', steps: ['À la caisse, Action › Facturer un devis : les prix du devis sont garantis jusqu’à sa date de validité.'] },
     ],
   },
+  deliveries: {
+    title: 'Livraisons du jour',
+    intro: 'Les ventes à porter chez le client : à préparer, en route, livrées. Elles se saisissent à la caisse, dans l’onglet Livraison du ticket.',
+    sections: [
+      {
+        title: 'Suivre une livraison',
+        steps: [
+          '« Partir 🚚 » quand le livreur s’en va (l’heure est notée), puis « Livrée ✓ » à son retour.',
+          '« Bon » réimprime le bon de livraison ; ✕ retire la livraison sans annuler la vente.',
+          'Pour une vente à crédit, « À encaisser » montre ce que le livreur doit rapporter : à « Livrée », le logiciel propose d’enregistrer le règlement du client.',
+        ],
+      },
+    ],
+  },
   promotions: {
     title: 'Promotions',
     intro: 'Prix promotionnels et offres « 3 pour 2 » appliqués tout seuls à la caisse.',
@@ -246,10 +269,19 @@ export const HELP: Record<WinKind, PageHelp> = {
     ],
   },
   labels: {
-    title: 'Étiquettes de rayon',
-    intro: 'Imprimer les étiquettes des prix à jour, avec le code-barres.',
+    title: 'Étiquettes et codes-barres',
+    intro: 'Imprimer les étiquettes des prix à jour, et les codes-barres à coller sur les articles.',
     sections: [
-      { title: 'Imprimer', steps: ['La liste « À refaire » montre les produits reçus jamais étiquetés et les prix changés.', 'Choisissez la planche (24, 40 ou 65 par page) ou le rouleau, vérifiez l’aperçu puis imprimez.'] },
+      { title: 'Étiquettes de rayon', steps: ['La liste « À refaire » montre les produits reçus jamais étiquetés et les prix changés.', 'Choisissez la planche (24, 40 ou 65 par page) ou le rouleau, vérifiez l’aperçu puis imprimez.'] },
+      {
+        title: 'Codes-barres produit',
+        steps: [
+          'Un article sans code fabricant reçoit un code interne EAN-8 (commence par 2) à son enregistrement, pour l’unité et pour chaque carton.',
+          '« Leur donner un code interne » équipe d’un coup les articles créés avant.',
+          'Cochez les articles, le nombre d’étiquettes, puis « Imprimer les codes-barres… » : rouleau 30 × 20, 40 × 25, 50 × 30 mm ou planche A4.',
+          'Aussi depuis la fiche article (« Imprimer les codes-barres… ») et après chaque réception d’achat.',
+        ],
+      },
     ],
   },
   reports: {

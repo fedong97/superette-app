@@ -9,6 +9,7 @@ import { DisclosureService } from './disclosures';
 import { EmoneyService } from './emoney';
 import { ExpenseService } from './expenses';
 import { PosService } from './pos';
+import { DeliveryService } from './deliveries';
 import { BackupService } from './backup';
 import { CashDeskService } from './cashdesk';
 import { StaffService } from './staff';
@@ -46,6 +47,7 @@ export * from './disclosures';
 export * from './emoney';
 export * from './expenses';
 export * from './pos';
+export * from './deliveries';
 export * from './backup';
 export * from './cashdesk';
 export * from './staff';
@@ -91,6 +93,7 @@ export interface Services {
   controls: ControlService;
   quotes: QuoteService;
   pos: PosService;
+  deliveries: DeliveryService;
   treasury: TreasuryService;
   emoney: EmoneyService;
   staff: StaffService;
@@ -130,7 +133,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const treasury = new TreasuryService(db, clock);
   const emoney = new EmoneyService(db, clock);
   const rebates = new RebateService(db, clock, treasury);
-  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney);
+  const deliveries = new DeliveryService(db, clock);
+  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries);
   const purchases = new PurchaseService(db, clock, stock);
   const receipts = new ReceiptService(db, clock, admin, pos, customers, expenses, treasury, inventories, rebates, quotes, purchases);
   const staff = new StaffService(db, clock);
@@ -146,7 +150,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const digest = new DigestService(db, clock, admin, reports, attention);
   const sync = new SyncService(db, clock, stock);
   const license = new LicenseService(db, clock, () => sync.credentials() !== null, machineId);
-  return { db, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, expenses, charges, controls, quotes, pos, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  return { db, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

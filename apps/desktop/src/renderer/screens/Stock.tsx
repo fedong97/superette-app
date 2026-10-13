@@ -10,6 +10,7 @@ import { type TermsText, TermsCells, lineNet, lineTerms, noTerms } from './purch
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
 import { tx } from '../tax';
+import { ReceptionLabels } from './barcodePrint';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -236,9 +237,11 @@ function Reception() {
   const [supplierId, setSupplierId] = useState('');
   const [reference, setReference] = useState('');
   const [lines, setLines] = useState<RecLine[]>([]);
+  const [received, setReceived] = useState<{ articleId: string; qty: number; packUnits: number }[] | null>(null);
   const total = lines.reduce((s, l) => s + lineNet(l), 0);
   return (
     <div>
+      {received && <ReceptionLabels title="Réception enregistrée · imprimer les étiquettes ?" lines={received} onClose={() => setReceived(null)} />}
       <p className="muted">
         Réception libre, sans bon de commande (lot et date limite). Pour réceptionner une commande : Achats › Bons de commande. Pour saisir la facture en même temps :
         Achats › Saisir une facture directe.
@@ -259,13 +262,15 @@ function Reception() {
           disabled={!lines.length}
           onClick={async () => {
             try {
+              const input = lines.map(recLineInput);
               await call('stock.receive', {
                 warehouseId,
                 supplierId: supplierId || null,
                 reference: reference || undefined,
-                lines: lines.map(recLineInput),
+                lines: input,
               });
               toast.ok('Réception enregistrée');
+              setReceived(input.map((l) => ({ articleId: l.articleId, qty: l.qty, packUnits: l.packUnits })));
               setLines([]);
               setReference('');
             } catch (err) {

@@ -11,6 +11,7 @@ export type WinKind =
   | 'customers'
   | 'expenses'
   | 'quotes'
+  | 'deliveries'
   | 'promotions'
   | 'labels'
   | 'reports'

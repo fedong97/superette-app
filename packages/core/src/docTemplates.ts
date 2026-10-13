@@ -42,10 +42,26 @@ export const DOC_KIND_VARIANTS: Record<DocKind, DocVariant[]> = {
   purchaseOrder: ['order'],
   purchaseInvoice: ['supplierInvoice'],
 };
-export const DOC_PAPERS = { '80mm': 'Rouleau 80 mm', '58mm': 'Rouleau 58 mm', A4: 'A4', A5: 'A5' } as const;
+export const DOC_PAPERS = { '80mm': 'Rouleau 80 mm', '58mm': 'Rouleau 58 mm', A4: 'A4', A5: 'A5', listing: 'Listing 240 mm (hauteur selon le contenu)' } as const;
 export type DocPaper = keyof typeof DOC_PAPERS;
 export const DOC_FONTS = { sans: 'Arial (sans empattement)', serif: 'Times (avec empattement)', mono: 'Courier (machine à écrire)' } as const;
 export type DocFont = keyof typeof DOC_FONTS;
+/**
+ * Disposition d'un modèle. Ticket : simple, encadré (nom du produit sur sa ligne,
+ * puis QTE / COND. / P.U. / TOTAL) ou détaillé (colonne code, détail HT, TVA,
+ * colis, TTC). A4 et listing : simple, listing avec logo ou listing sans logo
+ * (cadre, cases DATE / CLIENT / RÉF., montant en lettres, NB COLIS, NET À PAYER).
+ */
+export const DOC_STYLES = {
+  plain: 'Simple',
+  boxed: 'Ticket encadré',
+  detailed: 'Ticket détaillé (code et taxes)',
+  framed: 'Listing avec logo',
+  side: 'Listing sans logo',
+} as const;
+export type DocStyle = keyof typeof DOC_STYLES;
+/** Dispositions possibles pour un format. */
+export const stylesFor = (format: DocFormat): DocStyle[] => (format === 'ticket' ? ['plain', 'boxed', 'detailed'] : ['plain', 'framed', 'side']);
 
 /** Colonnes possibles du tableau des articles, avec leur titre par défaut. */
 export const DOC_COLUMNS = {
@@ -102,6 +118,8 @@ export interface DocTemplate {
     copies: number;
     /** Cadres autour des cellules du tableau. */
     borders: boolean;
+    /** Présentation simple ou encadrée. */
+    style: DocStyle;
   };
   header: {
     logo: boolean;
@@ -143,6 +161,8 @@ export interface DocTemplate {
     change: boolean;
     remaining: boolean;
     words: boolean;
+    /** Nombre de colis (somme des quantités). */
+    parcels?: boolean;
   };
   footer: {
     /** Mentions libres (conditions de vente…). */
@@ -154,6 +174,11 @@ export interface DocTemplate {
     signRight: string;
     /** « DUPLICATA » sur les réimpressions. */
     duplicate: boolean;
+    /** Remarque à gauche du montant en lettres (présentation encadrée), « Merci de votre fidélité ». */
+    remark: string;
+    /** Troisième et quatrième zones de signature (listing : « Le chauffeur », « Le contrôleur »). */
+    sign3?: string;
+    sign4?: string;
   };
 }
 
@@ -203,6 +228,8 @@ export interface DocData {
     validUntil?: string | null;
     /** Observations saisies sur le document. */
     notes?: string | null;
+    /** Dépôt d'où sort la marchandise (« MAG. DE LIVR. » sur la facture listing). */
+    warehouse?: string | null;
     /** Autres informations du document (« Facture fournisseur n° 123 du 10/10/2026 », « Livrer à : Magasin »). */
     extra?: string[];
   };
@@ -231,6 +258,8 @@ export interface DocLine {
   promoName: string | null;
   /** Plus d'une unité ou un conditionnement : le ticket détaille « 6 x 650 ». */
   detail: boolean;
+  /** Unité de vente d'un article à la pièce (« Sac », « Pièce ») : colonne COND. de la facture listing. */
+  unitName?: string;
   /** Achats : référence chez le fournisseur, remise en %, gratuits, coût net. */
   supplierRef?: string | null;
   discountLabel?: string;
@@ -252,36 +281,93 @@ const TICKET_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   doc: 'invoice',
   format: 'ticket',
   builtin: true,
-  page: { paper: '80mm', landscape: false, margin: 4, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false },
+  page: { paper: '80mm', landscape: false, margin: 4, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false, style: 'plain' },
   header: { logo: true, logoSize: 25, logoAlign: 'center', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: false, address: false, phone: false, niu: false, balance: false },
   info: { title: '', number: true, date: true, time: true, seller: true, register: false, priceLevel: true, dueDate: true, validUntil: false },
   columns: cols({ label: 0, qty: 0, unitPrice: 0, discount: 0, totalTtc: 0 }),
-  totals: { ttc: true, ht: false, vatDetail: true, discount: false, promo: true, rounding: true, payments: true, change: true, remaining: false, words: false },
-  footer: { text: '', thanks: '', signatures: false, signLeft: 'Le client', signRight: '', duplicate: true },
+  totals: { ttc: true, ht: false, vatDetail: true, discount: false, promo: true, rounding: true, payments: true, change: true, remaining: false, words: false, parcels: false },
+  footer: { text: '', thanks: '', signatures: false, signLeft: 'Le client', signRight: '', duplicate: true, remark: '', sign3: '', sign4: '' },
 };
 
 const A4_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   doc: 'invoice',
   format: 'a4',
   builtin: true,
-  page: { paper: 'A4', landscape: false, margin: 15, font: 'sans', fontSize: 12, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: true },
+  page: { paper: 'A4', landscape: false, margin: 15, font: 'sans', fontSize: 12, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: true, style: 'plain' },
   header: { logo: true, logoSize: 22, logoAlign: 'left', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: true, address: true, phone: true, niu: true, balance: false },
   info: { title: 'Facture', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: true, validUntil: false },
   columns: cols({ label: 0, qty: 10, unitPrice: 12, discount: 9, vat: 9, totalHt: 12, totalTtc: 13 }),
-  totals: { ttc: true, ht: true, vatDetail: true, discount: false, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
-  footer: { text: '', thanks: '', signatures: true, signLeft: 'Le client', signRight: 'Pour {magasin}', duplicate: true },
+  totals: { ttc: true, ht: true, vatDetail: true, discount: false, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false, parcels: false },
+  footer: { text: '', thanks: '', signatures: true, signLeft: 'Le client', signRight: 'Pour {magasin}', duplicate: true, remark: '', sign3: '', sign4: '' },
 };
 
 const LISTING_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   ...A4_BASE,
   format: 'listing',
-  page: { paper: 'A4', landscape: false, margin: 10, font: 'mono', fontSize: 10, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false },
+  page: { paper: 'A4', landscape: false, margin: 10, font: 'mono', fontSize: 10, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false, style: 'plain' },
   header: { ...A4_BASE.header, logo: false },
   customer: { show: true, code: true, address: false, phone: true, niu: true, balance: false },
   columns: cols({ code: 12, label: 0, qty: 11, unitPrice: 12, discount: 10, totalTtc: 13 }),
-  totals: { ttc: true, ht: true, vatDetail: true, discount: true, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false },
+  totals: { ttc: true, ht: true, vatDetail: true, discount: true, promo: false, rounding: false, payments: true, change: false, remaining: false, words: false, parcels: false },
+};
+
+/**
+ * Facture listing (touche F7) : imprimante à papier continu, 240 mm de large,
+ * hauteur selon le contenu ; cadre, cases DATE / CLIENT / RÉF., tableau
+ * encadré, montant en lettres, nombre de colis et NET À PAYER.
+ */
+const LISTING_INVOICE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
+  ...LISTING_BASE,
+  page: { ...LISTING_BASE.page, paper: 'listing', margin: 6, fontSize: 11, lineHeight: 0, borders: true, style: 'framed' },
+  header: { ...LISTING_BASE.header, logo: true, logoSize: 22, logoAlign: 'left' },
+  customer: { show: true, code: true, address: false, phone: false, niu: false, balance: false },
+  info: { ...LISTING_BASE.info, title: 'Facture', time: true, dueDate: false },
+  columns: cols({ code: [13, 'RÉF'], label: [0, 'DÉSIGNATION'], qty: [7, 'QTÉ'], unit: [9, 'COND.'], unitPrice: [10, 'PU'], totalTtc: [12, 'TOTAL'] }),
+  totals: { ttc: true, ht: false, vatDetail: false, discount: false, promo: false, rounding: false, payments: false, change: false, remaining: false, words: true, parcels: true },
+  footer: {
+    text: 'Veuillez toujours vérifier la qualité et la quantité de vos marchandises avant de les emporter.',
+    thanks: '',
+    signatures: false,
+    signLeft: '',
+    signRight: '',
+    duplicate: true,
+    remark: 'Merci de votre fidélité',
+    sign3: '',
+    sign4: '',
+  },
+};
+
+/** Listing sans logo : magasin à gauche, FACTURE et la case DATE / CLIENT / RÉF. à droite, quatre signatures. */
+const LISTING_SIDE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
+  ...LISTING_INVOICE,
+  page: { ...LISTING_INVOICE.page, style: 'side' },
+  header: { ...LISTING_INVOICE.header, logo: false },
+  info: { ...LISTING_INVOICE.info, title: 'Facture', number: true },
+  footer: { ...LISTING_INVOICE.footer, text: '', remark: '', signatures: true, signLeft: 'Le gestionnaire', signRight: 'Le client', sign3: 'Le chauffeur', sign4: 'Le contrôleur' },
+};
+
+/** Ticket encadré : nom du produit sur sa ligne, puis QTE / COND. / P.U. / TOTAL ; colis, net à payer encadré. */
+const TICKET_BOXED: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
+  ...TICKET_BASE,
+  page: { ...TICKET_BASE.page, style: 'boxed', font: 'sans', borders: true },
+  header: { ...TICKET_BASE.header, rccm: false },
+  info: { ...TICKET_BASE.info, title: 'Facture', time: true, priceLevel: false },
+  columns: cols({ label: 0, qty: [0, 'QTE'], unit: [0, 'COND.'], unitPrice: [0, 'P.U.'], totalTtc: [0, 'TOTAL'] }),
+  totals: { ttc: true, ht: false, vatDetail: true, discount: false, promo: false, rounding: false, payments: false, change: false, remaining: false, words: true, parcels: true },
+  footer: { ...TICKET_BASE.footer, thanks: 'Chez nous, le roi c’est vous !' },
+};
+
+/** Ticket détaillé : colonne code, sous-total, puis TOTAL HT, TVA, remise, NB COLIS et MONTANT TTC. */
+const TICKET_DETAILED: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
+  ...TICKET_BASE,
+  page: { ...TICKET_BASE.page, style: 'detailed', font: 'sans', borders: true },
+  header: { ...TICKET_BASE.header, rccm: false },
+  info: { ...TICKET_BASE.info, title: 'Facture', time: true, priceLevel: false },
+  columns: cols({ code: [0, 'CODE'], qty: [0, 'QTE'], unitPrice: [0, 'P.U'], totalTtc: [0, 'TOTAL'] }),
+  totals: { ttc: true, ht: true, vatDetail: true, discount: true, promo: false, rounding: false, payments: false, change: false, remaining: false, words: false, parcels: true },
+  footer: { ...TICKET_BASE.footer, thanks: '' },
 };
 
 /** Modèles livrés avec le logiciel, un par emplacement. */
@@ -307,16 +393,27 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
     info: { ...A4_BASE.info, title: 'Facture à terme' },
     totals: { ...A4_BASE.totals, remaining: true, words: true },
   },
-  { ...LISTING_BASE, id: 'invoice-listing-cash', variant: 'cash', name: 'Facture listing comptant' },
+  { ...LISTING_INVOICE, id: 'invoice-listing-cash', variant: 'cash', name: 'Facture listing comptant' },
   {
-    ...LISTING_BASE,
+    ...LISTING_INVOICE,
     id: 'invoice-listing-credit',
     variant: 'credit',
     name: 'Facture listing à terme',
-    info: { ...LISTING_BASE.info, title: 'Facture à terme' },
-    customer: { ...LISTING_BASE.customer, balance: true },
-    totals: { ...LISTING_BASE.totals, remaining: true, words: true },
+    info: { ...LISTING_INVOICE.info, title: 'Facture à terme', dueDate: true },
+    customer: { ...LISTING_INVOICE.customer, balance: true },
+    totals: { ...LISTING_INVOICE.totals, remaining: true },
   },
+  ...(['cash', 'credit'] as const).flatMap((variant): DocTemplate[] => {
+    const credit = variant === 'credit';
+    const label = credit ? 'à terme' : 'comptant';
+    const owed = (t: Omit<DocTemplate, 'id' | 'variant' | 'name'>) =>
+      credit ? { info: { ...t.info, dueDate: true }, customer: { ...t.customer, balance: true }, totals: { ...t.totals, remaining: true } } : {};
+    return [
+      { ...TICKET_BOXED, id: `invoice-ticket-${variant}-boxed`, variant, name: `Ticket encadré ${label}`, ...owed(TICKET_BOXED) },
+      { ...TICKET_DETAILED, id: `invoice-ticket-${variant}-detailed`, variant, name: `Ticket détaillé ${label}`, ...owed(TICKET_DETAILED) },
+      { ...LISTING_SIDE, id: `invoice-listing-${variant}-side`, variant, name: `Listing sans logo ${label}`, ...owed(LISTING_SIDE) },
+    ];
+  }),
   ...(['quote', 'proforma'] as const).flatMap((variant): DocTemplate[] => {
     const proforma = variant === 'proforma';
     const label = proforma ? 'Facture proforma' : 'Devis';
@@ -329,6 +426,7 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
       signLeft: 'Bon pour accord, le client\nDate et signature',
       signRight: 'Pour {magasin}',
       duplicate: false,
+      remark: '',
     };
     return [
       { ...A4_BASE, doc: 'quote', id: `quote-a4-${variant}`, variant, name: `${label} A4`, info, totals, footer },
@@ -356,6 +454,7 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
       signLeft: 'Livré par',
       signRight: 'Reçu par\n(nom, date et signature)',
       duplicate: true,
+      remark: '',
     };
     const customer = { show: true, code: true, address: true, phone: true, niu: false, balance: false };
     return [
@@ -381,12 +480,12 @@ export const BUILTIN_TEMPLATES: DocTemplate[] = [
     const order = {
       info: { title: 'Bon de commande', number: true, date: true, time: false, seller: true, register: false, priceLevel: false, dueDate: false, validUntil: false },
       totals: { ...noTotals, ht: true },
-      footer: { text: '', thanks: '', signatures: true, signLeft: 'Établi par {vendeur}', signRight: 'Signature et cachet', duplicate: false },
+      footer: { text: '', thanks: '', signatures: true, signLeft: 'Établi par {vendeur}', signRight: 'Signature et cachet', duplicate: false, remark: '' },
     };
     const invoice = {
       info: { title: 'Facture d’achat', number: true, date: true, time: false, seller: false, register: false, priceLevel: false, dueDate: true, validUntil: false },
       totals: { ...noTotals, ttc: true, ht: true, vatDetail: true, discount: true, payments: true, remaining: true },
-      footer: { text: '', thanks: '', signatures: true, signLeft: 'Contrôlé par', signRight: 'Visa', duplicate: false },
+      footer: { text: '', thanks: '', signatures: true, signLeft: 'Contrôlé par', signRight: 'Visa', duplicate: false, remark: '' },
     };
     const ticket = { ...TICKET_BASE, customer: { ...supplier, address: false, niu: false } };
     return [
@@ -474,9 +573,10 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
   const doc = pick(r.doc, Object.keys(DOC_KINDS) as DocKind[], 'invoice');
   const format = pick(r.format, Object.keys(DOC_FORMATS) as DocFormat[], 'a4');
   const variant = pick(r.variant, DOC_KIND_VARIANTS[doc], DOC_KIND_VARIANTS[doc][0]!);
-  const base = builtinFor(doc, format, variant);
   const id = str(r.id, 60).trim();
   if (!/^[\w-]{1,60}$/.test(id)) throw new Error('Modèle : identifiant invalide');
+  // Un modèle du logiciel modifié se complète avec ses propres valeurs, sinon avec celles de son emplacement.
+  const base = BUILTIN_TEMPLATES.find((b) => b.id === id && b.doc === doc && b.format === format && b.variant === variant) ?? builtinFor(doc, format, variant);
   const name = str(r.name, 60).trim();
   if (!name) throw new Error('Donnez un nom au modèle');
   const p = (r.page ?? {}) as Partial<DocTemplate['page']>;
@@ -510,6 +610,7 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
       lineHeight: clamp(p.lineHeight, 0, 30, 0),
       copies: clamp(p.copies, 1, 5, 1),
       borders: bool(p.borders, base.page.borders),
+      style: pick(p.style, stylesFor(format), stylesFor(format).includes(base.page.style) ? base.page.style : 'plain'),
     },
     header: {
       ...bools(h, base.header),
@@ -588,6 +689,7 @@ const shown = (t: DocTemplate, d: DocData) => {
 
 /** Ticket de caisse selon le modèle : la même description sert au pilote Windows et à l'ESC/POS. */
 export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
+  if (t.page.style === 'boxed' || t.page.style === 'detailed') return styledTicket(t, d);
   const r: Receipt = [];
   const noVat = docWithoutVat(d);
   const centered = (text: string): ReceiptLine => ({ t: 'text', text, align: 'center' });
@@ -664,7 +766,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   }
   if (t.footer.signatures) {
     r.push({ t: 'feed' });
-    for (const s of [t.footer.signLeft, t.footer.signRight].map((x) => fill(x, d).trim()).filter(Boolean)) r.push({ t: 'text', text: `${s} :` }, { t: 'feed' }, { t: 'feed' });
+    for (const s of signLabels(t, d)) r.push({ t: 'text', text: `${s} :` }, { t: 'feed' }, { t: 'feed' });
   }
   const bottom = [...lines(t.footer.text), ...lines(t.footer.thanks || d.store.thanks)];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
@@ -691,7 +793,7 @@ const FONTS: Record<DocFont, string> = {
   serif: "'Times New Roman', Georgia, serif",
   mono: "Consolas, 'Courier New', monospace",
 };
-const PAPER_MM: Record<DocPaper, [number, number]> = { '80mm': [80, 0], '58mm': [58, 0], A4: [210, 297], A5: [148, 210] };
+const PAPER_MM: Record<DocPaper, [number, number]> = { '80mm': [80, 0], '58mm': [58, 0], A4: [210, 297], A5: [148, 210], listing: [240, 0] };
 
 /** Dimensions de la page en mm (largeur, hauteur ; hauteur 0 : rouleau). */
 export function pageSize(t: DocTemplate): { width: number; height: number } {
@@ -707,7 +809,7 @@ function pageCss(t: DocTemplate): string {
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body { font: ${t.page.fontSize}px/1.35 ${FONTS[t.page.font]}; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sheet { ${height ? '' : `width: ${width}mm; padding: 0 ${m}mm;`} }
+  .sheet { ${height ? '' : `width: ${width}mm; padding: ${t.format === 'ticket' ? `0 ${m}mm` : `${m}mm`};`} }
   @media screen {
     html { background: #8a8f98; }
     body { padding: 16px 0; }
@@ -764,7 +866,9 @@ const nl = (s: string) => esc(s).replace(/\n/g, '<br>');
 export function renderDocHtml(t: DocTemplate, d: DocData): string {
   const wrap = (css: string, body: string) =>
     `<!doctype html><html><head><meta charset="utf-8"><style>${pageCss(t)}${css}</style></head><body><div class="sheet">${body}</div></body></html>`;
+  if (t.format === 'ticket' && (t.page.style === 'boxed' || t.page.style === 'detailed')) return wrap(styledTicketCss(t), styledTicketHtml(t, d));
   if (t.format === 'ticket') return wrap(`${TICKET_CSS} .c img { max-height: ${t.header.logoSize}mm !important; }`, receiptToHtml(renderDocTicket(t, d)));
+  if (t.page.style === 'framed' || t.page.style === 'side') return wrap(framedCss(t), framedBody(t, d));
 
   const noVat = docWithoutVat(d);
   const h = t.header;
@@ -856,7 +960,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   ].join('');
   const footer = [
     t.footer.text ? `<div class="notes">${nl(fill(t.footer.text, d))}</div>` : '',
-    t.footer.signatures ? `<div class="sign"><div>${nl(fill(t.footer.signLeft, d))}</div><div>${nl(fill(t.footer.signRight, d))}</div></div>` : '',
+    t.footer.signatures ? `<div class="sign">${signLabels(t, d).map((x) => `<div>${nl(x)}</div>`).join('')}</div>` : '',
     t.footer.thanks ? `<div class="thanks">${nl(fill(t.footer.thanks, d))}</div>` : '',
   ].join('');
 
@@ -868,13 +972,390 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   );
 }
 
+/** Nombre de colis : somme des quantités entières, une ligne au poids compte pour un colis. */
+export function parcelCount(lines: readonly DocLine[]): number {
+  return lines.reduce((n, l) => {
+    const q = Number(/^-?[\d\s ]*[.,]?\d*/.exec(l.qty)?.[0].replace(/[\s ]/g, '').replace(',', '.') ?? 0);
+    return n + (Number.isFinite(q) && q > 0 ? (Number.isInteger(q) ? q : 1) : 0);
+  }, 0);
+}
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter((w) => /^[\p{L}\d]/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('');
+
+function framedCss(t: DocTemplate): string {
+  const lh = t.page.lineHeight;
+  return `
+  .frame { border: 2px solid #111; padding: 3mm 3.5mm; }
+  .fhead { display: flex; gap: 4mm; align-items: center; }
+  .fhead img { height: ${t.header.logoSize}mm; width: auto; }
+  .flogo { width: ${t.header.logoSize}mm; height: ${t.header.logoSize}mm; border: 3px solid #111; border-radius: 50%; display: grid; place-items: center; font: 900 ${Math.round(t.header.logoSize * 1.3)}px Georgia, serif; flex: none; }
+  .fhead h1 { margin: 0; font: 900 1.75em Arial, sans-serif; }
+  .fhead p { margin: 0; }
+  .fhead .notes { white-space: pre-line; }
+  .ftitle { display: flex; flex-direction: column; align-items: center; margin: 2mm 0 1.5mm; }
+  .ftitle h2 { margin: 0 0 1mm; font: 900 1.6em Georgia, serif; }
+  .fside { display: flex; justify-content: space-between; align-items: flex-start; gap: 6mm; }
+  .fside .fhead h1 { font-size: 1.45em; }
+  .ftitle.left { align-items: flex-start; margin: 0; }
+  .ftitle.left h2 { font-size: 1.35em; }
+  .fsigns { display: flex; justify-content: space-around; min-height: 16mm; margin-top: 3mm; font-weight: bold; text-align: center; }
+  table { border-collapse: collapse; }
+  .fbox td, .fbox th, .fsum td, .fsum th { border: 1px solid #111; padding: 1px 3mm; text-align: center; }
+  .fbox th, .fsum th, .flines th { background: #eee; font-weight: bold; }
+  .fmag { margin: 1.5mm 0 2mm; }
+  .flines { width: 100%; table-layout: fixed; border: 1px solid #111; }
+  .flines th { border: 1px solid #111; padding: 1px 1.5mm; text-align: left; }
+  .flines td { border-left: 1px solid #111; border-right: 1px solid #111; padding: 0 1.5mm; vertical-align: top; overflow-wrap: anywhere; ${lh ? `height: ${lh}mm;` : ''} }
+  .flines tbody tr.fill td { height: 12mm; }
+  .flines tbody td.up { text-transform: uppercase; }
+  .flines thead { display: table-header-group; }
+  .r { text-align: right !important; }
+  .ftotal { display: flex; justify-content: flex-end; }
+  .ftotal div { border: 1px solid #111; border-top: none; padding: 1px 1.5mm; font-weight: bold; text-align: right; font-size: 1.1em; }
+  .fbottom { display: flex; gap: 4mm; align-items: flex-start; margin-top: 2.5mm; break-inside: avoid; }
+  .fremark { flex: 0 0 34%; font-style: italic; padding: 0 1.5mm; white-space: pre-line; }
+  .fsum { flex: 1; width: 100%; }
+  .fsum td { padding: 1px 2mm; }
+  .fsum .words { width: 62%; }
+  .fextra { margin-top: 1.5mm; }
+  .fslogan { text-align: center; font: bold 1.15em Arial, sans-serif; margin-top: 2.5mm; text-transform: uppercase; }
+  .notes { white-space: pre-line; }
+  .fids, .fby { display: flex; justify-content: space-between; margin-top: 1.5mm; }
+  .dup { font-weight: bold; letter-spacing: 2px; color: #a00; }
+  .muted { color: #444; }`;
+}
+
+/** Facture encadrée (listing) : cadre, cases DATE / CLIENT / RÉF., tableau, montant en lettres, NB COLIS, NET À PAYER. */
+function framedBody(t: DocTemplate, d: DocData): string {
+  const noVat = docWithoutVat(d);
+  const h = t.header;
+  const logo = !h.logo ? '' : d.store.logo ? `<img src="${esc(d.store.logo)}" alt="">` : `<div class="flogo">${esc(initials(d.store.name))}</div>`;
+  const ident = [
+    h.storeName ? `<h1>${esc(d.store.name)}</h1>` : '',
+    ...[d.store.message, h.message].filter(Boolean).map((m) => `<p class="notes">${nl(fill(m, d))}</p>`),
+    h.address && d.store.address ? `<p>${esc(d.store.address)}</p>` : '',
+    h.phone && d.store.phone ? `<p>Tél ${esc(d.store.phone)}</p>` : '',
+  ].join('');
+  const c = d.customer;
+  const cu = t.customer;
+  const title = docTitle(t, d);
+  const when = t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date);
+  const heads = [t.info.date ? 'DATE' : '', cu.show ? (d.partyLabel ?? 'Client').toUpperCase() : '', cu.show && cu.code ? 'RÉF.' : ''];
+  const vals = [t.info.date ? esc(when) : '', cu.show ? esc((c?.name ?? 'Client comptoir').toUpperCase()) : '', cu.show && cu.code ? esc(c?.code ?? '') : ''];
+  const box = heads.some(Boolean)
+    ? `<table class="fbox"><tr>${heads.filter(Boolean).map((x) => `<th>${x}</th>`).join('')}</tr><tr>${vals.filter((_, i) => heads[i]).map((x) => `<td>${x}</td>`).join('')}</tr></table>`
+    : '';
+  const extra = [
+    d.doc.warehouse ? `MAG. DE LIVR. : ${esc(d.doc.warehouse.toUpperCase())}` : '',
+    cu.show && c && !c.counter && cu.phone && c.phone ? `Tél. client : ${esc(c.phone)}` : '',
+    cu.show && c && !c.counter && cu.address && c.address ? esc(c.address) : '',
+    cu.show && c && !c.counter && cu.niu && c.niu ? `NIU client : ${esc(c.niu)}` : '',
+    t.info.dueDate && d.doc.dueDate ? `Échéance : ${dayFr(d.doc.dueDate)}` : '',
+    t.info.validUntil && d.doc.validUntil ? `Valable jusqu'au ${dayFr(d.doc.validUntil)}` : '',
+    t.info.priceLevel && d.doc.priceLevel ? `Tarif : ${esc(d.doc.priceLevel)}` : '',
+    t.info.register && d.doc.register ? `Caisse : ${esc(d.doc.register)}` : '',
+    ...(d.doc.extra ?? []).map(esc),
+  ].filter(Boolean);
+
+  const columns = shown(t, d);
+  const showUnit = columns.some((x) => x.key === 'unit');
+  const cell = (key: DocColumnKey, l: DocLine, i: number): string => {
+    switch (key) {
+      case 'line': return String(i + 1);
+      case 'supplierRef': return esc(l.supplierRef ?? '');
+      case 'freeQty': return esc(l.freeQty ?? '');
+      case 'netCost': return l.netCost === undefined ? '' : money(l.netCost);
+      case 'code': return esc(l.code ?? '');
+      case 'barcode': return esc(l.barcode ?? '');
+      case 'label': return esc(l.label);
+      case 'qty': return esc(`${l.qty}${!showUnit && l.unit ? ` ${l.unit}` : ''}`);
+      case 'unit': return esc(l.unit || l.unitName || '');
+      case 'unitPrice': return money(l.unitPrice);
+      case 'unitPriceHt': return money(l.unitPriceHt);
+      case 'discount': return l.discountLabel ? esc(l.discountLabel) : l.discount ? money(l.discount) : '';
+      case 'vat': return formatRate(l.vatRate);
+      case 'totalHt': return money(l.totalHt);
+      case 'totalTtc': return money(l.totalTtc);
+    }
+  };
+  const cls = (k: DocColumnKey) => (NUMERIC_COLUMNS.includes(k) ? ' class="r"' : k === 'label' || k === 'unit' ? ' class="up"' : '');
+  const lastWidth = columns.at(-1)?.width || 12;
+  const table = `<table class="flines"><colgroup>${columns.map((x) => `<col${x.width ? ` style="width:${x.width}%"` : ''}>`).join('')}</colgroup>
+    <thead><tr>${columns.map((x) => `<th${NUMERIC_COLUMNS.includes(x.key) ? ' class="r"' : ''}>${esc(tx(x.label, noVat))}</th>`).join('')}</tr></thead>
+    <tbody>${d.lines.map((l, i) => `<tr>${columns.map((x) => `<td${cls(x.key)}>${cell(x.key, l, i)}</td>`).join('')}</tr>`).join('')}<tr class="fill">${columns.map(() => '<td></td>').join('')}</tr></tbody></table>`;
+  const tot = d.totals;
+  const total = t.totals.ttc || t.totals.ht ? `<div class="ftotal"><div style="width:${lastWidth}%">${money(t.totals.ttc ? tot.ttc : tot.ht)}</div></div>` : '';
+  const sumHeads = [t.totals.words ? '<th class="words">MONTANT EN LETTRES</th>' : '', t.totals.parcels ? '<th>NB COLIS</th>' : '', t.totals.ttc ? '<th>NET À PAYER</th>' : ''].join('');
+  const sumVals = [
+    t.totals.words ? `<td class="words">${esc(cap(numberToWordsFr(Math.max(0, tot.ttc))))}</td>` : '',
+    t.totals.parcels ? `<td>${parcelCount(d.lines)}</td>` : '',
+    t.totals.ttc ? `<td><b>${money(tot.ttc)}</b></td>` : '',
+  ].join('');
+  const after = [
+    t.totals.ht && !noVat ? `${tx('Total HT', false)} : ${money(tot.ht)}` : '',
+    t.totals.vatDetail && !noVat ? vatRows(d).filter((v) => v.tva).map((v) => `${v.label} : ${money(v.tva)}`).join(' · ') : '',
+    t.totals.vatDetail && noVat ? 'TVA non applicable' : '',
+    t.totals.discount && tot.discount ? `Remises accordées : ${money(tot.discount)}` : '',
+    t.totals.payments ? d.payments.map((p) => `${esc(p.label)} : ${money(p.amount)}`).join(' · ') : '',
+    t.totals.change && tot.change ? `Rendu monnaie : ${money(tot.change)}` : '',
+    t.totals.remaining && tot.remaining ? `<b>Reste à payer : ${money(tot.remaining)}</b>` : '',
+    cu.show && cu.balance && c?.balance != null ? `Solde de votre compte : <b>${money(c.balance)}</b>` : '',
+  ].filter(Boolean);
+  const ids = [h.niu && d.store.niu ? `N° CONTR. : ${esc(d.store.niu)}` : '', h.rccm && d.store.rccm ? `RCCM : ${esc(d.store.rccm)}` : ''];
+  const titleHtml = `<h2>${esc(title.toUpperCase())}${t.info.number ? ` N° ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (ANNULÉE)' : ''}${
+    d.doc.duplicate && t.footer.duplicate ? ' <span class="dup">DUPLICATA</span>' : ''
+  }</h2>`;
+  const side = t.page.style === 'side';
+  const signs = signLabels(t, d);
+  const body = `<div class="frame">
+    ${
+      side
+        ? `<div class="fside"><div class="fhead">${logo}<div>${ident}</div></div><div class="ftitle left">${titleHtml}${box}</div></div>`
+        : `<div class="fhead">${logo}<div>${ident}</div></div><div class="ftitle">${titleHtml}${box}</div>`
+    }
+    ${extra.length ? `<div class="fmag">${extra.join(' · ')}</div>` : ''}
+    ${table}${total}
+    <div class="fbottom"><div class="fremark">${nl(fill(t.footer.remark, d))}</div><table class="fsum"><tr>${sumHeads}</tr><tr>${sumVals}</tr></table></div>
+    ${after.length ? `<div class="fextra">${after.join(' · ')}</div>` : ''}
+    ${d.doc.notes ? `<div class="fextra notes">${nl(d.doc.notes)}</div>` : ''}
+    ${t.footer.thanks ? `<div class="fslogan">${nl(fill(t.footer.thanks, d))}</div>` : ''}
+    ${t.footer.text ? `<div class="notes">${nl(fill(t.footer.text, d))}</div>` : ''}
+    ${ids.some(Boolean) ? `<div class="fids"><span>${ids[0]}</span><span>${ids[1]}</span></div>` : ''}
+    ${signs.length ? `<div class="fsigns">${signs.map((x) => `<span>${nl(x.toUpperCase())}</span>`).join('')}</div>` : ''}
+    <div class="fby"><span>${t.info.seller && d.doc.seller ? `${d.partyLabel ? 'ÉTABLI' : 'FACTURÉ'} PAR : ${esc(d.doc.seller.toUpperCase())}` : ''}</span><span>FEDO Gestion</span><span></span></div>
+  </div>`;
+  return body;
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Zones de signature remplies (jusqu'à quatre), dans l'ordre gauche, 3e, 4e, droite. */
+function signLabels(t: DocTemplate, d: DocData): string[] {
+  if (!t.footer.signatures) return [];
+  return [t.footer.signLeft, t.footer.sign3 ?? '', t.footer.sign4 ?? '', t.footer.signRight].map((x) => fill(x, d).trim()).filter(Boolean);
+}
+
+/** Lignes de totaux d'un ticket encadré ou détaillé : la partie TVA disparaît sans TVA ou décochée. */
+function ticketTotals(t: DocTemplate, d: DocData) {
+  const noVat = docWithoutVat(d);
+  const tot = d.totals;
+  const vat = t.totals.vatDetail && !noVat;
+  return {
+    noVat,
+    vat,
+    ht: t.totals.ht && !noVat,
+    rows: vat ? vatRows(d).filter((v) => v.tva).map((v) => ({ label: v.label, value: v.tva })) : [],
+    discount: t.totals.discount ? tot.discount : null,
+    parcels: t.totals.parcels ? parcelCount(d.lines) : null,
+  };
+}
+
+/** Valeur d'une colonne pour les tickets encadré et détaillé. */
+function ticketCell(key: DocColumnKey, l: DocLine, i: number): string {
+  switch (key) {
+    case 'line': return String(i + 1);
+    case 'code': return l.code ?? '';
+    case 'barcode': return l.barcode ?? '';
+    case 'label': return l.label;
+    case 'qty': return l.qty;
+    case 'unit': return (l.unit || l.unitName || '').toUpperCase();
+    case 'unitPrice': return money(l.unitPrice);
+    case 'unitPriceHt': return money(l.unitPriceHt);
+    case 'discount': return l.discountLabel ?? (l.discount ? money(l.discount) : '');
+    case 'vat': return formatRate(l.vatRate);
+    case 'totalHt': return money(l.totalHt);
+    case 'totalTtc': return money(l.totalTtc);
+    case 'supplierRef': return l.supplierRef ?? '';
+    case 'freeQty': return l.freeQty ?? '';
+    case 'netCost': return l.netCost === undefined ? '' : money(l.netCost);
+  }
+}
+
+function styledTicketCss(t: DocTemplate): string {
+  return `
+  .c { text-align: center; } .r { text-align: right !important; } .b { font-weight: bold; }
+  h1 { font: 900 1.55em Georgia, serif; text-align: center; margin: 0 0 1mm; }
+  .logo { text-align: center; } .logo img { max-height: ${t.header.logoSize}mm; max-width: 70%; }
+  .id div { margin: 0; } .notes { white-space: pre-line; }
+  .meta { margin-top: 2mm; }
+  .wh { display: flex; justify-content: space-between; align-items: baseline; margin: 1.5mm 0 1mm; }
+  .wh b { font: 900 1.2em Georgia, serif; }
+  table { width: 100%; border-collapse: collapse; }
+  .tb th { border: 1px solid #111; background: #e6e6e6; font-weight: bold; padding: 1px 3px; }
+  .tb td { border-left: 1px solid #111; border-right: 1px solid #111; padding: 1px 3px; }
+  .tb tr.n td { border-top: 1px solid #111; border-bottom: 1px dashed #111; padding-top: 2px; }
+  .tb tr.q td { border-bottom: 1px solid #111; }
+  .tb tr.s td { border: 1px solid #111; font-weight: bold; }
+  .box { border: 1px solid #111; padding: 1px 6px; min-width: 30mm; text-align: center; font-weight: bold; display: inline-block; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 2mm; margin-top: 1mm; }
+  .net { display: flex; justify-content: center; align-items: center; gap: 3mm; margin-top: 2mm; }
+  .words { border: 1px solid #111; padding: 1.2mm; text-align: center; margin-top: 2mm; }
+  .sum td { padding: 0.4mm 0; } .sum tr.ttc td { font-weight: bold; font-size: 1.25em; } .sum tr.ttc td.r { border-left: 1px solid #111; }
+  .thanks { text-align: center; font-style: italic; margin-top: 2mm; }
+  .soft { text-align: center; margin-top: 1.5mm; }
+  .dup { font-weight: bold; letter-spacing: 2px; }
+  .sign { margin-top: 3mm; min-height: 12mm; }`;
+}
+
+/** Ticket encadré ou détaillé en HTML (pilote Windows et aperçu). */
+function styledTicketHtml(t: DocTemplate, d: DocData): string {
+  const h = t.header;
+  const detailed = t.page.style === 'detailed';
+  const c = d.customer;
+  const tt = ticketTotals(t, d);
+  const tot = d.totals;
+  const id = [
+    h.logo && d.store.logo ? `<div class="logo"><img src="${esc(d.store.logo)}" alt=""></div>` : '',
+    h.storeName ? `<h1>${esc(d.store.name)}</h1>` : '',
+    `<div class="id${detailed ? ' c' : ''}">`,
+    ...[d.store.message, h.message].filter(Boolean).map((m) => `<div class="notes">${nl(fill(m, d))}</div>`),
+    h.address && d.store.address ? `<div>${esc(d.store.address)}</div>` : '',
+    h.niu && d.store.niu ? `<div>NIU : ${esc(d.store.niu)}</div>` : '',
+    h.rccm && d.store.rccm ? `<div>RCCM : ${esc(d.store.rccm)}</div>` : '',
+    h.phone && d.store.phone ? `<div>Tél : ${esc(d.store.phone)}</div>` : '',
+    '</div>',
+  ].join('');
+  const title = docTitle(t, d) || 'Facture';
+  const when = t.info.date ? (t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)) : '';
+  const client = t.customer.show ? `<div>Client : ${esc((c?.name ?? 'Client comptoir').toUpperCase())}</div>` : '';
+  const meta = [
+    detailed ? client : '',
+    t.info.number ? `<div>${esc(title.toUpperCase())} N° ${esc(d.doc.number)}${d.doc.cancelled ? ' (ANNULÉE)' : ''}</div>` : '',
+    d.doc.duplicate && t.footer.duplicate ? '<div class="dup">DUPLICATA</div>' : '',
+    t.info.seller && d.doc.seller ? `<div>Vendeur : ${esc(d.doc.seller.toUpperCase())}</div>` : '',
+    detailed ? '' : client,
+    t.customer.show && c && !c.counter && t.customer.phone && c.phone ? `<div>Tél. client : ${esc(c.phone)}</div>` : '',
+    t.info.priceLevel && d.doc.priceLevel ? `<div>Tarif : ${esc(d.doc.priceLevel)}</div>` : '',
+    t.info.dueDate && d.doc.dueDate ? `<div>À régler avant le ${dayFr(d.doc.dueDate)}</div>` : '',
+    ...(d.doc.extra ?? []).map((x) => `<div>${esc(x)}</div>`),
+  ].join('');
+  const wh = `<div class="wh"><b>${esc((d.doc.warehouse ?? '').toUpperCase())}</b><span>${when}</span></div>`;
+  const columns = shown(t, d);
+  const grid = columns.filter((x) => detailed || (x.key !== 'label' && x.key !== 'code'));
+  const num = (k: DocColumnKey) => (NUMERIC_COLUMNS.includes(k) && k !== 'qty' ? ' class="r"' : k === 'qty' ? ' class="c"' : '');
+  const head = `<tr>${grid.map((x) => `<th${num(x.key)}>${esc(tx(x.label, tt.noVat))}</th>`).join('')}</tr>`;
+  const rows = d.lines
+    .map((l, i) => {
+      const cells = `<tr class="q">${grid.map((x) => `<td${num(x.key)}>${esc(ticketCell(x.key, l, i))}</td>`).join('')}</tr>`;
+      if (detailed) return cells;
+      const name = [columns.some((x) => x.key === 'code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ');
+      return `<tr class="n"><td colspan="${grid.length}">${esc(name.toUpperCase())}</td></tr>${cells}`;
+    })
+    .join('');
+  const sub = detailed && t.totals.ttc ? `<tr class="s"><td colspan="${grid.length}" class="r">${money(tot.ttc)}</td></tr>` : '';
+  const table = `<table class="tb">${head}${rows}${sub}</table>`;
+  const bottom = detailed
+    ? `<table class="sum" style="margin-top:2mm">${[
+        tt.ht ? `<tr><td>TOTAL HT</td><td class="r">${money(tot.ht)}</td></tr>` : '',
+        ...tt.rows.map((v) => `<tr><td>${esc(v.label.toUpperCase())}</td><td class="r">${money(v.value)}</td></tr>`),
+        tt.discount !== null ? `<tr><td>REMISE</td><td class="r">${money(tt.discount)}</td></tr>` : '',
+        tt.parcels !== null ? `<tr><td>NB COLIS</td><td class="r">${tt.parcels}</td></tr>` : '',
+        t.totals.ttc ? `<tr class="ttc"><td>${tt.noVat ? 'MONTANT' : 'MONTANT TTC'}</td><td class="r">${money(tot.ttc)}</td></tr>` : '',
+      ].join('')}</table>`
+    : [
+        `<div class="row"><span>TOTAUX</span><span>${tt.parcels !== null ? `${tt.parcels} Colis` : ''}</span><span class="box">${money(tot.ttc)}</span></div>`,
+        tt.vat || tt.ht ? `<div class="row" style="justify-content:center;gap:8mm">${tt.ht ? `<span>HT ${money(tot.ht)}</span>` : ''}${tt.vat ? `<span>TVA ${money(tot.tva)}</span>` : ''}</div>` : '',
+        tt.discount ? `<div class="row" style="justify-content:center">Remise ${money(tt.discount)}</div>` : '',
+        t.totals.ttc ? `<div class="net"><span>${tt.noVat ? 'Net à payer' : 'Net à payer TTC'} :</span><span class="box">${money(tot.ttc)}</span></div>` : '',
+      ].join('');
+  const after = [
+    t.totals.payments ? d.payments.map((p) => `<div class="row"><span>${esc(p.label)}</span><span>${money(p.amount)}</span></div>`).join('') : '',
+    t.totals.change && tot.change ? `<div class="row"><span>Rendu monnaie</span><span>${money(tot.change)}</span></div>` : '',
+    t.totals.remaining && tot.remaining ? `<div class="row b"><span>Reste à payer</span><span>${money(tot.remaining)}</span></div>` : '',
+    t.customer.show && t.customer.balance && c?.balance != null ? `<div class="row"><span>Solde de votre compte</span><span>${money(c.balance)}</span></div>` : '',
+    t.totals.words && tot.ttc >= 0 ? `<div class="words">${esc(cap(numberToWordsFr(tot.ttc)))}</div>` : '',
+    d.doc.notes ? `<div class="notes" style="margin-top:2mm">${nl(d.doc.notes)}</div>` : '',
+    ...signLabels(t, d).map((x) => `<div class="sign">${nl(x)} :</div>`),
+    t.footer.text ? `<div class="notes c" style="margin-top:2mm">${nl(fill(t.footer.text, d))}</div>` : '',
+    t.footer.thanks || d.store.thanks ? `<div class="thanks">${nl(fill(t.footer.thanks || d.store.thanks, d))}</div>` : '',
+    '<div class="soft">FEDO Gestion</div>',
+  ].join('');
+  return `${id}<div class="meta">${meta}</div>${wh}${table}${bottom}${after}`;
+}
+
+/** Ticket encadré ou détaillé pour l'imprimante ESC/POS (texte) : même contenu, sans cadres. */
+function styledTicket(t: DocTemplate, d: DocData): Receipt {
+  const r: Receipt = [];
+  const h = t.header;
+  const detailed = t.page.style === 'detailed';
+  const c = d.customer;
+  const tt = ticketTotals(t, d);
+  const tot = d.totals;
+  const centered = (text: string): ReceiptLine => ({ t: 'text', text, align: 'center' });
+  const split = (text: string) => fill(text, d).split('\n').map((x) => x.trim()).filter(Boolean);
+  if (h.logo && d.store.logo) r.push({ t: 'image', src: d.store.logo });
+  if (h.storeName) r.push({ t: 'text', text: d.store.name, align: 'center', bold: true, big: true });
+  for (const m of [...split(d.store.message), ...split(h.message)]) r.push(centered(m));
+  if (h.address && d.store.address) r.push(centered(d.store.address));
+  if (h.niu && d.store.niu) r.push(centered(`NIU : ${d.store.niu}`));
+  if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
+  if (h.phone && d.store.phone) r.push(centered(`Tél : ${d.store.phone}`));
+  r.push({ t: 'feed' });
+  const title = (docTitle(t, d) || 'Facture').toUpperCase();
+  if (t.info.number) r.push({ t: 'text', text: `${title} N° ${d.doc.number}${d.doc.cancelled ? ' (ANNULÉE)' : ''}` });
+  if (d.doc.duplicate && t.footer.duplicate) r.push({ t: 'text', text: 'DUPLICATA', bold: true });
+  if (t.info.seller && d.doc.seller) r.push({ t: 'text', text: `Vendeur : ${d.doc.seller.toUpperCase()}` });
+  if (t.customer.show) r.push({ t: 'text', text: `Client : ${(c?.name ?? 'Client comptoir').toUpperCase()}` });
+  if (t.customer.show && c && !c.counter && t.customer.phone && c.phone) r.push({ t: 'text', text: `Tél. client : ${c.phone}` });
+  if (t.info.priceLevel && d.doc.priceLevel) r.push({ t: 'text', text: `Tarif : ${d.doc.priceLevel}` });
+  if (t.info.dueDate && d.doc.dueDate) r.push({ t: 'text', text: `À régler avant le ${dayFr(d.doc.dueDate)}` });
+  for (const x of d.doc.extra ?? []) r.push({ t: 'text', text: x });
+  const when = t.info.date ? (t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)) : '';
+  r.push({ t: 'row', left: (d.doc.warehouse ?? '').toUpperCase(), right: when, bold: true });
+  r.push({ t: 'rule' });
+  const columns = shown(t, d);
+  const grid = columns.filter((x) => detailed || (x.key !== 'label' && x.key !== 'code'));
+  // Colonnes alignées : chaque colonne prend la largeur de sa plus longue valeur ; la dernière est calée à droite.
+  const lastKey = grid.at(-1)?.key;
+  const lead = grid.slice(0, -1);
+  const widths = lead.map((x) => Math.max(tx(x.label, tt.noVat).length, ...d.lines.map((l, i) => ticketCell(x.key, l, i).length)));
+  const lineText = (cells: string[]) =>
+    cells.map((v, k) => (NUMERIC_COLUMNS.includes(lead[k]!.key) ? v.padStart(widths[k]!) : v.padEnd(widths[k]!))).join('  ');
+  r.push({ t: 'row', left: lineText(lead.map((x) => tx(x.label, tt.noVat))), right: grid.length ? tx(grid.at(-1)!.label, tt.noVat) : '', bold: true });
+  d.lines.forEach((l, i) => {
+    if (!detailed) r.push({ t: 'text', text: [columns.some((x) => x.key === 'code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ').toUpperCase() });
+    r.push({ t: 'row', left: lineText(lead.map((x) => ticketCell(x.key, l, i))), right: lastKey ? ticketCell(lastKey, l, i) : '' });
+  });
+  r.push({ t: 'rule' });
+  if (detailed) {
+    if (tt.ht) r.push({ t: 'row', left: 'TOTAL HT', right: money(tot.ht) });
+    for (const v of tt.rows) r.push({ t: 'row', left: v.label.toUpperCase(), right: money(v.value) });
+    if (tt.discount !== null) r.push({ t: 'row', left: 'REMISE', right: money(tt.discount) });
+    if (tt.parcels !== null) r.push({ t: 'row', left: 'NB COLIS', right: String(tt.parcels) });
+    if (t.totals.ttc) r.push({ t: 'row', left: tt.noVat ? 'MONTANT' : 'MONTANT TTC', right: money(tot.ttc), bold: true, big: true });
+  } else {
+    r.push({ t: 'row', left: `TOTAUX${tt.parcels !== null ? `   ${tt.parcels} Colis` : ''}`, right: money(tot.ttc) });
+    if (tt.ht) r.push({ t: 'row', left: 'Total HT', right: money(tot.ht) });
+    if (tt.vat) r.push({ t: 'row', left: 'TVA', right: money(tot.tva) });
+    if (tt.discount) r.push({ t: 'row', left: 'Remise', right: money(tt.discount) });
+    if (t.totals.ttc) r.push({ t: 'row', left: tt.noVat ? 'Net à payer' : 'Net à payer TTC', right: money(tot.ttc), bold: true, big: true });
+  }
+  if (t.totals.payments) for (const p of d.payments) r.push({ t: 'row', left: p.label, right: money(p.amount) });
+  if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change) });
+  if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
+  if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
+  if (t.totals.words && tot.ttc >= 0) r.push(centered(cap(numberToWordsFr(tot.ttc))));
+  if (d.doc.notes) for (const x of d.doc.notes.split('\n').filter(Boolean)) r.push({ t: 'text', text: x });
+  for (const x of signLabels(t, d)) r.push({ t: 'feed' }, { t: 'text', text: `${x} :` }, { t: 'feed' });
+  const bottom = [...split(t.footer.text), ...split(t.footer.thanks || d.store.thanks)];
+  if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
+  r.push(centered('FEDO Gestion'));
+  return r;
+}
+
 /** Facture d'exemple pour l'aperçu d'un modèle quand le magasin n'a pas encore vendu. */
 export function sampleDocData(variant: DocVariant, store?: Partial<DocData['store']>): DocData {
   const credit = variant === 'credit';
   const line = (code: string, label: string, qty: number, unit: string, unitPrice: number, vatRate: number, discount = 0): DocLine => {
     const totalTtc = qty * unitPrice - discount;
     const totalHt = splitTtc(totalTtc, vatRate).ht;
-    return { code, barcode: `61${code.replace(/\D/g, '').padStart(11, '0')}`, label, qty: String(qty), unit, unitPrice, unitPriceHt: splitTtc(unitPrice, vatRate).ht, discount, vatRate, totalHt, totalTtc, promo: 0, promoName: null, detail: qty !== 1 || Boolean(unit) };
+    return { code, barcode: `61${code.replace(/\D/g, '').padStart(11, '0')}`, label, qty: String(qty), unit, unitPrice, unitPriceHt: splitTtc(unitPrice, vatRate).ht, discount, vatRate, totalHt, totalTtc, promo: 0, promoName: null, detail: qty !== 1 || Boolean(unit), unitName: unit ? undefined : 'Pièce' };
   };
   const lines = [
     line('BOI012', 'Bière Castel 65 cl', 2, 'CASIER', 7800, 1925),
@@ -905,6 +1386,7 @@ export function sampleDocData(variant: DocVariant, store?: Partial<DocData['stor
       duplicate: false,
       validUntil: quote ? inDays(15) : null,
       notes: quote ? 'Livraison possible à Bonabéri.' : null,
+      warehouse: quote ? null : 'Surface de vente',
     },
     lines,
     payments: credit ? [{ label: 'Espèces', amount: 10000 }, { label: 'Crédit client', amount: ttc - 10000 }] : quote ? [] : [{ label: 'Espèces', amount: paid }],

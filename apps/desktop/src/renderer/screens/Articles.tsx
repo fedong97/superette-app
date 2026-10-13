@@ -5,6 +5,7 @@ import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, readT
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 import { type ArticlePhoto, PhotoField } from './photo';
+import { BarcodeChip, BarcodePrintDialog, barcodeRowsOf } from './barcodePrint';
 import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
@@ -171,6 +172,7 @@ export function ArticleForm({
     maxQty: milli(article?.max_qty),
     active: article ? article.active === 1 : true,
   });
+  const [printing, setPrinting] = useState(false);
   const packCodes = new Set(article?.packs.map((p) => p.barcode).filter(Boolean));
   const [barcodes, setBarcodes] = useState(
     article?.barcodes.filter((b) => !packCodes.has(b.code)).map((b) => ({ code: b.code, pack: String(b.pack_qty / 1000) })) ?? [],
@@ -411,13 +413,14 @@ export function ArticleForm({
           </label>
         </div>
         <h3>{piece && lastOn > 0 ? `Codes-barres de l'unité de détail (${unitName})` : 'Codes-barres'}</h3>
-        <table className="list compact">
+        <table className="list compact bc-codes">
           <tbody>
             {barcodes.map((b, i) => (
               <tr key={i}>
                 <td>
                   <input value={b.code} onChange={(e) => setBarcodes(barcodes.map((x, j) => (j === i ? { ...x, code: e.target.value } : x)))} placeholder="Scanner le code" />
                 </td>
+                <td>{b.code.trim() && <BarcodeChip code={b.code.trim()} />}</td>
                 <td>
                   <label className="inline">
                     Contient
@@ -432,11 +435,32 @@ export function ArticleForm({
                 </td>
               </tr>
             ))}
+            {levels
+              .filter((l) => l.enabled && l.barcode.trim())
+              .map((l) => (
+                <tr key={l.key}>
+                  <td>
+                    <span className="bc-num">{l.barcode.trim()}</span>
+                  </td>
+                  <td>
+                    <BarcodeChip code={l.barcode.trim()} />
+                  </td>
+                  <td colSpan={2}>
+                    <b>{l.name}</b> <small className="muted">· modifiable dans le tableau des conditionnements</small>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
+        {settings.barcodeAuto && (
+          <p className="muted">
+            Ce qui n'a pas de code fabricant reçoit un code interne {settings.barcodeKind === 'ean8' ? 'EAN-8' : 'EAN-13'} à l'enregistrement
+            {article ? ' (chaque nouveau carton ou pack)' : " (l'unité, chaque carton et pack)"}.
+          </p>
+        )}
         <div className="inline">
           <button type="button" onClick={() => setBarcodes([...barcodes, { code: '', pack: '1' }])}>
-            Ajouter un code-barres
+            Ajouter un code fabricant (scanner)
           </button>
           <button
             type="button"
@@ -451,6 +475,12 @@ export function ArticleForm({
           >
             Générer un code interne
           </button>
+          <span className="spacer" />
+          {article && (
+            <button type="button" className="primary" onClick={() => setPrinting(true)} title="Étiquettes code-barres de cet article (codes enregistrés)">
+              🖨 Imprimer les codes-barres…
+            </button>
+          )}
         </div>
         {article && (history.data?.length ?? 0) > 0 && (
           <>
@@ -481,6 +511,9 @@ export function ArticleForm({
           </button>
         </div>
       </form>
+      {printing && article && (
+        <BarcodePrintDialog title={`Imprimer les codes-barres · ${article.name}`} rows={barcodeRowsOf(article)} onClose={() => setPrinting(false)} />
+      )}
     </Modal>
   );
 }

@@ -9,6 +9,7 @@ import { type RecLine, RecLinesTable, newRecLine, recLineInput } from './Stock';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
 import { hasVat, tx } from '../tax';
 import { DocPreview } from './docPreview';
+import { ReceptionLabels } from './barcodePrint';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
@@ -468,6 +469,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
   const order = useLoad(() => call('purchases.order', id), [id]);
   const [lines, setLines] = useState<RecvLine[] | null>(null);
   const [note, setNote] = useState('');
+  const [received, setReceived] = useState<{ number: string; lines: { articleId: string; qty: number; packUnits: number }[] } | null>(null);
   useEffect(() => {
     if (order.data && !lines)
       setLines(
@@ -593,7 +595,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
                 }));
               const r = await call('purchases.receiveOrder', id, { deliveryNote: note || undefined, lines: input });
               toast.ok(`Réception ${r.number} enregistrée, stock mis à jour`);
-              onDone();
+              setReceived({ number: r.number, lines: input.map((l) => ({ articleId: l.articleId, qty: l.qty, packUnits: l.packUnits })) });
             } catch (err) {
               toast.error(err);
             }
@@ -602,6 +604,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
           Valider la réception
         </button>
       </div>
+      {received && <ReceptionLabels title={`Réception ${received.number} enregistrée · imprimer les étiquettes ?`} lines={received.lines} onClose={onDone} />}
     </div>
   );
 }
@@ -1086,6 +1089,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
   const [registerId, setRegisterId] = useState('');
   const emoney = useLoad(() => call('emoney.registers'), []);
   const [done, setDone] = useState<Invoice | null>(null);
+  const [received, setReceived] = useState<{ articleId: string; qty: number; packUnits: number }[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const sum = lines.reduce((s, l) => s + lineNet(l), 0);
   const d = Number(disc.replace(',', '.').replace('%', '').trim() || 0);
@@ -1126,6 +1130,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           </button>
         </div>
         {open && <InvoiceDetail id={open} onClose={() => setOpen(null)} />}
+        {received && <ReceptionLabels title={`Facture ${done.number} enregistrée · imprimer les étiquettes ?`} lines={received} onClose={() => setReceived(null)} />}
       </div>
     );
   return (
@@ -1252,6 +1257,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
               });
               toast.ok(`Facture ${inv.number} enregistrée, stock mis à jour`);
               setDone(inv);
+              setReceived(lines.map(recLineInput).map((l) => ({ articleId: l.articleId, qty: l.qty, packUnits: l.packUnits })));
             } catch (err) {
               toast.error(err);
             }

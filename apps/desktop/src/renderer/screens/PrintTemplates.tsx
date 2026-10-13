@@ -6,6 +6,8 @@ import {
   DOC_KIND_VARIANTS,
   DOC_KINDS,
   DOC_PAPERS,
+  DOC_STYLES,
+  stylesFor,
   DOC_VARIANTS,
   type DocColumn,
   type DocData,
@@ -36,7 +38,7 @@ const isDefault = (data: Templates, t: DocTemplate) => {
  * « Paramétrage des variantes des états » de Sage ou KONTROL : une ligne par
  * modèle, un éditeur champ par champ avec l'aperçu à côté.
  */
-export function PrintTemplates({ user }: { user: User }) {
+export function PrintTemplates({ user, initialEdit }: { user: User; initialEdit?: string | null }) {
   const toast = useToast();
   const list = useLoad(() => call('docs.templates'));
   const [selected, setSelected] = useState<string | null>(null);
@@ -45,6 +47,15 @@ export function PrintTemplates({ user }: { user: User }) {
   const [creating, setCreating] = useState(false);
   const canEdit = user.rights.includes('print_templates');
   const data = list.data;
+  // Ouvert depuis Paramètres : l'éditeur du modèle choisi s'ouvre directement.
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (!data || opened || !initialEdit) return;
+    setOpened(true);
+    const t = data.templates.find((x) => x.id === initialEdit);
+    if (t && canEdit) setEditing(structuredClone(t));
+    if (t) setSelected(t.id);
+  }, [data, opened, initialEdit, canEdit]);
   if (!data) return null;
   const sel = data.templates.find((t) => t.id === selected) ?? null;
 
@@ -344,6 +355,15 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                   ))}
                 </select>
               </Field>
+              <Field label="Disposition" hint={ticket ? 'Encadré : nom du produit sur sa ligne, puis QTE / COND. / P.U. / TOTAL. Détaillé : colonne code et détail des taxes.' : 'Listing : cadre, cases DATE / CLIENT / RÉF., montant en lettres, NB COLIS et NET À PAYER'}>
+                <select disabled={off} value={t.page.style} onChange={(e) => set('page', { style: e.target.value as DocTemplate['page']['style'] })}>
+                  {stylesFor(t.format).map((k) => (
+                    <option key={k} value={k}>
+                      {DOC_STYLES[k]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               {!ticket && (
                 <Field label="Orientation">
                   <select disabled={off} value={t.page.landscape ? '1' : '0'} onChange={(e) => set('page', { landscape: e.target.value === '1' })}>
@@ -466,7 +486,7 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                     </td>
                     <td>{DOC_COLUMNS[c.key]}</td>
                     <td>
-                      <input disabled={off || ticket} maxLength={40} value={c.label} onChange={(e) => setColumn(i, { label: e.target.value })} />
+                      <input disabled={off || (ticket && t.page.style === 'plain')} maxLength={40} value={c.label} onChange={(e) => setColumn(i, { label: e.target.value })} />
                     </td>
                     {!ticket && (
                       <td>
@@ -486,7 +506,9 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
               </tbody>
             </table>
             <small className="muted">
-              {ticket
+              {ticket && t.page.style !== 'plain'
+                ? 'Ticket encadré : la désignation est sur sa ligne, les autres colonnes cochées en dessous. Ticket détaillé : les colonnes cochées côte à côte.'
+                : ticket
                 ? 'Sur le ticket, la désignation et le total sont sur une ligne, la quantité, le prix et la remise en dessous.'
                 : `Largeur 0 : la colonne prend la place restante. Total des largeurs fixées : ${widthSum} %${widthSum > 100 ? ' (trop large, les colonnes seront réduites)' : ''}.`}
             </small>
@@ -496,7 +518,7 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
             <div className="checks">
               {check('totals', 'ttc', 'Total TTC')}
               {check('totals', 'ht', 'Total HT')}
-              {check('totals', 'vatDetail', 'Détail de la TVA')}
+              {check('totals', 'vatDetail', 'Partie TVA (détail, ou « TVA non applicable »)')}
               {check('totals', 'discount', 'Remises accordées')}
               {check('totals', 'promo', 'Promotions')}
               {check('totals', 'rounding', 'Arrondi espèces')}
@@ -504,14 +526,21 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
               {check('totals', 'change', 'Rendu monnaie')}
               {check('totals', 'remaining', 'Reste à payer')}
               {check('totals', 'words', 'Montant en lettres')}
+              {check('totals', 'parcels', 'Nombre de colis')}
             </div>
+            <small className="muted">Magasin sans TVA : la TVA et les mots HT / TTC disparaissent d’eux-mêmes. Décochez « Total HT » et « Partie TVA » pour ne rien afficher de la TVA.</small>
           </Section>
 
           <Section title="Pied du document">
             <Field label="Mentions" hint="Conditions de vente, coordonnées bancaires…">
               <textarea disabled={off} rows={3} maxLength={300} value={t.footer.text} onChange={(e) => set('footer', { text: e.target.value })} />
             </Field>
-            <Field label="Message de remerciement" hint={ticket ? 'Vide : le pied de ticket des paramètres' : undefined}>
+            {(t.page.style === 'framed' || t.page.style === 'side') && (
+              <Field label="Remarque" hint="À gauche du montant en lettres">
+                <input disabled={off} maxLength={300} value={t.footer.remark} onChange={(e) => set('footer', { remark: e.target.value })} />
+              </Field>
+            )}
+            <Field label={t.page.style === 'framed' || t.page.style === 'side' ? 'Slogan' : 'Message de remerciement'} hint={ticket ? 'Vide : le pied de ticket des paramètres' : t.page.style === 'framed' || t.page.style === 'side' ? 'En gras, centré au-dessus des mentions, par exemple « {magasin} : la qualité d’abord !!! »' : undefined}>
               <input disabled={off} maxLength={300} value={t.footer.thanks} onChange={(e) => set('footer', { thanks: e.target.value })} />
             </Field>
             <div className="checks">
@@ -525,6 +554,12 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                 </Field>
                 <Field label="Signature à droite">
                   <input disabled={off} maxLength={300} value={t.footer.signRight} onChange={(e) => set('footer', { signRight: e.target.value })} />
+                </Field>
+                <Field label="3e signature" hint="Vide : pas de zone">
+                  <input disabled={off} maxLength={300} value={t.footer.sign3 ?? ''} onChange={(e) => set('footer', { sign3: e.target.value })} />
+                </Field>
+                <Field label="4e signature" hint="Vide : pas de zone">
+                  <input disabled={off} maxLength={300} value={t.footer.sign4 ?? ''} onChange={(e) => set('footer', { sign4: e.target.value })} />
                 </Field>
               </div>
             )}

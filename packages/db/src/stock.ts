@@ -237,6 +237,8 @@ export class StockService extends Base {
     m: Omit<MovementInput, 'qty' | 'unitCost' | 'lotId'> & { qty: Milli; lotId?: string | null },
   ): { unitCost: Fcfa; lots: { lotId: string | null; qty: Milli }[] } {
     if (m.qty <= 0) throw new AppError('Quantité à sortir invalide', 'INVALID');
+    // Service (frais de livraison) : vendu sans stock, sans coût.
+    if (this.db.prepare('SELECT is_service FROM articles WHERE id = ?').pluck().get(m.articleId) === 1) return { unitCost: 0, lots: [] };
     const candidates = this.lots(m.articleId, m.warehouseId).filter((l) => !m.lotId || l.id === m.lotId);
     const { allocations, unallocated } = allocateFefo(candidates, m.qty);
     const parts: { lotId: string | null; qty: Milli }[] = allocations.map((a) => ({ lotId: a.lotId, qty: a.qty }));

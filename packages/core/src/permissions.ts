@@ -74,6 +74,9 @@ export const PERMISSIONS = {
   sale_reprint: { label: 'Réimprimer un ticket ou une facture', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_new_article: { label: 'Créer un produit inexistant pendant la facturation', group: 'Facturation', type: 'Fonction', parent: 'articles' },
   drawer_open: { label: 'Ouvrir le tiroir-caisse sans vente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
+  sale_tariff: { label: 'Changer le tarif d’une fiche à la caisse (détail, gros, super gros) sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
+  sale_warehouse: { label: 'Vendre depuis un autre dépôt que la surface de vente sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
+  deliveries: { label: 'Livraisons du jour (préparer, partir, livrée)', group: 'Facturation', type: 'Menu', parent: 'cash' },
   sales_alerts: { label: 'Alertes sur les ventes (remises, annulations, retours)', group: 'Facturation', type: 'Menu', parent: 'sales' },
 
   // --- Trésorerie --------------------------------------------------------------

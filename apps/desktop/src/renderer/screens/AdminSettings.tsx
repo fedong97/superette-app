@@ -1,7 +1,10 @@
-import { CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type StoreSettings } from '@superette/core';
+import { BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
+import classicShot from '../assets/caisse/classique.png';
+import conventionalShot from '../assets/caisse/conventionnel.png';
+import modernShot from '../assets/caisse/moderne.png';
 import { askConfirm, Empty, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -12,7 +15,31 @@ interface Item {
   label: string;
   hint?: string;
   render: () => ReactNode;
+  /** Libellé affiché, quand `label` contient aussi des mots pour la recherche. */
+  title?: string;
+  /** Sur toute la largeur de la section (les cartes de l'écran de caisse). */
+  wide?: boolean;
 }
+
+/** Impressions dont on choisit le modèle dans les paramètres. */
+const PRINT_SLOTS: { doc: DocKind; format: DocFormat; variant: DocVariant; label: string; hint?: string }[] = [
+  { doc: 'invoice', format: 'ticket', variant: 'cash', label: 'Ticket de caisse au comptant', hint: 'Touche F2' },
+  { doc: 'invoice', format: 'ticket', variant: 'credit', label: 'Ticket de caisse à crédit', hint: 'Touche F2 sur une vente à crédit' },
+  { doc: 'invoice', format: 'listing', variant: 'cash', label: 'Facture listing au comptant', hint: 'Touche F7' },
+  { doc: 'invoice', format: 'listing', variant: 'credit', label: 'Facture listing à crédit', hint: 'Touche F7 sur une vente à crédit' },
+  { doc: 'invoice', format: 'a4', variant: 'cash', label: 'Facture A4 au comptant', hint: 'Touche F9' },
+  { doc: 'invoice', format: 'a4', variant: 'credit', label: 'Facture A4 à crédit', hint: 'Touche F9 sur une vente à crédit' },
+  { doc: 'delivery', format: 'a4', variant: 'delivery', label: 'Bon de livraison', hint: 'Imprimé avec une vente à livrer' },
+  { doc: 'quote', format: 'a4', variant: 'quote', label: 'Devis' },
+  { doc: 'quote', format: 'a4', variant: 'proforma', label: 'Facture proforma' },
+];
+
+/** Les trois présentations de l'écran de caisse, avec leur vignette. */
+const LAYOUT_CARDS: { id: PosLayout; shot: string; text: string }[] = [
+  { id: 'modern', shot: modernShot, text: 'Tuiles des produits, ticket à droite, gros boutons. Idéal pour un écran tactile.' },
+  { id: 'classic', shot: classicShot, text: 'Tableau des lignes, boutons à droite, touches F en bas.' },
+  { id: 'conventional', shot: conventionalShot, text: 'Grand total en haut, ligne de saisie, cadre Règlement et « A rendre ».' },
+];
 
 /** Image choisie réduite à 512 points de large au plus, en PNG : elle reste légère pour le ticket. */
 function readLogo(file: File): Promise<string> {
@@ -45,13 +72,15 @@ function readLogo(file: File): Promise<string> {
  * postes ; l'imprimante, la balance, l'affichage et l'heure de sauvegarde sont
  * propres à ce PC.
  */
-export function Settings({ user, onChanged }: { user: User; onChanged: () => void }) {
+export function Settings({ user, onChanged, onEditTemplate }: { user: User; onChanged: () => void; onEditTemplate?: (id: string) => void }) {
   const toast = useToast();
   const state = useLoad(() => call('app.state'));
   const local = useLoad(() => call('admin.settings'));
   const store = useLoad(() => call('admin.storeSettings'));
   const printers = useLoad(() => call('admin.printers'));
+  const barcodeInfo = useLoad(() => call('barcode.info'));
   const emoney = useLoad(() => call('emoney.registers'));
+  const templates = useLoad(() => call('docs.templates'));
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [storeDraft, setStoreDraft] = useState<Partial<StoreSettings>>({});
   const [identity, setIdentity] = useState<Partial<StoreIdentity>>({});
@@ -155,6 +184,181 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
           ),
         },
       ],
+    ],
+    [
+      'Codes-barres et étiquettes',
+      'Codes internes pour les articles sans code fabricant, et étiquettes produit à coller sur les articles et les cartons.',
+      [
+        {
+          label: 'Créer un code-barres automatiquement',
+          hint: "Pour chaque nouvel article sans code fabricant, à l'enregistrement : l'unité, chaque carton et pack.",
+          render: () => yes('barcodeAuto'),
+        },
+        {
+          label: 'Format des codes internes',
+          hint: 'EAN-8 : court, tient sur les petites étiquettes. EAN-13 : même longueur que les codes fabricants.',
+          render: () => (
+            <select disabled={!canEdit} value={sv('barcodeKind')} onChange={(e) => sset('barcodeKind', e.target.value as StoreSettings['barcodeKind'])}>
+              <option value="ean8">EAN-8 · 2xxxxxxx (recommandé)</option>
+              <option value="ean13">EAN-13 · 20xxxxxxxxxxx</option>
+            </select>
+          ),
+        },
+        {
+          label: 'Prochain code',
+          hint: "Les codes déjà pris sont sautés. Chaque poste a son chiffre, pour qu'aucun code ne se répète entre deux PC.",
+          render: () =>
+            barcodeInfo.data ? (
+              <span>
+                <b className="bc-num">{barcodeInfo.data.next}</b> <small className="muted">· {barcodeInfo.data.created} code(s) interne(s) déjà donné(s)</small>
+              </span>
+            ) : (
+              <span className="muted">…</span>
+            ),
+        },
+        {
+          label: 'Articles sans code-barres',
+          hint: 'Donne en une fois un code interne à tous les articles et conditionnements qui n’en ont pas (sauf articles vendus à la balance).',
+          render: () => (
+            <button
+              disabled={!canEdit}
+              onClick={async () => {
+                if (!(await askConfirm('Donner un code-barres interne à tous les articles et cartons qui n’en ont pas ?'))) return;
+                try {
+                  const n = await call('catalogue.assignMissingBarcodes');
+                  toast.ok(n ? `${n} code(s)-barres créé(s)` : 'Tous les articles ont déjà un code-barres');
+                  barcodeInfo.reload();
+                } catch (e) {
+                  toast.error(e);
+                }
+              }}
+            >
+              Donner un code aux articles sans code
+            </button>
+          ),
+        },
+        {
+          label: "Imprimante d'étiquettes (ce poste)",
+          hint: 'Rouleau d’étiquettes : impression directe, sans fenêtre Windows.',
+          render: () => (
+            <select disabled={!canEdit} value={v('printer.labels')} onChange={set('printer.labels')}>
+              <option value="">Demander à chaque fois (fenêtre d’impression)</option>
+              {(printers.data ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+        {
+          label: "Format d'étiquette par défaut",
+          render: () => (
+            <select disabled={!canEdit} value={sv('labelFormat')} onChange={(e) => sset('labelFormat', e.target.value as StoreSettings['labelFormat'])}>
+              {Object.entries(BARCODE_LABEL_FORMATS).map(([id, f]) => (
+                <option key={id} value={id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+        {
+          label: "Sur l'étiquette par défaut nom prix magasin",
+          title: "Sur l'étiquette par défaut",
+          hint: 'Le code-barres et ses chiffres sont toujours imprimés.',
+          render: () => (
+            <span className="inline bc-checks">
+              {(
+                [
+                  ['labelName', 'Nom'],
+                  ['labelPrice', 'Prix'],
+                  ['labelStore', 'Magasin'],
+                ] as const
+              ).map(([k, l]) => (
+                <label key={k}>
+                  <input type="checkbox" disabled={!canEdit} checked={sv(k)} onChange={(e) => sset(k, e.target.checked)} /> {l}
+                </label>
+              ))}
+            </span>
+          ),
+        },
+        {
+          label: "Après une réception d'achat",
+          hint: 'Proposer d’imprimer les étiquettes des articles reçus qui ont un code interne.',
+          render: () => yes('labelAfterReception'),
+        },
+      ],
+    ],
+    [
+      'Écran de caisse',
+      'Le modèle choisi s’applique à toutes les caisses du magasin. Les trois ont les mêmes fonctions et les mêmes touches (F2 ticket, F7 listing, F4 enregistrer).',
+      [
+        {
+          label: 'Modèle de l’écran de caisse moderne classique conventionnel',
+          wide: true,
+          render: () => (
+            <div className="layout-cards" role="radiogroup" aria-label="Modèle de l’écran de caisse">
+              {LAYOUT_CARDS.map((c) => (
+                <label key={c.id} className={`layout-card ${sv('posLayout') === c.id ? 'on' : ''} ${isAdmin ? '' : 'disabled'}`}>
+                  <img src={c.shot} alt="" />
+                  <span className="layout-name">
+                    <input type="radio" name="posLayout" disabled={!isAdmin} checked={sv('posLayout') === c.id} onChange={() => sset('posLayout', c.id)} />
+                    {POS_LAYOUTS[c.id]}
+                  </span>
+                  <small className="muted">{c.text}</small>
+                </label>
+              ))}
+            </div>
+          ),
+        },
+        {
+          label: `Exception pour ce poste (${state.data?.register?.name ?? 'ce PC'})`,
+          hint: isAdmin ? 'Choisissez un autre modèle seulement pour ce PC.' : 'Seul un administrateur peut changer l’écran de caisse.',
+          render: () => (
+            <select disabled={!isAdmin} value={v('pos.layout')} onChange={set('pos.layout')}>
+              <option value="">Comme le magasin</option>
+              {(Object.keys(POS_LAYOUTS) as PosLayout[]).map((k) => (
+                <option key={k} value={k}>
+                  {POS_LAYOUTS[k]}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+      ],
+    ],
+    [
+      'Modèle utilisé pour chaque impression',
+      'Le modèle choisi sert à chaque impression de ce type. « Modifier… » ouvre le modèle ; créez-en d’autres dans Modèles d’impression.',
+      PRINT_SLOTS.map((slot) => {
+        const key = slotKey(slot.doc, slot.format, slot.variant);
+        const choices = (templates.data?.templates ?? []).filter((t) => t.doc === slot.doc && t.format === slot.format && t.variant === slot.variant);
+        const builtin = BUILTIN_TEMPLATES.find((b) => b.doc === slot.doc && b.format === slot.format && b.variant === slot.variant)!;
+        const current = sv('printDefaults')[key] ?? '';
+        const value = choices.some((t) => t.id === current) ? current : builtin.id;
+        return {
+          label: `${slot.label} modèle impression`,
+          title: slot.label,
+          hint: slot.hint,
+          render: () => (
+            <span className="inline tpl-pick">
+              <select disabled={!canEdit} value={value} onChange={(e) => sset('printDefaults', { ...sv('printDefaults'), [key]: e.target.value })}>
+                {choices.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {onEditTemplate && (
+                <button type="button" onClick={() => onEditTemplate(value)}>
+                  Modifier…
+                </button>
+              )}
+            </span>
+          ),
+        };
+      }),
     ],
     [
       'TVA, stock et écart de caisse',
@@ -439,6 +643,20 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
             </select>
           ),
         },
+        {
+          label: 'Imprimante listing (factures F7)',
+          hint: 'Imprimante à papier continu : la facture listing y part directement, sans fenêtre Windows.',
+          render: () => (
+            <select disabled={!canEdit} value={v('printer.listing')} onChange={set('printer.listing')}>
+              <option value="">Demander à chaque fois (fenêtre d’impression)</option>
+              {(printers.data ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
         { label: 'Pied de ticket', render: () => <input disabled={!canEdit} value={v('ticket.footer', 'Merci de votre visite !')} onChange={set('ticket.footer')} /> },
         {
           label: 'Page de test',
@@ -512,6 +730,8 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
       setIdentity({});
       local.reload();
       store.reload();
+      barcodeInfo.reload();
+      templates.reload();
       state.reload();
       onChanged();
       toast.ok('Paramètres enregistrés');
@@ -538,13 +758,19 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
           <h3>{title}</h3>
           {intro && <p className="muted">{intro}</p>}
           {items.map((i) => (
-            <div key={i.label} className="settings-row">
-              <div>
-                <div>{i.label}</div>
-                {i.hint && <small className="muted">{i.hint}</small>}
+            i.wide ? (
+              <div key={i.label} className="settings-row wide">
+                {i.render()}
               </div>
-              <div>{i.render()}</div>
-            </div>
+            ) : (
+              <div key={i.label} className="settings-row">
+                <div>
+                  <div>{i.title ?? i.label}</div>
+                  {i.hint && <small className="muted">{i.hint}</small>}
+                </div>
+                <div>{i.render()}</div>
+              </div>
+            )
           ))}
         </section>
       ))}

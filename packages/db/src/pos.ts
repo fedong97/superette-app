@@ -31,6 +31,7 @@ import type { PromotionService } from './promotions';
 import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
 import type { TreasuryService } from './treasury';
+import { DELIVERY_FEE_ARTICLE_ID, type DeliveryInput, type DeliveryService } from './deliveries';
 import { ENTRY_KINDS, type EmoneyRow, type EmoneyService, type EntryKind, isEmoney } from './emoney';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
@@ -169,6 +170,12 @@ export interface SaleInput {
   quoteId?: string | null;
   /** Nom donné par un client comptoir (sans fiche client), imprimé sur le ticket et la facture. */
   clientName?: string | null;
+  /** Tarif choisi à la caisse pour cette fiche ; sinon celui du client (détail pour le client comptoir). */
+  priceLevel?: PriceLevel | null;
+  /** Dépôt d'où sort la marchandise ; sinon le dépôt de vente du magasin. */
+  warehouseId?: string | null;
+  /** Livraison chez le client : ses frais s'ajoutent au ticket. */
+  delivery?: DeliveryInput | null;
 }
 
 export interface Sale {
@@ -297,8 +304,23 @@ export class PosService extends Base {
     private readonly promotions: PromotionService,
     private readonly treasury: TreasuryService,
     private readonly emoney: EmoneyService,
+    private readonly deliveries: DeliveryService,
   ) {
     super(db, clock);
+  }
+
+  /** Dépôt de sortie d'une vente : celui choisi à la caisse (du magasin, actif) ou le dépôt de vente. */
+  saleWarehouse(storeId: string, warehouseId?: string | null) {
+    if (!warehouseId) return this.admin.salesWarehouse(storeId);
+    const wh = this.admin.listWarehouses(storeId).find((w) => w.id === warehouseId);
+    if (!wh) throw new AppError('Dépôt indisponible pour ce magasin', 'INVALID');
+    return wh;
+  }
+
+  /** Ligne « Frais de livraison » (service, sans stock) au montant TTC saisi. */
+  deliveryFeeLine(ctx: Pick<Context, 'storeId' | 'registerId'>, fee: Fcfa): PricedLine {
+    const article = this.catalogue.getArticle(this.deliveries.feeArticleId(ctx), ctx.storeId);
+    return { articleId: article.id, label: article.name, unitPrice: fee, qty: 1000, vatRate: article.vat_rate_bp, discount: 0, barcode: null, packId: null, packName: null, promo: 0, promotionId: null, promotionName: null };
   }
 
   private requireRegister(ctx: Context): string {
@@ -567,11 +589,15 @@ export class PosService extends Base {
    * Recherche en caisse, une ligne par conditionnement, du plus grand au plus
    * petit. Les lignes épuisées sont listées et marquées (sauf `includeEmpty: false`).
    */
-  searchForSale(storeId: string, query: string, opts: { customerId?: string | null; includeEmpty?: boolean; limit?: number } = {}): SaleSearchRow[] {
+  searchForSale(
+    storeId: string,
+    query: string,
+    opts: { customerId?: string | null; includeEmpty?: boolean; limit?: number; priceLevel?: PriceLevel | null; warehouseId?: string | null } = {},
+  ): SaleSearchRow[] {
     const articles = this.catalogue.suggestArticles(query, storeId, 50);
     if (articles.length === 0) return [];
-    const level = opts.customerId ? this.customers.getCustomer(opts.customerId).price_level : 'retail';
-    const warehouse = this.admin.salesWarehouse(storeId);
+    const level = opts.priceLevel ?? (opts.customerId ? this.customers.getCustomer(opts.customerId).price_level : 'retail');
+    const warehouse = this.saleWarehouse(storeId, opts.warehouseId);
     const ids = articles.map((a) => a.id);
     const marks = ids.map(() => '?').join(',');
     const stock = new Map(
@@ -630,12 +656,13 @@ export class PosService extends Base {
    * le ticket. Avec « Ignorer la gestion des stocks », la vente passe et renvoie
    * les lignes vendues sans stock, que la prochaine réception régularise.
    */
-  private assertInStock(storeId: string, lines: { articleId: string; label: string; qty: Milli }[]): { label: string; qty: Milli; stock: Milli }[] {
-    const warehouse = this.admin.salesWarehouse(storeId);
+  private assertInStock(storeId: string, lines: { articleId: string; label: string; qty: Milli }[], warehouseId?: string | null): { label: string; qty: Milli; stock: Milli }[] {
+    const warehouse = this.saleWarehouse(storeId, warehouseId);
     const ignore = this.admin.getStore(storeId).ignore_stock === 1;
     const short: { label: string; qty: Milli; stock: Milli }[] = [];
     const wanted = new Map<string, { label: string; qty: Milli }>();
     for (const l of lines) {
+      if (l.articleId === DELIVERY_FEE_ARTICLE_ID) continue;
       const w = wanted.get(l.articleId);
       wanted.set(l.articleId, { label: l.label, qty: (w?.qty ?? 0) + l.qty });
     }
@@ -658,9 +685,15 @@ export class PosService extends Base {
     const session = this.requireOpenSession(ctx);
     if (input.lines.length === 0) throw new AppError('Ticket vide', 'EMPTY');
     if (input.lines.some((l) => l.qty < 0)) throw new AppError('Quantité négative : utilisez le retour client', 'INVALID');
-    const level = input.customerId ? this.customers.getCustomer(input.customerId).price_level : 'retail';
+    const level = input.priceLevel ?? (input.customerId ? this.customers.getCustomer(input.customerId).price_level : 'retail');
     const set = this.admin.storeSettings(ctx.storeId);
+    const warehouse = this.saleWarehouse(ctx.storeId, input.warehouseId);
     const lines = this.priceLines(ctx.storeId, input.lines, level);
+    if (input.delivery) {
+      this.deliveries.check(input.delivery);
+      const fee = input.delivery.fee ?? 0;
+      if (fee > 0) lines.push(this.deliveryFeeLine(ctx, fee));
+    }
     // Arrondi des espèces : un ticket payé tout en espèces descend au multiple inférieur, en remise sur la dernière ligne.
     const allCash = input.payments.length > 0 && input.payments.every((p) => p.method === 'CASH');
     const rounding = allCash ? computeTotals(lines).totalTtc - roundCash(computeTotals(lines).totalTtc, set.cashRounding) : 0;
@@ -693,7 +726,7 @@ export class PosService extends Base {
         throw new AppError(`Référence de transaction obligatoire pour ${PAYMENT_METHODS[p.method]}`, 'REFERENCE_REQUIRED');
       }
     }
-    const withoutStock = this.assertInStock(ctx.storeId, lines);
+    const withoutStock = this.assertInStock(ctx.storeId, lines, warehouse.id);
     // Chaque paiement va à la journée de la caisse de son type (espèces, électronique, banque).
     const paymentSessions = input.payments.map((p) => this.sessionFor(ctx, p.method, session.id));
     const settlement = settle(totals.totalTtc, input.payments);
@@ -712,13 +745,12 @@ export class PosService extends Base {
     return this.tx(() => {
       const saleId = newId();
       const number = this.nextTicketNumber(ctx);
-      const warehouse = this.admin.salesWarehouse(ctx.storeId);
       const now = this.now();
       this.db
         .prepare(
           `INSERT INTO sales (id, number, kind, store_id, register_id, session_id, user_id, status, total_ttc, total_ht,
-             total_tva, total_discount, total_promo, price_level, change_given, customer_id, client_name, due_date, created_at, rounding)
-           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             total_tva, total_discount, total_promo, price_level, change_given, customer_id, client_name, due_date, created_at, rounding, warehouse_id)
+           VALUES (?, ?, 'sale', ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           saleId,
@@ -739,6 +771,7 @@ export class PosService extends Base {
           due,
           now,
           rounding,
+          warehouse.is_sales_default ? null : warehouse.id,
         );
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id,
@@ -772,8 +805,12 @@ export class PosService extends Base {
       }
       if (withoutStock.length) this.audit(ctx.userId, 'sale.without_stock', 'sale', saleId, { number, lines: withoutStock });
       if (input.quoteId) this.quotes.markAccepted(ctx, input.quoteId, saleId);
+      if (level !== (customer?.price_level ?? 'retail') || !warehouse.is_sales_default) {
+        this.audit(ctx.userId, 'sale.options', 'sale', saleId, { number, level, warehouse: warehouse.name });
+      }
       const sale = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', sale);
+      if (input.delivery) this.deliveries.create(ctx, saleId, input.delivery);
       return sale;
     });
   }
@@ -835,6 +872,7 @@ export class PosService extends Base {
     return this.tx(() => {
       this.db.prepare("UPDATE sales SET status = 'cancelled', cancelled_by = ?, cancel_reason = ? WHERE id = ?").run(supervisorId, reason.trim(), saleId);
       this.restockSaleMovements(ctx, saleId, 'sale_cancel', saleId);
+      this.deliveries.cancelForSale(ctx, saleId);
       this.audit(supervisorId, 'sale.cancel', 'sale', saleId, { number: sale.number, total: sale.total_ttc, reason, cashier: ctx.userId });
       const updated = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', updated);

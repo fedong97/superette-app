@@ -109,6 +109,24 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.42.0',
+    items: [
+      'Fenêtres : chaque écran s’ouvre dans sa fenêtre, à l’intérieur du logiciel. On la déplace par sa barre verte, on l’agrandit par le coin, ▢ (ou double-clic sur la barre) la met en plein écran et ✕ la ferme. La caisse s’ouvre en plein écran ; chaque fenêtre se rouvre là où vous l’avez laissée.',
+      'Barre du haut : tous les onglets sont visibles en entier (sur deux lignes si l’écran est étroit). 🔍 cherche un écran (Ctrl+K), ＋ personnalise les onglets ; l’heure est en bas à droite.',
+      'Trois écrans de caisse au choix (Administration › Paramètres › Écran de caisse) : Moderne, Classique et Conventionnel, avec les mêmes fonctions et les mêmes touches. Le choix vaut pour tout le magasin, avec une exception possible pour un poste.',
+      'Nouvelles touches pour finir une fiche : F2 valide et imprime le ticket de caisse, F7 valide et imprime la facture listing, F4 ou VALIDER enregistre sans imprimer. Sur une fiche vide, F2 réimprime le dernier ticket et F7 ouvre « Mes factures ».',
+      'Nouveaux modèles de facture : ticket encadré (nom du produit sur sa ligne, QTE, COND., P.U., TOTAL, colis, net à payer), ticket détaillé (code, total HT, TVA, remise, colis, montant TTC) et listing sans logo (avec jusqu’à 4 signatures). Tout se modifie dans Modèles d’impression : disposition, textes, lignes à afficher, colonnes, signatures.',
+      'Paramètres › « Modèle utilisé pour chaque impression » : choisissez le modèle du ticket (F2), du listing (F7), de l’A4 (F9), du bon de livraison et des devis ; « Modifier… » ouvre le modèle.',
+      'Magasin sans TVA : la TVA et les mots HT / TTC disparaissent des modèles ; décochez « Total HT » et « Partie TVA » pour ne rien afficher de la TVA.',
+      'Facture listing refaite pour l’imprimante à papier continu : cadre, logo, cases DATE / CLIENT / RÉF., magasin de livraison, tableau encadré, montant en lettres, nombre de colis et NET À PAYER. Les textes se changent dans Modèles d’impression ; choisissez l’imprimante listing de chaque PC dans Paramètres pour imprimer sans fenêtre Windows.',
+      'Codes-barres : un article sans code fabricant reçoit tout seul un code interne EAN-8 (8 chiffres, commence par 2) à son enregistrement, pour l’unité et pour chaque carton. Paramètres › « Codes-barres et étiquettes » : code automatique, EAN-8 ou EAN-13, et « Donner un code aux articles sans code » pour les articles déjà créés.',
+      'Étiquettes produit : « Imprimer les codes-barres… » sur la fiche article, dans Étiquettes › « Codes-barres produit » et après chaque réception d’achat. Rouleau 30 × 20, 40 × 25 ou 50 × 30 mm, ou planche A4 ; nom, prix et magasin au choix. Choisissez l’imprimante d’étiquettes du PC dans Paramètres pour imprimer sans fenêtre Windows.',
+      'Caisse : choisissez le tarif (Détail, Gros, Super gros) et le dépôt d’où sort la marchandise pour la fiche en cours. Sans ce droit, le code d’un gérant est demandé.',
+      'Livraisons : onglet « Livraison » du ticket (adresse, livreur, jour, créneau, frais ajoutés au ticket) et bon de livraison imprimé avec la vente.',
+      'Nouvel écran Vente › « Livraisons du jour » : à préparer, en route, livrées, avec « Partir » et « Livrée ». Pour une vente à crédit, l’argent rapporté par le livreur s’enregistre comme règlement du client.',
+    ],
+  },
+  {
     version: '0.41.1',
     items: [
       'Correction : la barre de recherche (caisse, clients, fournisseurs) ne se bloque plus après une question « OK / Annuler » ou une impression. Les questions s’affichent maintenant dans le logiciel.',

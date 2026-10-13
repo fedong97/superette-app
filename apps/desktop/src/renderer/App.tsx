@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import logo from './assets/logo.svg';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
+import { Deliveries } from './screens/Deliveries';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
@@ -27,6 +28,7 @@ import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTab
 import { ROLE_TILES } from './guide';
 import { AskHost, Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
+import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -59,6 +61,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement'] },
   expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
   quotes: { label: 'Devis et proformas', perm: ['quotes', 'quote_save'] },
+  deliveries: { label: 'Livraisons du jour', perm: ['deliveries'] },
   promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
@@ -107,6 +110,10 @@ const MENU_ICONS: Record<string, string> = {
   Administration: '⚙️',
   Aide: '❔',
 };
+
+/** Icône d'un écran : celle du premier menu qui l'ouvre (Magasinier pour le stock). */
+const winIcon = (kind: WinKind) =>
+  kind === 'stock' ? MENU_ICONS['Magasinier']! : (MENU_ICONS[MENUS.find(([, items]) => items.some((it) => it.open?.[0] === kind))?.[0] ?? ''] ?? '▣');
 const MENU_COLORS: Record<string, string> = {
   Fichier: '#64748b',
   Facturation: '#1f7a5c',
@@ -146,6 +153,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Vente au comptant 2', open: ['cash2'] },
       { label: 'Vente à crédit', open: ['credit'] },
       { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Mes factures', open: ['sales', 'tickets'] },
       { label: 'Registre (clôtures Z)', open: ['sales', 'z'] },
     ],
@@ -163,6 +171,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Tickets et factures annulés', open: ['sales', 'cancelled'] },
       SEP,
       { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
       SEP,
@@ -229,7 +238,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Recherche', open: ['articles', 'search'], perm: 'articles' },
       SEP,
       { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
-      { label: 'Étiquettes de rayon', open: ['labels'] },
+      { label: 'Étiquettes et codes-barres', open: ['labels'] },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Stock multi-magasin', open: ['stock', 'multi'], perm: 'stock' },
@@ -309,7 +318,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Pertes et casse', open: ['stock', 'loss'], perm: 'stock_loss' },
       { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count', 'inventory_close', 'inventory_print'] },
       { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
-      { label: 'Étiquettes de rayon', open: ['labels'] },
+      { label: 'Étiquettes et codes-barres', open: ['labels'] },
     ],
   ],
   [
@@ -444,6 +453,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [wins, setWins] = useState<Win[]>(() => (startOnPos ? [{ kind: first, nonce: 0, crumb: 'Facturation › Vente au comptant 1' }] : []));
   // null : la page d'accueil.
   const [active, setActive] = useState<WinKind | null>(startOnPos ? first : null);
+  /** Ordre des fenêtres, de la plus en arrière à celle de devant. */
+  const [stack, setStack] = useState<WinKind[]>(() => (startOnPos ? [first] : []));
+  const [area, setArea] = useState<Area>({ w: 0, h: 0 });
+  const areaRef = useRef<HTMLElement>(null);
   const [menu, setMenu] = useState<string | null>(null);
   /** Écran « Tous les menus » : chaque menu en tuile, avec tous ses écrans. */
   const [allMenus, setAllMenus] = useState(false);
@@ -546,22 +559,48 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => window.removeEventListener('keydown', onKey);
   }, [onPos]);
 
+  // Taille de la zone de travail : les fenêtres restent dedans quand l'écran change.
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const measure = () => setArea({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  /** Place de chaque fenêtre sur ce poste ; la caisse s'ouvre en plein écran. */
+  const geos = (prefs.winGeo as Partial<Record<WinKind, Geo>> | undefined) ?? {};
+  const isPosKind = (kind: WinKind) => kind === 'cash1' || kind === 'cash2' || kind === 'credit';
+  // Place donnée à l'ouverture (en cascade) tant que la fenêtre n'a pas été déplacée.
+  const [placed, setPlaced] = useState<Partial<Record<WinKind, Geo>>>({});
+  const geoOf = (kind: WinKind): Geo => geos[kind] ?? placed[kind] ?? defaultGeo(area, 0, isPosKind(kind));
+  const saveGeo = (kind: WinKind, g: Geo) => savePref('winGeo', { ...geos, [kind]: g });
+  /** Met une fenêtre devant les autres. */
+  const focus = (kind: WinKind | null) => {
+    setActive(kind);
+    if (kind) setStack((st) => (st[st.length - 1] === kind ? st : [...st.filter((k) => k !== kind), kind]));
+  };
+
   const open = (kind: WinKind, tab?: string, crumb?: string) => {
     if (!canWin(kind)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
+    if (!wins.some((w) => w.kind === kind)) setPlaced((p) => ({ ...p, [kind]: defaultGeo(area, wins.length, isPosKind(kind)) }));
     setWins((ws) => {
       const existing = ws.find((w) => w.kind === kind);
       if (!existing) return [...ws, { kind, tab, nonce: 0, crumb }];
       if (tab && tab !== existing.tab) return ws.map((w) => (w === existing ? { ...w, tab, crumb, nonce: w.nonce + 1 } : w));
       return crumb ? ws.map((w) => (w === existing ? { ...w, crumb } : w)) : ws;
     });
-    setActive(kind);
+    // Un écran déjà ouvert revient devant au lieu de s'ouvrir une deuxième fois.
+    focus(kind);
   };
   const close = (kind: WinKind | null) => {
     if (!kind) return;
-    const rest = wins.filter((w) => w.kind !== kind);
-    setWins(rest);
-    // Sans fenêtre ouverte, la page d'accueil s'affiche.
-    if (active === kind) setActive(rest[rest.length - 1]?.kind ?? null);
+    setWins(wins.filter((w) => w.kind !== kind));
+    const rest = stack.filter((k) => k !== kind);
+    setStack(rest);
+    // La fenêtre juste derrière passe devant ; sans fenêtre ouverte, la page d'accueil s'affiche.
+    if (active === kind) setActive(rest[rest.length - 1] ?? null);
   };
 
   /**
@@ -728,17 +767,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               </button>
             );
           })}
-          <button className="tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
-            ＋
-          </button>
         </div>
-        <button className="top-search" title="Rechercher un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
-          🔍 Aller à un écran <kbd>Ctrl+K</kbd>
+        <button className="top-icon tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
+          ＋
         </button>
-        <span className={`top-sync ${sync.data?.connected && !sync.data.lastError ? 'ok' : ''}`} title={syncLabel}>
-          <span className="dot" />
-        </span>
-        <Clock />
+        <button className="top-icon" title="Aller à un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
+          🔍
+        </button>
         <div className="menu">
           <button
             className={`user-chip ${menu === '__user' ? 'open' : ''}`}
@@ -749,74 +784,62 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             }}
           >
             <b>{user.name.slice(0, 1).toUpperCase()}</b>
-            {user.name.split(' ')[0]}
           </button>
           {menu === '__user' && <MenuDrop name="Fichier" items={visibleItems(MENUS[0]![1])} right />}
         </div>
         <button className="help-btn" title="Aide sur cette page (F1)" onClick={() => setHelp('page')}>
           ?
         </button>
-        <button className="win-close" title="Fermer la fenêtre active" disabled={showHome} onClick={() => close(active)}>
-          ✕
-        </button>
       </header>
-      {!onPos && (
-        <div className="crumbs">
-          <button className="link" onClick={() => setActive(null)}>
-            Accueil
-          </button>
-          {activeWin &&
-            (activeWin.crumb ?? WINDOWS[activeWin.kind].label).split(' › ').map((part, i) => (
-              <span key={`${part}-${i}`}>
-                <span className="crumb-sep">›</span>
-                {part}
-              </span>
-            ))}
-          <span className="spacer" />
-          <button className="link" onClick={() => setHelp('page')}>
-            Comment utiliser cette page ?
-          </button>
-        </div>
-      )}
-      <main className="windows">
-        {showHome && (
-          <section className="home">
-            <div className="home-card">
-              <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
-              <h1>{state.station?.store.name}</h1>
-              {(state.station?.store.address || state.station?.store.phone) && (
-                <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
-              )}
-              <p className="home-sub">
-                Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
-              </p>
-              <div className="role-tiles">
-                {tiles.map((t) => (
-                  <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
-                    <span className="tile-icon" aria-hidden>
-                      {t.icon}
-                    </span>
-                    <strong>{t.label}</strong>
-                    <small>{t.desc}</small>
-                  </button>
-                ))}
-              </div>
-              <p className="home-links">
-                <button className="link" onClick={() => setHelp('palette')}>
-                  Chercher un autre écran (Ctrl+K)
+      <main className="windows" ref={areaRef}>
+        {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
+        <section className={`home ${showHome ? 'front' : ''}`}>
+          <div className="home-card">
+            <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
+            <h1>{state.station?.store.name}</h1>
+            {(state.station?.store.address || state.station?.store.phone) && (
+              <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
+            )}
+            <p className="home-sub">
+              Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
+            </p>
+            <div className="role-tiles">
+              {tiles.map((t) => (
+                <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
+                  <span className="tile-icon" aria-hidden>
+                    {t.icon}
+                  </span>
+                  <strong>{t.label}</strong>
+                  <small>{t.desc}</small>
                 </button>
-                <button className="link" onClick={() => setHelp('guide')}>
-                  Guide de démarrage
-                </button>
-                <button className="link" onClick={() => setHelp('news')}>
-                  Quoi de neuf
-                </button>
-              </p>
+              ))}
             </div>
-          </section>
-        )}
+            <p className="home-links">
+              <button className="link" onClick={() => setHelp('palette')}>
+                Chercher un autre écran (Ctrl+K)
+              </button>
+              <button className="link" onClick={() => setHelp('guide')}>
+                Guide de démarrage
+              </button>
+              <button className="link" onClick={() => setHelp('news')}>
+                Quoi de neuf
+              </button>
+            </p>
+          </div>
+        </section>
         {wins.map((w) => (
-          <section key={`${w.kind}-${w.nonce}`} className="window" hidden={w.kind !== active}>
+          <MdiWindow
+            key={`${w.kind}-${w.nonce}`}
+            title={w.crumb ?? WINDOWS[w.kind].label}
+            icon={MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)}
+            geo={geoOf(w.kind)}
+            area={area}
+            z={stack.indexOf(w.kind) + 1}
+            active={w.kind === active}
+            onFocus={() => focus(w.kind)}
+            onChange={(g) => saveGeo(w.kind, g)}
+            onClose={() => close(w.kind)}
+          >
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
               <Pos
                 user={user}
@@ -827,6 +850,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 onRegisterChosen={refresh}
                 vatEnabled={state.station?.store.vat_enabled !== 0}
                 ignoreStock={state.station?.store.ignore_stock === 1}
+                layout={state.posLayout}
                 active={w.kind === active}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
@@ -843,6 +867,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
+            {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}
@@ -852,7 +877,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
-          </section>
+          </MdiWindow>
         ))}
       </main>
       <footer className="statusbar">
@@ -897,6 +922,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
         </button>
+        <Clock />
       </footer>
       {allMenus && (
         <div className="all-menus" onClick={() => setAllMenus(false)}>
@@ -1028,13 +1054,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               {[
                 ['Ctrl+K', 'Rechercher un écran par son nom'],
                 ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
-                ['F4 ou Entrée sur saisie vide', 'Valider la fiche (espèces si l’encaissé couvre le total)'],
+                ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
+                ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+                ['F4 ou Entrée sur saisie vide', 'Enregistrer la fiche sans imprimer'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],
                 ['F10', 'Rappeler un ticket en attente'],
-                ['F2', 'Réimprimer le dernier ticket'],
                 ['F6', 'Remise sur la ligne sélectionnée'],
-                ['F7', 'Listing des factures'],
                 ['+ / −', 'Quantité de la ligne sélectionnée'],
                 ['Suppr', 'Enlever la ligne sélectionnée'],
                 ['3*code', 'Ajouter 3 unités du code scanné'],

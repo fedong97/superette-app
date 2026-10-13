@@ -1,10 +1,12 @@
 import { randomInt } from 'node:crypto';
 import {
+  type BarcodeKind,
   type Fcfa,
   type Milli,
   type ScaleBarcodeConfig,
   checkPacks,
   internalEan13,
+  internalEan8,
   isValidEan,
   normalizeBarcode,
   packUnits,
@@ -204,7 +206,7 @@ export class CatalogueService extends Base {
         `${ARTICLE_SELECT}
          WHERE (a.name LIKE @q OR a.code LIKE @q OR a.brand LIKE @q OR a.other_ref LIKE @q
                 OR a.id IN (SELECT article_id FROM barcodes WHERE code LIKE @q))
-           AND (@all = 1 OR a.active = 1)
+           AND (@all = 1 OR a.active = 1) AND a.is_service = 0
            AND (@familyId IS NULL OR a.family_id = @familyId)
          ORDER BY a.name LIMIT @limit`,
       )
@@ -259,7 +261,7 @@ export class CatalogueService extends Base {
   }
 
   /** Crée ou modifie une fiche article ; trace l'historique des prix. */
-  saveArticle(userId: string, input: ArticleInput, id?: string): Article {
+  saveArticle(userId: string, input: ArticleInput, id?: string, opts: { autoBarcode?: BarcodeKind | null } = {}): Article {
     if (!input.name.trim()) throw new AppError("La désignation de l'article est obligatoire", 'INVALID');
     for (const [label, v] of [
       ['Prix de vente', input.salePrice],
@@ -301,6 +303,18 @@ export class CatalogueService extends Base {
       const articleId = id ?? newId();
       const existing = id ? this.getArticle(id) : null;
       if (existing && packs) this.assertSameStockUnit(existing, input.unitName === undefined ? existing.unit_name : input.unitName, packs);
+      if (opts.autoBarcode) {
+        // Code interne pour ce qui n'a pas de code fabricant : l'unité d'un nouvel
+        // article à la pièce (hors balance), et chaque nouveau carton ou pack.
+        if (!existing && input.unit === 'piece' && !input.plu?.trim() && !barcodes.some((b) => b.packQty === 1000)) {
+          barcodes.push({ code: this.generateInternalBarcode(opts.autoBarcode), packQty: 1000 });
+        }
+        (packs ?? []).forEach((p, i) => {
+          if (p.barcode || existing?.packs.some((x) => x.name === p.name)) return;
+          p.barcode = this.generateInternalBarcode(opts.autoBarcode!);
+          barcodes.push({ code: p.barcode, packQty: units[i]! });
+        });
+      }
       // Prix d'achat et de revient tenus au conditionnement d'achat, l'unité en est déduite.
       const purchaseUnits = packs ? (units[0] ?? 1000) : (existing?.packs[0]?.units ?? 1000);
       const sameBasis = existing !== null && existing.purchase_price === input.purchasePrice && (existing.packs[0]?.units ?? 1000) === purchaseUnits;
@@ -486,19 +500,86 @@ export class CatalogueService extends Base {
       .all(articleId) as never;
   }
 
-  /** Attribue un code-barres interne (préfixe 20) à un article sans code. */
-  generateInternalBarcode(): string {
-    // 3 chiffres propres au poste + 7 chiffres de séquence : pas de doublon entre PC hors ligne.
-    let node = this.db.prepare("SELECT value FROM settings WHERE key = 'barcode.node'").pluck().get() as string | undefined;
+  /** Chiffre propre au poste dans les codes EAN-8 : deux PC hors ligne ne tirent pas le même code. */
+  private ean8Node(): number {
+    let node = this.db.prepare("SELECT value FROM settings WHERE key = 'barcode.node8'").pluck().get() as string | undefined;
     if (!node) {
-      node = String(randomInt(0, 1000));
-      this.db.prepare("INSERT INTO settings (key, value) VALUES ('barcode.node', ?)").run(node);
+      node = String(randomInt(0, 10));
+      this.db.prepare("INSERT INTO settings (key, value) VALUES ('barcode.node8', ?)").run(node);
     }
+    return Number(node);
+  }
+
+  private internalCode(kind: BarcodeKind, seq: number): string {
+    if (kind === 'ean13') {
+      let node = this.db.prepare("SELECT value FROM settings WHERE key = 'barcode.node'").pluck().get() as string | undefined;
+      if (!node) {
+        node = String(randomInt(0, 1000));
+        this.db.prepare("INSERT INTO settings (key, value) VALUES ('barcode.node', ?)").run(node);
+      }
+      return internalEan13(Number(node) * 10_000_000 + seq);
+    }
+    if (seq > 99_999) throw new AppError('Plus de codes EAN-8 libres sur ce poste : passez les codes internes en EAN-13 (Paramètres)', 'INVALID');
+    return internalEan8(this.ean8Node() * 100_000 + seq);
+  }
+
+  private counterOf = (kind: BarcodeKind) => (kind === 'ean8' ? 'barcode.internal8' : 'barcode.internal');
+
+  /**
+   * Code-barres interne libre, préfixe 2 : EAN-8 (2 + poste + 5 chiffres + clé)
+   * ou EAN-13 (20 + poste + 7 chiffres + clé). Les codes déjà pris sont sautés.
+   */
+  generateInternalBarcode(kind: BarcodeKind = 'ean13'): string {
     for (;;) {
-      const code = internalEan13(Number(node) * 10_000_000 + this.nextCounter('barcode.internal'));
-      const taken = this.db.prepare('SELECT 1 FROM barcodes WHERE code = ?').get(code);
+      const code = this.internalCode(kind, this.nextCounter(this.counterOf(kind)));
+      const taken = this.db.prepare('SELECT 1 FROM barcodes WHERE code = ? UNION SELECT 1 FROM article_packs WHERE barcode = ?').get(code, code);
       if (!taken) return code;
     }
+  }
+
+  /** Prochain code interne (sans le réserver) et nombre de codes internes déjà donnés, pour les Paramètres. */
+  internalBarcodeInfo(kind: BarcodeKind): { next: string; created: number } {
+    let seq = ((this.db.prepare('SELECT value FROM counters WHERE name = ?').pluck().get(this.counterOf(kind)) as number | undefined) ?? 0) + 1;
+    let next = this.internalCode(kind, seq);
+    while (this.db.prepare('SELECT 1 FROM barcodes WHERE code = ?').get(next)) next = this.internalCode(kind, ++seq);
+    const pattern = kind === 'ean8' ? '2_______' : '20___________';
+    const created = this.db.prepare('SELECT COUNT(*) FROM barcodes WHERE code LIKE ? AND length(code) = ?').pluck().get(pattern, pattern.length) as number;
+    return { next, created };
+  }
+
+  /**
+   * Donne un code interne à tout ce qui n'en a pas : l'unité des articles actifs
+   * à la pièce (hors balance) et chaque carton ou pack. Renvoie le nombre de codes créés.
+   */
+  assignMissingBarcodes(userId: string, kind: BarcodeKind): number {
+    return this.tx(() => {
+      const rows = this.db
+        .prepare("SELECT id, unit, plu FROM articles WHERE active = 1")
+        .all() as { id: string; unit: string; plu: string | null }[];
+      const insertCode = this.db.prepare('INSERT INTO barcodes (code, article_id, pack_qty) VALUES (?, ?, ?)');
+      const setPack = this.db.prepare('UPDATE article_packs SET barcode = ? WHERE id = ?');
+      let created = 0;
+      for (const r of rows) {
+        const codes = this.db.prepare('SELECT pack_qty FROM barcodes WHERE article_id = ?').pluck().all(r.id) as number[];
+        const packs = this.db.prepare('SELECT id, units FROM article_packs WHERE article_id = ? AND barcode IS NULL').all(r.id) as { id: string; units: Milli }[];
+        let changed = false;
+        if (r.unit === 'piece' && !r.plu && !codes.includes(1000)) {
+          insertCode.run(this.generateInternalBarcode(kind), r.id, 1000);
+          changed = true;
+          created++;
+        }
+        for (const p of packs) {
+          const code = this.generateInternalBarcode(kind);
+          setPack.run(code, p.id);
+          insertCode.run(code, r.id, p.units);
+          changed = true;
+          created++;
+        }
+        if (changed) this.enqueue(null, 'article', r.id, 'upsert', this.getArticle(r.id));
+      }
+      if (created) this.audit(userId, 'barcode.assign', 'article', undefined, { created, kind });
+      return created;
+    });
   }
 
   private scaleConfig(): ScaleBarcodeConfig {

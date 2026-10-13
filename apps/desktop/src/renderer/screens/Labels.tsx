@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LABEL_FORMATS, type LabelFormatId } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, fcfa, useLoad, useToast } from '../ui';
+import { Empty, askConfirm, fcfa, useLoad, useToast } from '../ui';
+import { BarcodeChip, BarcodePrintDialog } from './barcodePrint';
 
 type Candidate = Result<'labels.candidates'>[number];
 const keyOf = (c: Pick<Candidate, 'article_id' | 'pack'>) => `${c.article_id}|${c.pack}`;
@@ -23,10 +24,22 @@ const readFormat = (): LabelFormatId => {
  */
 export function Labels({ active }: { active: boolean }) {
   const toast = useToast();
-  const [redo, setRedo] = useState(true);
+  const [mode, setMode] = useState<'shelf' | 'barcode'>('shelf');
+  const [redoChoice, setRedo] = useState(true);
+  // Étiquettes produit : pas de liste « à refaire » (elle suit les prix), tout le catalogue.
+  const redo = redoChoice && mode === 'shelf';
+  const [printing, setPrinting] = useState(false);
   const [departmentId, setDepartmentId] = useState('');
   const [search, setSearch] = useState('');
-  const list = useLoad(() => call('labels.candidates', { redo, departmentId: departmentId || null, search: search || undefined }), [redo, departmentId, search]);
+  const list = useLoad(
+    () =>
+      call('labels.candidates', {
+        redo,
+        departmentId: departmentId || null,
+        search: search || undefined,
+      }),
+    [redo, departmentId, search],
+  );
   const departments = useLoad(() => call('catalogue.departments'), []);
   // Un prix changé ailleurs pendant que la fenêtre était cachée doit apparaître.
   useEffect(() => {
@@ -56,20 +69,29 @@ export function Labels({ active }: { active: boolean }) {
     () =>
       rows
         .filter((c) => checked.has(keyOf(c)))
-        .map((c) => ({ articleId: c.article_id, pack: c.pack || null, copies: Math.max(0, Math.floor(Number(copies[keyOf(c)] ?? '1') || 0)) }))
+        .map((c) => ({
+          articleId: c.article_id,
+          pack: c.pack || null,
+          copies: Math.max(0, Math.floor(Number(copies[keyOf(c)] ?? '1') || 0)),
+        }))
         .filter((i) => i.copies > 0),
     [rows, checked, copies],
   );
   const total = items.reduce((s, i) => s + i.copies, 0);
+  const missing = mode === 'barcode' ? rows.filter((c) => !c.barcode).length : 0;
+  const barcodeTotal =
+    mode === 'barcode'
+      ? rows.filter((c) => c.barcode && checked.has(keyOf(c))).reduce((t, c) => t + Math.max(0, Math.floor(Number(copies[keyOf(c)] ?? '1') || 0)), 0)
+      : 0;
   const skipN = Math.max(0, Math.floor(Number(skip) || 0));
 
   useEffect(() => {
-    if (!items.length) return setPreview('');
+    if (mode !== 'shelf' || !items.length) return setPreview('');
     const t = setTimeout(() => {
       call('labels.preview', items, format, skipN).then(setPreview, (e) => toast.error(e));
     }, 250);
     return () => clearTimeout(t);
-  }, [items, format, skipN]);
+  }, [items, format, skipN, mode]);
 
   const toggle = (k: string) => {
     const next = new Set(checked);
@@ -85,17 +107,31 @@ export function Labels({ active }: { active: boolean }) {
     <div className="page labels-page">
       <header className="page-head">
         <h1>Étiquettes</h1>
-        <span className="muted">Prix du magasin, promotions comprises, avec le code-barres de l'unité ou du carton</span>
+        <span className="muted">
+          {mode === 'shelf'
+            ? "Prix du magasin, promotions comprises, avec le code-barres de l'unité ou du carton"
+            : "Le code-barres à coller sur l'article ou le carton, lu à la douchette en caisse"}
+        </span>
       </header>
       <div className="filters">
         <div className="seg">
-          <button className={redo ? 'active' : ''} onClick={() => setRedo(true)}>
-            À refaire
+          <button className={mode === 'shelf' ? 'active' : ''} onClick={() => (setMode('shelf'), setChecked(new Set()))}>
+            Étiquettes de rayon
           </button>
-          <button className={!redo ? 'active' : ''} onClick={() => (setRedo(false), setChecked(new Set()))}>
-            Tous les articles
+          <button className={mode === 'barcode' ? 'active' : ''} onClick={() => (setMode('barcode'), setChecked(new Set()))}>
+            Codes-barres produit
           </button>
         </div>
+        {mode === 'shelf' && (
+          <div className="seg">
+            <button className={redo ? 'active' : ''} onClick={() => setRedo(true)}>
+              À refaire
+            </button>
+            <button className={!redo ? 'active' : ''} onClick={() => (setRedo(false), setChecked(new Set()))}>
+              Tous les articles
+            </button>
+          </div>
+        )}
         <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
           <option value="">Tous les rayons</option>
           {(departments.data ?? []).map((d) => (
@@ -124,6 +160,7 @@ export function Labels({ active }: { active: boolean }) {
                   </th>
                   <th>Article</th>
                   <th>Étiquette</th>
+                  {mode === 'barcode' && <th>Code-barres</th>}
                   <th className="r">Prix</th>
                   <th>Exemplaires</th>
                 </tr>
@@ -134,14 +171,25 @@ export function Labels({ active }: { active: boolean }) {
                   return (
                     <tr key={k} className={checked.has(k) ? 'selected' : ''}>
                       <td>
-                        <input type="checkbox" checked={checked.has(k)} onChange={() => toggle(k)} />
+                        <input type="checkbox" disabled={mode === 'barcode' && !c.barcode} checked={checked.has(k)} onChange={() => toggle(k)} />
                       </td>
                       <td onClick={() => toggle(k)} className="clickable">
                         {c.name} <small className="muted">{c.code}</small>
-                        {c.reason === 'new' && <span className="tag normal">Nouveau</span>}
-                        {c.reason === 'price' && <span className="tag alerte">Prix changé</span>}
+                        {mode === 'shelf' && c.reason === 'new' && <span className="tag normal">Nouveau</span>}
+                        {mode === 'shelf' && c.reason === 'price' && <span className="tag alerte">Prix changé</span>}
                       </td>
                       <td>{c.pack_label}</td>
+                      {mode === 'barcode' && (
+                        <td>
+                          {c.barcode ? (
+                            <>
+                              <span className="bc-num">{c.barcode}</span> <BarcodeChip code={c.barcode} />
+                            </>
+                          ) : (
+                            <span className="muted">Pas de code</span>
+                          )}
+                        </td>
+                      )}
                       <td className="r">
                         {c.reason === 'price' && c.last_price !== null && <s className="muted">{fcfa(c.last_price)}</s>} {fcfa(c.price)}
                       </td>
@@ -163,50 +211,111 @@ export function Labels({ active }: { active: boolean }) {
             </table>
           )}
         </div>
-        <aside className="labels-side">
-          <label>
-            Format
-            <select value={format} onChange={(e) => setFormat(e.target.value as LabelFormatId)}>
-              {Object.entries(LABEL_FORMATS).map(([id, v]) => (
-                <option key={id} value={id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {f.cols > 1 && (
+        {mode === 'barcode' ? (
+          <aside className="labels-side">
+            <p>Cochez les articles et les cartons, indiquez le nombre d'étiquettes, puis imprimez sur rouleau d'étiquettes ou sur planche A4.</p>
+            {missing > 0 && (
+              <div className="card">
+                <p>
+                  <b>{missing}</b> article(s) ou carton(s) n'ont pas de code-barres.
+                </p>
+                <button
+                  onClick={async () => {
+                    if (!(await askConfirm(`Donner un code-barres interne aux ${missing} article(s) et carton(s) sans code ?`))) return;
+                    try {
+                      const n = await call('catalogue.assignMissingBarcodes');
+                      toast.ok(`${n} code(s)-barres créé(s)`);
+                      list.reload();
+                    } catch (err) {
+                      toast.error(err);
+                    }
+                  }}
+                >
+                  Leur donner un code interne
+                </button>
+              </div>
+            )}
+            <div className="actions">
+              <span className="muted">
+                {barcodeTotal} étiquette{barcodeTotal > 1 ? 's' : ''}
+              </span>
+              <button className="primary" disabled={!barcodeTotal} onClick={() => setPrinting(true)}>
+                Imprimer les codes-barres…
+              </button>
+            </div>
+            {printing && (
+              <BarcodePrintDialog
+                title="Imprimer les codes-barres"
+                rows={rows
+                  .filter((c) => c.barcode && checked.has(keyOf(c)))
+                  .map((c) => ({
+                    articleId: c.article_id,
+                    pack: c.pack || null,
+                    label: `${c.name} · ${c.pack_label}`,
+                    barcode: c.barcode,
+                    copies: Math.max(0, Math.floor(Number(copies[keyOf(c)] ?? '1') || 0)),
+                  }))}
+                onClose={() => setPrinting(false)}
+              />
+            )}
+          </aside>
+        ) : (
+          <aside className="labels-side">
             <label>
-              Étiquettes déjà utilisées sur la planche
-              <input inputMode="numeric" value={skip} onChange={(e) => setSkip(e.target.value)} />
+              Format
+              <select value={format} onChange={(e) => setFormat(e.target.value as LabelFormatId)}>
+                {Object.entries(LABEL_FORMATS).map(([id, v]) => (
+                  <option key={id} value={id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
             </label>
-          )}
-          <div className="labels-preview">
-            {preview ? <iframe title="Aperçu des étiquettes" srcDoc={preview} style={{ width: `${f.pageW}mm`, height: `${f.pageH * Math.max(1, pages)}mm` }} /> : <Empty>Cochez des étiquettes pour voir l'aperçu.</Empty>}
-          </div>
-          <div className="actions">
-            <span className="muted">
-              {total} étiquette{total > 1 ? 's' : ''}
-              {f.cols > 1 && total > 0 ? ` · ${pages} planche${pages > 1 ? 's' : ''}` : ''}
-            </span>
-            <button
-              className="primary"
-              disabled={!total}
-              onClick={async () => {
-                try {
-                  if (await call('labels.print', items, format, skipN)) {
-                    toast.ok(`${total} étiquette${total > 1 ? 's' : ''} envoyée${total > 1 ? 's' : ''} à l'imprimante`);
-                    setSkip('0');
-                    list.reload();
+            {f.cols > 1 && (
+              <label>
+                Étiquettes déjà utilisées sur la planche
+                <input inputMode="numeric" value={skip} onChange={(e) => setSkip(e.target.value)} />
+              </label>
+            )}
+            <div className="labels-preview">
+              {preview ? (
+                <iframe
+                  title="Aperçu des étiquettes"
+                  srcDoc={preview}
+                  style={{
+                    width: `${f.pageW}mm`,
+                    height: `${f.pageH * Math.max(1, pages)}mm`,
+                  }}
+                />
+              ) : (
+                <Empty>Cochez des étiquettes pour voir l'aperçu.</Empty>
+              )}
+            </div>
+            <div className="actions">
+              <span className="muted">
+                {total} étiquette{total > 1 ? 's' : ''}
+                {f.cols > 1 && total > 0 ? ` · ${pages} planche${pages > 1 ? 's' : ''}` : ''}
+              </span>
+              <button
+                className="primary"
+                disabled={!total}
+                onClick={async () => {
+                  try {
+                    if (await call('labels.print', items, format, skipN)) {
+                      toast.ok(`${total} étiquette${total > 1 ? 's' : ''} envoyée${total > 1 ? 's' : ''} à l'imprimante`);
+                      setSkip('0');
+                      list.reload();
+                    }
+                  } catch (err) {
+                    toast.error(err);
                   }
-                } catch (err) {
-                  toast.error(err);
-                }
-              }}
-            >
-              Imprimer
-            </button>
-          </div>
-        </aside>
+                }}
+              >
+                Imprimer
+              </button>
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

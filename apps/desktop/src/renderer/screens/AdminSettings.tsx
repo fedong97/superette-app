@@ -1,4 +1,4 @@
-import { CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, POS_LAYOUTS, type PosLayout, type StoreSettings } from '@superette/core';
+import { BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -15,9 +15,24 @@ interface Item {
   label: string;
   hint?: string;
   render: () => ReactNode;
+  /** Libellé affiché, quand `label` contient aussi des mots pour la recherche. */
+  title?: string;
   /** Sur toute la largeur de la section (les cartes de l'écran de caisse). */
   wide?: boolean;
 }
+
+/** Impressions dont on choisit le modèle dans les paramètres. */
+const PRINT_SLOTS: { doc: DocKind; format: DocFormat; variant: DocVariant; label: string; hint?: string }[] = [
+  { doc: 'invoice', format: 'ticket', variant: 'cash', label: 'Ticket de caisse au comptant', hint: 'Touche F2' },
+  { doc: 'invoice', format: 'ticket', variant: 'credit', label: 'Ticket de caisse à crédit', hint: 'Touche F2 sur une vente à crédit' },
+  { doc: 'invoice', format: 'listing', variant: 'cash', label: 'Facture listing au comptant', hint: 'Touche F7' },
+  { doc: 'invoice', format: 'listing', variant: 'credit', label: 'Facture listing à crédit', hint: 'Touche F7 sur une vente à crédit' },
+  { doc: 'invoice', format: 'a4', variant: 'cash', label: 'Facture A4 au comptant', hint: 'Touche F9' },
+  { doc: 'invoice', format: 'a4', variant: 'credit', label: 'Facture A4 à crédit', hint: 'Touche F9 sur une vente à crédit' },
+  { doc: 'delivery', format: 'a4', variant: 'delivery', label: 'Bon de livraison', hint: 'Imprimé avec une vente à livrer' },
+  { doc: 'quote', format: 'a4', variant: 'quote', label: 'Devis' },
+  { doc: 'quote', format: 'a4', variant: 'proforma', label: 'Facture proforma' },
+];
 
 /** Les trois présentations de l'écran de caisse, avec leur vignette. */
 const LAYOUT_CARDS: { id: PosLayout; shot: string; text: string }[] = [
@@ -57,13 +72,14 @@ function readLogo(file: File): Promise<string> {
  * postes ; l'imprimante, la balance, l'affichage et l'heure de sauvegarde sont
  * propres à ce PC.
  */
-export function Settings({ user, onChanged }: { user: User; onChanged: () => void }) {
+export function Settings({ user, onChanged, onEditTemplate }: { user: User; onChanged: () => void; onEditTemplate?: (id: string) => void }) {
   const toast = useToast();
   const state = useLoad(() => call('app.state'));
   const local = useLoad(() => call('admin.settings'));
   const store = useLoad(() => call('admin.storeSettings'));
   const printers = useLoad(() => call('admin.printers'));
   const emoney = useLoad(() => call('emoney.registers'));
+  const templates = useLoad(() => call('docs.templates'));
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [storeDraft, setStoreDraft] = useState<Partial<StoreSettings>>({});
   const [identity, setIdentity] = useState<Partial<StoreIdentity>>({});
@@ -205,6 +221,38 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
           ),
         },
       ],
+    ],
+    [
+      'Modèle utilisé pour chaque impression',
+      'Le modèle choisi sert à chaque impression de ce type. « Modifier… » ouvre le modèle ; créez-en d’autres dans Modèles d’impression.',
+      PRINT_SLOTS.map((slot) => {
+        const key = slotKey(slot.doc, slot.format, slot.variant);
+        const choices = (templates.data?.templates ?? []).filter((t) => t.doc === slot.doc && t.format === slot.format && t.variant === slot.variant);
+        const builtin = BUILTIN_TEMPLATES.find((b) => b.doc === slot.doc && b.format === slot.format && b.variant === slot.variant)!;
+        const current = sv('printDefaults')[key] ?? '';
+        const value = choices.some((t) => t.id === current) ? current : builtin.id;
+        return {
+          label: `${slot.label} modèle impression`,
+          title: slot.label,
+          hint: slot.hint,
+          render: () => (
+            <span className="inline tpl-pick">
+              <select disabled={!canEdit} value={value} onChange={(e) => sset('printDefaults', { ...sv('printDefaults'), [key]: e.target.value })}>
+                {choices.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {onEditTemplate && (
+                <button type="button" onClick={() => onEditTemplate(value)}>
+                  Modifier…
+                </button>
+              )}
+            </span>
+          ),
+        };
+      }),
     ],
     [
       'TVA, stock et écart de caisse',
@@ -576,6 +624,7 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
       setIdentity({});
       local.reload();
       store.reload();
+      templates.reload();
       state.reload();
       onChanged();
       toast.ok('Paramètres enregistrés');
@@ -609,7 +658,7 @@ export function Settings({ user, onChanged }: { user: User; onChanged: () => voi
             ) : (
               <div key={i.label} className="settings-row">
                 <div>
-                  <div>{i.label}</div>
+                  <div>{i.title ?? i.label}</div>
                   {i.hint && <small className="muted">{i.hint}</small>}
                 </div>
                 <div>{i.render()}</div>

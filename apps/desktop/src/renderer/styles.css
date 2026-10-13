@@ -1029,3 +1029,4 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .layout-name { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; }
 .layout-card small { font-weight: 500 !important; }
 .settings-row .layout-name input[type='radio'] { width: auto; margin: 0; }
+.tpl-pick { display: flex; gap: 8px; width: 100%; } .tpl-pick select { flex: 1; }

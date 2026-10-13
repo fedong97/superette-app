@@ -650,7 +650,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     <StoreSettingsProvider value={state.storeSettings ?? DEFAULT_STORE_SETTINGS}>
     <div className={`desk ${onPos ? 'on-pos' : ''}`}>
       <nav className="rail">
-        <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => setActive(null)}>
+        <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
           <img src={logo} alt="" />
         </button>
         {railMenus.map(([name, items]) => (
@@ -659,6 +659,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               className={`rail-item ${menu === name ? 'open' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
+                // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
+                setAllMenus(false);
                 setMenu(menu === name ? null : name);
                 chargesLate.reload();
                 gaps.reload();
@@ -677,7 +679,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           onClick={(e) => {
             e.stopPropagation();
             setMenu(null);
-            setAllMenus(true);
+            setAllMenus((v) => !v);
             chargesLate.reload();
             gaps.reload();
           }}
@@ -691,6 +693,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               className={`rail-item ${menu === name ? 'open' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
+                // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
+                setAllMenus(false);
                 setMenu(menu === name ? null : name);
               }}
             >

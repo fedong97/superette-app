@@ -1626,7 +1626,7 @@ function Accounts({ user }: { user: User }) {
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Comptes désactivés
         </label>
         {canEdit && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
             Nouveau compte
           </button>
         )}
@@ -1767,7 +1767,7 @@ export function FiscalYears() {
             <button style={{ marginLeft: 'auto' }} disabled={busy} onClick={() => void run(() => call('fiscal.openNext'), 'Exercice suivant ouvert')}>
               Ouvrir l'exercice suivant
             </button>
-            <button className="primary" onClick={() => setForm({ start: '', end: '' })}>
+            <button data-new title="Ctrl+J" className="primary" onClick={() => setForm({ start: '', end: '' })}>
               Nouvel exercice…
             </button>
           </>

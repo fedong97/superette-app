@@ -99,7 +99,7 @@ function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: bo
           <input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} /> En cours seulement
         </label>
         {canEdit && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setView({ mode: 'edit', order: null })}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setView({ mode: 'edit', order: null })}>
             Nouveau bon de commande
           </button>
         )}
@@ -1119,7 +1119,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           <button onClick={() => setOpen(done.id)}>Voir la facture</button>
           <button onClick={() => setPreview(done.id)}>Aperçu et impression…</button>
           {preview && <DocPreview source={{ kind: 'purchaseInvoice', id: preview }} onClose={() => setPreview(null)} />}
-          <button
+          <button data-new title="Ctrl+J"
             className="primary"
             onClick={() => {
               setDone(null);

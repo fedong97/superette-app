@@ -1,7 +1,7 @@
 {
   "name": "@superette/desktop",
   "productName": "FEDO Gestion",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "private": true,
   "description": "Caisse et gestion de superette",
   "author": "FEDONG",

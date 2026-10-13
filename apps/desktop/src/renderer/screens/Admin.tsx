@@ -114,7 +114,7 @@ function Stores({ onChanged }: { onChanged: () => void }) {
         </tbody>
       </table>
       <div className="actions">
-        <button className="primary" onClick={() => setForm({ storeCode: '', storeName: '', address: '', phone: '', taxpayerNumber: '' })}>
+        <button data-new title="Ctrl+J" className="primary" onClick={() => setForm({ storeCode: '', storeName: '', address: '', phone: '', taxpayerNumber: '' })}>
           Ajouter un magasin
         </button>
       </div>
@@ -260,7 +260,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             ))}
           </select>
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newKind === 'cash' ? 'Nom (facultatif), ex. Caisse boissons' : newKind === 'electronic' ? 'Nom (facultatif), ex. Mobile 1' : 'Nom (facultatif), ex. Banque SGC'} />
-          <button className="primary" type="submit">
+          <button data-new title="Ctrl+J" className="primary" type="submit">
             Ajouter une caisse
           </button>
         </form>
@@ -501,7 +501,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
       </table>
       {canManage && (
         <div className="actions">
-          <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', saleWarehouses: null, active: true })}>
+          <button data-new title="Ctrl+J" className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', saleWarehouses: null, active: true })}>
             Ajouter un utilisateur
           </button>
         </div>

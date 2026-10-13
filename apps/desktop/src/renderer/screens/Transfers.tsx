@@ -96,7 +96,7 @@ function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
   return (
     <div>
       <div className="filters">
-        <button className="primary" disabled={!canEdit} onClick={() => onOpen('new')}>
+        <button data-new title="Ctrl+J" className="primary" disabled={!canEdit} onClick={() => onOpen('new')}>
           Nouveau transfert
         </button>
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | '')}>
@@ -452,7 +452,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
           </div>
         </div>
         <aside className="transfer-actions">
-          <button onClick={() => onOpen('new')} disabled={!transfer || !canCreate}>
+          <button data-new title="Ctrl+J" onClick={() => onOpen('new')} disabled={!transfer || !canCreate}>
             Nouveau transfert
           </button>
           {editable && (

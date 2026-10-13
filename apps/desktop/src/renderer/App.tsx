@@ -28,6 +28,7 @@ import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTab
 import { ROLE_TILES } from './guide';
 import { AskHost, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
+import { ctrlJ } from './newShortcut';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
 
 type AppState = Result<'app.state'>;
@@ -563,6 +564,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       } else if (e.key === 'F1' && !onPos) {
         e.preventDefault();
         setHelp('page');
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'j' && !onPos) {
+        // Ctrl+J : nouveau ; dans un formulaire, enregistre et en rouvre un vide.
+        e.preventDefault();
+        ctrlJ();
       } else if (e.key === 'F5' && !onPos && !e.ctrlKey) {
         // F5 actualise la fenêtre de devant (à la caisse, F5 ouvre le tiroir).
         e.preventDefault();
@@ -1075,6 +1080,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
                 ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière en listing)'],
                 ['F5', 'Actualiser la page (à la caisse : ouvrir le tiroir)'],
+                ['Ctrl+J', 'Nouveau (article, client, fournisseur…) ; dans un formulaire : enregistrer et en ouvrir un nouveau'],
                 ['F4 ou Entrée sur saisie vide', 'Enregistrer la fiche sans imprimer'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],

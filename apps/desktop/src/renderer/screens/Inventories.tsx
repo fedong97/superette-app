@@ -35,7 +35,7 @@ function InventoryList({ user, onOpen }: { user: User; onOpen: (id: string) => v
       <div className="filters">
         {canManage && (
           <>
-            <button className="primary" onClick={() => setCreating('global')}>
+            <button data-new title="Ctrl+J" className="primary" onClick={() => setCreating('global')}>
               Nouvel inventaire global
             </button>
             <button onClick={() => setCreating('partial')}>Nouvel inventaire partiel</button>

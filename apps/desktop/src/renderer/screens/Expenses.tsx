@@ -87,7 +87,7 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
           <input type="checkbox" checked={cancelled} onChange={(e) => setCancelled(e.target.checked)} /> Annulées
         </label>
         {has(user, 'expense_record') && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}>
             Nouvelle dépense
           </button>
         )}
@@ -591,7 +591,7 @@ function Categories() {
       <div className="filters">
         <span className="muted">Chaque catégorie passe sur un compte de charges du plan comptable (classe 6).</span>
         {can('expense_categories') && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
             Nouvelle catégorie
           </button>
         )}
@@ -728,7 +728,7 @@ function ChargePlans() {
         <label style={{ marginLeft: 'auto' }}>
           <input type="checkbox" checked={showStopped} onChange={(e) => setShowStopped(e.target.checked)} /> Afficher les charges arrêtées
         </label>
-        <button className="primary" onClick={() => setOpen('new')}>
+        <button data-new title="Ctrl+J" className="primary" onClick={() => setOpen('new')}>
           Nouvelle charge fixe
         </button>
       </div>

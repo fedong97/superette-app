@@ -41,16 +41,17 @@ const POS: PageHelp = {
     {
       title: 'Faire une vente',
       steps: [
-        'Scannez le code-barres, ou tapez le début du nom (2 lettres suffisent) puis choisissez avec les flèches et Entrée.',
-        'Pour plusieurs pièces, tapez « 3*code » ou « 3*riz », ou utilisez + et −.',
-        'Les espèces reçues se tapent en bas (ou les boutons 1 000, 2 000…) : le rendu monnaie s’affiche.',
-        'Entrée sur la zone de saisie vide (ou F4) valide le ticket en espèces et l’imprime.',
+        'Scannez le code-barres, ou tapez le début du nom (2 lettres suffisent) : les produits trouvés s’affichent en tuiles. Touchez une tuile, ou choisissez avec les flèches et Entrée.',
+        'Sans saisie, les tuiles montrent vos touches rapides (fiche du produit › « Touche rapide en caisse »).',
+        'Pour plusieurs pièces, tapez « 3*code » ou « 3*riz ». Touchez une ligne du ticket pour ses boutons − et +, Varier, Remise et Enlever (ou les touches +, −, F6 et Suppr).',
+        'Touchez les billets reçus (1 000, 2 000…) ou « Exact » : « Reçu » et « À rendre » s’affichent sous le total.',
+        'Le grand bouton vert VALIDER (F4, ou Entrée sur la zone de saisie vide) valide le ticket en espèces et l’imprime.',
       ],
     },
     {
       title: 'Payer par Mobile Money, carte ou chèque',
       steps: [
-        'Ctrl+E ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
+        '« Encaisser » (Ctrl+E) ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
         'Un paiement peut être mixte : une partie en espèces, le reste en MTN par exemple.',
         'Chaque paiement va dans la caisse de son type : MTN, Orange et carte à votre caisse électronique, virement et chèque à votre caisse banque.',
       ],
@@ -58,13 +59,13 @@ const POS: PageHelp = {
     {
       title: 'Client, remise, attente',
       steps: [
-        'F8 choisit un client : ses prix (gros, super gros) s’appliquent et son solde s’affiche.',
+        'Touchez « Client comptoir » en haut du ticket (ou F8) pour choisir un client : ses prix (gros, super gros) s’appliquent et son solde s’affiche. « Comptant » et « Crédit » passent d’une vente à l’autre.',
         'F6 fait une remise sur la ligne ; sans le droit, le code d’un gérant est demandé.',
-        'F3 met la fiche en attente pour servir un autre client ; F10 la rappelle.',
+        '« En attente » (F3) met la fiche de côté pour servir un autre client ; « Rappeler » (F10) la reprend.',
       ],
     },
     {
-      title: 'Menu Action',
+      title: 'Menu Actions',
       steps: [
         'Encaisser un règlement client, payer une dépense avec les espèces du tiroir, facturer un devis.',
         'Apport ou prélèvement d’espèces, retour d’articles d’un client, annulation d’un ticket (code du gérant).',

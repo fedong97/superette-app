@@ -14,7 +14,7 @@ export function HelpDialog({ kind, tab, rights, onClose, onGuide }: { kind: WinK
     return (
       <Modal title="Aide : page d'accueil" onClose={onClose}>
         <div className="help">
-          <p className="help-intro">Les grosses tuiles ouvrent les écrans que vous utilisez le plus. Les menus du haut donnent accès à tout le reste.</p>
+          <p className="help-intro">Les grosses tuiles ouvrent les écrans que vous utilisez le plus. La barre verte à gauche ouvre les menus ; « Tous les menus » les montre tous d'un coup.</p>
           <ul>
             <li>Ctrl+K : chercher un écran en tapant son nom (« clôture », « inventaire »…).</li>
             <li>Clic droit sur un onglet rapide : l'épingler, le retirer ou le déplacer.</li>

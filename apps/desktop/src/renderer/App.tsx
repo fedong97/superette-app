@@ -88,6 +88,47 @@ interface MenuItem {
 
 const SEP: MenuItem = { label: '', sep: true };
 
+/** Icônes et couleurs des menus : barre verte de gauche et écran « Tous les menus ». */
+const MENU_ICONS: Record<string, string> = {
+  Fichier: '📁',
+  Facturation: '🧾',
+  Vente: '📈',
+  Achats: '🛒',
+  Fabrication: '🏭',
+  Trésorerie: '💰',
+  Produit: '📦',
+  Fournisseur: '🚚',
+  Client: '👥',
+  Charge: '💸',
+  Transfert: '🔁',
+  Magasinier: '🗄️',
+  Comptabilité: '📒',
+  Fiscal: '🏛️',
+  Administration: '⚙️',
+  Aide: '❔',
+};
+const MENU_COLORS: Record<string, string> = {
+  Fichier: '#64748b',
+  Facturation: '#1f7a5c',
+  Vente: '#22a06b',
+  Achats: '#2563eb',
+  Fabrication: '#7c3aed',
+  Trésorerie: '#e0a800',
+  Produit: '#0891b2',
+  Fournisseur: '#0d9488',
+  Client: '#db2777',
+  Charge: '#dc2626',
+  Transfert: '#0284c7',
+  Magasinier: '#65a30d',
+  Comptabilité: '#4f46e5',
+  Fiscal: '#e11d48',
+  Administration: '#64748b',
+  Aide: '#94a3b8',
+};
+/** Menus directement dans la barre verte ; les autres sont dans « Tous les menus ». */
+const RAIL_MENUS = ['Facturation', 'Vente', 'Achats', 'Produit', 'Magasinier', 'Client', 'Trésorerie'];
+const RAIL_LABELS: Record<string, string> = { Facturation: 'Caisse', Vente: 'Ventes', Magasinier: 'Stock', Client: 'Clients', Administration: 'Réglages' };
+
 const MENUS: [string, MenuItem[]][] = [
   [
     'Fichier',
@@ -323,11 +364,11 @@ const MENUS: [string, MenuItem[]][] = [
   ],
 ];
 
-/** Barre d'onglets rapides, comme celle de KONTROL : les onglets d'origine, que chacun peut personnaliser. */
+/** Onglets rapides en haut de l'écran : ceux d'origine, que chacun peut personnaliser. */
 const QUICK: QuickTab[] = [
-  { label: 'V. cash 1', open: ['cash1'] },
-  { label: 'V. cash 2', open: ['cash2'] },
-  { label: 'V. crédit', open: ['credit'], credit: true },
+  { label: 'Caisse 1', open: ['cash1'] },
+  { label: 'Caisse 2', open: ['cash2'] },
+  { label: 'Crédit', open: ['credit'], credit: true },
   { label: 'Mes factures', open: ['sales', 'tickets'] },
   { label: 'Registre', open: ['sales', 'z'] },
   { label: 'Produits', open: ['articles'] },
@@ -403,6 +444,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // null : la page d'accueil.
   const [active, setActive] = useState<WinKind | null>(startOnPos ? first : null);
   const [menu, setMenu] = useState<string | null>(null);
+  /** Écran « Tous les menus » : chaque menu en tuile, avec tous ses écrans. */
+  const [allMenus, setAllMenus] = useState(false);
   const [chooseRegister, setChooseRegister] = useState(false);
   const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | null>(null);
   const [finding, setFinding] = useState(false);
@@ -488,8 +531,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const onPos = active === 'cash1' || active === 'cash2' || active === 'credit';
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAllMenus(false);
       if (e.ctrlKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setAllMenus(false);
         setHelp('palette');
       } else if (e.key === 'F1' && !onPos) {
         e.preventDefault();
@@ -535,6 +580,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
 
   const run = async (item: MenuItem, menuName: string) => {
     setMenu(null);
+    setAllMenus(false);
     if (item.soon) return;
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
@@ -563,6 +609,36 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     { menu: 'Accueil', label: "Page d'accueil", run: () => setActive(null) },
   ];
 
+  /** Liste d'un menu, ouverte à côté de la barre verte (ou sous le nom de l'utilisateur). */
+  const MenuDrop = ({ name, items, up, right }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean }) => (
+    <div className={`menu-drop ${up ? 'up' : ''} ${right ? 'right' : ''}`} onClick={(e) => e.stopPropagation()}>
+      <div className="menu-title">{name}</div>
+      {items.map((i, n) =>
+        i.sep ? (
+          <hr key={`sep-${n}`} />
+        ) : (
+          <button
+            key={i.label}
+            disabled={i.soon}
+            onClick={() => void run(i, name)}
+            onContextMenu={(e) => {
+              if (!i.open) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setCtxMenu({ x: e.clientX, y: e.clientY, pin: { label: i.label, open: i.open } });
+            }}
+          >
+            {i.label}
+            {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
+            {i.soon && <small>bientôt</small>}
+          </button>
+        ),
+      )}
+    </div>
+  );
+  const railMenus = visibleMenus.filter(([name]) => RAIL_MENUS.includes(name));
+  const railBottom = visibleMenus.filter(([name]) => name === 'Administration' || name === 'Aide');
+
   const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : sync.data.pending ? `Serveur : ${sync.data.pending} en attente` : 'Serveur : connecté';
   const activeWin = wins.find((w) => w.kind === active);
   const showHome = !activeWin;
@@ -571,79 +647,106 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   return (
     <RightsProvider value={user.rights}>
     <StoreSettingsProvider value={state.storeSettings ?? DEFAULT_STORE_SETTINGS}>
-    <div className="desk">
-      <nav className="menubar">
-        {visibleMenus.map(([name, items]) => (
+    <div className={`desk ${onPos ? 'on-pos' : ''}`}>
+      <nav className="rail">
+        <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => setActive(null)}>
+          <img src={logo} alt="" />
+        </button>
+        {railMenus.map(([name, items]) => (
           <div key={name} className="menu">
             <button
-              className={menu === name ? 'open' : ''}
+              className={`rail-item ${menu === name ? 'open' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setMenu(menu === name ? null : name);
                 chargesLate.reload();
                 gaps.reload();
               }}
-              onMouseEnter={() => menu && setMenu(name)}
             >
-              {name}
+              <i aria-hidden>{MENU_ICONS[name]}</i>
+              {RAIL_LABELS[name] ?? name}
             </button>
-            {menu === name && (
-              <div className="menu-drop">
-                {visibleItems(items).map((i, n) =>
-                  i.sep ? (
-                    <hr key={`sep-${n}`} />
-                  ) : (
-                    <button
-                      key={i.label}
-                      disabled={i.soon}
-                      onClick={() => void run(i, name)}
-                      onContextMenu={(e) => {
-                        if (!i.open) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setCtxMenu({ x: e.clientX, y: e.clientY, pin: { label: i.label, open: i.open } });
-                      }}
-                    >
-                      {i.label}
-                      {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg">{gaps.data!.length} écart(s) à justifier</small>}
-                      {i.soon && <small>bientôt</small>}
-                    </button>
-                  ),
-                )}
-              </div>
-            )}
+            {menu === name && <MenuDrop name={name} items={visibleItems(items)} />}
           </div>
         ))}
-        <button className="menu-search" title="Rechercher un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
-          🔍 Rechercher un écran <kbd>Ctrl+K</kbd>
+        <span className="rail-grow" />
+        <button
+          className={`rail-item ${allMenus ? 'open' : ''}`}
+          title="Tous les menus"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenu(null);
+            setAllMenus(true);
+            chargesLate.reload();
+            gaps.reload();
+          }}
+        >
+          <i aria-hidden>▦</i>
+          Tous les menus
         </button>
-      </nav>
-      <nav className="quickbar">
-        <div className="quick-tabs">
-        <button className={`home-tab ${showHome ? 'active' : ''}`} title="Page d'accueil" onClick={() => setActive(null)}>
-          🏠 Accueil
-        </button>
-        {quickTabs.map((q, idx) => {
-          // Plusieurs onglets rapides partagent la fenêtre Stock ou Ventes : seul celui de l'onglet affiché est en relief.
-          const win = wins.find((w) => w.kind === q.open[0] && (!q.open[1] || w.tab === q.open[1]));
-          const isOpen = Boolean(win);
-          const isActive = isOpen && active === q.open[0];
-          return (
+        {railBottom.map(([name, items]) => (
+          <div key={name} className="menu">
             <button
-              key={`${q.label}-${idx}`}
-              className={`${isActive ? 'active' : isOpen ? 'open' : ''} ${q.credit ? 'credit' : ''}`}
-              title="Clic droit : déplacer ou retirer cet onglet"
-              onClick={() => open(q.open[0], q.open[1], q.label)}
-              onContextMenu={(e) => {
-                e.preventDefault();
+              className={`rail-item ${menu === name ? 'open' : ''}`}
+              onClick={(e) => {
                 e.stopPropagation();
-                setCtxMenu({ x: e.clientX, y: e.clientY, tab: idx });
+                setMenu(menu === name ? null : name);
               }}
             >
-              {q.label}
+              <i aria-hidden>{MENU_ICONS[name]}</i>
+              {RAIL_LABELS[name] ?? name}
             </button>
-          );
-        })}
+            {menu === name && <MenuDrop name={name} items={visibleItems(items)} up />}
+          </div>
+        ))}
+      </nav>
+      <header className="topbar">
+        <div className="quick-tabs">
+          {quickTabs.map((q, idx) => {
+            // Plusieurs onglets rapides partagent la fenêtre Stock ou Ventes : seul celui de l'onglet affiché est en relief.
+            const win = wins.find((w) => w.kind === q.open[0] && (!q.open[1] || w.tab === q.open[1]));
+            const isOpen = Boolean(win);
+            const isActive = isOpen && active === q.open[0];
+            return (
+              <button
+                key={`${q.label}-${idx}`}
+                className={`${isActive ? 'active' : isOpen ? 'open' : ''} ${q.credit ? 'credit' : ''}`}
+                title="Clic droit : déplacer ou retirer cet onglet"
+                onClick={() => open(q.open[0], q.open[1], q.label)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCtxMenu({ x: e.clientX, y: e.clientY, tab: idx });
+                }}
+              >
+                {q.label}
+              </button>
+            );
+          })}
+          <button className="tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
+            ＋
+          </button>
+        </div>
+        <button className="top-search" title="Rechercher un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
+          🔍 Aller à un écran <kbd>Ctrl+K</kbd>
+        </button>
+        <span className={`top-sync ${sync.data?.connected && !sync.data.lastError ? 'ok' : ''}`} title={syncLabel}>
+          <span className="dot" />
+        </span>
+        <Clock />
+        <div className="menu">
+          <button
+            className={`user-chip ${menu === '__user' ? 'open' : ''}`}
+            title={`${user.name} (${ROLE_LABELS[user.role]})`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenu(menu === '__user' ? null : '__user');
+            }}
+          >
+            <b>{user.name.slice(0, 1).toUpperCase()}</b>
+            {user.name.split(' ')[0]}
+          </button>
+          {menu === '__user' && <MenuDrop name="Fichier" items={visibleItems(MENUS[0]![1])} right />}
         </div>
         <button className="help-btn" title="Aide sur cette page (F1)" onClick={() => setHelp('page')}>
           ?
@@ -651,23 +754,25 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className="win-close" title="Fermer la fenêtre active" disabled={showHome} onClick={() => close(active)}>
           ✕
         </button>
-      </nav>
-      <div className="crumbs">
-        <button className="link" onClick={() => setActive(null)}>
-          Accueil
-        </button>
-        {activeWin &&
-          (activeWin.crumb ?? WINDOWS[activeWin.kind].label).split(' › ').map((part, i) => (
-            <span key={`${part}-${i}`}>
-              <span className="crumb-sep">›</span>
-              {part}
-            </span>
-          ))}
-        <span className="spacer" />
-        <button className="link" onClick={() => setHelp('page')}>
-          Comment utiliser cette page ?
-        </button>
-      </div>
+      </header>
+      {!onPos && (
+        <div className="crumbs">
+          <button className="link" onClick={() => setActive(null)}>
+            Accueil
+          </button>
+          {activeWin &&
+            (activeWin.crumb ?? WINDOWS[activeWin.kind].label).split(' › ').map((part, i) => (
+              <span key={`${part}-${i}`}>
+                <span className="crumb-sep">›</span>
+                {part}
+              </span>
+            ))}
+          <span className="spacer" />
+          <button className="link" onClick={() => setHelp('page')}>
+            Comment utiliser cette page ?
+          </button>
+        </div>
+      )}
       <main className="windows">
         {showHome && (
           <section className="home">
@@ -720,6 +825,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 active={w.kind === active}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
+                onSwitchMode={() => (w.kind === 'credit' ? open('cash1', undefined, 'Facturation › Vente au comptant 1') : open('credit', undefined, 'Facturation › Vente à crédit'))}
                 onListing={() => open('sales', 'tickets', 'Facturation › Mes factures')}
                 onTreasury={() => open('treasury', 'day', 'Trésorerie › Opérations de trésorerie')}
               />
@@ -787,6 +893,47 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           Changer d'utilisateur
         </button>
       </footer>
+      {allMenus && (
+        <div className="all-menus" onClick={() => setAllMenus(false)}>
+          <div className="all-menus-head" onClick={(e) => e.stopPropagation()}>
+            <h1>Tous les menus</h1>
+            <button className="top-search" onClick={() => (setAllMenus(false), setHelp('palette'))}>
+              🔍 Aller à un écran <kbd>Ctrl+K</kbd>
+            </button>
+            <button className="all-close" title="Fermer (Échap)" onClick={() => setAllMenus(false)}>
+              ✕
+            </button>
+          </div>
+          <div className="all-menus-grid">
+            {visibleMenus.map(([name, items]) => (
+              <section key={name} className="menu-card" style={{ '--c': MENU_COLORS[name] } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
+                <h2>
+                  <i aria-hidden>{MENU_ICONS[name]}</i>
+                  {name}
+                </h2>
+                {visibleItems(items)
+                  .filter((i) => !i.sep)
+                  .map((i) => (
+                    <button
+                      key={i.label}
+                      disabled={i.soon}
+                      onClick={() => void run(i, name)}
+                      onContextMenu={(e) => {
+                        if (!i.open) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setCtxMenu({ x: e.clientX, y: e.clientY, pin: { label: i.label, open: i.open } });
+                      }}
+                    >
+                      {i.label}
+                      {i.badge === 'gaps' && Boolean(gaps.data?.length) && <small className="neg"> · {gaps.data!.length} écart(s)</small>}
+                    </button>
+                  ))}
+              </section>
+            ))}
+          </div>
+        </div>
+      )}
       {ctxMenu && (
         <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.pin && (
@@ -955,4 +1102,14 @@ function OpenInvoice({ onClose, onFound }: { onClose: () => void; onFound: (sale
       </form>
     </Modal>
   );
+}
+
+/** Heure en haut à droite, mise à jour chaque minute. */
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 15000);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="top-clock">{now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>;
 }

@@ -36,3 +36,22 @@ describe('charges fixes : suppression', () => {
     expect(occ.map((o) => [o.period, o.state])).toEqual([['2026-09', 'paid']]);
   });
 });
+
+describe('sauvegarde automatique programmée', () => {
+  it('se refait toutes les N minutes une fois celle du jour faite', () => {
+    const { s, admin, at } = setup();
+    const setLast = (iso: string) => s.db.prepare("INSERT INTO settings (key, value) VALUES ('backup.lastAt', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(iso);
+    setLast('2026-10-13T08:30:00Z');
+    expect(s.backups.autoDue()).toBe(false);
+    expect(() => s.backups.configure(admin.id, { everyMinutes: 7 })).toThrow(/Fréquence/);
+    expect(s.backups.configure(admin.id, { everyMinutes: 60 }).every_minutes).toBe(60);
+    expect(s.backups.autoDue()).toBe(false);
+    at('2026-10-13T09:31:00Z');
+    expect(s.backups.autoDue()).toBe(true);
+    setLast('2026-10-13T09:31:00Z');
+    expect(s.backups.autoDue()).toBe(false);
+    s.backups.configure(admin.id, { everyMinutes: 0 });
+    at('2026-10-13T15:00:00Z');
+    expect(s.backups.autoDue()).toBe(false);
+  });
+});

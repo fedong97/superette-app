@@ -185,6 +185,7 @@ const LOCAL_SETTINGS = [
   'printer.listing',
   'printer.labels',
   'backup.autoTime',
+  'backup.every',
 ];
 
 /**
@@ -431,6 +432,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           if (v && !(v in POS_LAYOUTS)) throw new AppError("Présentation de l'écran de caisse inconnue", 'INVALID');
         }
         if (k === 'backup.autoTime') s.backups.configure(user!.id, { autoTime: v || null });
+        else if (k === 'backup.every') s.backups.configure(user!.id, { everyMinutes: Number(v) || 0 });
         else s.admin.setSetting(k, v);
       }
     },
@@ -1349,7 +1351,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return dir ? s.backups.backup(u.id, { dir, kind: 'manual' }) : null;
     },
     'backup.chooseFolder': (title: string) => (requireAdmin(), system.chooseFolder(title)),
-    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number; autoTime?: string | null }) => s.backups.configure(requireAdmin().id, input),
+    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number; autoTime?: string | null; everyMinutes?: number }) => s.backups.configure(requireAdmin().id, input),
     'backup.list': (dir?: string | null) => (requireUser(['backups']), s.backups.list(dir)),
     'backup.chooseFile': async () => {
       requireAdmin();

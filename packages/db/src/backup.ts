@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
+import { BACKUP_FREQUENCIES } from '@superette/core';
 import type { Db } from './database';
 import { MIGRATIONS } from './schema';
 import { AppError, Base, type Clock } from './util';
@@ -37,10 +38,13 @@ export interface BackupStatus {
   overdue: boolean;
   /** Heure de la sauvegarde automatique en plus de celle du jour (« 13:00 »), ou vide. */
   auto_time: string | null;
+  /** Sauvegarde automatique toutes les N minutes (0 : une fois par jour). */
+  every_minutes: number;
 }
 
 const NAME = /^superette-.+-(\d{4}-\d{2}-\d{2})-(\d{4}(?:\d{2})?)-(auto|manual|safety)\.db$/;
 const DEFAULT_KEEP = 14;
+
 /** Clé de tri chronologique tirée du nom (date et heure de la sauvegarde). */
 const when = (name: string) => {
   const m = NAME.exec(name);
@@ -169,6 +173,7 @@ export class BackupService extends Base {
       copy_dir: this.setting('backup.copyDir'),
       keep: Number(this.setting('backup.keep')) || DEFAULT_KEEP,
       auto_time: this.setting('backup.autoTime'),
+      every_minutes: Number(this.setting('backup.every')) || 0,
       last_at: lastAt,
       last_file: this.setting('backup.lastFile'),
       last_error: this.setting('backup.lastError'),
@@ -176,14 +181,18 @@ export class BackupService extends Base {
     };
   }
 
-  configure(userId: string, input: { dir?: string | null; copyDir?: string | null; keep?: number; autoTime?: string | null }): BackupStatus {
+  configure(userId: string, input: { dir?: string | null; copyDir?: string | null; keep?: number; autoTime?: string | null; everyMinutes?: number }): BackupStatus {
+    if (input.everyMinutes !== undefined) {
+      if (!BACKUP_FREQUENCIES.some(([m]) => m === input.everyMinutes)) throw new AppError('Fréquence de sauvegarde invalide', 'INVALID');
+      this.setSetting('backup.every', input.everyMinutes ? String(input.everyMinutes) : null);
+    }
     if (input.autoTime !== undefined) {
       const t = input.autoTime?.trim() || null;
       if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new AppError('Heure invalide (par exemple 13:00)', 'INVALID');
       this.setSetting('backup.autoTime', t);
     }
     if (input.keep !== undefined) {
-      if (!Number.isInteger(input.keep) || input.keep < 1 || input.keep > 365) throw new AppError('Nombre de sauvegardes gardées invalide (1 à 365)', 'INVALID');
+      if (!Number.isInteger(input.keep) || input.keep < 1 || input.keep > 2000) throw new AppError('Nombre de sauvegardes gardées invalide (1 à 2000)', 'INVALID');
       this.setSetting('backup.keep', String(input.keep));
     }
     if (input.dir !== undefined) this.setSetting('backup.dir', input.dir?.trim() || null);
@@ -276,22 +285,25 @@ export class BackupService extends Base {
     }
   }
 
-  /** Sauvegarde automatique : une par jour, n'échoue jamais (l'erreur est gardée pour l'afficher). */
   /**
-   * Sauvegarde automatique à faire : celle du jour, puis celle de l'heure fixe
-   * réglée dans les paramètres (par exemple 13:00), une fois l'heure passée.
+   * Sauvegarde automatique à faire : celle du jour, puis, selon les réglages,
+   * une toutes les N minutes (toutes les heures…) ou celle de l'heure fixe
+   * (par exemple 13:00), une fois l'heure passée.
    */
   autoDue(): boolean {
     if (!this.doneToday()) return true;
+    const every = Number(this.setting('backup.every')) || 0;
+    const last = this.setting('backup.lastAt');
+    if (every > 0 && last && this.clock().getTime() - new Date(last).getTime() >= every * 60_000) return true;
     const at = this.setting('backup.autoTime');
     const m = at ? /^(\d{2}):(\d{2})$/.exec(at) : null;
     if (!m) return false;
     const now = this.clock();
     const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Number(m[1]), Number(m[2]));
-    const lastAt = this.setting('backup.lastAt');
-    return now >= target && (!lastAt || new Date(lastAt) < target);
+    return now >= target && (!last || new Date(last) < target);
   }
 
+  /** Sauvegarde automatique, n'échoue jamais (l'erreur est gardée pour l'afficher). */
   async runAutomatic(force = false): Promise<BackupInfo | null> {
     if (!force && !this.autoDue()) return null;
     if (!this.status().dir) return null;
@@ -304,7 +316,7 @@ export class BackupService extends Base {
 
   /** Réglages propres au PC, gardés quand on restaure une sauvegarde plus ancienne. */
   localSettings(): Record<string, string | null> {
-    return Object.fromEntries(['backup.dir', 'backup.copyDir', 'backup.keep', 'backup.autoTime', 'backup.lastAt', 'backup.lastFile', 'backup.lastError', 'license.key', 'license.trialStart', 'license.lastSeen', 'license.sent', 'digest.config', 'digest.smtpPass', 'digest.lastSent'].map((k) => [k, this.setting(k)]));
+    return Object.fromEntries(['backup.dir', 'backup.copyDir', 'backup.keep', 'backup.autoTime', 'backup.every', 'backup.lastAt', 'backup.lastFile', 'backup.lastError', 'license.key', 'license.trialStart', 'license.lastSeen', 'license.sent', 'digest.config', 'digest.smtpPass', 'digest.lastSent'].map((k) => [k, this.setting(k)]));
   }
 
   /** Efface les sauvegardes automatiques les plus anciennes au-delà de `keep`. */

@@ -1,4 +1,4 @@
-import { type Permission, type RegisterKind } from '@superette/core';
+import { BACKUP_FREQUENCIES, type Permission, type RegisterKind } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
@@ -952,7 +952,7 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
       onChanged();
     }
   };
-  const configure = (input: { dir?: string | null; copyDir?: string | null; keep?: number }) =>
+  const configure = (input: { dir?: string | null; copyDir?: string | null; keep?: number; everyMinutes?: number }) =>
     call('backup.configure', input).then(() => {
       toast.ok('Réglage enregistré');
       status.reload();
@@ -964,7 +964,7 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   return (
     <div>
       <p>
-        La base de ce PC est copiée chaque jour, pendant que la caisse travaille. Gardez aussi une copie hors du PC (clé USB, dossier OneDrive ou Google
+        La base de ce PC est copiée automatiquement (chaque jour, ou plus souvent selon la fréquence choisie), pendant que la caisse travaille. Gardez aussi une copie hors du PC (clé USB, dossier OneDrive ou Google
         Drive) : en cas de vol ou de panne du disque, c'est elle qui sauve les ventes, le stock et la comptabilité.
       </p>
       <table className="list narrow">
@@ -1000,6 +1000,23 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
                   {st.copy_dir && <button onClick={() => void configure({ copyDir: null })}>Retirer</button>}
                 </>
               )}
+            </td>
+          </tr>
+          <tr>
+            <th>Sauvegarde automatique</th>
+            <td>
+              {isAdmin ? (
+                <select value={st.every_minutes} onChange={(e) => void configure({ everyMinutes: Number(e.target.value) })}>
+                  {BACKUP_FREQUENCIES.map(([m, label]) => (
+                    <option key={m} value={m}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                BACKUP_FREQUENCIES.find(([m]) => m === st.every_minutes)?.[1]
+              )}
+              {st.auto_time && <span className="muted"> · et chaque jour à {st.auto_time}</span>}
             </td>
           </tr>
           <tr>

@@ -111,7 +111,8 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.42.0',
     items: [
-      'Onglets : chaque écran ouvert a son onglet sous la barre du haut, avec une croix ✕ pour le fermer (ou clic avec la molette).',
+      'Fenêtres : chaque écran s’ouvre dans sa fenêtre, à l’intérieur du logiciel. On la déplace par sa barre verte, on l’agrandit par le coin, ▢ (ou double-clic sur la barre) la met en plein écran et ✕ la ferme. La caisse s’ouvre en plein écran ; chaque fenêtre se rouvre là où vous l’avez laissée.',
+      'Barre du haut : tous les onglets sont visibles en entier (sur deux lignes si l’écran est étroit). 🔍 cherche un écran (Ctrl+K), ＋ personnalise les onglets ; l’heure est en bas à droite.',
       'Caisse : choisissez le tarif (Détail, Gros, Super gros) et le dépôt d’où sort la marchandise pour la fiche en cours. Sans ce droit, le code d’un gérant est demandé.',
       'Livraisons : onglet « Livraison » du ticket (adresse, livreur, jour, créneau, frais ajoutés au ticket) et bon de livraison imprimé avec la vente.',
       'Nouvel écran Vente › « Livraisons du jour » : à préparer, en route, livrées, avec « Partir » et « Livrée ». Pour une vente à crédit, l’argent rapporté par le livreur s’enregistre comme règlement du client.',

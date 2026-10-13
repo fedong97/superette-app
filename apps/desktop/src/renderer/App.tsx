@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import logo from './assets/logo.svg';
@@ -28,6 +28,7 @@ import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTab
 import { ROLE_TILES } from './guide';
 import { AskHost, Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
+import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -452,6 +453,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [wins, setWins] = useState<Win[]>(() => (startOnPos ? [{ kind: first, nonce: 0, crumb: 'Facturation › Vente au comptant 1' }] : []));
   // null : la page d'accueil.
   const [active, setActive] = useState<WinKind | null>(startOnPos ? first : null);
+  /** Ordre des fenêtres, de la plus en arrière à celle de devant. */
+  const [stack, setStack] = useState<WinKind[]>(() => (startOnPos ? [first] : []));
+  const [area, setArea] = useState<Area>({ w: 0, h: 0 });
+  const areaRef = useRef<HTMLElement>(null);
   const [menu, setMenu] = useState<string | null>(null);
   /** Écran « Tous les menus » : chaque menu en tuile, avec tous ses écrans. */
   const [allMenus, setAllMenus] = useState(false);
@@ -554,22 +559,48 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => window.removeEventListener('keydown', onKey);
   }, [onPos]);
 
+  // Taille de la zone de travail : les fenêtres restent dedans quand l'écran change.
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const measure = () => setArea({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  /** Place de chaque fenêtre sur ce poste ; la caisse s'ouvre en plein écran. */
+  const geos = (prefs.winGeo as Partial<Record<WinKind, Geo>> | undefined) ?? {};
+  const isPosKind = (kind: WinKind) => kind === 'cash1' || kind === 'cash2' || kind === 'credit';
+  // Place donnée à l'ouverture (en cascade) tant que la fenêtre n'a pas été déplacée.
+  const [placed, setPlaced] = useState<Partial<Record<WinKind, Geo>>>({});
+  const geoOf = (kind: WinKind): Geo => geos[kind] ?? placed[kind] ?? defaultGeo(area, 0, isPosKind(kind));
+  const saveGeo = (kind: WinKind, g: Geo) => savePref('winGeo', { ...geos, [kind]: g });
+  /** Met une fenêtre devant les autres. */
+  const focus = (kind: WinKind | null) => {
+    setActive(kind);
+    if (kind) setStack((st) => (st[st.length - 1] === kind ? st : [...st.filter((k) => k !== kind), kind]));
+  };
+
   const open = (kind: WinKind, tab?: string, crumb?: string) => {
     if (!canWin(kind)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
+    if (!wins.some((w) => w.kind === kind)) setPlaced((p) => ({ ...p, [kind]: defaultGeo(area, wins.length, isPosKind(kind)) }));
     setWins((ws) => {
       const existing = ws.find((w) => w.kind === kind);
       if (!existing) return [...ws, { kind, tab, nonce: 0, crumb }];
       if (tab && tab !== existing.tab) return ws.map((w) => (w === existing ? { ...w, tab, crumb, nonce: w.nonce + 1 } : w));
       return crumb ? ws.map((w) => (w === existing ? { ...w, crumb } : w)) : ws;
     });
-    setActive(kind);
+    // Un écran déjà ouvert revient devant au lieu de s'ouvrir une deuxième fois.
+    focus(kind);
   };
   const close = (kind: WinKind | null) => {
     if (!kind) return;
-    const rest = wins.filter((w) => w.kind !== kind);
-    setWins(rest);
-    // Sans fenêtre ouverte, la page d'accueil s'affiche.
-    if (active === kind) setActive(rest[rest.length - 1]?.kind ?? null);
+    setWins(wins.filter((w) => w.kind !== kind));
+    const rest = stack.filter((k) => k !== kind);
+    setStack(rest);
+    // La fenêtre juste derrière passe devant ; sans fenêtre ouverte, la page d'accueil s'affiche.
+    if (active === kind) setActive(rest[rest.length - 1] ?? null);
   };
 
   /**
@@ -736,17 +767,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               </button>
             );
           })}
-          <button className="tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
-            ＋
-          </button>
         </div>
-        <button className="top-search" title="Rechercher un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
-          🔍 Aller à un écran <kbd>Ctrl+K</kbd>
+        <button className="top-icon tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
+          ＋
         </button>
-        <span className={`top-sync ${sync.data?.connected && !sync.data.lastError ? 'ok' : ''}`} title={syncLabel}>
-          <span className="dot" />
-        </span>
-        <Clock />
+        <button className="top-icon" title="Aller à un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
+          🔍
+        </button>
         <div className="menu">
           <button
             className={`user-chip ${menu === '__user' ? 'open' : ''}`}
@@ -757,95 +784,62 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             }}
           >
             <b>{user.name.slice(0, 1).toUpperCase()}</b>
-            {user.name.split(' ')[0]}
           </button>
           {menu === '__user' && <MenuDrop name="Fichier" items={visibleItems(MENUS[0]![1])} right />}
         </div>
         <button className="help-btn" title="Aide sur cette page (F1)" onClick={() => setHelp('page')}>
           ?
         </button>
-        <button className="win-close" title="Fermer la fenêtre active" disabled={showHome} onClick={() => close(active)}>
-          ✕
-        </button>
       </header>
-      {/* Écrans ouverts, comme des onglets de navigateur : un clic l'affiche, ✕ le ferme. */}
-      <div className="win-tabs" role="tablist">
-        <button className={`win-tab home-tab ${showHome ? 'active' : ''}`} title="Page d'accueil" onClick={() => setActive(null)}>
-          <i aria-hidden>⌂</i>Accueil
-        </button>
-        {wins.map((w) => {
-          const parts = (w.crumb ?? WINDOWS[w.kind].label).split(' › ');
-          return (
-            <div
-              key={w.kind}
-              role="tab"
-              aria-selected={w.kind === active}
-              className={`win-tab ${w.kind === active ? 'active' : ''}`}
-              title={parts.join(' › ')}
-              onClick={() => setActive(w.kind)}
-              onAuxClick={(e) => e.button === 1 && close(w.kind)}
-            >
-              <i aria-hidden>{MENU_ICONS[parts[0]!] ?? winIcon(w.kind)}</i>
-              <span>{parts[parts.length - 1]}</span>
-              <button
-                className="win-tab-x"
-                title="Fermer cet écran"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  close(w.kind);
-                }}
-              >
-                ✕
+      <main className="windows" ref={areaRef}>
+        {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
+        <section className={`home ${showHome ? 'front' : ''}`}>
+          <div className="home-card">
+            <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
+            <h1>{state.station?.store.name}</h1>
+            {(state.station?.store.address || state.station?.store.phone) && (
+              <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
+            )}
+            <p className="home-sub">
+              Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
+            </p>
+            <div className="role-tiles">
+              {tiles.map((t) => (
+                <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
+                  <span className="tile-icon" aria-hidden>
+                    {t.icon}
+                  </span>
+                  <strong>{t.label}</strong>
+                  <small>{t.desc}</small>
+                </button>
+              ))}
+            </div>
+            <p className="home-links">
+              <button className="link" onClick={() => setHelp('palette')}>
+                Chercher un autre écran (Ctrl+K)
               </button>
-            </div>
-          );
-        })}
-        <span className="spacer" />
-        {!onPos && (
-          <button className="link" onClick={() => setHelp('page')}>
-            Comment utiliser cette page ?
-          </button>
-        )}
-      </div>
-      <main className="windows">
-        {showHome && (
-          <section className="home">
-            <div className="home-card">
-              <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
-              <h1>{state.station?.store.name}</h1>
-              {(state.station?.store.address || state.station?.store.phone) && (
-                <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
-              )}
-              <p className="home-sub">
-                Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
-              </p>
-              <div className="role-tiles">
-                {tiles.map((t) => (
-                  <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
-                    <span className="tile-icon" aria-hidden>
-                      {t.icon}
-                    </span>
-                    <strong>{t.label}</strong>
-                    <small>{t.desc}</small>
-                  </button>
-                ))}
-              </div>
-              <p className="home-links">
-                <button className="link" onClick={() => setHelp('palette')}>
-                  Chercher un autre écran (Ctrl+K)
-                </button>
-                <button className="link" onClick={() => setHelp('guide')}>
-                  Guide de démarrage
-                </button>
-                <button className="link" onClick={() => setHelp('news')}>
-                  Quoi de neuf
-                </button>
-              </p>
-            </div>
-          </section>
-        )}
+              <button className="link" onClick={() => setHelp('guide')}>
+                Guide de démarrage
+              </button>
+              <button className="link" onClick={() => setHelp('news')}>
+                Quoi de neuf
+              </button>
+            </p>
+          </div>
+        </section>
         {wins.map((w) => (
-          <section key={`${w.kind}-${w.nonce}`} className="window" hidden={w.kind !== active}>
+          <MdiWindow
+            key={`${w.kind}-${w.nonce}`}
+            title={w.crumb ?? WINDOWS[w.kind].label}
+            icon={MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)}
+            geo={geoOf(w.kind)}
+            area={area}
+            z={stack.indexOf(w.kind) + 1}
+            active={w.kind === active}
+            onFocus={() => focus(w.kind)}
+            onChange={(g) => saveGeo(w.kind, g)}
+            onClose={() => close(w.kind)}
+          >
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
               <Pos
                 user={user}
@@ -882,7 +876,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
-          </section>
+          </MdiWindow>
         ))}
       </main>
       <footer className="statusbar">
@@ -927,6 +921,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
         </button>
+        <Clock />
       </footer>
       {allMenus && (
         <div className="all-menus" onClick={() => setAllMenus(false)}>

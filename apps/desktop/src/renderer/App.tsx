@@ -310,7 +310,13 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
-  ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_direct'] }]],
+  [
+    'Transfert',
+    [
+      { label: 'Nouveau transfert', open: ['stock', 'transferNew'], perm: 'transfer_create' },
+      { label: 'Liste des transferts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_ship', 'transfer_receive', 'transfer_cancel', 'transfer_direct'] },
+    ],
+  ],
   [
     'Magasinier',
     [

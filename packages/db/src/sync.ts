@@ -70,7 +70,8 @@ const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment
 
 /** Ordre des statuts : une version plus ancienne reçue d'un autre PC ne fait jamais reculer un document. */
 const STATUS_RANK: Record<string, Record<string, number>> = {
-  transfers: { draft: 0, shipped: 1, received: 2, cancelled: 2 },
+  // Annulé est définitif : un transfert réceptionné puis annulé ne redevient pas réceptionné.
+  transfers: { draft: 0, shipped: 1, received: 2, cancelled: 3 },
   inventories: { open: 0, closed: 1, cancelled: 1 },
   stock_requests: { pending: 0, approved: 1, rejected: 1 },
   production_orders: { draft: 0, done: 1, cancelled: 1 },
@@ -402,7 +403,14 @@ export class SyncService extends Base {
         return true;
       }
       case 'transfer': {
-        if (!p) return true;
+        if (event.op === 'delete' || !p) {
+          // Seul un brouillon est effacé ; un bon déjà expédié ici reste.
+          if (this.db.prepare("SELECT 1 FROM transfers WHERE id = ? AND status = 'draft'").get(event.entityId)) {
+            this.db.prepare('DELETE FROM transfer_lines WHERE transfer_id = ?').run(event.entityId);
+            this.db.prepare('DELETE FROM transfers WHERE id = ?').run(event.entityId);
+          }
+          return true;
+        }
         if (this.isAhead('transfers', event.entityId, p['status'])) return true;
         this.upsert('transfers', p);
         this.db.prepare('DELETE FROM transfer_lines WHERE transfer_id = ?').run(event.entityId);

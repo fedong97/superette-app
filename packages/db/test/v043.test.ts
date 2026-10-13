@@ -55,3 +55,33 @@ describe('sauvegarde automatique programmée', () => {
     expect(s.backups.autoDue()).toBe(false);
   });
 });
+
+describe('transferts : supprimer et modifier', () => {
+  it('efface un brouillon, annule un transfert reçu et le reprend en brouillon', () => {
+    const { s, ctx, shop, reserve, castel, qty } = setup();
+    s.stock.receive(ctx, { warehouseId: reserve.id, lines: [{ articleId: castel.id, qty: 10_000, unitCost: 450 }] });
+    const input = { fromWarehouseId: reserve.id, toWarehouseId: shop.id, lines: [{ articleId: castel.id, qty: 4_000 }] };
+
+    const draft = s.transfers.create(ctx, input);
+    expect(s.transfers.remove(ctx, draft.id)).toEqual({ deleted: true });
+    expect(s.transfers.list(ctx.storeId)).toEqual([]);
+
+    const t = s.transfers.create(ctx, input);
+    s.transfers.ship(ctx, t.id);
+    s.transfers.receive(ctx, t.id);
+    expect([qty(reserve.id), qty(shop.id)]).toEqual([6_000, 4_000]);
+
+    const copy = s.transfers.reopen(ctx, t.id);
+    expect([qty(reserve.id), qty(shop.id)]).toEqual([10_000, 0]);
+    expect(s.transfers.get(t.id).transfer.status).toBe('cancelled');
+    expect(copy.status).toBe('draft');
+    expect(s.transfers.get(copy.id).lines.map((l) => l.qty)).toEqual([4_000]);
+
+    // Reçu puis vendu : l'annulation est refusée tant que le dépôt d'arrivée n'a plus la marchandise.
+    s.transfers.ship(ctx, copy.id);
+    s.transfers.receive(ctx, copy.id);
+    s.stock.recordLoss(ctx, { warehouseId: shop.id, articleId: castel.id, qty: 1_000, type: 'BREAKAGE', reason: 'casse' });
+    expect(() => s.transfers.remove(ctx, copy.id)).toThrow(/plus assez de CASTEL/);
+    expect(s.transfers.list(ctx.storeId, { warehouseId: shop.id }).length).toBe(2);
+  });
+});

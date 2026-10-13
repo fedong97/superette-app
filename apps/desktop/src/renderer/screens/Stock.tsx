@@ -15,13 +15,14 @@ import { ReceptionLabels } from './barcodePrint';
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring';
+type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
 export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
   // Les stocks critiques sont l'état du stock filtré sur les ruptures et alertes.
-  const [tab, setTab] = useState<Tab>(initialTab === 'critical' ? 'state' : initialTab);
+  // « Nouveau transfert » (menu Transfert) ouvre l'onglet Transfert sur un bon vierge.
+  const [tab, setTab] = useState<Tab>(initialTab === 'critical' ? 'state' : initialTab === 'transferNew' ? 'transfer' : initialTab);
   const any = (...rights: Permission[]) => rights.some((r) => has(user, r));
   const allowed: Record<Tab, boolean> = {
     state: true,
@@ -31,6 +32,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
     receive: has(user, 'stock_receive'),
     loss: has(user, 'stock_loss'),
     transfer: any('transfer_view', 'transfer_create', 'transfer_ship', 'transfer_receive', 'transfer_cancel'),
+    transferNew: has(user, 'transfer_create'),
     inventory: any('inventory', 'inventory_count', 'inventory_close', 'inventory_cancel', 'inventory_edit', 'inventory_import', 'inventory_print'),
     expiry: true,
     moves: any('stock_moves', 'stock'),
@@ -64,7 +66,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'warehouses' && <StockByWarehouse />}
       {tab === 'receive' && allowed.receive && <Reception />}
       {tab === 'loss' && allowed.loss && <Loss />}
-      {tab === 'transfer' && allowed.transfer && <Transfers />}
+      {tab === 'transfer' && allowed.transfer && <Transfers startNew={initialTab === 'transferNew' && allowed.transferNew} />}
       {tab === 'inventory' && allowed.inventory && <Inventories user={user} />}
       {tab === 'expiry' && <Expiry />}
       {tab === 'moves' && allowed.moves && <Moves />}

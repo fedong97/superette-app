@@ -548,7 +548,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
       s.stock.transfer(ctx(['transfer_direct']), input),
     // --- Bons de transfert entre dépôts --------------------------------------------
-    'transfers.list': (status?: TransferStatus | null) => s.transfers.list(ctx(TRANSFERS).storeId, { status }),
+    'transfers.list': (status?: TransferStatus | null, filters?: { from?: string | null; to?: string | null; warehouseId?: string | null }) =>
+      s.transfers.list(ctx(TRANSFERS).storeId, { status, ...filters }),
     'transfers.get': (id: string) => (requireUser(TRANSFERS), s.transfers.get(id)),
     'transfers.create': (input: TransferInput) => s.transfers.create(ctx(['transfer_create']), input),
     'transfers.update': (id: string, input: TransferInput) => s.transfers.update(ctx(['transfer_create']), id, input),
@@ -562,6 +563,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.transfers.receive(c, id, input);
     },
     'transfers.cancel': (id: string) => s.transfers.cancel(ctx(['transfer_cancel']), id),
+    /** Brouillon effacé ; expédié ou réceptionné : annulé, la marchandise revient au départ. */
+    'transfers.remove': (id: string) => s.transfers.remove(ctx(['transfer_cancel']), id),
+    /** Modifier un transfert expédié ou réceptionné : annulé puis repris en brouillon. */
+    'transfers.reopen': (id: string) => {
+      const c = ctx(['transfer_cancel']);
+      requireUser(['transfer_create']);
+      return s.transfers.reopen(c, id);
+    },
     'transfers.movements': (id: string) => (requireUser(TRANSFERS), s.transfers.movements(id)),
     // --- Fabrication -------------------------------------------------------------
     'production.recipes': (includeInactive?: boolean) => (requireUser(PRODUCTION), s.production.recipes({ includeInactive })),

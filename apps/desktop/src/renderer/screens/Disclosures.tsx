@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Field, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, Field, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 
 type Data = Result<'accounting.disclosures'>;
 type Draft = Omit<Data, 'year' | 'updatedAt' | 'updatedBy' | 'labels'>;
@@ -63,9 +63,10 @@ export function Disclosures() {
           Exercice
           <select
             value={year}
-            onChange={(e) => {
-              if (dirty && !confirm('Abandonner la saisie non enregistrée ?')) return;
-              setYear(Number(e.target.value));
+            onChange={async (e) => {
+              const next = Number(e.target.value);
+              if (dirty && !(await askConfirm('Abandonner la saisie non enregistrée ?'))) return;
+              setYear(next);
             }}
           >
             {[0, 1, 2, 3].map((k) => (

@@ -109,6 +109,22 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.41.1',
+    items: [
+      'Correction : la barre de recherche (caisse, clients, fournisseurs) ne se bloque plus après une question « OK / Annuler » ou une impression. Les questions s’affichent maintenant dans le logiciel.',
+      'Correction : sur « Tous les menus », la barre verte de gauche répond de nouveau (le menu s’ouvrait derrière la page).',
+    ],
+  },
+  {
+    version: '0.41.0',
+    items: [
+      'Nouvelle présentation aux couleurs de FEDO : barre verte à gauche avec les menus, onglets arrondis en haut, et « Tous les menus » pour voir chaque écran d’un coup.',
+      'Caisse tactile : les produits trouvés s’affichent en grosses tuiles avec le prix et le stock ; sans saisie, vos touches rapides.',
+      'Le ticket en cours est à droite : client, Comptant ou Crédit, lignes, total, reçu et rendu. Touchez une ligne pour − et +, Varier, Remise ou Enlever.',
+      'Gros boutons en bas : En attente, Rappeler, Tiroir, Ticket, Facture A4, Listing, Vider, Encaisser et VALIDER. Toutes les fonctions et tous les raccourcis clavier restent les mêmes.',
+    ],
+  },
+  {
     version: '0.40.0',
     items: [
       'Modèles d’impression (Administration › Modèles d’impression) : la facture client en ticket de caisse, A4 ou listing, comptant ou à terme, chacune réglable champ par champ avec l’aperçu à côté.',

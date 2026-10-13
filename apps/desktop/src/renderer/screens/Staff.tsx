@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useToast } from '../ui';
+import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
@@ -320,7 +320,7 @@ function OfficePayDialog({
           e.preventDefault();
           try {
             const r = await call('staff.pay', { kind, staffId: staff.id, salaryId: salary?.id ?? null, amount: value, method, reference: reference || null, piece: piece || null });
-            if (confirm('Imprimer le bon ?')) call('staff.printEntry', r.id).catch(toast.error);
+            if (await askConfirm('Imprimer le bon ?')) call('staff.printEntry', r.id).catch(toast.error);
             onDone();
           } catch (err) {
             toast.error(err);
@@ -481,7 +481,7 @@ function Salaries() {
                       <button
                         className="link danger"
                         onClick={async () => {
-                          const reason = prompt('Motif de l’annulation de ce salaire ?');
+                          const reason = await askText('Motif de l’annulation de ce salaire ?');
                           if (!reason) return;
                           try {
                             await call('staff.cancelSalary', x.id, reason);

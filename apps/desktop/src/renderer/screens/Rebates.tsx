@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, qty, today, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, qty, today, useLoad, useToast } from '../ui';
 import { tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -71,7 +71,7 @@ function RebateState({ user, manage }: { user: User; manage: boolean }) {
   const toClose = rows.filter((r) => r.pending > 0).length;
 
   const closePeriod = async () => {
-    if (!confirm(`Constater la ristourne du ${dateFr(from)} au ${dateFr(to)} pour ${toClose} client(s) ?`)) return;
+    if (!(await askConfirm(`Constater la ristourne du ${dateFr(from)} au ${dateFr(to)} pour ${toClose} client(s) ?`))) return;
     try {
       const done = await call('rebates.close', from, to, null);
       toast.ok(`${done.length} ristourne(s) constatée(s) : ${fcfa(done.reduce((t, d) => t + d.amount, 0))}`);

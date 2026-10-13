@@ -1,7 +1,7 @@
 import { type CartLine, computeTotals, lineTotal } from '@superette/core';
 import { useState } from 'react';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useLoad, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker } from './pickers';
 import { DocPreview } from './docPreview';
@@ -315,7 +315,7 @@ function QuoteDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
   if (!q) return null;
   if (preview) return <DocPreview source={{ kind: 'quote', id: q.id }} onClose={() => setPreview(false)} />;
   const cancel = async () => {
-    if (!confirm(`Annuler ${q.number} ? Le document ne pourra plus être facturé.`)) return;
+    if (!(await askConfirm(`Annuler ${q.number} ? Le document ne pourra plus être facturé.`))) return;
     try {
       await call('quotes.cancel', q.id);
       toast.ok(`${q.number} annulé`);

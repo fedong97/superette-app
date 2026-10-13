@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { describeInPacks } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateTime, has, parseQty, qty, today, useLoad, useToast } from '../ui';
+import { askText, Empty, Field, Modal, dateTime, has, parseQty, qty, today, useLoad, useToast } from '../ui';
 import { ArticlePicker } from './pickers';
 import { qtyText } from './packs';
 
@@ -235,8 +235,8 @@ function RequestTable({ rows, canDecide, showArticle, onChanged }: { rows: Reque
                     Valider
                   </button>{' '}
                   <button
-                    onClick={() => {
-                      const note = prompt('Motif du refus');
+                    onClick={async () => {
+                      const note = await askText('Motif du refus');
                       if (note) void call('monitoring.decide', r.id, false, note).then(() => (toast.ok('Demande refusée'), onChanged()), toast.error);
                     }}
                   >

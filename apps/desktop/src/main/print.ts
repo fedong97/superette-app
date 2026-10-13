@@ -72,6 +72,29 @@ const A4_STYLE = `
 `;
 
 /**
+ * Fenêtre cachée qui sert à imprimer. À sa fermeture, la fenêtre du logiciel
+ * reprend le clavier : sinon, sous Windows, après une impression les champs
+ * (recherche de la caisse, des clients…) ne prennent plus la saisie.
+ */
+function renderWindow(back = BrowserWindow.getFocusedWindow()): BrowserWindow {
+  const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+  win.once('closed', () => giveFocusBack(back));
+  return win;
+}
+
+function giveFocusBack(back: BrowserWindow | null): void {
+  if (!back || back.isDestroyed()) return;
+  back.focus();
+  back.webContents.focus();
+}
+
+/** « Enregistrer sous » rattachée à la fenêtre du logiciel, qui retrouve ainsi le clavier à la fermeture. */
+function saveDialog(back: BrowserWindow | null, defaultPath: string) {
+  const options = { defaultPath, filters: [{ name: 'PDF', extensions: ['pdf'] }] };
+  return back ? dialog.showSaveDialog(back, options) : dialog.showSaveDialog(options);
+}
+
+/**
  * Ticket de caisse et rapport Z : par le pilote Windows (rendu HTML 80 mm) ou
  * en ESC/POS direct (USB via le spouleur Windows, ou réseau port 9100), avec
  * ouverture du tiroir-caisse. Les autres documents sont imprimés en A4.
@@ -80,7 +103,7 @@ export function createPrinter(s: Services): Printer {
   async function printHtml(body: string, force = false): Promise<void> {
     if (!force && s.admin.getSetting('printer.enabled') === '0') return;
     const deviceName = s.admin.getSetting('printer.name') || undefined;
-    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    const win = renderWindow();
     try {
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>${STYLE}</style></head><body>${body}</body></html>`;
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
@@ -97,7 +120,7 @@ export function createPrinter(s: Services): Printer {
   /** Page complète (ticket d'un modèle) envoyée sans fenêtre à l'imprimante du poste. */
   async function printPage(html: string): Promise<void> {
     const deviceName = s.admin.getSetting('printer.name') || undefined;
-    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    const win = renderWindow();
     try {
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       await new Promise<void>((resolve, reject) =>
@@ -115,9 +138,10 @@ export function createPrinter(s: Services): Printer {
    * du modèle, ou la fenêtre « Enregistrer sous » pour un PDF. Renvoie false si annulé.
    */
   async function printDocument(html: string, t: DocTemplate, pdfName?: string): Promise<boolean> {
-    const target = pdfName ? await dialog.showSaveDialog({ defaultPath: pdfName, filters: [{ name: 'PDF', extensions: ['pdf'] }] }) : null;
-    if (target && (target.canceled || !target.filePath)) return false;
-    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    const back = BrowserWindow.getFocusedWindow();
+    const target = pdfName ? await saveDialog(back, pdfName) : null;
+    if (target && (target.canceled || !target.filePath)) return (giveFocusBack(back), false);
+    const win = renderWindow(back);
     try {
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       if (target?.filePath) {
@@ -214,7 +238,7 @@ export function createPrinter(s: Services): Printer {
 
   /** Document A4 (bon de commande) : la fenêtre d'impression Windows s'ouvre pour choisir l'imprimante ou « Enregistrer en PDF ». */
   async function printA4(body: string): Promise<void> {
-    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    const win = renderWindow();
     try {
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${body}</body></html>`;
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
@@ -230,9 +254,10 @@ export function createPrinter(s: Services): Printer {
 
   /** Document A4 enregistré en PDF : la fenêtre « Enregistrer sous » s'ouvre. Renvoie false si annulé. */
   async function saveA4Pdf(body: string, fileName: string): Promise<boolean> {
-    const target = await dialog.showSaveDialog({ defaultPath: fileName, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
-    if (target.canceled || !target.filePath) return false;
-    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    const back = BrowserWindow.getFocusedWindow();
+    const target = await saveDialog(back, fileName);
+    if (target.canceled || !target.filePath) return (giveFocusBack(back), false);
+    const win = renderWindow(back);
     try {
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${body}</body></html>`;
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
@@ -246,7 +271,7 @@ export function createPrinter(s: Services): Printer {
   /** Planche d'étiquettes : la fenêtre d'impression s'ouvre au format de la planche ou du rouleau. Renvoie false si annulé. */
   async function printLabelsHtml(html: string, format: LabelFormatId): Promise<boolean> {
     const f = LABEL_FORMATS[format];
-    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    const win = renderWindow();
     try {
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       return await new Promise<boolean>((resolve, reject) =>

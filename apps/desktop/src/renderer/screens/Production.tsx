@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, has, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateTime, fcfa, has, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker, WarehouseSelect } from './pickers';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -272,7 +272,7 @@ function OrderDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
       <div className="actions">
         <button onClick={() => call('production.print', o.id).catch(toast.error)}>Imprimer</button>
         {can('production_cancel') && o.status === 'draft' && (
-          <button className="danger" onClick={() => confirm('Annuler cet ordre de fabrication ?') && act(() => call('production.cancel', o.id), 'Ordre annulé')}>
+          <button className="danger" onClick={async () => (await askConfirm('Annuler cet ordre de fabrication ?')) && act(() => call('production.cancel', o.id), 'Ordre annulé')}>
             Annuler l’ordre
           </button>
         )}
@@ -450,7 +450,7 @@ function RecipeEditor({ recipe, manage, onClose, onDone }: { recipe: Recipe | nu
             <button
               className="danger"
               onClick={async () => {
-                if (!confirm('Archiver cette recette ?')) return;
+                if (!(await askConfirm('Archiver cette recette ?'))) return;
                 await call('production.archiveRecipe', recipe.id).then(onDone, toast.error);
               }}
             >

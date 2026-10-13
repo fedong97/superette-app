@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CartLine, type Permission, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
-import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, useSaleRows } from './SaleSearch';
+import { QtyPrompt, type SaleRow, SaleSearchDialog, rowKey, stockIn, useSaleRows } from './SaleSearch';
 import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 import { tx } from '../tax';
 
@@ -87,14 +87,30 @@ type Pane = 'lines' | 'payments' | 'extra';
 const UNIT_LABEL = { piece: 'Pièce', kg: 'Kg', litre: 'Litre' } as const;
 const BILLS = [1000, 2000, 5000, 10000];
 const amount = (v: number) => formatFcfa(v, false);
+/** Deux lettres pour la tuile d'un produit sans photo : « Bière Castel » → « BC ». */
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter((w) => /^[\p{L}\d]/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('');
+const TILE_COLORS = ['#1f7a5c', '#e0a800', '#0891b2', '#db2777', '#7c3aed', '#22a06b', '#2563eb', '#ea580c'];
+/** Couleur stable par produit (le nom donne toujours la même). */
+const tileColor = (name: string) => {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return { '--c': TILE_COLORS[h % TILE_COLORS.length] } as React.CSSProperties;
+};
 
 /**
- * Fiche de facturation (vente au comptant ou à crédit), sur le modèle de KONTROL :
- * saisie produit, grille, grand total TTC, billets rapides avec encaissé
- * et rendu, boutons d'action à droite et raccourcis clavier en bas.
- * Plusieurs fiches peuvent être ouvertes en même temps (V. cash 1, V. cash 2).
+ * Fiche de facturation (vente au comptant ou à crédit), pensée pour le tactile :
+ * recherche avec les produits en tuiles, ticket à droite (client, lignes,
+ * total, reçu et rendu), billets rapides et gros boutons d'action en bas.
+ * Tous les raccourcis clavier restent actifs.
+ * Plusieurs fiches peuvent être ouvertes en même temps (Caisse 1, Caisse 2).
  */
-export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onListing, onTreasury, mode = 'cash' }: {
+export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onListing, onTreasury, mode = 'cash' }: {
   mode?: 'cash' | 'credit';
   user: User;
   hasRegister: boolean;
@@ -110,6 +126,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   active: boolean;
   title: string;
   onClose: () => void;
+  /** Passe de la vente au comptant à la vente à crédit (et inversement). */
+  onSwitchMode?: () => void;
   onListing: () => void;
   /** Ouvre Trésorerie › Opérations de trésorerie (ouverture et clôture). */
   onTreasury: () => void;
@@ -124,7 +142,6 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pane, setPane] = useState<Pane>('lines');
   const [cashGiven, setCashGiven] = useState(0);
-  const [showDiscount, setShowDiscount] = useState(false);
   const [showTaxes, setShowTaxes] = useState(false);
   const [now, setNow] = useState(() => new Date());
   /** Recherche complète (F1) et ligne choisie dont on demande la quantité. */
@@ -462,28 +479,13 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
 
   const sel = lines.find((l) => l.key === selected);
   const salesWarehouse = (warehouses.data ?? []).find((w) => w.is_sales_default) ?? warehouses.data?.[0];
-  const withDiscount = showDiscount || totals.totalDiscount > 0;
   const shownTotal = lines.length ? totals.totalTtc : (lastSale?.total_ttc ?? 0);
   const change = lines.length ? Math.max(0, cashGiven - cashDue) : (lastSale?.change_given ?? 0);
   // Après validation : espèces réellement reçues (rien pour une vente entièrement à crédit).
   const given = lines.length ? cashGiven : lastSale ? lastSale.payments.filter((p) => p.method === 'CASH').reduce((t, p) => t + p.amount, 0) : 0;
-  const rows = Math.max(12, lines.length);
 
   return (
-    <div className="fiche">
-      <div className="fiche-band">
-        <h2>{title}</h2>
-        <div className={`band-mode ${credit ? 'credit' : ''}`}>{credit ? 'Vente à crédit' : 'Vente au comptant'}</div>
-        <div className={`band-delivery ${credit ? 'credit' : ''}`}>
-          {credit && customer && account.data
-            ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
-            : !lines.length && lastSale?.customer_name
-              ? `${lastSale.customer_name}${lastSale.due_date ? ` · à régler avant le ${new Date(`${lastSale.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`
-              : quote && lines.length
-                ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
-                : 'Livraison immédiate'}
-        </div>
-      </div>
+    <div className={`pos-screen ${credit ? 'credit' : ''}`}>
       {stale && (
         <div className="tre-warning">
           Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
@@ -493,234 +495,294 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           puis rouvrez la caisse.
         </div>
       )}
-      <div className="fiche-body">
-        <div className="fiche-main">
-          <div className="fiche-head">
-            <label>N°</label>
-            <input readOnly value={lines.length ? (quote ? `Devis ${quote.number}` : 'Nouveau') : (lastSale?.number ?? 'Nouveau')} />
-            <input
-              className={`client ${credit && !customer ? 'missing' : ''}`}
-              readOnly
-              value={customer ? customer.name.toUpperCase() : credit ? 'CHOISIR LE CLIENT (F8)' : 'CLIENT COMPTOIR'}
-              title="Choisir le client (F8)"
-              onClick={() => setDialog('customer')}
-            />
-            {level !== 'retail' && (
-              <span className="tag surstock" title="Prix de gros appliqués à ce client">
-                Tarif {PRICE_LEVELS[level].toLowerCase()}
+      <div className="pos-body">
+        <section className="pos-shop">
+          <form onSubmit={onScan} className="pos-search">
+            <div className="scan-wrap">
+              <span className="scan-icon" aria-hidden>
+                🔍
               </span>
-            )}
-            {customer ? (
-              <button className="client-clear" title="Revenir au client comptoir" onClick={() => setCustomer(null)}>
-                ✕ {customer.code}
-              </button>
-            ) : (
-              <button className="client-clear" onClick={() => setDialog('customer')}>
-                Client… <kbd>F8</kbd>
-              </button>
-            )}
-            <span className="count">
-              {totals.itemCount} art.
-            </span>
-            {customer && account.data && (
-              <div className="solde">
-                <span
-                  className={`solde-chip ${account.data.balance > 0 ? 'neg' : account.data.balance < 0 ? 'pos' : 'zero'}`}
-                  title={account.data.balance > 0 ? 'Le client doit cette somme' : account.data.balance < 0 ? 'Avoir du client, utilisable en payant « sur compte »' : 'Compte soldé'}
-                >
-                  Solde : {account.data.balance > 0 ? '−' : account.data.balance < 0 ? '+' : ''}
-                  {amount(Math.abs(account.data.balance))} FCFA
-                  <small>{account.data.balance > 0 ? ' (doit)' : account.data.balance < 0 ? ' (avoir)' : ''}</small>
-                </span>
-                <button className="client-clear" title="Extrait de compte du client" onClick={() => setDialog('statement')}>
-                  J..
-                </button>
-              </div>
-            )}
-            <div className={`fiche-total ${!lines.length && lastSale ? 'done' : ''}`}>
-              {amount(shownTotal)}
-              <small>{tx('TTC')}</small>
-            </div>
-            <label>Date</label>
-            <input readOnly value={now.toLocaleString('fr-FR')} />
-            {!customer && !credit && (
               <input
-                className="client-name"
-                value={clientName}
-                maxLength={80}
-                onChange={(e) => setClientName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && scanRef.current?.focus()}
-                placeholder="Nom du client (facultatif)"
-                title="Imprimé sur le ticket et la facture"
+                ref={scanRef}
+                className="scan-input"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => suggestions.onKeyDown(e, pickSuggestion)}
+                onBlur={suggestions.close}
+                autoComplete="off"
+                placeholder="Nom du produit ou code-barres (3*code pour la quantité)"
               />
-            )}
-            {!customer && !credit && (namesake.data?.length ?? 0) > 0 && (
-              <div className="namesake">
-                <small>Client déjà enregistré ?</small>
-                {namesake.data!.slice(0, 4).map((c) => (
+              <button type="button" className="scan-hint" title="Recherche complète (F1)" onClick={() => openSearch(input)}>
+                Rechercher <kbd>F1</kbd>
+              </button>
+            </div>
+            <button type="submit" className="scan-go" title="Ajouter (Entrée) ; sur une saisie vide, valider la fiche">
+              ▥
+            </button>
+          </form>
+          <div className="pos-opts">
+            <label className="opt" title="Le tarif suit la fiche du client (Client › Tarif) : détail pour le client comptoir">
+              Tarif
+              <select value={level} disabled>
+                {Object.entries(PRICE_LEVELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="opt" title="La vente sort du dépôt « surface de vente » du magasin">
+              Dépôt
+              <select value={salesWarehouse?.id ?? ''} disabled>
+                {salesWarehouse && <option value={salesWarehouse.id}>{salesWarehouse.name}</option>}
+              </select>
+            </label>
+            <select
+              className="opt action"
+              value=""
+              onChange={(e) => {
+                const v = e.target.value as Dialog | 'close';
+                if (v === 'close') {
+                  if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+                  return onTreasury();
+                }
+                setDialog(v);
+              }}
+            >
+              <option value="" disabled>
+                ⋯ Actions
+              </option>
+              <option value="cashIn">Apport espèces</option>
+              <option value="cashOut">Prélèvement</option>
+              <option value="cancel">Annuler un ticket</option>
+              <option value="return">Retour client</option>
+              <option value="custPay">Règlement client (crédit)</option>
+              <option value="quote">Facturer un devis / proforma</option>
+              <option value="expense">Dépense payée en caisse</option>
+              <option value="close">Clôture de caisse (Trésorerie)</option>
+            </select>
+            <span className="opts-count">
+              {suggestions.items.length
+                ? `${suggestions.items.length} produit${suggestions.items.length > 1 ? 's' : ''} trouvé${suggestions.items.length > 1 ? 's' : ''} · touchez pour ajouter`
+                : quickKeys.data?.length
+                  ? 'Touches rapides'
+                  : ''}
+            </span>
+          </div>
+          <div className="pos-tiles">
+            {suggestions.items.length > 0
+              ? suggestions.items.map((r, i) => (
                   <button
-                    key={c.id}
-                    onClick={() => {
-                      setCustomer(c);
-                      setClientName('');
+                    type="button"
+                    key={rowKey(r)}
+                    className={`pos-tile ${i === suggestions.active ? 'hit' : ''} ${r.out_of_stock ? 'out' : r.stock < r.units * 5 ? 'low' : ''}`}
+                    style={tileColor(r.name)}
+                    // mousedown : choisir avant que la zone de saisie perde le focus.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickSuggestion(r);
                     }}
+                    onMouseEnter={() => suggestions.setActive(i)}
                   >
-                    {c.name}
-                    <span className={c.balance > 0 ? 'neg' : c.balance < 0 ? 'pos' : 'muted'}>
-                      {' '}
-                      {c.balance > 0 ? '−' : c.balance < 0 ? '+' : ''}
-                      {amount(Math.abs(c.balance))}
+                    <span className="tile-ic">{initials(r.name)}</span>
+                    <b>{r.name}</b>
+                    <small className="tile-pack">
+                      {r.code}
+                      {r.pack_name ? ` · ${r.pack_name}` : ''}
+                    </small>
+                    <span className="tile-p">
+                      <strong>{amount(r.price)}</strong>
+                      <small>{r.out_of_stock ? 'épuisé' : `stock ${stockIn(r)}`}</small>
+                    </span>
+                  </button>
+                ))
+              : (quickKeys.data ?? []).map((a) => (
+                  <button type="button" key={a.id} className="pos-tile" style={tileColor(a.name)} onClick={() => addArticle(a)}>
+                    {a.photo_thumb ? <img className="tile-ph" src={a.photo_thumb} alt="" /> : <span className="tile-ic">{initials(a.name)}</span>}
+                    <b>{a.name}</b>
+                    <span className="tile-p">
+                      <strong>{amount(a.store_price)}</strong>
+                      <small>{a.unit !== 'piece' ? `le ${a.unit === 'kg' ? 'kg' : 'litre'}` : ''}</small>
                     </span>
                   </button>
                 ))}
-              </div>
+            {!suggestions.items.length && !quickKeys.data?.length && (
+              <p className="tiles-empty">Tapez le début du nom d'un produit ou scannez son code-barres : les produits trouvés s'affichent ici en tuiles.</p>
             )}
           </div>
+          <div className="pos-bills">
+            {BILLS.map((b) => (
+              <button key={b} type="button" disabled={!lines.length} onClick={() => setCashGiven((c) => c + b)}>
+                <small>BILLET</small>
+                {amount(b)}
+              </button>
+            ))}
+            <button type="button" className="x" disabled={!lines.length} onClick={() => setCashGiven(cashDue)} title="Montant exact (arrondi espèces compris)">
+              = Exact
+            </button>
+            <button type="button" className="x" disabled={!cashGiven} onClick={() => setCashGiven(0)} title="Remettre l'encaissé à zéro">
+              C Effacer
+            </button>
+          </div>
+        </section>
 
-          <div className="fiche-tabs">
-            <button className={pane === 'lines' ? 'active' : ''} onClick={() => setPane('lines')}>
-              Produits commandés
-            </button>
-            <button className={pane === 'payments' ? 'active' : ''} onClick={() => setPane('payments')}>
-              Règlements
-            </button>
-            <button disabled title="Arrive avec le module Clients">
-              Livraisons
-            </button>
-            <button className={pane === 'extra' ? 'active' : ''} onClick={() => setPane('extra')}>
-              Extra infos
-            </button>
+        <aside className="pos-ticket">
+          <div className="tk-head">
+            <div className="tk-row">
+              <button className={`tk-client ${credit && !customer ? 'missing' : ''}`} title="Choisir le client (F8)" onClick={() => setDialog('customer')}>
+                <i aria-hidden>👤</i>
+                <span>
+                  <b>{customer ? customer.name : credit ? 'Choisir le client' : 'Client comptoir'}</b>
+                  <small>
+                    {customer && account.data
+                      ? `${account.data.balance > 0 ? 'Doit' : account.data.balance < 0 ? 'Avoir' : 'Solde'} ${amount(Math.abs(account.data.balance))} FCFA${credit ? ` · disponible ${amount(account.data.available)}` : ''}`
+                      : credit
+                        ? 'obligatoire pour une vente à crédit'
+                        : 'touchez pour choisir un client'}
+                  </small>
+                </span>
+                <kbd>F8</kbd>
+              </button>
+              <div className="tk-mode" role="group" aria-label="Type de vente">
+                <button className={credit ? '' : 'on'} disabled={!credit} onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onSwitchMode?.())}>
+                  Comptant
+                </button>
+                <button className={credit ? 'on' : ''} disabled={credit} onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onSwitchMode?.())}>
+                  Crédit
+                </button>
+              </div>
+            </div>
+            {(customer || level !== 'retail') && (
+              <div className="tk-row tk-chips">
+                {level !== 'retail' && (
+                  <span className="tag surstock" title="Prix de gros appliqués à ce client">
+                    Tarif {PRICE_LEVELS[level].toLowerCase()}
+                  </span>
+                )}
+                {customer && (
+                  <>
+                    <button className="chip-btn" title="Extrait de compte du client" onClick={() => setDialog('statement')}>
+                      Extrait de compte
+                    </button>
+                    <button className="chip-btn" title="Revenir au client comptoir" onClick={() => setCustomer(null)}>
+                      ✕ {customer.code}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {!customer && !credit && (
+              <div className="tk-name">
+                <input
+                  value={clientName}
+                  maxLength={80}
+                  onChange={(e) => setClientName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && scanRef.current?.focus()}
+                  placeholder="Nom du client sur le ticket (facultatif)"
+                  title="Imprimé sur le ticket et la facture"
+                />
+                {(namesake.data?.length ?? 0) > 0 && (
+                  <div className="namesake">
+                    <small>Client déjà enregistré ?</small>
+                    {namesake.data!.slice(0, 4).map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          setCustomer(c);
+                          setClientName('');
+                        }}
+                      >
+                        {c.name}
+                        <span className={c.balance > 0 ? 'neg' : c.balance < 0 ? 'pos' : 'muted'}>
+                          {' '}
+                          {c.balance > 0 ? '−' : c.balance < 0 ? '+' : ''}
+                          {amount(Math.abs(c.balance))}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="tk-tabs">
+              <button className={pane === 'lines' ? 'on' : ''} onClick={() => setPane('lines')}>
+                Articles{lines.length ? ` (${lines.length})` : ''}
+              </button>
+              <button className={pane === 'payments' ? 'on' : ''} onClick={() => setPane('payments')}>
+                Règlements
+              </button>
+              <button disabled title="Arrive avec le module Clients">
+                Livraisons
+              </button>
+              <button className={pane === 'extra' ? 'on' : ''} onClick={() => setPane('extra')}>
+                Infos
+              </button>
+              <span className="tk-meta" title={title}>
+                {lines.length ? (quote ? `Devis ${quote.number}` : 'Nouveau') : (lastSale?.number ?? 'Nouveau')}
+              </span>
+            </div>
+            {(quote && lines.length > 0) || (!lines.length && lastSale?.customer_name) ? (
+              <div className="tk-note">
+                {quote && lines.length
+                  ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
+                  : `${lastSale!.customer_name}${lastSale!.due_date ? ` · à régler avant le ${new Date(`${lastSale!.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`}
+              </div>
+            ) : null}
           </div>
 
           {pane === 'lines' && (
-            <>
-              <form onSubmit={onScan} className="fiche-tools">
-                <div className="scan-wrap">
-                  <input
-                    ref={scanRef}
-                    className="scan-input"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => suggestions.onKeyDown(e, pickSuggestion)}
-                    onBlur={suggestions.close}
-                    autoComplete="off"
-                    placeholder="Taper le début du nom produit ou scanner (3*code) · F1 recherche"
-                  />
-                  <SaleRowList s={suggestions} onPick={pickSuggestion} />
-                </div>
-                <label>Grille tarif.</label>
-                <select value={level} disabled title="Le tarif suit la fiche du client (Client › Tarif) : détail pour le client comptoir">
-                  {Object.entries(PRICE_LEVELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-                <label>Dépôt</label>
-                <select value={salesWarehouse?.id ?? ''} disabled title="La vente sort du dépôt « surface de vente » du magasin">
-                  {salesWarehouse && <option value={salesWarehouse.id}>{salesWarehouse.name.toUpperCase()}</option>}
-                </select>
-                <select
-                  className="action"
-                  value=""
-                  onChange={(e) => {
-                    const v = e.target.value as Dialog | 'close';
-                    if (v === 'close') {
-                      if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
-                      return onTreasury();
-                    }
-                    setDialog(v);
-                  }}
-                >
-                  <option value="" disabled>
-                    Action
-                  </option>
-                  <option value="cashIn">Apport espèces</option>
-                  <option value="cashOut">Prélèvement</option>
-                  <option value="cancel">Annuler un ticket</option>
-                  <option value="return">Retour client</option>
-                  <option value="custPay">Règlement client (crédit)</option>
-                  <option value="quote">Facturer un devis / proforma</option>
-                  <option value="expense">Dépense payée en caisse</option>
-                  <option value="close">Clôture de caisse (Trésorerie)</option>
-                </select>
-              </form>
-
-              <div className={`fiche-grid-wrap ${quickKeys.data?.length ? '' : 'no-quick'}`}>
-                <div className="fiche-grid">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th className="n">N°</th>
-                        <th className="ref">Réf.</th>
-                        <th>Produit</th>
-                        <th className="r">Qté</th>
-                        {withDiscount && <th className="r">Remise</th>}
-                        <th>Cond.</th>
-                        <th className="r">{tx('PU TTC')}</th>
-                        <th className="r">{tx('Total TTC')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.from({ length: rows }, (_, i) => {
-                        const l = priced[i];
-                        if (!l)
-                          return (
-                            <tr key={`empty-${i}`} className="empty-row">
-                              <td colSpan={withDiscount ? 8 : 7}>&nbsp;</td>
-                            </tr>
-                          );
-                        return (
-                          <tr key={l.key} className={l.key === selected ? 'sel' : ''} onClick={() => setSelected(l.key)} onDoubleClick={() => setDialog('vary')}>
-                            <td className="n">{i + 1}</td>
-                            <td className="ref">{l.ref}</td>
-                            <td>
-                              {l.label}
-                              {l.promo > 0 && (
-                                <span className="tag normal promo" title={l.promotionName ?? ''}>
-                                  Promo −{amount(l.promo)}
-                                </span>
-                              )}
-                            </td>
-                            <td className="r">
-                              <QtyCell line={l} onChange={(q) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: q } : x)))} />
-                            </td>
-                            {withDiscount && <td className="r">{l.discount ? amount(l.discount) : ''}</td>}
-                            <td className={l.packId ? 'pack-unit' : ''}>{l.packId ? l.packs.find((p) => p.id === l.packId)?.name : l.unitName}</td>
-                            <td className="r">{amount(l.packPrice ?? l.unitPrice)}</td>
-                            <td className="r">{amount(lineTotal(l))}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td colSpan={3}>Total{totals.totalPromo > 0 && <span className="tag normal promo">Promotions −{amount(totals.totalPromo)}</span>}</td>
-                        <td className="r">{lines.length ? totals.itemCount : ''}</td>
-                        {withDiscount && <td className="r">{totals.totalDiscount ? amount(totals.totalDiscount) : ''}</td>}
-                        <td colSpan={2}></td>
-                        <td className="r">{amount(totals.totalTtc)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-                <div className="fiche-quick">
-                  {(quickKeys.data ?? []).map((a) => (
-                    <button key={a.id} onClick={() => addArticle(a)}>
-                      {a.name}
-                      <small>
-                        {fcfa(a.store_price)}
-                        {a.unit !== 'piece' ? ` / ${a.unit === 'kg' ? 'kg' : 'L'}` : ''}
-                      </small>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
+            <div className="tk-lines">
+              {!priced.length && <p className="tk-empty">{lastSale ? `Ticket ${lastSale.number} validé. Scannez le produit suivant.` : 'Aucun article : scannez ou touchez un produit.'}</p>}
+              {priced.map((l) => {
+                const isSel = l.key === selected;
+                const pack = l.packId ? l.packs.find((p) => p.id === l.packId) : undefined;
+                return (
+                  <div key={l.key} className={`tk-line ${isSel ? 'sel' : ''}`}>
+                    <div className="tk-main" onClick={() => setSelected(l.key)} onDoubleClick={() => setDialog('vary')}>
+                      <span className="tk-q">{lineQty(l)}</span>
+                      <span className="tk-label">
+                        <b>{l.label}</b>
+                        <small>
+                          {lineQty(l)} × {amount(l.packPrice ?? l.unitPrice)} · {pack ? pack.name : l.unitName}
+                          {l.discount > 0 && <span className="neg"> · remise −{amount(l.discount)}</span>}
+                          {l.promo > 0 && (
+                            <span className="promo" title={l.promotionName ?? ''}>
+                              {' '}
+                              · promo −{amount(l.promo)}
+                            </span>
+                          )}
+                        </small>
+                      </span>
+                      <span className="tk-t">{amount(lineTotal(l))}</span>
+                    </div>
+                    {isSel && (
+                      <div className="tk-ops">
+                        <button title="Quantité − (touche −)" disabled={l.fixedAmount !== undefined} onClick={() => changeQty(l.key, -1000)}>
+                          −
+                        </button>
+                        <QtyCell line={l} onChange={(q) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: q } : x)))} />
+                        <button title="Quantité + (touche +)" disabled={l.fixedAmount !== undefined} onClick={() => changeQty(l.key, 1000)}>
+                          ＋
+                        </button>
+                        <button className="wide" title="Changer le prix, le conditionnement ou la quantité" onClick={() => setDialog('vary')}>
+                          Varier
+                        </button>
+                        <button className="wide" title="Remise sur la ligne (F6)" onClick={() => setDialog('discount')}>
+                          % Remise
+                        </button>
+                        <button className="wide red" title="Enlever la ligne (Suppr)" onClick={() => removeLine(l.key)}>
+                          Enlever
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
 
           {pane === 'payments' && (
-            <div className="fiche-pane">
+            <div className="tk-pane">
               {lastSale && !lines.length ? (
                 <table className="list">
                   <caption>Règlement du ticket {lastSale.number}</caption>
@@ -743,17 +805,21 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                 </table>
               ) : (
                 <p className="muted">
-                  Le règlement se fait à la validation (F4) : espèces avec les billets rapides, ou Ctrl+E pour MTN Mobile Money, Orange Money,
-                  carte, bon d'achat et paiements mixtes.
+                  Le règlement se fait à la validation (F4) : espèces avec les billets, ou Encaisser (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
+                  d'achat et paiements mixtes.
                 </p>
               )}
             </div>
           )}
 
           {pane === 'extra' && (
-            <div className="fiche-pane">
+            <div className="tk-pane">
               <table className="list compact">
                 <tbody>
+                  <tr>
+                    <th>Fiche</th>
+                    <td>{title}</td>
+                  </tr>
                   <tr>
                     <th>Caisse ouverte par</th>
                     <td>{session.data.user_name}</td>
@@ -775,140 +841,96 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             </div>
           )}
 
-          <div className="fiche-foot">
-            <div className="checks-col">
-              <label>
-                <input type="checkbox" checked={showDiscount} onChange={(e) => setShowDiscount(e.target.checked)} /> Remise ?
-              </label>
+          <div className="tk-foot">
+            <div className="tk-sum">
+              <span>
+                {totals.itemCount} article{totals.itemCount > 1 ? 's' : ''}
+                {totals.totalDiscount > 0 && ` · remises −${amount(totals.totalDiscount)}`}
+                {totals.totalPromo > 0 && ` · promotions −${amount(totals.totalPromo)}`}
+                {lines.length > 0 && cashDue < totals.totalTtc && ` · espèces ${amount(cashDue)} (arrondi −${amount(totals.totalTtc - cashDue)})`}
+              </span>
               {vatEnabled && (
-                <label>
-                  <input type="checkbox" checked={showTaxes} onChange={(e) => setShowTaxes(e.target.checked)} /> Taxes ?
-                </label>
+                <button className="link" onClick={() => setShowTaxes((v) => !v)}>
+                  HT / TVA {showTaxes ? '▾' : '▸'}
+                </button>
               )}
             </div>
-            {showTaxes && vatEnabled ? (
-              <div className="taxes">
-                <div>HT {amount(totals.totalHt)}</div>
-                {totals.vat.filter((v) => v.tva > 0).map((v) => (
-                  <div key={v.rate}>TVA {(v.rate / 100).toLocaleString('fr-FR')} % : {amount(v.tva)}</div>
-                ))}
+            {showTaxes && vatEnabled && (
+              <div className="tk-taxes">
+                <span>HT {amount(totals.totalHt)}</span>
+                {totals.vat
+                  .filter((v) => v.tva > 0)
+                  .map((v) => (
+                    <span key={v.rate}>
+                      TVA {(v.rate / 100).toLocaleString('fr-FR')} % : {amount(v.tva)}
+                    </span>
+                  ))}
               </div>
-            ) : cashDue < totals.totalTtc ? (
-              <div className="taxes">
-                <div>Espèces : {amount(cashDue)}</div>
-                <div className="muted">arrondi −{amount(totals.totalTtc - cashDue)}</div>
-              </div>
-            ) : (
-              <div className="taxes" />
             )}
-            <div className="bills">
-              {BILLS.map((b) => (
-                <button key={b} type="button" disabled={!lines.length} onClick={() => setCashGiven((c) => c + b)}>
-                  {amount(b)}
-                </button>
-              ))}
-              <button type="button" className="exact" disabled={!lines.length} onClick={() => setCashGiven(cashDue)} title="Montant exact (arrondi espèces compris)">
-                =
-              </button>
-              <button type="button" className="exact" disabled={!cashGiven} onClick={() => setCashGiven(0)} title="Remettre l'encaissé à zéro">
-                C
-              </button>
+            <div className={`tk-total ${!lines.length && lastSale ? 'done' : ''}`}>
+              <span>{tx('Total TTC').toUpperCase()}</span>
+              <strong>
+                {amount(shownTotal)}
+                <small>FCFA</small>
+              </strong>
             </div>
-            <div className="er">
-              <span>E:</span> {given ? amount(given) : ''}
-            </div>
-            <div className="er">
-              <span>R:</span> {change ? amount(change) : ''}
+            <div className="tk-er">
+              <div>
+                <small>REÇU</small>
+                <b>{given ? amount(given) : '—'}</b>
+              </div>
+              <div className="change">
+                <small>À RENDRE</small>
+                <b>{change ? amount(change) : '—'}</b>
+              </div>
             </div>
           </div>
-        </div>
-
-        <aside className="fiche-actions">
-          <button className="main" disabled={!lines.length} onClick={() => void validate()}>
-            Valider / Nouv. <kbd>F4</kbd>
-          </button>
-          <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()}>
-            Mise en attente <kbd>F3</kbd>
-          </button>
-          <button disabled={!can('sale_resume')} onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente">
-            <span>
-              Ouvrir (en attente)
-              {(held.data?.length ?? 0) > 0 && <b className="held-count">{held.data!.length}</b>}
-            </span>
-            <kbd>F10</kbd>
-          </button>
-          <button disabled={!lines.length} onClick={() => setDialog('pay')}>
-            Encaisser <kbd>Ctrl+E</kbd>
-          </button>
-          <hr />
-          <button onClick={onListing}>
-            Listing <kbd>F7</kbd>
-          </button>
-          <button disabled={!lastSale || !can('sale_reprint')} onClick={reprint}>
-            Ticket <kbd>F2</kbd>
-          </button>
-          <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
-            Facture A4 <kbd>F9</kbd>
-          </button>
-          <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
-            Tiroir <kbd>F5</kbd>
-          </button>
-          <hr />
-          <button disabled={!sel} onClick={() => setDialog('vary')}>
-            Varier
-          </button>
-          <button disabled={!sel} onClick={() => sel && removeLine(sel.key)}>
-            Enlever
-          </button>
-          <button className="danger" disabled={!lines.length} onClick={() => confirm('Vider la fiche en cours ?') && clear()}>
-            Vider
-          </button>
-          <button className="close" onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())}>
-            Fermer
-          </button>
         </aside>
       </div>
 
-      <div className="shortcuts">
-        <span>
-          <kbd>F1</kbd> Rechercher
-        </span>
-        <span>
-          <kbd>Suppr</kbd> Enlever
-        </span>
-        <span>
-          <kbd>+</kbd>/<kbd>−</kbd> Quantité
-        </span>
-        <span>
-          <kbd>F6</kbd> Remise
-        </span>
-        <span>
-          <kbd>F3</kbd> Mise en attente
-        </span>
-        <span>
-          <kbd>F4</kbd> Valider
-        </span>
-        <span>
-          <kbd>F2</kbd> Ticket
-        </span>
-        <span>
-          <kbd>F5</kbd> Tiroir
-        </span>
-        <span>
-          <kbd>F7</kbd> Listing
-        </span>
-        <span>
-          <kbd>Ctrl+E</kbd> Encaisser
-        </span>
-        <span>
-          <kbd>F8</kbd> Client
-        </span>
-        <span>
-          <kbd>F9</kbd> Facture A4
-        </span>
-        <span>
-          <kbd>F10</kbd> Rappel ticket
-        </span>
+      <div className="pos-actions">
+        <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()} style={{ '--c': '#e0a800' } as React.CSSProperties}>
+          <i aria-hidden>⏸</i>En attente <kbd>F3</kbd>
+        </button>
+        <button disabled={!can('sale_resume')} onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente" style={{ '--c': '#e0a800' } as React.CSSProperties}>
+          <i aria-hidden>↺</i>
+          <span>
+            Rappeler
+            {(held.data?.length ?? 0) > 0 && <b className="held-count">{held.data!.length}</b>}
+          </span>
+          <kbd>F10</kbd>
+        </button>
+        <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)" style={{ '--c': '#0891b2' } as React.CSSProperties}>
+          <i aria-hidden>🗃</i>Tiroir <kbd>F5</kbd>
+        </button>
+        <button disabled={!lastSale || !can('sale_reprint')} onClick={reprint} title="Réimprimer le dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+          <i aria-hidden>🧾</i>Ticket <kbd>F2</kbd>
+        </button>
+        <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+          <i aria-hidden>📄</i>Facture A4 <kbd>F9</kbd>
+        </button>
+        <button onClick={onListing} title="Listing des factures" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+          <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
+        </button>
+        <button disabled={!lines.length} onClick={async () => {
+            if (await askConfirm('Vider la fiche en cours ?')) clear();
+            focusScan();
+          }} style={{ '--c': '#dc2626' } as React.CSSProperties}>
+          <i aria-hidden>🗑</i>Vider
+        </button>
+        <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>
+          <i aria-hidden>✕</i>Fermer
+        </button>
+        <button className="pay" disabled={!lines.length} onClick={() => setDialog('pay')} title="Mobile Money, carte, bon d'achat, paiements mixtes">
+          <i aria-hidden>💳</i>Encaisser <kbd>Ctrl+E</kbd>
+        </button>
+        <button className="go" disabled={!lines.length} onClick={() => void validate()}>
+          <i aria-hidden>✓</i>
+          <span>
+            VALIDER
+            <small>et nouvelle fiche · F4</small>
+          </span>
+        </button>
       </div>
 
       {dialog === 'pay' && (

@@ -2,7 +2,7 @@ import { type Permission, type RegisterKind } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
-import { Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
@@ -793,7 +793,7 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
               <button
                 disabled={busy}
                 onClick={async () => {
-                  if (!confirm('Délier ce PC du serveur central ? Les ventes resteront sur ce PC sans être partagées.')) return;
+                  if (!(await askConfirm('Délier ce PC du serveur central ? Les ventes resteront sur ce PC sans être partagées.'))) return;
                   try {
                     await call('sync.disconnect');
                     state.reload();

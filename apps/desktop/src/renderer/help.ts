@@ -65,6 +65,14 @@ const POS: PageHelp = {
       ],
     },
     {
+      title: 'Tarif, dépôt et livraison',
+      steps: [
+        'Les boutons Tarif (Détail, Gros, Super gros) et Dépôt (Surface de vente, Réserve…) changent le tarif et le dépôt de sortie pour cette fiche seulement ; sans le droit, le code d’un gérant est demandé.',
+        'Onglet « Livraison » du ticket : cochez « À livrer », vérifiez l’adresse (reprise de la fiche client), choisissez le jour, le créneau, le livreur et les frais. Au VALIDER, le bon de livraison s’imprime avec le ticket.',
+        'Les livraisons se suivent dans Vente › Livraisons du jour.',
+      ],
+    },
+    {
       title: 'Menu Actions',
       steps: [
         'Encaisser un règlement client, payer une dépense avec les espèces du tiroir, facturer un devis.',
@@ -235,6 +243,20 @@ export const HELP: Record<WinKind, PageHelp> = {
     sections: [
       { title: 'Faire un devis', steps: ['« Nouveau devis », puis choisissez Devis ou Facture proforma : client (ou simple nom), produits, remises et durée de validité.', 'Imprimez : le montant est écrit en lettres, avec le « Bon pour accord ».'] },
       { title: 'Facturer', steps: ['À la caisse, Action › Facturer un devis : les prix du devis sont garantis jusqu’à sa date de validité.'] },
+    ],
+  },
+  deliveries: {
+    title: 'Livraisons du jour',
+    intro: 'Les ventes à porter chez le client : à préparer, en route, livrées. Elles se saisissent à la caisse, dans l’onglet Livraison du ticket.',
+    sections: [
+      {
+        title: 'Suivre une livraison',
+        steps: [
+          '« Partir 🚚 » quand le livreur s’en va (l’heure est notée), puis « Livrée ✓ » à son retour.',
+          '« Bon » réimprime le bon de livraison ; ✕ retire la livraison sans annuler la vente.',
+          'Pour une vente à crédit, « À encaisser » montre ce que le livreur doit rapporter : à « Livrée », le logiciel propose d’enregistrer le règlement du client.',
+        ],
+      },
     ],
   },
   promotions: {

@@ -62,6 +62,7 @@ const TABLES: Record<string, string> = {
   staff: 'staff',
   staff_salary: 'staff_salaries',
   treasury_entry: 'treasury_entries',
+  sale_delivery: 'sale_deliveries',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -73,6 +74,7 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   inventories: { open: 0, closed: 1, cancelled: 1 },
   stock_requests: { pending: 0, approved: 1, rejected: 1 },
   production_orders: { draft: 0, done: 1, cancelled: 1 },
+  sale_deliveries: { pending: 0, out: 1, delivered: 2, cancelled: 2 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
@@ -582,6 +584,12 @@ export class SyncService extends Base {
         const warehouseId = String(p['warehouse_id']);
         stock.set(`${articleId}|${warehouseId}`, [articleId, warehouseId]);
         if (p['lot_id']) lots.add(String(p['lot_id']));
+        return;
+      }
+      case 'sale_delivery': {
+        // « Livrée » sur un PC ne redevient pas « à préparer » si une version plus ancienne arrive.
+        if (this.isAhead('sale_deliveries', event.entityId, p['status'])) return;
+        this.upsert('sale_deliveries', p);
         return;
       }
       default: {

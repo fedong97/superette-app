@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.42.0',
+    items: [
+      'Onglets : chaque écran ouvert a son onglet sous la barre du haut, avec une croix ✕ pour le fermer (ou clic avec la molette).',
+      'Caisse : choisissez le tarif (Détail, Gros, Super gros) et le dépôt d’où sort la marchandise pour la fiche en cours. Sans ce droit, le code d’un gérant est demandé.',
+      'Livraisons : onglet « Livraison » du ticket (adresse, livreur, jour, créneau, frais ajoutés au ticket) et bon de livraison imprimé avec la vente.',
+      'Nouvel écran Vente › « Livraisons du jour » : à préparer, en route, livrées, avec « Partir » et « Livrée ». Pour une vente à crédit, l’argent rapporté par le livreur s’enregistre comme règlement du client.',
+    ],
+  },
+  {
     version: '0.41.1',
     items: [
       'Correction : la barre de recherche (caisse, clients, fournisseurs) ne se bloque plus après une question « OK / Annuler » ou une impression. Les questions s’affichent maintenant dans le logiciel.',

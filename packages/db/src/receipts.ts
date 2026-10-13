@@ -62,6 +62,21 @@ export class ReceiptService extends Base {
     super(db, clock);
   }
 
+  /** Livraison de la vente : adresse, jour, créneau et livreur sur la facture et le bon de livraison. */
+  private deliveryInfo(saleId: string): { extra?: string[]; notes?: string | null } {
+    const d = this.db.prepare('SELECT address, phone, courier, slot, planned_date, note FROM sale_deliveries WHERE sale_id = ?').get(saleId) as
+      | { address: string; phone: string | null; courier: string | null; slot: string | null; planned_date: string; note: string | null }
+      | undefined;
+    if (!d) return {};
+    return {
+      extra: [
+        `Livrer à : ${d.address}${d.phone ? ` · tél. ${d.phone}` : ''}`,
+        `Livraison le ${dayFr(d.planned_date)}${d.slot ? `, ${d.slot}` : ''}${d.courier ? ` · livreur : ${d.courier}` : ''}`,
+      ],
+      notes: d.note,
+    };
+  }
+
   private header(): Receipt {
     const station = this.admin.station();
     if (!station) return [];
@@ -304,6 +319,7 @@ export class ReceiptService extends Base {
         priceLevel: sale.price_level && sale.price_level !== 'retail' ? PRICE_LEVELS[sale.price_level] : null,
         cancelled: sale.status === 'cancelled',
         duplicate: Boolean(opts?.duplicate),
+        ...this.deliveryInfo(sale.id),
       },
       lines: sale.lines.map((l) => {
         const pack = Boolean(l.pack_name && l.pack_units && l.pack_price !== null);

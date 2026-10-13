@@ -4,6 +4,7 @@ import { type Result, call } from './api';
 import logo from './assets/logo.svg';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
+import { Deliveries } from './screens/Deliveries';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
@@ -59,6 +60,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement'] },
   expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
   quotes: { label: 'Devis et proformas', perm: ['quotes', 'quote_save'] },
+  deliveries: { label: 'Livraisons du jour', perm: ['deliveries'] },
   promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
@@ -150,6 +152,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Vente au comptant 2', open: ['cash2'] },
       { label: 'Vente à crédit', open: ['credit'] },
       { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Mes factures', open: ['sales', 'tickets'] },
       { label: 'Registre (clôtures Z)', open: ['sales', 'z'] },
     ],
@@ -167,6 +170,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Tickets et factures annulés', open: ['sales', 'cancelled'] },
       SEP,
       { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
       SEP,
@@ -868,6 +872,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
+            {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}

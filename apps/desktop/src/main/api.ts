@@ -68,6 +68,8 @@ import {
   type ProductionStatus,
   type StoreOptions,
   type User,
+  type DeliveryInput,
+  type DeliveryStatus,
 } from '@superette/db';
 
 import type { SyncRunner } from './sync';
@@ -663,7 +665,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (type === 'OUT' && !can(user!, ['cashout'])) supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
-    'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean }) => s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
+    'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
+      s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
@@ -678,9 +681,21 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       creditPin?: string;
       quoteId?: string | null;
       clientName?: string | null;
+      priceLevel?: PriceLevel | null;
+      warehouseId?: string | null;
+      /** Code du gérant qui a permis le tarif ou le dépôt choisis, si le caissier n'en a pas le droit. */
+      optionsPin?: string;
+      delivery?: DeliveryInput | null;
     }) => {
       const c = ctx(POS);
       s.license.assertCanSell();
+      const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
+      const otherLevel = Boolean(input.priceLevel) && input.priceLevel !== usual;
+      const otherWarehouse = Boolean(input.warehouseId) && s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1;
+      if ((otherLevel && !can(user!, ['sale_tariff'])) || (otherWarehouse && !can(user!, ['sale_warehouse']))) {
+        if (!input.optionsPin) throw new AppError('Tarif ou dépôt soumis à validation du gérant', 'OPTIONS_SUPERVISOR');
+        supervisor(input.optionsPin);
+      }
       if (input.lines.some((l) => l.price != null) && !can(user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
       const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(user!, ['discount']) ? user!.id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
@@ -692,8 +707,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         creditAuthorizedBy: creditBy,
         quoteId: input.quoteId ?? null,
         clientName: input.clientName ?? null,
+        priceLevel: input.priceLevel ?? null,
+        warehouseId: input.warehouseId ?? null,
+        delivery: input.delivery ?? null,
       });
     },
+    /** Taux de TVA des frais de livraison, pour le total affiché à la caisse. */
+    'deliveries.feeVat': () => {
+      const c = ctx(POS);
+      return s.pos.deliveryFeeLine(c, 1).vatRate;
+    },
+    'deliveries.list': (opts: { from?: string; to?: string; open?: boolean; courier?: string | null }) => s.deliveries.list(ctx(['deliveries']).storeId, opts),
+    'deliveries.couriers': () => s.deliveries.couriers(ctx(POS).storeId),
+    'deliveries.forSale': (saleId: string) => (requireSaleAccess(saleId), s.deliveries.forSale(saleId)),
+    'deliveries.setStatus': (id: string, status: Exclude<DeliveryStatus, 'pending'>, patch?: { courier?: string | null }) => s.deliveries.setStatus(ctx(['deliveries']), id, status, patch),
     'pos.cancel': (saleId: string, supervisorPin: string, reason: string) => {
       const c = ctx(['sale_cancel']);
       const limit = settings().cancelMinutes;

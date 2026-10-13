@@ -1408,4 +1408,34 @@ CREATE TABLE stock_published (
 );
 `,
   },
+  {
+    version: 31,
+    name: 'livraisons, tarif et dépôt à la caisse',
+    sql: `
+-- Article de service (frais de livraison) : il se vend sans sortir de stock.
+ALTER TABLE articles ADD COLUMN is_service INTEGER NOT NULL DEFAULT 0;
+-- Dépôt d'où la vente est sortie (NULL : dépôt de vente du magasin, comme avant).
+ALTER TABLE sales ADD COLUMN warehouse_id TEXT REFERENCES warehouses(id);
+-- Livraison d'une vente chez le client : adresse, créneau, livreur, suivi.
+CREATE TABLE sale_deliveries (
+  id TEXT PRIMARY KEY,
+  sale_id TEXT NOT NULL UNIQUE REFERENCES sales(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  address TEXT NOT NULL,
+  phone TEXT,
+  courier TEXT,
+  slot TEXT,
+  planned_date TEXT NOT NULL,
+  fee INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'out', 'delivered', 'cancelled')),
+  out_at TEXT,
+  delivered_at TEXT,
+  updated_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX sale_deliveries_day ON sale_deliveries(store_id, planned_date);
+`,
+  },
 ];

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatFcfa } from '@superette/core';
+import { type PriceLevel, formatFcfa } from '@superette/core';
 import { type Result, call } from '../api';
 import { Field, Modal, fcfa, parseAmount, parseQty, qty, useToast } from '../ui';
 import { ArticlePhotoView } from './photo';
@@ -20,7 +20,10 @@ export function stockIn(r: SaleRow): string {
  * Lignes de vente pendant la saisie (à partir de 2 lettres) : une par
  * conditionnement, seulement celles qu'on peut servir avec le stock.
  */
-export function useSaleRows(query: string, customerId: string | null) {
+/** Tarif et dépôt choisis à la caisse pour la fiche (sinon ceux du client et du magasin). */
+export type SaleOpts = { priceLevel?: PriceLevel | null; warehouseId?: string | null };
+
+export function useSaleRows(query: string, customerId: string | null, opts: SaleOpts = {}) {
   const [items, setItems] = useState<SaleRow[]>([]);
   const [active, setActive] = useState(0);
   const [closed, setClosed] = useState(false);
@@ -33,7 +36,7 @@ export function useSaleRows(query: string, customerId: string | null) {
     }
     let live = true;
     const t = setTimeout(() => {
-      call('pos.search', q, { customerId })
+      call('pos.search', q, { customerId, priceLevel: opts.priceLevel ?? null, warehouseId: opts.warehouseId ?? null })
         .then((r) => {
           if (!live) return;
           setItems(r.slice(0, 14));
@@ -45,7 +48,7 @@ export function useSaleRows(query: string, customerId: string | null) {
       live = false;
       clearTimeout(t);
     };
-  }, [query, customerId]);
+  }, [query, customerId, opts.priceLevel, opts.warehouseId]);
   const shown = closed ? [] : items;
   return {
     items: shown,
@@ -107,6 +110,7 @@ export function SaleRowList({ s, onPick }: { s: ReturnType<typeof useSaleRows>; 
 export function SaleSearchDialog({
   initialQuery,
   customerId,
+  opts = {},
   canCreate,
   onClose,
   onPick,
@@ -115,6 +119,7 @@ export function SaleSearchDialog({
 }: {
   initialQuery: string;
   customerId: string | null;
+  opts?: SaleOpts;
   canCreate: boolean;
   onClose: () => void;
   onPick: (r: SaleRow) => void;
@@ -134,7 +139,7 @@ export function SaleSearchDialog({
     }
     let live = true;
     const t = setTimeout(() => {
-      call('pos.search', q, { customerId, includeEmpty: !hideEmpty })
+      call('pos.search', q, { customerId, includeEmpty: !hideEmpty, priceLevel: opts.priceLevel ?? null, warehouseId: opts.warehouseId ?? null })
         .then((r) => {
           if (!live) return;
           setRows(r);
@@ -146,7 +151,7 @@ export function SaleSearchDialog({
       live = false;
       clearTimeout(t);
     };
-  }, [q, hideEmpty, customerId]);
+  }, [q, hideEmpty, customerId, opts.priceLevel, opts.warehouseId]);
   useEffect(() => {
     listRef.current?.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' });
   }, [active]);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, type Permission, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
+import { type CartLine, type Permission, type PriceLevel, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -80,9 +80,19 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
+type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
-type Pane = 'lines' | 'payments' | 'extra';
+type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
+
+/** Livraison en cours de saisie dans l'onglet Livraison du ticket. */
+type DeliveryDraft = { on: boolean; address: string; phone: string; courier: string; slot: string; date: string; fee: string; note: string };
+const NO_DELIVERY: DeliveryDraft = { on: false, address: '', phone: '', courier: '', slot: 'Tout de suite', date: '', fee: '', note: '' };
+const SLOTS = ['Tout de suite', '8h–12h', '12h–16h', '16h–20h'];
+const dayPlus = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 const UNIT_LABEL = { piece: 'Pièce', kg: 'Kg', litre: 'Litre' } as const;
 const BILLS = [1000, 2000, 5000, 10000];
@@ -159,6 +169,15 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const [clientName, setClientName] = useState('');
   /** Devis ou proforma chargé : ses prix garantis valent accord de remise. */
   const [quote, setQuote] = useState<{ id: string; number: string; validUntil: string } | null>(null);
+  /** Tarif et dépôt choisis pour cette fiche (null : ceux du client et du magasin). */
+  const [levelChoice, setLevelChoice] = useState<PriceLevel | null>(null);
+  const [warehouseChoice, setWarehouseChoice] = useState<string | null>(null);
+  /** Code du gérant qui a permis ces choix, quand le caissier n'en a pas le droit. */
+  const [optionsPin, setOptionsPin] = useState<string | undefined>();
+  const [askOption, setAskOption] = useState<{ label: string; apply: () => void } | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryDraft>(NO_DELIVERY);
+  const feeVat = useLoad(() => call('deliveries.feeVat'), []);
+  const couriers = useLoad(() => call('deliveries.couriers'), []);
   const account = useLoad(() => (customer ? call('customers.account', customer.id) : Promise.resolve(null)), [customer?.id]);
   // Tickets en attente sur cette caisse : leur nombre s'affiche sur le bouton « Ouvrir ».
   const held = useLoad(() => call('pos.held'), []);
@@ -170,12 +189,18 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const scanRef = useRef<HTMLInputElement>(null);
   /** Promotions du jour : appliquées à l'écran comme elles le seront à l'encaissement. */
   const promoRules = useLoad(() => call('promotions.active'), []);
-  const level = customer?.price_level ?? 'retail';
+  const usualLevel = customer?.price_level ?? 'retail';
+  const level = levelChoice ?? usualLevel;
   const priced = useMemo(
     () => applyPromotions(lines.map((l) => atLevel(l, level)), level === 'retail' ? (promoRules.data ?? []) : []),
     [lines, promoRules.data, level],
   );
-  const totals = useMemo(() => computeTotals(priced), [priced]);
+  /** Frais de livraison : une ligne de service ajoutée au ticket par le serveur à la validation. */
+  const fee = delivery.on ? (parseAmount(delivery.fee) ?? 0) : 0;
+  const totals = useMemo(() => {
+    const t = computeTotals(fee > 0 ? [...priced, { articleId: 'svc-delivery-fee', label: 'Frais de livraison', unitPrice: fee, qty: 1000, vatRate: feeVat.data ?? 0, discount: 0 }] : priced);
+    return { ...t, itemCount: computeTotals(priced).itemCount };
+  }, [priced, fee, feeVat.data]);
   /** Total à payer si tout est réglé en espèces (arrondi des paramètres). */
   const cashDue = roundCash(totals.totalTtc, settings.cashRounding);
   // Une remise sous le maximum des paramètres passe sans le code du gérant.
@@ -227,7 +252,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   // « 3*mut » : lignes sur « mut », la quantité proposée est 3.
   const multiplied = /^(\d+(?:[.,]\d+)?)\*(.*)$/.exec(input.trim());
   const suggestQuery = multiplied ? multiplied[2]! : input;
-  const suggestions = useSaleRows(suggestQuery, customer?.id ?? null);
+  const saleOpts = { priceLevel: levelChoice, warehouseId: warehouseChoice };
+  const suggestions = useSaleRows(suggestQuery, customer?.id ?? null, saleOpts);
   /** Une ligne choisie (conditionnement d'un article) : on demande d'abord la quantité. */
   const askQty = (row: SaleRow, initial?: string) => {
     setPicked({ row, initial });
@@ -276,7 +302,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         return;
       }
       // Pas un code-barres : une seule ligne en stock → quantité, sinon la recherche complète.
-      const rows = /^[\d\s]+$/.test(code) ? [] : await call('pos.search', code, { customerId: customer?.id ?? null });
+      const rows = /^[\d\s]+$/.test(code) ? [] : await call('pos.search', code, { customerId: customer?.id ?? null, ...saleOpts });
       if (rows.length === 1) askQty(rows[0]!, m?.[1]);
       else openSearch(code);
     } catch (err) {
@@ -297,13 +323,42 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setLines((ls) => ls.filter((l) => l.key !== key));
     setSelected(null);
   };
+  /** Tarif, dépôt et livraison valent pour une fiche : on revient aux réglages habituels. */
+  const resetOptions = () => {
+    setLevelChoice(null);
+    setWarehouseChoice(null);
+    setOptionsPin(undefined);
+    setDelivery(NO_DELIVERY);
+  };
   const clear = () => {
     setQuote(null);
     setClientName('');
     setLines([]);
     setCashGiven(0);
     setSelected(null);
+    resetOptions();
   };
+  /**
+   * Tarif ou dépôt choisis pour la fiche : sans le droit, le code d'un gérant
+   * est demandé (une fois par fiche). Revenir au réglage habituel est libre.
+   */
+  const chooseOption = (label: string, right: Permission, usual: boolean, apply: () => void) => {
+    if (usual || can(right) || optionsPin) return apply();
+    setAskOption({ label, apply });
+    setDialog('options');
+  };
+  const deliveryInput = () =>
+    delivery.on
+      ? {
+          address: delivery.address,
+          phone: delivery.phone || null,
+          courier: delivery.courier || null,
+          slot: delivery.slot || null,
+          plannedDate: delivery.date || null,
+          fee,
+          note: delivery.note || null,
+        }
+      : null;
 
   const saleInput = () => lines.map((l) => ({ articleId: l.articleId, qty: l.qty, barcode: l.barcode, discount: l.discount, packId: l.packId, price: l.price ?? null }));
   /** Lignes rechargées (ticket en attente, devis) : on reprend les fiches pour les tarifs et conditionnements. */
@@ -321,7 +376,14 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setCustomer(null);
     setClientName('');
     setQuote(null);
+    const delivered = delivery.on;
+    resetOptions();
     call('pos.printTicket', sale.id, { newSale: true }).catch((err) => toast.error(err));
+    // Le bon de livraison part avec le livreur.
+    if (delivered) {
+      call('pos.printInvoice', sale.id, { doc: 'delivery' }).catch((err) => toast.error(err));
+      couriers.reload();
+    }
   };
 
   /**
@@ -330,7 +392,24 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
    */
   const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string } = {}) => {
     try {
-      finish(await call('pos.sell', { lines: saleInput(), payments: payments as never, customerId: customer?.id ?? null, clientName: customer ? null : clientName.trim() || null, quoteId: quote?.id ?? null, ...pins }));
+      if (delivery.on && !delivery.address.trim()) {
+        setPane('delivery');
+        return toast.error("Indiquez l'adresse de livraison (onglet Livraison)");
+      }
+      finish(
+        await call('pos.sell', {
+          lines: saleInput(),
+          payments: payments as never,
+          customerId: customer?.id ?? null,
+          clientName: customer ? null : clientName.trim() || null,
+          quoteId: quote?.id ?? null,
+          priceLevel: levelChoice,
+          warehouseId: warehouseChoice,
+          optionsPin,
+          delivery: deliveryInput(),
+          ...pins,
+        }),
+      );
       setCashGiven(0);
       setPending(null);
     } catch (err) {
@@ -521,22 +600,36 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             </button>
           </form>
           <div className="pos-opts">
-            <label className="opt" title="Le tarif suit la fiche du client (Client › Tarif) : détail pour le client comptoir">
-              Tarif
-              <select value={level} disabled>
-                {Object.entries(PRICE_LEVELS).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
+            <div className="opt-seg" role="group" aria-label="Tarif" title="Tarif de cette fiche ; par défaut celui du client (détail pour le client comptoir)">
+              <span>Tarif</span>
+              {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={level === k ? 'on' : ''}
+                  onClick={() => chooseOption(`Passer cette fiche au tarif ${PRICE_LEVELS[k].toLowerCase()}.`, 'sale_tariff', k === usualLevel, () => setLevelChoice(k === usualLevel ? null : k))}
+                >
+                  {PRICE_LEVELS[k]}
+                </button>
+              ))}
+            </div>
+            {(warehouses.data?.length ?? 0) > 1 && (
+              <div className="opt-seg" role="group" aria-label="Dépôt" title="Dépôt d'où sort la marchandise de cette fiche">
+                <span>Dépôt</span>
+                {warehouses.data!.map((w) => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    className={(warehouseChoice ?? salesWarehouse?.id) === w.id ? 'on' : ''}
+                    onClick={() =>
+                      chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', w.id === salesWarehouse?.id, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id))
+                    }
+                  >
+                    {w.name}
+                  </button>
                 ))}
-              </select>
-            </label>
-            <label className="opt" title="La vente sort du dépôt « surface de vente » du magasin">
-              Dépôt
-              <select value={salesWarehouse?.id ?? ''} disabled>
-                {salesWarehouse && <option value={salesWarehouse.id}>{salesWarehouse.name}</option>}
-              </select>
-            </label>
+              </div>
+            )}
             <select
               className="opt action"
               value=""
@@ -601,7 +694,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                     {a.photo_thumb ? <img className="tile-ph" src={a.photo_thumb} alt="" /> : <span className="tile-ic">{initials(a.name)}</span>}
                     <b>{a.name}</b>
                     <span className="tile-p">
-                      <strong>{amount(a.store_price)}</strong>
+                      <strong>{amount(tariffPrice({ retail: a.store_price, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price }, level))}</strong>
                       <small>{a.unit !== 'piece' ? `le ${a.unit === 'kg' ? 'kg' : 'litre'}` : ''}</small>
                     </span>
                   </button>
@@ -652,13 +745,14 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                 </button>
               </div>
             </div>
-            {(customer || level !== 'retail') && (
+            {(customer || level !== 'retail' || warehouseChoice) && (
               <div className="tk-row tk-chips">
                 {level !== 'retail' && (
-                  <span className="tag surstock" title="Prix de gros appliqués à ce client">
+                  <span className="tag surstock" title={levelChoice ? 'Tarif choisi pour cette fiche' : 'Tarif de ce client'}>
                     Tarif {PRICE_LEVELS[level].toLowerCase()}
                   </span>
                 )}
+                {warehouseChoice && <span className="tag surstock">Sortie {warehouses.data?.find((w) => w.id === warehouseChoice)?.name}</span>}
                 {customer && (
                   <>
                     <button className="chip-btn" title="Extrait de compte du client" onClick={() => setDialog('statement')}>
@@ -711,8 +805,8 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
               <button className={pane === 'payments' ? 'on' : ''} onClick={() => setPane('payments')}>
                 Règlements
               </button>
-              <button disabled title="Arrive avec le module Clients">
-                Livraisons
+              <button className={pane === 'delivery' ? 'on' : ''} title="Livrer cette vente chez le client" onClick={() => setPane('delivery')}>
+                Livraison{delivery.on ? ' 🚚' : ''}
               </button>
               <button className={pane === 'extra' ? 'on' : ''} onClick={() => setPane('extra')}>
                 Infos
@@ -812,6 +906,86 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             </div>
           )}
 
+          {pane === 'delivery' && (
+            <div className="tk-pane tk-delivery">
+              <label className="dl-switch">
+                <input
+                  type="checkbox"
+                  checked={delivery.on}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setDelivery((d) => ({
+                      ...d,
+                      on,
+                      // Adresse et téléphone repris de la fiche du client.
+                      address: d.address || (on ? (customer?.address ?? '') : ''),
+                      phone: d.phone || (on ? (customer?.phone ?? '') : ''),
+                    }));
+                  }}
+                />
+                À livrer chez le client
+              </label>
+              {delivery.on ? (
+                <>
+                  <Field label="Adresse de livraison">
+                    <input value={delivery.address} maxLength={200} onChange={(e) => setDelivery((d) => ({ ...d, address: e.target.value }))} placeholder="Quartier, rue, repère" />
+                  </Field>
+                  <div className="grid2">
+                    <Field label="Téléphone">
+                      <input value={delivery.phone} maxLength={40} onChange={(e) => setDelivery((d) => ({ ...d, phone: e.target.value }))} />
+                    </Field>
+                    <Field label="Livreur">
+                      <input value={delivery.courier} maxLength={60} list="pos-couriers" onChange={(e) => setDelivery((d) => ({ ...d, courier: e.target.value }))} />
+                      <datalist id="pos-couriers">
+                        {(couriers.data ?? []).map((c) => (
+                          <option key={c} value={c} />
+                        ))}
+                      </datalist>
+                    </Field>
+                  </div>
+                  <div className="dl-chips">
+                    <b>Quand ?</b>
+                    {[
+                      ['', "Aujourd'hui"],
+                      [dayPlus(1), 'Demain'],
+                    ].map(([d, label]) => (
+                      <button key={label} type="button" className={delivery.date === d ? 'on' : ''} onClick={() => setDelivery((x) => ({ ...x, date: d! }))}>
+                        {label}
+                      </button>
+                    ))}
+                    <input
+                      type="date"
+                      value={delivery.date}
+                      min={dayPlus(0)}
+                      onChange={(e) => setDelivery((x) => ({ ...x, date: e.target.value }))}
+                      title="Autre jour"
+                    />
+                  </div>
+                  <div className="dl-chips">
+                    {SLOTS.map((sl) => (
+                      <button key={sl} type="button" className={delivery.slot === sl ? 'on' : ''} onClick={() => setDelivery((x) => ({ ...x, slot: sl }))}>
+                        {sl}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid2">
+                    <Field label="Frais de livraison (FCFA)">
+                      <input inputMode="numeric" value={delivery.fee} onChange={(e) => setDelivery((d) => ({ ...d, fee: e.target.value }))} placeholder="0" />
+                    </Field>
+                    <Field label="Note pour le livreur">
+                      <input value={delivery.note} maxLength={300} onChange={(e) => setDelivery((d) => ({ ...d, note: e.target.value }))} />
+                    </Field>
+                  </div>
+                  <p className="muted">
+                    Au VALIDER, le bon de livraison s'imprime avec le ticket et la vente apparaît dans Vente › Livraisons du jour.{credit ? ' La part à crédit est à encaisser par le livreur.' : ''}
+                  </p>
+                </>
+              ) : (
+                <p className="muted">Cochez « À livrer » pour porter cette vente chez le client : adresse, créneau, livreur et frais de livraison.</p>
+              )}
+            </div>
+          )}
+
           {pane === 'extra' && (
             <div className="tk-pane">
               <table className="list compact">
@@ -845,6 +1019,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             <div className="tk-sum">
               <span>
                 {totals.itemCount} article{totals.itemCount > 1 ? 's' : ''}
+                {fee > 0 && lines.length > 0 && ` · livraison ${amount(fee)}`}
                 {totals.totalDiscount > 0 && ` · remises −${amount(totals.totalDiscount)}`}
                 {totals.totalPromo > 0 && ` · promotions −${amount(totals.totalPromo)}`}
                 {lines.length > 0 && cashDue < totals.totalTtc && ` · espèces ${amount(cashDue)} (arrondi −${amount(totals.totalTtc - cashDue)})`}
@@ -952,8 +1127,24 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           onClose={() => setDialog(null)}
           onPick={(c) => {
             setCustomer(c);
+            // Livraison déjà cochée : l'adresse et le téléphone viennent de la fiche du client.
+            setDelivery((d) => (d.on ? { ...d, address: d.address || (c.address ?? ''), phone: d.phone || (c.phone ?? '') } : d));
             setDialog(null);
           }}
+        />
+      )}
+      {dialog === 'options' && askOption && (
+        <SupervisorPrompt
+          action={`${askOption.label} Vous n'avez pas ce droit : le code d'un gérant est demandé.`}
+          onCancel={() => setDialog(null)}
+          onConfirm={(pin) =>
+            call('auth.checkSupervisor', pin).then(() => {
+              setOptionsPin(pin);
+              askOption.apply();
+              setAskOption(null);
+              setDialog(null);
+            }, toast.error)
+          }
         />
       )}
       {dialog === 'custPay' && (
@@ -994,6 +1185,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         <SaleSearchDialog
           initialQuery={searchQuery}
           customerId={customer?.id ?? null}
+          opts={saleOpts}
           canCreate={canCreate}
           onClose={() => setDialog(null)}
           onPick={(row) => askQty(row)}

@@ -107,6 +107,10 @@ const MENU_ICONS: Record<string, string> = {
   Administration: '⚙️',
   Aide: '❔',
 };
+
+/** Icône d'un écran : celle du premier menu qui l'ouvre (Magasinier pour le stock). */
+const winIcon = (kind: WinKind) =>
+  kind === 'stock' ? MENU_ICONS['Magasinier']! : (MENU_ICONS[MENUS.find(([, items]) => items.some((it) => it.open?.[0] === kind))?.[0] ?? ''] ?? '▣');
 const MENU_COLORS: Record<string, string> = {
   Fichier: '#64748b',
   Facturation: '#1f7a5c',
@@ -760,24 +764,45 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           ✕
         </button>
       </header>
-      {!onPos && (
-        <div className="crumbs">
-          <button className="link" onClick={() => setActive(null)}>
-            Accueil
-          </button>
-          {activeWin &&
-            (activeWin.crumb ?? WINDOWS[activeWin.kind].label).split(' › ').map((part, i) => (
-              <span key={`${part}-${i}`}>
-                <span className="crumb-sep">›</span>
-                {part}
-              </span>
-            ))}
-          <span className="spacer" />
+      {/* Écrans ouverts, comme des onglets de navigateur : un clic l'affiche, ✕ le ferme. */}
+      <div className="win-tabs" role="tablist">
+        <button className={`win-tab home-tab ${showHome ? 'active' : ''}`} title="Page d'accueil" onClick={() => setActive(null)}>
+          <i aria-hidden>⌂</i>Accueil
+        </button>
+        {wins.map((w) => {
+          const parts = (w.crumb ?? WINDOWS[w.kind].label).split(' › ');
+          return (
+            <div
+              key={w.kind}
+              role="tab"
+              aria-selected={w.kind === active}
+              className={`win-tab ${w.kind === active ? 'active' : ''}`}
+              title={parts.join(' › ')}
+              onClick={() => setActive(w.kind)}
+              onAuxClick={(e) => e.button === 1 && close(w.kind)}
+            >
+              <i aria-hidden>{MENU_ICONS[parts[0]!] ?? winIcon(w.kind)}</i>
+              <span>{parts[parts.length - 1]}</span>
+              <button
+                className="win-tab-x"
+                title="Fermer cet écran"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  close(w.kind);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
+        <span className="spacer" />
+        {!onPos && (
           <button className="link" onClick={() => setHelp('page')}>
             Comment utiliser cette page ?
           </button>
-        </div>
-      )}
+        )}
+      </div>
       <main className="windows">
         {showHome && (
           <section className="home">

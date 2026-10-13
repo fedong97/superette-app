@@ -526,10 +526,6 @@ table.rebate-rules select { min-width: 240px; }
 
 /* 0.31.0 : aide, recherche d'écran, fil d'Ariane, onglets personnalisables, accueil par rôle */
 .quick-tabs { display: flex; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; }
-.crumbs { display: flex; align-items: center; gap: 6px; padding: 5px 14px; background: #f7faf9; border-bottom: 1px solid var(--line); font-size: 14px; font-weight: 700; color: #33415c; }
-.crumbs button.link { font-weight: 700; }
-.crumb-sep { margin: 0 6px; color: var(--muted); }
-.crumbs .spacer { flex: 1; }
 .ctx-menu { position: fixed; z-index: 60; background: #fff; border: 1px solid #c9d1de; border-radius: 8px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2); padding: 4px; display: flex; flex-direction: column; min-width: 240px; }
 .ctx-menu button { border: none; text-align: left; padding: 8px 10px; background: transparent; font-weight: 700; }
 .ctx-menu button:hover:not(:disabled) { background: var(--brand-soft); }
@@ -678,7 +674,6 @@ pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; lin
 
 /* 0.41.0 : nouvelle présentation. Barre verte à gauche, onglets en haut, « Tous les menus ». */
 .desk { display: grid; grid-template-columns: 78px minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; height: 100vh; background: var(--bg); }
-.desk.on-pos { grid-template-rows: auto 1fr auto; }
 .rail { grid-row: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; background: linear-gradient(180deg, var(--brand), var(--brand-dark)); z-index: 40; }
 .rail .menu { position: relative; }
 .rail-logo { width: 50px; height: 50px; padding: 4px; margin-bottom: 8px; border-radius: 14px; border: none; background: #fff !important; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); }
@@ -715,7 +710,6 @@ pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; lin
 .user-chip b { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; }
 .topbar .help-btn { flex: none; border-radius: 50%; width: 34px; height: 34px; padding: 0; border: none; background: var(--gold) !important; color: #3d3100; font-size: 17px; font-weight: 800; }
 .topbar .win-close { flex: none; width: 34px; height: 34px; padding: 0; border-radius: 10px; }
-.desk.on-pos .crumbs { display: none; }
 .statusbar { background: #fff; border-top: 1px solid var(--line); color: var(--muted); }
 .statusbar button.link { color: var(--brand); }
 .all-menus { position: fixed; inset: 0 0 0 78px; z-index: 45; background: var(--bg); overflow: auto; padding: 22px 28px; }
@@ -845,3 +839,16 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: rgb
 .modal.ask p { margin: 0 0 14px; font-size: 15px; line-height: 1.45; white-space: pre-line; }
 .modal.ask input { width: 100%; margin-bottom: 12px; }
 .modal.ask .actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Écrans ouverts en onglets, sous la barre du haut. */
+.win-tabs { grid-column: 2; display: flex; align-items: flex-end; gap: 4px; padding: 6px 12px 0; background: #e3efe8; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
+.win-tabs .spacer { flex: 1; }
+.win-tabs > .link { align-self: center; font-weight: 700; font-size: 13px; white-space: nowrap; padding-bottom: 4px; }
+.win-tab { display: flex; align-items: center; gap: 7px; max-width: 230px; min-height: 36px; padding: 0 6px 0 12px; border: 1px solid transparent; border-bottom: none; border-radius: 10px 10px 0 0; background: rgba(255, 255, 255, 0.45); color: var(--ink); font-size: 13.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.win-tab:hover { background: rgba(255, 255, 255, 0.8); }
+.win-tab.active { background: #fff; border-color: var(--line); box-shadow: inset 0 3px 0 var(--brand), 0 -1px 4px rgba(23, 50, 42, 0.06); color: var(--brand-dark); margin-bottom: -1px; padding-bottom: 1px; }
+.win-tab i { font-style: normal; font-size: 15px; }
+.win-tab span { overflow: hidden; text-overflow: ellipsis; }
+.win-tab.home-tab { padding-right: 12px; }
+.win-tab-x { width: 24px; height: 24px; padding: 0; border: none; border-radius: 6px; background: transparent !important; color: #6b7f76; font-size: 12px; line-height: 1; flex: none; }
+.win-tab-x:hover { background: #fde2e2 !important; color: #b91c1c; }

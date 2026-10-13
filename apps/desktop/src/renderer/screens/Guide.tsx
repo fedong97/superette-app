@@ -211,6 +211,65 @@ export function QuickTabsEditor({ current, available, onSave, onClose }: { curre
   );
 }
 
+/**
+ * Barre verte : menus à afficher (cochés) et leur ordre. Réglages et Aide
+ * restent en bas ; « Tous les menus » retrouve un menu masqué.
+ */
+export function RailEditor({ menus, current, label, onSave, onClose }: { menus: string[]; current: string[]; label: (name: string) => string; onSave: (list: string[] | null) => void; onClose: () => void }) {
+  const [order, setOrder] = useState(() => [...current, ...menus.filter((m) => !current.includes(m))]);
+  const [shown, setShown] = useState(() => new Set(current));
+  const move = (i: number, d: number) => {
+    const j = i + d;
+    if (j < 0 || j >= order.length) return;
+    const next = [...order];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    setOrder(next);
+  };
+  return (
+    <Modal title="Personnaliser la barre latérale" onClose={onClose}>
+      <p className="muted">Cochez les menus à afficher dans la barre verte et rangez-les avec ↑ ↓. Réglages et Aide restent en bas ; « Tous les menus » montre toujours tout.</p>
+      <table className="list compact">
+        <tbody>
+          {order.map((m, i) => (
+            <tr key={m} className={shown.has(m) ? '' : 'inactive'}>
+              <td>
+                <label className="inline">
+                  <input
+                    type="checkbox"
+                    checked={shown.has(m)}
+                    onChange={(e) => {
+                      const next = new Set(shown);
+                      if (e.target.checked) next.add(m);
+                      else next.delete(m);
+                      setShown(next);
+                    }}
+                  />{' '}
+                  {label(m)}
+                </label>
+              </td>
+              <td className="r">
+                <button className="ghost" title="Monter" disabled={i === 0} onClick={() => move(i, -1)}>
+                  ↑
+                </button>
+                <button className="ghost" title="Descendre" disabled={i === order.length - 1} onClick={() => move(i, 1)}>
+                  ↓
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="actions">
+        <button onClick={() => onSave(null)}>Rétablir</button>
+        <button onClick={onClose}>Annuler</button>
+        <button className="primary" onClick={() => onSave(order.filter((m) => shown.has(m)))}>
+          Enregistrer
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 /** Guide de démarrage : les cinq premières choses à faire pour ce rôle, chacune ouvre son écran. */
 export function GettingStarted({ role, canOpen, onOpen, onClose }: { role: keyof typeof GETTING_STARTED; canOpen: (kind: WinKind) => boolean; onOpen: (o: [WinKind, string?]) => void; onClose: () => void }) {
   const steps: GuideStep[] = GETTING_STARTED[role];

@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.43.1',
+    items: [
+      'Barre verte : tous les menus y sont (Fichier, Fabrication, Fournisseurs, Charges, Transferts, Comptabilité, Fiscal en plus). Si l’écran est petit, la barre défile à la molette.',
+      '« ✎ Personnaliser » en bas de la barre (ou Fichier › Personnaliser la barre latérale) : cochez les menus à afficher et rangez-les avec ↑ ↓. Le choix vaut pour chaque utilisateur ; « Rétablir » revient à tous les menus.',
+    ],
+  },
+  {
     version: '0.43.0',
     items: [
       'Bouton ⟳ dans la barre de chaque fenêtre (ou F5) : la page se recharge sans la fermer. À la caisse, F5 ouvre toujours le tiroir.',

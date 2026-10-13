@@ -1053,3 +1053,14 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .inline-pick > select, .inline-pick > input { flex: 1; min-width: 0; }
 .account-picker { max-height: 55vh; overflow: auto; border: 1px solid var(--line, #dde3e0); border-radius: 6px; margin-bottom: 10px; }
 .account-picker table.list { margin: 0; }
+
+/* 0.43.1 : barre verte avec tous les menus, au choix ; le milieu défile si l'écran est petit. */
+.rail { gap: 2px; padding: 8px 0; }
+.rail-logo { width: 46px; height: 46px; margin-bottom: 6px; flex: none; }
+.rail-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; align-items: center; gap: 2px; scrollbar-width: none; }
+.rail-scroll::-webkit-scrollbar { display: none; }
+.rail-item { padding: 4px 2px 3px; font-size: 10px; gap: 1px; flex: none; }
+.rail-item i { font-size: 17px; }
+.rail-item.small { padding: 3px 2px; font-size: 10px; }
+.rail-item.small i { font-size: 15px; }
+.menu-drop.fixed { position: fixed; }

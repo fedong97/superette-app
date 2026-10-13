@@ -24,7 +24,7 @@ import { Staff, type StaffTab } from './screens/Staff';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
-import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
+import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
 import { AskHost, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
@@ -79,7 +79,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs';
+  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
   /** Trait de séparation entre deux groupes, comme dans KONTROL. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -135,9 +135,19 @@ const MENU_COLORS: Record<string, string> = {
   Administration: '#64748b',
   Aide: '#94a3b8',
 };
-/** Menus directement dans la barre verte ; les autres sont dans « Tous les menus ». */
-const RAIL_MENUS = ['Facturation', 'Vente', 'Achats', 'Produit', 'Magasinier', 'Client', 'Trésorerie'];
-const RAIL_LABELS: Record<string, string> = { Facturation: 'Caisse', Vente: 'Ventes', Magasinier: 'Stock', Client: 'Clients', Administration: 'Réglages' };
+/** Réglages et Aide restent en bas de la barre verte ; les autres menus s'y affichent au choix de chacun. */
+const RAIL_FIXED = ['Administration', 'Aide'];
+const RAIL_LABELS: Record<string, string> = {
+  Facturation: 'Caisse',
+  Vente: 'Ventes',
+  Magasinier: 'Stock',
+  Client: 'Clients',
+  Fournisseur: 'Fournisseurs',
+  Charge: 'Charges',
+  Transfert: 'Transferts',
+  Comptabilité: 'Compta',
+  Administration: 'Réglages',
+};
 
 const MENUS: [string, MenuItem[]][] = [
   [
@@ -145,6 +155,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Synchroniser maintenant', action: 'sync' },
       { label: 'Personnaliser les onglets rapides', action: 'tabs' },
+      { label: 'Personnaliser la barre latérale', action: 'rail' },
       { label: "Changer d'utilisateur", action: 'logout' },
       { label: 'Quitter', action: 'quit' },
     ],
@@ -472,7 +483,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Écran « Tous les menus » : chaque menu en tuile, avec tous ses écrans. */
   const [allMenus, setAllMenus] = useState(false);
   const [chooseRegister, setChooseRegister] = useState(false);
-  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | null>(null);
+  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | null>(null);
+  /** Place du menu ouvert depuis la barre verte (elle défile : le menu s'affiche par-dessus). */
+  const [menuAt, setMenuAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
   // Menu du clic droit : sur un onglet rapide (le déplacer, le retirer) ou sur un écran d'un menu (l'épingler).
@@ -646,7 +659,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'quit') return window.close();
-    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs') return setHelp(item.action);
+    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail') return setHelp(item.action);
     if (item.action === 'help') return setHelp('page');
     if (item.action === 'openInvoice') return setFinding(true);
     if (item.action === 'sync') {
@@ -671,8 +684,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   ];
 
   /** Liste d'un menu, ouverte à côté de la barre verte (ou sous le nom de l'utilisateur). */
-  const MenuDrop = ({ name, items, up, right }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean }) => (
-    <div className={`menu-drop ${up ? 'up' : ''} ${right ? 'right' : ''}`} onClick={(e) => e.stopPropagation()}>
+  const MenuDrop = ({ name, items, up, right, at }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean; at?: typeof menuAt }) => (
+    <div
+      className={`menu-drop ${up ? 'up' : ''} ${right ? 'right' : ''} ${at ? 'fixed' : ''}`}
+      style={at ? { left: at.left, top: at.top ?? 'auto', bottom: at.bottom ?? 'auto', maxHeight: `calc(100vh - ${(at.top ?? at.bottom ?? 0) + 10}px)` } : undefined}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="menu-title">{name}</div>
       {items.map((i, n) =>
         i.sep ? (
@@ -697,8 +714,20 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       )}
     </div>
   );
-  const railMenus = visibleMenus.filter(([name]) => RAIL_MENUS.includes(name));
-  const railBottom = visibleMenus.filter(([name]) => name === 'Administration' || name === 'Aide');
+  // Barre verte : les menus choisis par l'utilisateur, dans son ordre ; par défaut tous.
+  const railChoice = prefs.railMenus as string[] | undefined;
+  const railMenus = railChoice
+    ? railChoice.flatMap((n) => visibleMenus.filter(([name]) => name === n && !RAIL_FIXED.includes(name)))
+    : visibleMenus.filter(([name]) => !RAIL_FIXED.includes(name));
+  const railBottom = visibleMenus.filter(([name]) => RAIL_FIXED.includes(name));
+  /** Ouvre un menu de la barre verte à hauteur de son bouton (vers le haut dans la moitié basse de l'écran). */
+  const toggleRailMenu = (name: string, btn: HTMLElement) => {
+    setAllMenus(false);
+    if (menu === name) return setMenu(null);
+    const r = btn.getBoundingClientRect();
+    setMenuAt(r.top > window.innerHeight / 2 ? { left: r.right + 8, bottom: Math.max(10, window.innerHeight - r.bottom) } : { left: r.right + 8, top: r.top });
+    setMenu(name);
+  };
 
   const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : sync.data.pending ? `Serveur : ${sync.data.pending} en attente` : 'Serveur : connecté';
   const activeWin = wins.find((w) => w.kind === active);
@@ -713,26 +742,27 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
           <img src={logo} alt="" />
         </button>
-        {railMenus.map(([name, items]) => (
-          <div key={name} className="menu">
-            <button
-              className={`rail-item ${menu === name ? 'open' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
-                setAllMenus(false);
-                setMenu(menu === name ? null : name);
-                chargesLate.reload();
-                gaps.reload();
-              }}
-            >
-              <i aria-hidden>{MENU_ICONS[name]}</i>
-              {RAIL_LABELS[name] ?? name}
-            </button>
-            {menu === name && <MenuDrop name={name} items={visibleItems(items)} />}
-          </div>
-        ))}
-        <span className="rail-grow" />
+        <div className="rail-scroll" onWheel={() => menu && setMenu(null)}>
+          {railMenus.map(([name, items]) => (
+            <div key={name} className="menu">
+              <button
+                className={`rail-item ${menu === name ? 'open' : ''}`}
+                title={name}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
+                  toggleRailMenu(name, e.currentTarget);
+                  chargesLate.reload();
+                  gaps.reload();
+                }}
+              >
+                <i aria-hidden>{MENU_ICONS[name]}</i>
+                {RAIL_LABELS[name] ?? name}
+              </button>
+              {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
+            </div>
+          ))}
+        </div>
         <button
           className={`rail-item ${allMenus ? 'open' : ''}`}
           title="Tous les menus"
@@ -747,21 +777,23 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           <i aria-hidden>▦</i>
           Tous les menus
         </button>
+        <button className="rail-item small" title="Choisir les menus de cette barre et leur ordre" onClick={() => (setMenu(null), setHelp('rail'))}>
+          <i aria-hidden>✎</i>
+          Personnaliser
+        </button>
         {railBottom.map(([name, items]) => (
           <div key={name} className="menu">
             <button
               className={`rail-item ${menu === name ? 'open' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
-                // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
-                setAllMenus(false);
-                setMenu(menu === name ? null : name);
+                toggleRailMenu(name, e.currentTarget);
               }}
             >
               <i aria-hidden>{MENU_ICONS[name]}</i>
               {RAIL_LABELS[name] ?? name}
             </button>
-            {menu === name && <MenuDrop name={name} items={visibleItems(items)} up />}
+            {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
           </div>
         ))}
       </nav>
@@ -1060,6 +1092,18 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       {help === 'palette' && <CommandPalette entries={paletteEntries} onClose={() => setHelp(null)} />}
       {help === 'guide' && <GettingStarted role={user.role} canOpen={canWin} onOpen={([kind, tab]) => open(kind, tab)} onClose={() => setHelp(null)} />}
       {help === 'news' && <WhatsNew version={state.version} onClose={() => setHelp(null)} />}
+      {help === 'rail' && (
+        <RailEditor
+          menus={visibleMenus.map(([name]) => name).filter((n) => !RAIL_FIXED.includes(n))}
+          current={railMenus.map(([name]) => name)}
+          label={(n) => `${MENU_ICONS[n] ?? ''} ${RAIL_LABELS[n] ?? n}`}
+          onSave={(list) => {
+            savePref('railMenus', list);
+            setHelp(null);
+          }}
+          onClose={() => setHelp(null)}
+        />
+      )}
       {help === 'tabs' && (
         <QuickTabsEditor
           current={quickTabs}

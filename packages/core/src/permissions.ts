@@ -70,6 +70,8 @@ export const PERMISSIONS = {
   sale_hold: { label: 'Mettre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_resume: { label: 'Reprendre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_cancel: { label: 'Annuler une facture (avec le code du gérant)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
+  sale_edit: { label: 'Modifier une facture de la journée (articles et quantités)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
+  sale_cancel_free: { label: 'Annuler ou supprimer une facture sans le code du gérant', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_return: { label: "Retour d'articles et facture d'avoir (avec le code du gérant)", group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_reprint: { label: 'Réimprimer un ticket ou une facture', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_new_article: { label: 'Créer un produit inexistant pendant la facturation', group: 'Facturation', type: 'Fonction', parent: 'articles' },

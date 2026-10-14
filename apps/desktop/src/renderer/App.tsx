@@ -18,7 +18,7 @@ import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
 import { Quotes } from './screens/Quotes';
 import { Purchases, type PurchasesTab } from './screens/Purchases';
-import { SaleDetail, Sales, type SalesTab } from './screens/Sales';
+import { EDIT_SALE_EVENT, SaleDetail, Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
 import { Staff, type StaffTab } from './screens/Staff';
 import { Stock, type StockTab } from './screens/Stock';
@@ -594,6 +594,20 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     // Un écran déjà ouvert revient devant au lieu de s'ouvrir une deuxième fois.
     focus(kind);
   };
+  /** Facture à modifier : elle se recharge dans la fiche au comptant 1, ou à crédit pour une vente à crédit. */
+  const [editReq, setEditReq] = useState<{ kind: WinKind; sale: Result<'sales.editable'> & { id: string }; nonce: number } | null>(null);
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      call('sales.editable', id).then((sale) => {
+        const kind: WinKind = sale.credit ? 'credit' : 'cash1';
+        open(kind, undefined, `Facturation › Modifier la facture ${sale.number}`);
+        setEditReq((r) => ({ kind, sale: { ...sale, id }, nonce: (r?.nonce ?? 0) + 1 }));
+      }, toast.error);
+    };
+    window.addEventListener(EDIT_SALE_EVENT, onEdit);
+    return () => window.removeEventListener(EDIT_SALE_EVENT, onEdit);
+  });
   const close = (kind: WinKind | null) => {
     if (!kind) return;
     setWins(wins.filter((w) => w.kind !== kind));
@@ -851,6 +865,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 vatEnabled={state.station?.store.vat_enabled !== 0}
                 ignoreStock={state.station?.store.ignore_stock === 1}
                 layout={state.posLayout}
+                edit={editReq?.kind === w.kind ? editReq : null}
                 active={w.kind === active}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}

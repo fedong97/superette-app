@@ -808,7 +808,6 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: rgb
 .tk-total span { font-weight: 800; letter-spacing: 0.08em; font-size: 13px; color: #6b7080; }
 .tk-total strong { font-size: 42px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .tk-total strong small { font-size: 14px; color: #8a8f9c; margin-left: 4px; letter-spacing: 0; }
-.tk-total.done strong { color: #9ca3af; }
 .tk-er { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tk-er div { border-radius: 12px; padding: 6px 12px; background: #f1efe8; }
 .tk-er small { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; color: #8a8f9c; }
@@ -917,7 +916,6 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .pc-count { color: #374151; white-space: nowrap; }
 .pc-total { grid-row: 1 / span 2; grid-column: 6; justify-self: end; color: #c62828; font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pc-total small { font-size: 13px; margin-left: 6px; color: #374151; }
-.pc-total.done { color: #1f6f4c; }
 .pc-second { grid-column: 3 / span 2; display: flex; gap: 6px; align-items: center; }
 .pc-second input { width: 100%; }
 .pc-opts { grid-column: 5; display: flex; gap: 6px; align-items: center; white-space: nowrap; }
@@ -988,7 +986,6 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .pv-total span { display: flex; align-items: flex-end; padding: 8px 12px; font-size: 20px; }
 .pv-total b { display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 12px; font-size: 36px; font-weight: 700; border-left: 1px solid #7fa894; font-variant-numeric: tabular-nums; }
 .pv.credit .pv-total { background: #f3dcc0; border-color: #c99a62; }
-.pv-total.done { background: #d6eadf; }
 .pv-entry { display: flex; gap: 6px; padding: 5px 10px; align-items: flex-end; background: #e3e7ea; border-top: 1px solid #c9ced3; border-bottom: 1px solid #c9ced3; flex: none; }
 .pv-entry > label { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: #444; }
 .pv-grow { flex: 1; max-width: 520px; }
@@ -1046,3 +1043,58 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .bc-codes td { vertical-align: middle; }
 @media (max-width: 900px) { .bc-print { grid-template-columns: 1fr; } }
 .tag.internal { background: #e3f3ea; color: var(--brand); font-weight: 700; }
+/* Modèles d'impression : lignes à glisser-déposer (sections, colonnes). */
+.tpl-columns tr[draggable='true'] { cursor: grab; }
+.tpl-columns tr.dragging { opacity: 0.45; }
+.tpl-columns .drag-handle { color: #9ca3af; width: 1.5em; text-align: center; }
+
+/* Saisie des achats : panneau de l'article à gauche, liste à droite. */
+.pe-split { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 8px; }
+@media (max-width: 1000px) { .pe-split { grid-template-columns: 1fr; } }
+.pe-side { background: var(--panel, #fff); border: 2px solid var(--brand); border-radius: 12px; padding: 10px 14px 12px; position: sticky; top: 8px; }
+.pe-side.editing { border-color: #d68a00; background: #fffaf0; }
+.pe-side .picker { margin: 4px 0 8px; }
+.pe-side .field { margin-bottom: 7px; }
+.pe-side input, .pe-side select { width: 100%; box-sizing: border-box; min-width: 0; }
+.pe-side .inline input { flex: 1; }
+.pe-side .inline select { width: auto; }
+.pe-title { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pe-tag { font-size: 11.5px; background: #fde7c3; color: #8a5a00; border-radius: 10px; padding: 2px 8px; font-weight: 600; }
+.pe-info { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
+.pe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.pe-seg { display: flex; margin: 2px 0 8px; }
+.pe-seg button { flex: 1; border-radius: 0; padding: 4px; }
+.pe-seg button:first-child { border-radius: 6px 0 0 6px; }
+.pe-seg button:last-child { border-radius: 0 6px 6px 0; }
+.pe-seg button.on { background: var(--brand); color: var(--brand-ink, #fff); border-color: var(--brand); }
+.pe-cost { background: #eef6f3; border-radius: 8px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 8px; }
+.pe-cost b { font-size: 15px; }
+.pe-required { border: 2px solid #d9534f !important; background: #fff5f5; }
+.pe-net { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+.pe-net small { color: var(--muted); }
+.pe-net b { font-size: 22px; white-space: nowrap; }
+.pe-buttons { display: flex; gap: 8px; margin-top: 8px; }
+.pe-buttons button { flex: 1; }
+.pe-buttons button.primary { flex: 2; }
+.pe-hint { color: var(--muted); font-size: 11.5px; margin: 6px 0 0; }
+.pe-hint kbd { border: 1px solid #bbb; border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; background: #fff; }
+.pe-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.pe-toolbar .muted { margin-left: auto; font-size: 13px; }
+.pe-main { min-width: 0; }
+.pe-scroll { overflow-x: auto; }
+.pe-table td, .pe-table th { padding: 6px 7px; font-size: 13px; }
+.pe-table td.r { white-space: nowrap; }
+.pe-table tr.selected td { background: #e6f2ef; }
+.pe-table tr.editing td { background: #fff3dc; }
+.pe-pill { font-size: 11px; background: #e6f2ef; color: #0f5f58; border-radius: 8px; padding: 1px 5px; margin-left: 4px; }
+
+/* Choix gauche, centre, droite dans l'éditeur de modèles. */
+.align-pick { display: inline-flex; }
+.align-pick button { padding: 1px 7px; border-radius: 0; min-width: 28px; }
+.align-pick button:first-child { border-radius: 6px 0 0 6px; }
+.align-pick button:last-child { border-radius: 0 6px 6px 0; }
+.align-pick button.on { background: var(--brand); color: var(--brand-ink, #fff); border-color: var(--brand); }
+.tpl-columns input.qty { width: 56px; }
+.tpl-columns td:has(.align-pick) { white-space: nowrap; }
+.align-pick button { min-width: 24px; padding: 1px 5px; }
+.sec-align { margin-top: 3px; }

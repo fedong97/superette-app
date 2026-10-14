@@ -35,6 +35,7 @@ export interface SalesRegisterRow {
   methods: string | null;
   original_number: string | null;
   cancel_reason: string | null;
+  hidden: number;
 }
 
 export type SalesAlertKind = 'below_cost' | 'discount' | 'cancelled' | 'return' | 'credit_override';
@@ -137,7 +138,7 @@ export class ControlService extends Base {
     const rows = this.db
       .prepare(
         `SELECT s.id, s.number, s.kind, s.status, s.created_at, r.name AS register_name, u.name AS user_name, COALESCE(c.name, s.client_name) AS customer_name,
-                s.total_ttc, s.total_discount, s.total_promo, o.number AS original_number, s.cancel_reason,
+                s.total_ttc, s.total_discount, s.total_promo, o.number AS original_number, s.cancel_reason, s.hidden,
                 (SELECT group_concat(DISTINCT p.method) FROM sale_payments p WHERE p.sale_id = s.id) AS methods
          FROM sales s JOIN registers r ON r.id = s.register_id JOIN users u ON u.id = s.user_id
          LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN sales o ON o.id = s.original_sale_id
@@ -145,6 +146,8 @@ export class ControlService extends Base {
            AND (@kind IS NULL OR s.kind = @kind) AND (@status IS NULL OR s.status = @status)
            AND (@register IS NULL OR s.register_id = @register) AND (@user IS NULL OR s.user_id = @user)
            AND (@customer IS NULL OR s.customer_id = @customer)
+           -- Factures « supprimées » : seulement avec le filtre Annulés.
+           AND (s.hidden = 0 OR @status = 'cancelled')
            AND (@search IS NULL OR s.number LIKE @like OR c.name LIKE @like OR s.client_name LIKE @like OR s.total_ttc = @amount OR -s.total_ttc = @amount)
          ORDER BY s.created_at DESC LIMIT @limit`,
       )

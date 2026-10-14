@@ -45,6 +45,15 @@ describe('fiche article à la KONTROL', () => {
     // Modifier la fiche sans toucher aux prix d'achat ne les arrondit pas.
     const again = s.catalogue.saveArticle(ctx.userId, { name: 'BIERE MUTZIG 50CL', unit: 'piece', vatRateId: mutzig.vat_rate_id, purchasePrice: 750, salePrice: 1_100 }, mutzig.id);
     expect(again).toMatchObject({ pack_purchase_price: 18_000, pack_cost_price: 18_500, sale_price: 1_100 });
+    // Transport et manutention saisis : 300 + 200 par palette, le revient devient 18 000 + 600.
+    s.stock.receive(ctx, { warehouseId, lines: [{ articleId: mutzig.id, qty: 24_000, unitCost: 750, packCost: 18_000, packUnits: 24_000, extraCost: 600 }] });
+    expect(s.catalogue.getArticle(mutzig.id)).toMatchObject({ pack_purchase_price: 18_000, pack_cost_price: 18_600 });
+    // Saisis par canette (25 par canette), ramenés à la palette.
+    s.stock.receive(ctx, { warehouseId, lines: [{ articleId: mutzig.id, qty: 24_000, unitCost: 750, packCost: 750, packUnits: 1_000, extraCost: 25 }] });
+    expect(s.catalogue.getArticle(mutzig.id)).toMatchObject({ pack_purchase_price: 18_000, pack_cost_price: 18_600 });
+    // Sans frais saisis, l'écart de 600 est gardé.
+    s.stock.receive(ctx, { warehouseId, lines: [{ articleId: mutzig.id, qty: 24_000, unitCost: 800, packCost: 19_200, packUnits: 24_000 }] });
+    expect(s.catalogue.getArticle(mutzig.id)).toMatchObject({ pack_purchase_price: 19_200, pack_cost_price: 19_800 });
   });
 
   it('garde l’unité de stock une fois l’article mouvementé', () => {

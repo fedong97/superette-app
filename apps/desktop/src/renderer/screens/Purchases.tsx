@@ -5,7 +5,8 @@ import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmo
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
-import { type RecLine, RecLinesTable, newRecLine, recLineInput } from './Stock';
+import { type RecLine, newRecLine, recLineInput } from './Stock';
+import { PurchaseEntry } from './purchaseEntry';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
 import { hasVat, tx } from '../tax';
 import { DocPreview } from './docPreview';
@@ -142,21 +143,6 @@ function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: bo
   );
 }
 
-interface EditLine {
-  articleId: string;
-  code: string;
-  name: string;
-  unit: 'piece' | 'kg' | 'litre';
-  ref: string | null;
-  /** Quantité et prix HT dans le conditionnement choisi (`packUnits` unités de détail, en millièmes). */
-  qty: string;
-  cost: string;
-  packUnits: number;
-  /** Ligne reprise d'un bon enregistré : passée au conditionnement d'achat dès qu'on le connaît. */
-  auto?: boolean;
-  disc: string;
-  promo: string;
-}
 
 /** Ligne prête à envoyer : quantité et prix en unités de base, remise et gratuits. */
 function termsInput(l: { name: string; qty: string; cost: string; packUnits: number } & TermsText) {
@@ -164,8 +150,6 @@ function termsInput(l: { name: string; qty: string; cost: string; packUnits: num
   if (typeof t === 'string') throw new Error(`${t} : ${l.name}`);
   return { qty: t.qty, unitCost: t.unitCost, discountBp: t.discountBp, freeQty: t.freeQty, promoBuy: t.promoBuy, promoPay: t.promoPay };
 }
-
-const lineHt = (qty: string, cost: string) => Math.round(((parseQty(qty) ?? 0) * (parseAmount(cost) ?? 0)) / 1000);
 
 /** Les lignes reprises d'un bon passent au conditionnement d'achat quand la quantité tombe juste (2 cartons plutôt que 200 pièces). */
 function useAutoPacks<L extends { articleId: string; qty: string; cost: string; packUnits: number; auto?: boolean }>(
@@ -207,6 +191,32 @@ function PackCell<L extends { qty: string; cost: string; packUnits: number; auto
   );
 }
 
+/** Lignes d'un bon enregistré, remises dans le conditionnement d'achat quand la quantité tombe juste. */
+async function orderLines(order: Order): Promise<RecLine[]> {
+  return Promise.all(
+    order.lines.map(async (l) => {
+      const a = await call('catalogue.get', l.article_id);
+      const promo = Boolean(l.promo_buy && l.promo_pay !== null);
+      // Gratuits sans promo : le bonus saisi en plus de la quantité payée.
+      const bonus = promo ? 0 : l.free_qty;
+      const paid = l.qty - bonus;
+      let units = unitsFor(paid, packChoices(a), purchaseUnits(a));
+      if (bonus % units) units = 1000;
+      const t = termsFrom(l);
+      return {
+        ...newRecLine(a),
+        supplierRef: l.supplier_ref,
+        qty: num((paid * 1000) / units),
+        cost: String(Math.round((l.unit_cost * units) / 1000)),
+        packUnits: units,
+        bonus: bonus ? num((bonus * 1000) / units) : '',
+        ...t,
+        discType: t.disc && t.promo ? undefined : t.promo ? 'promo' : 'pct',
+      };
+    }),
+  );
+}
+
 function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: string | null) => void }) {
   const toast = useToast();
   const can = useCan();
@@ -214,28 +224,20 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
   const [warehouseId, setWarehouseId] = useState(order?.warehouse_id ?? '');
   const [expected, setExpected] = useState(order?.expected_date ?? '');
   const [notes, setNotes] = useState(order?.notes ?? '');
-  const [lines, setLines] = useState<EditLine[]>(
-    order?.lines.map((l) => ({ articleId: l.article_id, code: l.article_code, name: l.article_name, unit: l.unit, ref: l.supplier_ref, qty: num(l.qty), cost: String(l.unit_cost), packUnits: 1000, auto: true, ...termsFrom(l) })) ?? [],
-  );
-  const [packs, remember] = useArticlePacks(lines.map((l) => l.articleId));
-  useAutoPacks(lines, setLines, packs);
-  const update = (i: number, patch: Partial<EditLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const [lines, setLines] = useState<RecLine[]>([]);
+  useEffect(() => {
+    if (order) orderLines(order).then(setLines, (err) => toast.error(err));
+  }, [order?.id]);
   const total = lines.reduce((t, l) => t + lineNet(l), 0);
 
-  const add = async (a: Result<'catalogue.get'>) => {
-    // Prix négocié et colisage du fournisseur choisi, sinon dernier prix d'achat ;
-    // la ligne est saisie dans le conditionnement d'achat (1 carton au prix du carton).
-    remember(a.id, a);
+  /** Prix négocié et colisage du fournisseur choisi, sinon dernier prix d'achat ; saisie dans le conditionnement d'achat. */
+  const prepare = async (a: Result<'catalogue.get'>): Promise<RecLine> => {
     const refs = await call('suppliers.ofArticle', a.id);
     const ref = refs.find((r) => r.supplier_id === supplierId);
-    const unitCost = ref?.unit_cost || a.purchase_price || 0;
     const baseQty = ref?.pack_qty ?? purchaseUnits(a);
     const units = unitsFor(baseQty, packChoices(a), purchaseUnits(a));
-    const cost = ref?.unit_cost ? String(Math.round((unitCost * units) / 1000)) : packCostText(a, units);
-    setLines([
-      ...lines,
-      { articleId: a.id, code: a.code, name: a.name, unit: a.unit, ref: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units, ...noTerms },
-    ]);
+    const cost = ref?.unit_cost ? String(Math.round((ref.unit_cost * units) / 1000)) : packCostText(a, units);
+    return { ...newRecLine(a), supplierRef: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units };
   };
 
   const save = async (send: boolean) => {
@@ -245,7 +247,11 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         warehouseId,
         expectedDate: expected || null,
         notes: notes || null,
-        lines: lines.map((l) => ({ articleId: l.articleId, ...termsInput(l) })),
+        lines: lines.map((l) => {
+          const t = lineTerms(l);
+          if (typeof t === 'string') throw new Error(`${t} : ${l.article.name}`);
+          return { articleId: l.article.id, qty: t.qty, unitCost: t.unitCost, discountBp: t.discountBp, freeQty: t.freeQty, promoBuy: t.promoBuy, promoPay: t.promoPay };
+        }),
       };
       if (!supplierId) throw new Error('Choisissez le fournisseur');
       let saved = order ? await call('purchases.updateOrder', order.id, input) : await call('purchases.createOrder', input);
@@ -267,65 +273,23 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
           <input type="date" value={expected} onChange={(e) => setExpected(e.target.value)} />
         </Field>
       </div>
-      <ArticlePicker placeholder="Ajouter un article : scanner ou rechercher" onPick={(a) => void add(a)} />
-      {lines.length > 0 && (
-        <table className="list">
-          <thead>
-            <tr>
-              <th>Réf. fournisseur</th>
-              <th>Article</th>
-              <th>Quantité</th>
-              <th>Conditionnement</th>
-              <th>{tx('PU HT')}</th>
-              <th>Remise %</th>
-              <th>Promo N/M</th>
-              <th className="r">{tx('Total HT')}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => (
-              <tr key={i}>
-                <td>{l.ref}</td>
-                <td>
-                  {l.name} <small className="muted">{l.code}</small>
-                </td>
-                <td>
-                  <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
-                </td>
-                <td>
-                  <PackCell line={l} a={packs.get(l.articleId)} onChange={(p) => update(i, p)} />
-                </td>
-                <td>
-                  <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
-                </td>
-                <TermsCells line={l} onChange={(p) => update(i, p)} />
-                <td className="r">{fcfa(lineNet(l))}</td>
-                <td>
-                  <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <Field label="Notes pour le fournisseur">
-        <input value={notes} onChange={(e) => setNotes(e.target.value)} />
-      </Field>
-      <div className="actions">
-        <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
-        <button onClick={() => onDone(order?.id ?? null)}>Retour</button>
-        <button disabled={!lines.length} onClick={() => void save(false)}>
-          Enregistrer le brouillon
-        </button>
-        {can('order_close') && (
-          <button className="primary" disabled={!lines.length} onClick={() => void save(true)}>
-            Enregistrer et envoyer
+      <PurchaseEntry lines={lines} setLines={setLines} order prepare={prepare}>
+        <Field label="Notes pour le fournisseur">
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+        <div className="actions">
+          <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
+          <button onClick={() => onDone(order?.id ?? null)}>Retour</button>
+          <button disabled={!lines.length} onClick={() => void save(false)}>
+            Enregistrer le brouillon
           </button>
-        )}
-      </div>
+          {can('order_close') && (
+            <button className="primary" disabled={!lines.length} onClick={() => void save(true)}>
+              Enregistrer et envoyer
+            </button>
+          )}
+        </div>
+      </PurchaseEntry>
     </div>
   );
 }
@@ -1153,8 +1117,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           <input value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
       </div>
-      <ArticlePicker placeholder="Ajouter un article : scanner ou rechercher" onPick={(a) => setLines([...lines, newRecLine(a)])} />
-      <RecLinesTable lines={lines} setLines={setLines} />
+      <PurchaseEntry lines={lines} setLines={setLines}>
       {lines.length > 0 && (
         <div className="direct-foot">
           <div>
@@ -1266,6 +1229,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           Enregistrer la facture et la réception
         </button>
       </div>
+      </PurchaseEntry>
     </div>
   );
 }

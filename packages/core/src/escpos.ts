@@ -13,6 +13,10 @@ export type ReceiptLine =
   | { t: 'row'; left: string; right: string; bold?: boolean; big?: boolean; indent?: number }
   | { t: 'rule' }
   | { t: 'feed' }
+  /** Espace vertical entre deux sections, en mm. */
+  | { t: 'space'; mm: number }
+  /** Interligne des lignes suivantes, en % de l'interligne normal (100). */
+  | { t: 'spacing'; pct: number }
   /**
    * Image centrée (logo du magasin) : `src` est une data URL pour l'impression
    * par le pilote ; `raster` est l'image en noir et blanc (1 bit par point,
@@ -153,6 +157,12 @@ export function receiptToEscPos(receipt: Receipt, opts: EscPosOptions): Uint8Arr
       text('-'.repeat(columns));
     } else if (line.t === 'feed') {
       out.push(0x0a);
+    } else if (line.t === 'space') {
+      // Avance du papier en points (8 points par mm à 203 dpi).
+      for (let dots = Math.round(line.mm * 8); dots > 0; dots -= 255) out.push(ESC, 0x4a, Math.min(255, dots));
+    } else if (line.t === 'spacing') {
+      if (line.pct === 100) out.push(ESC, 0x32);
+      else out.push(ESC, 0x33, Math.max(0, Math.min(255, Math.round((30 * line.pct) / 100))));
     } else if (line.t === 'image') {
       // Sans image noir et blanc préparée, le logo n'est pas imprimé.
       if (!line.raster) continue;
@@ -173,6 +183,7 @@ export function receiptToEscPos(receipt: Receipt, opts: EscPosOptions): Uint8Arr
     }
   }
   style(false, false, 0);
+  out.push(ESC, 0x32);
   if (opts.cut !== false) out.push(ESC, 0x64, 4, GS, 0x56, 1);
   else out.push(ESC, 0x64, 2);
   return Uint8Array.from(out);
@@ -184,6 +195,8 @@ export function receiptToText(receipt: Receipt, columns: number, codepage: Codep
   for (const line of receipt) {
     if (line.t === 'rule') lines.push('-'.repeat(columns));
     else if (line.t === 'feed') lines.push('');
+    else if (line.t === 'space') lines.push(...Array<string>(Math.max(1, Math.round(line.mm / 4))).fill(''));
+    else if (line.t === 'spacing') continue;
     else if (line.t === 'image') lines.push('[logo]'.padStart(Math.floor((columns + 6) / 2)));
     else if (line.t === 'text') {
       const width = line.big ? Math.floor(columns / 2) : columns;

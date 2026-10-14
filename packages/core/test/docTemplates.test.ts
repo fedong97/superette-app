@@ -3,6 +3,7 @@ import {
   BUILTIN_TEMPLATES,
   effectiveTemplates,
   mergeStoreSettings,
+  docSections,
   normalizeTemplate,
   parcelCount,
   receiptToText,
@@ -69,6 +70,78 @@ describe('modèles d’impression', () => {
     expect(html).toContain('size: 210mm 297mm');
   });
 
+  it('réimpression : filigrane DUPLICATA, sauf si le modèle ne l’affiche pas', () => {
+    const d = sampleDocData('cash');
+    expect(renderDocHtml(builtin('invoice-a4-cash'), d)).not.toContain('class="wm"');
+    d.doc.duplicate = true;
+    for (const id of ['invoice-a4-cash', 'invoice-listing-cash', 'invoice-ticket-cash']) expect(renderDocHtml(builtin(id), d)).toContain('<div class="wm">DUPLICATA</div>');
+    const off = { ...builtin('invoice-a4-cash'), footer: { ...builtin('invoice-a4-cash').footer, duplicate: false } };
+    expect(renderDocHtml(off, d)).not.toContain('DUPLICATA');
+  });
+
+  it('marges gauche et droite, largeur imprimée, interlignes et ordre des sections', () => {
+    const base = builtin('invoice-ticket-cash');
+    const t = normalizeTemplate({
+      ...base,
+      page: { ...base.page, marginLeft: 1, marginRight: 6, printWidth: 70, lineSpacing: 150, sectionGap: 3 },
+      sections: [{ key: 'footer', space: 5 }, { key: 'lines', space: 0 }],
+    });
+    expect(docSections(t).map((x) => x.key)).toEqual(['footer', 'lines', 'header', 'title', 'totals', 'payments']);
+    const html = renderDocHtml(t, sampleDocData('cash'));
+    expect(html).toContain('size: 70mm auto');
+    expect(html).toContain('padding: 0 6mm 0 1mm');
+    expect(html).toContain('font: 11px/2.02');
+    // Ticket ESC/POS : interligne en tête, puis le pied d'abord (5 mm au-dessus), et 3 mm entre les sections.
+    const r = renderDocTicket(t, sampleDocData('cash'));
+    expect(r[0]).toEqual({ t: 'spacing', pct: 150 });
+    expect(r[1]).toEqual({ t: 'space', mm: 5 });
+    expect(r.filter((l) => l.t === 'space').map((l) => (l as { mm: number }).mm)).toEqual([5, 3, 3, 3, 3, 3]);
+    const a4 = renderDocHtml({ ...builtin('invoice-a4-cash'), sections: [{ key: 'totals', space: 0 }] }, sampleDocData('cash'));
+    expect(a4.indexOf('sec-totals')).toBeLessThan(a4.indexOf('sec-header'));
+  });
+
+  it('signatures du ticket côte à côte : la première à gauche, la seconde à droite', () => {
+    const base = builtin('invoice-ticket-cash-boxed');
+    const t = normalizeTemplate({ ...base, footer: { ...base.footer, signatures: true, signLeft: 'Le client', signRight: 'caissier', sign3: '', sign4: 'Le livreur' } });
+    const html = renderDocHtml(t, sampleDocData('cash'));
+    expect(html).toContain('<div class="signs"><span>Le client :</span><span>caissier :</span></div>');
+    expect(html).toContain('<div class="signs"><span></span><span>Le livreur :</span></div>');
+    const r = renderDocTicket(t, sampleDocData('cash'));
+    expect(r).toContainEqual({ t: 'row', left: 'Le client :', right: 'caissier :' });
+    expect(r).toContainEqual({ t: 'text', text: 'Le livreur :', align: 'right' });
+    const text = receiptToText(r, 32);
+    expect(text).toMatch(/Le client :\s+caissier :/);
+    const plain = normalizeTemplate({ ...builtin('invoice-ticket-cash'), footer: { ...builtin('invoice-ticket-cash').footer, signatures: true, signLeft: 'Le client', signRight: 'Le caissier' } });
+    expect(renderDocTicket(plain, sampleDocData('cash'))).toContainEqual({ t: 'row', left: 'Le client :', right: 'Le caissier :' });
+  });
+
+  it('alignement par section, par ligne et par colonne', () => {
+    const base = builtin('invoice-ticket-cash');
+    const t = normalizeTemplate({
+      ...base,
+      sections: [{ key: 'header', space: 0, align: 'left' }, { key: 'title', space: 0, align: 'right' }, { key: 'footer', space: 0, align: 'bad' }],
+      align: { storeName: 'center', thanks: 'right', nope: 'left', address: 'sideways' },
+    });
+    expect(t.align).toEqual({ storeName: 'center', thanks: 'right' });
+    expect(docSections(t).find((x) => x.key === 'footer')!.align).toBeUndefined();
+    const d = sampleDocData('cash');
+    const r = renderDocTicket(t, d);
+    const line = (text: string) => r.find((l) => l.t === 'text' && l.text.includes(text)) as { align?: string };
+    // Le nom garde le centre choisi, le reste de l'en-tête suit la section (gauche).
+    expect(line(d.store.name).align).toBe('center');
+    expect(line(`NIU : ${d.store.niu}`).align).toBe('left');
+    // Section du titre à droite : le numéro suit.
+    expect(line(d.doc.number).align).toBe('right');
+    expect(renderDocHtml(t, d)).toMatch(/<div class="r">(N°|Ticket) /);
+    // Colonne alignée au centre dans le ticket encadré et en A4 ; section alignée en HTML.
+    const boxed = builtin('invoice-ticket-cash-boxed');
+    expect(renderDocHtml(normalizeTemplate({ ...boxed, sections: [{ key: 'title', space: 0, align: 'right' }] }), d)).toContain('class="sec sec-title" style="text-align:right"');
+    const centered = normalizeTemplate({ ...boxed, columns: boxed.columns.map((c) => (c.key === 'unitPrice' ? { ...c, align: 'center' } : c)) });
+    expect(renderDocHtml(centered, d)).toMatch(/<th class="c">P\.U\.<\/th>/);
+    const a4 = normalizeTemplate({ ...builtin('invoice-a4-cash'), columns: builtin('invoice-a4-cash').columns.map((c) => (c.key === 'label' ? { ...c, align: 'right' } : c)) });
+    expect(renderDocHtml(a4, d)).toContain(`<td class="r">${d.lines[0]!.label}</td>`);
+  });
+
   it('magasin sans TVA : ni colonne ni total de TVA', () => {
     const d = sampleDocData('cash', { vatEnabled: false });
     d.lines = d.lines.map((l) => ({ ...l, vatRate: 0 }));
@@ -107,13 +180,14 @@ describe('modèles d’impression', () => {
     d.doc.duplicate = true;
     const text = receiptToText(renderDocTicket(builtin('invoice-ticket-credit'), d), 48);
     expect(text).toContain('FACTURE À TERME');
-    expect(text).toContain('DUPLICATA');
+    expect(text).toContain('D U P L I C A T A');
     expect(text).toContain('N° DLA1-1-000123');
     expect(text).toContain('Compte : C0012');
     expect(text).toMatch(/Reste à payer\s+19 950/);
     expect(text).toContain('Le client :');
     // Le même modèle en aperçu HTML.
-    expect(renderDocHtml(builtin('invoice-ticket-credit'), d)).toContain('size: 80mm auto');
+    // Rouleau de 80 mm : la tête n'imprime que sur 72 mm, la page s'y tient.
+    expect(renderDocHtml(builtin('invoice-ticket-credit'), d)).toContain('size: 72mm auto');
   });
 
   it('facture listing (F7) : encadrée, papier continu, cases DATE / CLIENT, montant en lettres, nombre de colis, net à payer', () => {

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FEDO Serveur</title>
+<style>
+  :root {
+    --vert: #1f7a4d; --vert-fonce: #155c39; --vert-clair: #e7f4ec;
+    --fond: #f4f5f7; --carte: #fff; --texte: #1d2430; --gris: #667085; --ligne: #e4e7ec;
+    --rouge: #b42318; --rouge-clair: #fef3f2; --orange: #b54708; --orange-clair: #fffaeb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 "Segoe UI", system-ui, sans-serif; background: var(--fond); color: var(--texte); }
+  header { background: var(--vert); color: #fff; padding: 0 20px; display: flex; align-items: center; gap: 18px; min-height: 56px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; }
+  header .etat { margin-left: auto; font-size: 13px; opacity: .95; display: flex; align-items: center; gap: 8px; }
+  header .etat button { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.6); }
+  nav { display: flex; gap: 2px; flex-wrap: wrap; }
+  nav button { background: transparent; border: 0; color: #fff; padding: 17px 12px; font-size: 14px; cursor: pointer; border-bottom: 3px solid transparent; border-radius: 0; }
+  nav button.actif { border-bottom-color: #fff; font-weight: 600; }
+  main { max-width: 1150px; margin: 0 auto; padding: 20px 16px 60px; }
+  h2 { font-size: 20px; margin: 0 0 14px; }
+  h3 { font-size: 16px; margin: 22px 0 10px; }
+  .cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .carte { background: var(--carte); border: 1px solid var(--ligne); border-radius: 10px; padding: 14px 16px; }
+  .carte .titre { color: var(--gris); font-size: 13px; }
+  .carte .valeur { font-size: 24px; font-weight: 600; margin-top: 2px; }
+  .carte .detail { color: var(--gris); font-size: 13px; margin-top: 2px; }
+  .bloc { background: var(--carte); border: 1px solid var(--ligne); border-radius: 10px; padding: 16px; margin-bottom: 16px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--ligne); vertical-align: top; }
+  th { color: var(--gris); font-weight: 600; font-size: 13px; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.nombre, th.nombre { text-align: right; white-space: nowrap; }
+  .pastille { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .ok { background: var(--vert-clair); color: var(--vert-fonce); }
+  .non { background: #f2f4f7; color: var(--gris); }
+  .alerte { background: var(--orange-clair); color: var(--orange); }
+  .erreur { background: var(--rouge-clair); color: var(--rouge); }
+  button, .bouton { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 7px; border: 1px solid var(--ligne); background: #fff; color: var(--texte); cursor: pointer; text-decoration: none; display: inline-block; }
+  button.principal { background: var(--vert); border-color: var(--vert); color: #fff; }
+  button.danger { color: var(--rouge); border-color: #fda29b; }
+  button:disabled { opacity: .55; cursor: default; }
+  input, select { font: inherit; padding: 7px 10px; border: 1px solid #d0d5dd; border-radius: 7px; background: #fff; min-width: 0; }
+  label { display: block; font-size: 13px; color: var(--gris); margin-bottom: 4px; }
+  .ligne { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .ligne > div { min-width: 0; }
+  .muted { color: var(--gris); }
+  .cle { font: 600 22px/1.2 Consolas, monospace; letter-spacing: 1px; background: var(--vert-clair); color: var(--vert-fonce); padding: 8px 14px; border-radius: 8px; display: inline-block; word-break: break-all; }
+  code { font-family: Consolas, monospace; background: #f2f4f7; padding: 1px 6px; border-radius: 5px; }
+  .connexion { max-width: 380px; margin: 70px auto; }
+  .connexion input { width: 100%; margin-bottom: 12px; }
+  .message { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texte); color: #fff; padding: 10px 18px; border-radius: 8px; display: none; z-index: 10; max-width: calc(100% - 32px); }
+  .etapes li { margin-bottom: 6px; }
+  @media (max-width: 700px) { header .etat { margin-left: 0; } nav button { padding: 10px 8px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>FEDO Serveur</h1>
+  <nav id="menu" hidden></nav>
+  <div class="etat" id="etat"></div>
+</header>
+<main id="page"><p class="muted">Chargement…</p></main>
+<div id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var page = document.getElementById('page');
+  var menu = document.getElementById('menu');
+  var etat = document.getElementById('etat');
+  var onglet = 'accueil';
+  var minuterie = null;
+  var groupes = [];
+  var dernier = null;
+
+  var ONGLETS = [
+    ['accueil', 'Accueil'], ['postes', 'Postes'], ['activite', 'Activité'],
+    ['ventes', 'Ventes'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
+  ];
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fcfa(n) { return Math.round(Number(n) || 0).toLocaleString('fr-FR') + ' FCFA'; }
+  function date(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+  function depuis(v) {
+    if (!v) return 'jamais';
+    var s = Math.round((Date.now() - new Date(v).getTime()) / 1000);
+    if (s < 60) return 'il y a ' + Math.max(s, 0) + ' s';
+    if (s < 3600) return 'il y a ' + Math.round(s / 60) + ' min';
+    if (s < 86400) return 'il y a ' + Math.round(s / 3600) + ' h';
+    return 'le ' + date(v);
+  }
+  function taille(o) {
+    if (o > 1048576) return (o / 1048576).toFixed(1).replace('.', ',') + ' Mo';
+    return Math.max(1, Math.round(o / 1024)) + ' Ko';
+  }
+  function toast(t) {
+    var el = document.getElementById('toast');
+    el.textContent = t;
+    el.style.display = 'block';
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.style.display = 'none'; }, 4000);
+  }
+
+  function api(chemin, options) {
+    options = options || {};
+    var init = { method: options.method || 'GET', headers: {}, credentials: 'same-origin' };
+    if (options.body !== undefined) {
+      init.headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(options.body);
+    }
+    return fetch('/admin/api/' + chemin, init).then(function (r) {
+      return r.text().then(function (t) {
+        var data = null;
+        try { data = t ? JSON.parse(t) : null; } catch (e) { data = null; }
+        if (r.status === 401 && chemin.indexOf('login') < 0 && chemin.indexOf('first-password') < 0) {
+          demarrer();
+          throw new Error('Connectez-vous');
+        }
+        if (!r.ok) {
+          var m = data && data.message;
+          throw new Error(Array.isArray(m) ? m.join(', ') : (m || ('Erreur ' + r.status)));
+        }
+        return data;
+      });
+    });
+  }
+
+  function action(bouton, travail, reussite) {
+    if (bouton) bouton.disabled = true;
+    return travail().then(function (r) {
+      if (reussite) toast(reussite);
+      return r;
+    }).catch(function (e) {
+      toast(e.message);
+    }).then(function (r) {
+      if (bouton) bouton.disabled = false;
+      return r;
+    });
+  }
+
+  // ——— Connexion ———
+
+  function demarrer() {
+    clearInterval(minuterie);
+    api('session').then(function (s) {
+      if (s.authenticated) return ouvrir();
+      menu.hidden = true;
+      etat.innerHTML = '';
+      if (!s.hasPassword && s.canChoose) {
+        page.innerHTML = '<div class="bloc connexion"><h2>Bienvenue</h2>' +
+          '<p>Choisissez un mot de passe pour cette interface. Il sera demandé pour la consulter depuis un autre PC ou un téléphone.</p>' +
+          '<form id="f"><label>Mot de passe (6 caractères minimum)</label><input type="password" id="p1" autocomplete="new-password" required>' +
+          '<label>Le même, encore une fois</label><input type="password" id="p2" autocomplete="new-password" required>' +
+          '<button class="principal" type="submit">Continuer</button></form></div>';
+        document.getElementById('f').onsubmit = function (e) {
+          e.preventDefault();
+          var p1 = document.getElementById('p1').value;
+          if (p1 !== document.getElementById('p2').value) return toast('Les deux mots de passe ne sont pas les mêmes');
+          action(e.submitter, function () { return api('first-password', { method: 'POST', body: { password: p1 } }); }).then(function (r) { if (r) ouvrir(); });
+        };
+      } else if (!s.hasPassword) {
+        page.innerHTML = '<div class="bloc connexion"><h2>FEDO Serveur</h2><p>Aucun mot de passe n\'est encore choisi. Ouvrez FEDO Serveur sur le PC du serveur pour en choisir un (serveur PostgreSQL : variable ADMIN_PASSWORD).</p></div>';
+      } else {
+        page.innerHTML = '<div class="bloc connexion"><h2>Connexion</h2>' +
+          '<form id="f"><label>Mot de passe de l\'interface</label><input type="password" id="p" autocomplete="current-password" autofocus required>' +
+          '<button class="principal" type="submit">Se connecter</button></form></div>';
+        document.getElementById('f').onsubmit = function (e) {
+          e.preventDefault();
+          var p = document.getElementById('p').value;
+          action(e.submitter, function () { return api('login', { method: 'POST', body: { password: p } }); }).then(function (r) { if (r) ouvrir(); });
+        };
+      }
+    }).catch(function (e) {
+      page.innerHTML = '<div class="message erreur">Le serveur ne répond pas : ' + esc(e.message) + '</div>';
+    });
+  }
+
+  function ouvrir() {
+    menu.hidden = false;
+    menu.innerHTML = ONGLETS.map(function (o) {
+      return '<button data-o="' + o[0] + '"' + (o[0] === onglet ? ' class="actif"' : '') + '>' + o[1] + '</button>';
+    }).join('');
+    menu.onclick = function (e) {
+      var o = e.target.getAttribute('data-o');
+      if (o) { onglet = o; ouvrir(); }
+    };
+    etat.innerHTML = '<span id="en-marche"></span><button id="sortir">Se déconnecter</button>';
+    document.getElementById('sortir').onclick = function () { api('logout', { method: 'POST' }).then(demarrer); };
+    if (dernier) marquerEnMarche(dernier);
+    clearInterval(minuterie);
+    afficher();
+    // L'accueil, les postes et l'activité se mettent à jour tout seuls.
+    minuterie = setInterval(function () {
+      if (onglet === 'accueil' || onglet === 'postes' || onglet === 'activite') afficher(true);
+    }, 10000);
+  }
+
+  function afficher(silencieux) {
+    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, sauvegardes: vueSauvegardes, reglages: vueReglages };
+    var o = onglet;
+    if (!silencieux) page.innerHTML = '<p class="muted">Chargement…</p>';
+    vues[o]().then(function (html) {
+      if (o !== onglet || html === null) return;
+      page.innerHTML = html;
+      branchements[o] && branchements[o]();
+    }).catch(function (e) {
+      if (!silencieux) page.innerHTML = '<div class="message erreur">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function apercu() {
+    return api('overview').then(function (o) {
+      dernier = o;
+      marquerEnMarche(o);
+      return o;
+    });
+  }
+  function marquerEnMarche(o) {
+    var el = document.getElementById('en-marche');
+    if (el) el.innerHTML = '<span class="pastille ok">Serveur en marche</span>' + (o.version ? ' version ' + esc(o.version) : '');
+  }
+
+  function etatSauvegarde(b) {
+    if (!b.available) return '<span class="pastille non">PostgreSQL</span>';
+    if (b.error) return '<span class="pastille erreur">Échec</span>';
+    if (!b.last) return '<span class="pastille alerte">Aucune</span>';
+    var age = Date.now() - new Date(b.last.at).getTime();
+    return '<span class="pastille ' + (age < 36 * 3600000 ? 'ok' : 'alerte') + '">' + esc(depuis(b.last.at)) + '</span>';
+  }
+
+  // ——— Accueil ———
+
+  function vueAccueil() {
+    return apercu().then(function (o) {
+      var actifs = o.devices.filter(function (d) { return !d.revoked; });
+      var enLigne = actifs.filter(function (d) { return d.online; }).length;
+      var ventes = o.stores.reduce(function (s, x) { return s + x.sales; }, 0);
+      var total = o.stores.reduce(function (s, x) { return s + x.total; }, 0);
+      var h = '<h2>Accueil</h2><div class="cartes">' +
+        '<div class="carte"><div class="titre">Postes en ligne</div><div class="valeur">' + enLigne + ' / ' + actifs.length + '</div><div class="detail">PC reliés au serveur</div></div>' +
+        '<div class="carte"><div class="titre">Ventes du jour</div><div class="valeur">' + fcfa(total) + '</div><div class="detail">' + ventes + ' ticket' + (ventes > 1 ? 's' : '') + ', tous magasins</div></div>' +
+        '<div class="carte"><div class="titre">Opérations reçues aujourd\'hui</div><div class="valeur">' + o.events.today.toLocaleString('fr-FR') + '</div><div class="detail">' + o.events.total.toLocaleString('fr-FR') + ' en tout</div></div>' +
+        '<div class="carte"><div class="titre">Dernière sauvegarde</div><div class="valeur" style="font-size:18px;margin-top:6px">' + etatSauvegarde(o.backups) + '</div><div class="detail">' + (o.backups.available ? o.backups.count + ' sauvegarde' + (o.backups.count > 1 ? 's' : '') + ' gardée' + (o.backups.count > 1 ? 's' : '') : 'gérée par PostgreSQL') + '</div></div>' +
+        '</div>';
+      if (!actifs.length) {
+        h += '<div class="bloc"><h3 style="margin-top:0">Relier le premier PC</h3><ol class="etapes">' +
+          '<li>Sur le PC principal, ouvrez FEDO Gestion avec le compte administrateur.</li>' +
+          '<li>Allez dans <b>Administration › Serveur central</b>.</li>' +
+          '<li>Adresse du serveur : ' + adresses(o) + '</li>' +
+          '<li>Clé d\'enrôlement : <span class="cle">' + esc(o.enrollmentKey) + '</span></li>' +
+          '<li>Cliquez sur <b>Relier ce PC au serveur</b>. Les autres PC rejoignent ensuite le magasin avec le code d\'activation de leur caisse.</li></ol></div>';
+      }
+      h += '<div class="bloc"><h3 style="margin-top:0">Magasins aujourd\'hui</h3>';
+      if (!o.stores.length) h += '<p class="muted">Aucun magasin relié pour l\'instant.</p>';
+      else {
+        h += '<table><thead><tr><th>Magasin</th><th class="nombre">Tickets</th><th class="nombre">Chiffre du jour</th><th class="nombre">Retours</th><th>Dernière vente</th></tr></thead><tbody>' +
+          o.stores.map(function (s) {
+            return '<tr><td>' + esc(s.name) + '</td><td class="nombre">' + s.sales + '</td><td class="nombre">' + fcfa(s.total) + '</td><td class="nombre">' + (s.returns ? fcfa(s.returns) : '—') + '</td><td>' + esc(s.lastSale ? depuis(s.lastSale) : '—') + '</td></tr>';
+          }).join('') + '</tbody></table>';
+      }
+      h += '</div>' + tablePostes(o, false);
+      return h;
+    });
+  }
+
+  function adresses(o) {
+    var liste = ['http://localhost:' + o.port + ' (sur ce PC)'].concat(o.addresses.map(function (a) {
+      return a + (/^http:\/\/100\./.test(a) ? ' (Tailscale)' : ' (autres PC du réseau)');
+    }));
+    return liste.map(function (a) { return '<code>' + esc(a) + '</code>'; }).join(' ou ');
+  }
+
+  function tablePostes(o, actions) {
+    var liste = actions ? o.devices : o.devices.filter(function (d) { return !d.revoked; });
+    var h = '<div class="bloc"><h3 style="margin-top:0">Postes</h3>';
+    if (!liste.length) return h + '<p class="muted">Aucun PC relié.</p></div>';
+    h += '<table><thead><tr><th>PC</th><th>Magasin</th><th>Caisse</th><th>État</th><th>Dernière synchronisation</th>' + (actions ? '<th>Relié le</th><th></th>' : '') + '</tr></thead><tbody>';
+    h += liste.map(function (d) {
+      var pastille = d.revoked ? '<span class="pastille non">Délié</span>' : d.online ? '<span class="pastille ok">En ligne</span>' : '<span class="pastille alerte">Hors ligne</span>';
+      return '<tr><td>' + esc(d.name) + '</td><td>' + esc(d.store) + '</td><td>' + esc(d.register) + '</td><td>' + pastille + '</td><td>' + esc(depuis(d.lastSeenAt)) + '</td>' +
+        (actions ? '<td>' + esc(date(d.createdAt)) + '</td><td>' + (d.revoked ? '' : '<button class="danger" data-delier="' + esc(d.id) + '" data-nom="' + esc(d.name) + '">Délier</button>') + '</td>' : '') + '</tr>';
+    }).join('');
+    return h + '</tbody></table></div>';
+  }
+
+  // ——— Postes ———
+
+  function vuePostes() {
+    return apercu().then(function (o) {
+      var h = '<h2>Postes</h2><p class="muted">Un poste « hors ligne » continue de vendre : ses opérations arrivent dès qu\'il retrouve le réseau. Délier un PC libère sa caisse pour un autre PC.</p>' + tablePostes(o, true);
+      if (o.license) h += '<p class="muted">Licence : ' + esc(o.license.client) + ', ' + o.license.stations + ' PC permis.</p>';
+      return h;
+    });
+  }
+
+  // ——— Activité ———
+
+  var filtre = { group: '', store: '' };
+  function vueActivite() {
+    var g = groupes.length ? Promise.resolve(groupes) : api('groups').then(function (r) { groupes = r; return r; });
+    return g.then(function () {
+      return api('events?group=' + encodeURIComponent(filtre.group));
+    }).then(function (ev) {
+      var h = '<h2>Activité</h2><p class="muted">Tout ce que les PC envoient au serveur, du plus récent au plus ancien.</p>' +
+        '<div class="ligne" style="margin-bottom:12px"><div><label>Afficher</label><select id="groupe"><option value="">Tout</option>' +
+        groupes.map(function (x) { return '<option value="' + x.key + '"' + (x.key === filtre.group ? ' selected' : '') + '>' + esc(x.label) + '</option>'; }).join('') +
+        '</select></div></div><div class="bloc">' + tableEvenements(ev) + '</div>' +
+        (ev.length >= 100 ? '<button id="plus" data-avant="' + ev[ev.length - 1].seq + '">Voir plus ancien</button>' : '');
+      return h;
+    });
+  }
+  function lignesEvenements(ev) {
+    return ev.map(function (e) {
+      return '<tr><td style="white-space:nowrap">' + esc(date(e.at)) + '</td><td>' + esc(e.type) + (e.action === 'Suppression' ? ' <span class="pastille erreur">supprimé</span>' : '') + '</td><td>' + esc(e.summary) + '</td><td>' + esc(e.store) + '</td><td>' + esc(e.device) + '</td></tr>';
+    }).join('');
+  }
+  function tableEvenements(ev) {
+    if (!ev.length) return '<p class="muted">Rien pour l\'instant.</p>';
+    return '<table><thead><tr><th>Date</th><th>Type</th><th>Détail</th><th>Magasin</th><th>PC</th></tr></thead><tbody id="lignes">' + lignesEvenements(ev) + '</tbody></table>';
+  }
+
+  // ——— Ventes ———
+
+  function vueVentes() {
+    return api('sales').then(function (jours) {
+      var h = '<h2>Ventes des 14 derniers jours</h2><p class="muted">Tickets validés, sans les tickets annulés ni les retours.</p><div class="bloc">';
+      if (!jours.length) return h + '<p class="muted">Aucune vente reçue sur cette période.</p></div>';
+      h += '<table><thead><tr><th>Jour</th><th>Magasin</th><th class="nombre">Tickets</th><th class="nombre">Chiffre</th></tr></thead><tbody>';
+      jours.forEach(function (j) {
+        var d = new Date(j.day + 'T12:00:00');
+        var nom = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+        j.stores.forEach(function (s, i) {
+          h += '<tr><td>' + (i === 0 ? esc(nom) : '') + '</td><td>' + esc(s.store) + '</td><td class="nombre">' + s.sales + '</td><td class="nombre">' + fcfa(s.total) + '</td></tr>';
+        });
+      });
+      return h + '</tbody></table></div>';
+    });
+  }
+
+  // ——— Sauvegardes ———
+
+  function vueSauvegardes() {
+    return apercu().then(function (o) {
+      var b = o.backups;
+      if (!b.available) {
+        return '<h2>Sauvegardes</h2><div class="bloc"><p>Ce serveur utilise un serveur PostgreSQL : sauvegardez la base avec les outils de PostgreSQL (pgAdmin › Backup, ou <code>pg_dump</code>).</p></div>';
+      }
+      return api('backups').then(function (liste) {
+        var h = '<h2>Sauvegardes</h2>' +
+          (b.error ? '<div class="message erreur">La dernière sauvegarde automatique a échoué : ' + esc(b.error) + '</div>' : '') +
+          '<div class="bloc"><p style="margin-top:0">Le serveur fait une sauvegarde complète <b>chaque jour</b>, toute seule, et garde les <b>' + b.keep + '</b> plus récentes.<br>' +
+          'Dossier : <code>' + esc(b.dir) + '</code></p>' +
+          '<button class="principal" id="sauver">Sauvegarder maintenant</button></div>' +
+          '<div class="bloc"><h3 style="margin-top:0">Sauvegardes disponibles</h3>';
+        if (!liste.length) h += '<p class="muted">Aucune sauvegarde pour l\'instant.</p>';
+        else {
+          h += '<table><thead><tr><th>Date</th><th class="nombre">Taille</th><th></th></tr></thead><tbody>' +
+            liste.map(function (f) {
+              return '<tr><td>' + esc(date(f.at)) + (f.name.indexOf('avant-restauration') >= 0 ? ' <span class="pastille non">avant une restauration</span>' : '') + '</td><td class="nombre">' + taille(f.size) + '</td>' +
+                '<td class="nombre"><a class="bouton" href="/admin/api/backups/' + encodeURIComponent(f.name) + '">Télécharger</a> <button class="danger" data-restaurer="' + esc(f.name) + '" data-date="' + esc(date(f.at)) + '">Restaurer</button></td></tr>';
+            }).join('') + '</tbody></table>';
+        }
+        h += '<p class="muted">Pour remettre une sauvegarde venue d\'un autre PC, copiez son fichier dans le dossier ci-dessus : elle apparaît dans la liste.</p></div>' +
+          '<div class="bloc"><h3 style="margin-top:0">Réglages des sauvegardes</h3><div class="ligne">' +
+          '<div style="flex:1 1 320px"><label>Dossier (par exemple une clé USB ou un dossier Google Drive / OneDrive)</label><input id="dossier" style="width:100%" value="' + esc(b.dir) + '"></div>' +
+          '<div><label>Nombre gardé</label><input id="garder" type="number" min="1" max="365" style="width:90px" value="' + b.keep + '"></div>' +
+          '<div><button id="regler">Enregistrer</button></div></div></div>';
+        return h;
+      });
+    });
+  }
+
+  // ——— Réglages ———
+
+  function vueReglages() {
+    return apercu().then(function (o) {
+      return '<h2>Réglages</h2>' +
+        '<div class="bloc"><h3 style="margin-top:0">Relier un PC</h3>' +
+        '<p>Adresse du serveur à saisir dans FEDO Gestion : ' + adresses(o) + '</p>' +
+        '<p>Clé d\'enrôlement (pour le premier PC d\'un magasin) :<br><span class="cle">' + esc(o.enrollmentKey) + '</span></p>' +
+        (o.enrollmentKeyFixed ? '<p class="muted">Cette clé est fixée par la configuration du serveur.</p>' :
+          '<button id="copier">Copier la clé</button> <button id="nouvelle-cle">Changer de clé</button> <span class="muted">Les PC déjà reliés ne sont pas touchés.</span>') +
+        '<p class="muted">Les PC suivants n\'ont pas besoin de cette clé : dans FEDO Gestion, ils choisissent « Rejoindre un magasin » avec le code d\'activation de leur caisse (Administration › Caisses).</p></div>' +
+        '<div class="bloc"><h3 style="margin-top:0">Mot de passe de l\'interface</h3><div class="ligne">' +
+        '<div><label>Nouveau mot de passe</label><input type="password" id="mdp" autocomplete="new-password"></div>' +
+        '<div><button id="changer-mdp">Changer</button></div></div></div>' +
+        '<div class="bloc"><h3 style="margin-top:0">Informations</h3><table><tbody>' +
+        '<tr><th>Version</th><td>' + esc(o.version || '—') + '</td></tr>' +
+        '<tr><th>Démarré</th><td>' + esc(date(o.startedAt)) + '</td></tr>' +
+        '<tr><th>Base de données</th><td>' + (o.database === 'integree' ? 'Intégrée (rien à installer)' : 'Serveur PostgreSQL') + '</td></tr>' +
+        '<tr><th>Port</th><td>' + o.port + '</td></tr>' +
+        '<tr><th>Première opération reçue</th><td>' + esc(date(o.events.first)) + '</td></tr>' +
+        '</tbody></table></div>';
+    });
+  }
+
+  // ——— Boutons de chaque vue ———
+
+  var branchements = {
+    postes: function () {
+      page.querySelectorAll('[data-delier]').forEach(function (b) {
+        b.onclick = function () {
+          if (!confirm('Délier « ' + b.getAttribute('data-nom') + ' » ? Ce PC ne pourra plus se synchroniser tant qu\'il n\'est pas relié à nouveau.')) return;
+          action(b, function () { return api('devices/' + b.getAttribute('data-delier') + '/revoke', { method: 'POST' }); }, 'PC délié').then(function () { afficher(true); });
+        };
+      });
+    },
+    activite: function () {
+      document.getElementById('groupe').onchange = function (e) { filtre.group = e.target.value; afficher(); };
+      var plus = document.getElementById('plus');
+      if (plus) plus.onclick = function () {
+        action(plus, function () {
+          return api('events?group=' + encodeURIComponent(filtre.group) + '&before=' + plus.getAttribute('data-avant'));
+        }).then(function (ev) {
+          if (!ev) return;
+          // On arrête la mise à jour automatique pour ne pas perdre les lignes chargées.
+          clearInterval(minuterie);
+          document.getElementById('lignes').insertAdjacentHTML('beforeend', lignesEvenements(ev));
+          if (ev.length < 100) plus.remove(); else plus.setAttribute('data-avant', ev[ev.length - 1].seq);
+        });
+      };
+    },
+    sauvegardes: function () {
+      var s = document.getElementById('sauver');
+      if (!s) return;
+      s.onclick = function () { action(s, function () { return api('backups', { method: 'POST' }); }, 'Sauvegarde faite').then(function () { afficher(true); }); };
+      page.querySelectorAll('[data-restaurer]').forEach(function (b) {
+        b.onclick = function () {
+          if (!confirm('Remettre le serveur dans l\'état du ' + b.getAttribute('data-date') + ' ?\n\nCe qui est arrivé au serveur depuis cette date en sera retiré : les PC le gardent chez eux, mais les nouveaux PC ne le recevront pas. L\'état actuel est d\'abord sauvegardé.')) return;
+          action(b, function () { return api('backups/' + encodeURIComponent(b.getAttribute('data-restaurer')) + '/restore', { method: 'POST' }); }, 'Sauvegarde restaurée').then(function () { afficher(true); });
+        };
+      });
+      var r = document.getElementById('regler');
+      r.onclick = function () {
+        action(r, function () {
+          return api('backups/settings', { method: 'POST', body: { dir: document.getElementById('dossier').value, keep: Number(document.getElementById('garder').value) } });
+        }, 'Réglages enregistrés').then(function () { afficher(true); });
+      };
+    },
+    reglages: function () {
+      var c = document.getElementById('copier');
+      if (c) c.onclick = function () {
+        var cle = dernier && dernier.enrollmentKey;
+        if (navigator.clipboard) navigator.clipboard.writeText(cle).then(function () { toast('Clé copiée'); }, function () { toast(cle); });
+        else toast(cle);
+      };
+      var n = document.getElementById('nouvelle-cle');
+      if (n) n.onclick = function () {
+        if (!confirm('Créer une nouvelle clé d\'enrôlement ? L\'ancienne ne marchera plus pour relier un nouveau magasin.')) return;
+        action(n, function () { return api('enrollment-key', { method: 'POST' }); }, 'Nouvelle clé créée').then(function () { afficher(true); });
+      };
+      var m = document.getElementById('changer-mdp');
+      m.onclick = function () {
+        var v = document.getElementById('mdp').value;
+        action(m, function () { return api('password', { method: 'POST', body: { password: v } }); }, 'Mot de passe changé').then(function () { document.getElementById('mdp').value = ''; });
+      };
+    }
+  };
+
+  demarrer();
+})();
+</script>
+</body>
+</html>

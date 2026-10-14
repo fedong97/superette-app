@@ -6,7 +6,10 @@ import {
   DOC_KIND_VARIANTS,
   DOC_KINDS,
   DOC_PAPERS,
+  DOC_LINES,
   DOC_SECTIONS,
+  type DocAlign,
+  type DocLineKey,
   DOC_STYLES,
   docSections,
   pageLayout,
@@ -288,6 +291,25 @@ function Check({ label, value, onChange, disabled }: { label: string; value: boo
   );
 }
 
+const ALIGN_LABELS: [DocAlign, string, string][] = [
+  ['left', '⇤', 'À gauche'],
+  ['center', '↔', 'Au centre'],
+  ['right', '⇥', 'À droite'],
+];
+
+/** Gauche, centre ou droite ; un second clic revient à l'alignement par défaut. */
+function AlignPick({ value, onChange, disabled }: { value: DocAlign | undefined; onChange: (v: DocAlign | undefined) => void; disabled?: boolean }) {
+  return (
+    <span className="align-pick">
+      {ALIGN_LABELS.map(([a, icon, title]) => (
+        <button key={a} type="button" title={title} disabled={disabled} className={value === a ? 'on' : ''} onClick={() => onChange(value === a ? undefined : a)}>
+          {icon}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function Section({ title, children, open }: { title: string; children: ReactNode; open?: boolean }) {
   return (
     <details className="tpl-section" open={open}>
@@ -349,6 +371,16 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
           className: drag?.list === list && drag.from === i ? 'dragging' : undefined,
         };
   const setSectionSpace = (i: number, space: number) => setT((cur) => ({ ...cur, sections: docSections(cur).map((x, j) => (j === i ? { ...x, space: Math.min(50, space) } : x)) }));
+  const setSectionAlign = (i: number, align: DocAlign | undefined) =>
+    setT((cur) => ({ ...cur, sections: docSections(cur).map((x, j) => (j === i ? { key: x.key, space: x.space, ...(align ? { align } : {}) } : x)) }));
+  const setLineAlign = (k: DocLineKey, a: DocAlign | undefined) =>
+    setT((cur) => {
+      const next = { ...(cur.align ?? {}) };
+      if (a) next[k] = a;
+      else delete next[k];
+      return { ...cur, align: next };
+    });
+  const framed = t.page.style === 'framed' || t.page.style === 'side';
   const layout = pageLayout(t);
   const papers = (Object.keys(DOC_PAPERS) as (keyof typeof DOC_PAPERS)[]).filter((p) => (ticket ? p.endsWith('mm') : !p.endsWith('mm')));
   const widthSum = t.columns.filter((c) => c.show && c.width).reduce((s, c) => s + c.width, 0);
@@ -521,7 +553,7 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                 <tr>
                   <th />
                   <th>Section</th>
-                  <th>Espace au-dessus</th>
+                  <th>Espace au-dessus et alignement</th>
                 </tr>
               </thead>
               <tbody>
@@ -533,6 +565,9 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                     <td>{DOC_SECTIONS[x.key]}</td>
                     <td>
                       <NumberInput disabled={off} value={x.space} onChange={(v) => setSectionSpace(i, v)} suffix="mm" />
+                      <div className="sec-align">
+                        {x.key === 'lines' ? <span className="muted small">alignement par colonne</span> : <AlignPick disabled={off || framed} value={x.align} onChange={(a) => setSectionAlign(i, a)} />}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -541,8 +576,24 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
             <small className="muted">
               {t.page.style === 'framed' || t.page.style === 'side'
                 ? 'Présentation encadrée : l’ordre des parties est fixe ; seuls les marges et l’interligne s’appliquent.'
-                : 'Tirez une ligne à la souris pour changer l’ordre ; l’aperçu suit. « Espace au-dessus » s’ajoute à l’espace entre les sections.'}
+                : 'Tirez une ligne à la souris pour changer l’ordre ; l’aperçu suit. « Espace au-dessus » s’ajoute à l’espace entre les sections. Alignement : aucun bouton allumé, la section garde sa présentation.'}
             </small>
+          </Section>
+
+          <Section title="Position de chaque ligne">
+            <table className="list compact tpl-columns">
+              <tbody>
+                {(Object.keys(DOC_LINES) as DocLineKey[]).map((k) => (
+                  <tr key={k}>
+                    <td>{DOC_LINES[k]}</td>
+                    <td>
+                      <AlignPick disabled={off || framed} value={t.align?.[k]} onChange={(a) => setLineAlign(k, a)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <small className="muted">{framed ? 'Présentation encadrée : la position des lignes est fixe.' : 'Aucun bouton allumé : la ligne suit l’alignement de sa section.'}</small>
           </Section>
 
           <Section title="Colonnes du tableau" open>
@@ -551,7 +602,7 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                 <tr>
                   <th>Afficher</th>
                   <th>Colonne</th>
-                  <th>Titre imprimé</th>
+                  <th>Titre imprimé{!(ticket && t.page.style === 'plain') ? ' et alignement' : ''}</th>
                   {!ticket && <th>Largeur</th>}
                   <th title="Glissez une ligne, ou utilisez les flèches">Ordre ⠿</th>
                 </tr>
@@ -565,6 +616,17 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                     <td>{DOC_COLUMNS[c.key]}</td>
                     <td>
                       <input disabled={off || (ticket && t.page.style === 'plain')} maxLength={40} value={c.label} onChange={(e) => setColumn(i, { label: e.target.value })} />
+                      {!(ticket && t.page.style === 'plain') && (
+                        <div className="sec-align">
+                        <AlignPick
+                          disabled={off || framed}
+                          value={c.align}
+                          onChange={(a) =>
+                            setT((cur) => ({ ...cur, columns: cur.columns.map((x, j) => (j === i ? (a ? { ...x, align: a } : { key: x.key, label: x.label, show: x.show, width: x.width }) : x)) }))
+                          }
+                        />
+                        </div>
+                      )}
                     </td>
                     {!ticket && (
                       <td>

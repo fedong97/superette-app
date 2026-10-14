@@ -62,7 +62,21 @@ const toHt = (ttc: string, a: Article) => {
  * limite), à droite la liste. Entrée passe au champ suivant et, sur le dernier,
  * fait descendre la ligne dans la liste ; un clic sur une ligne la remonte.
  */
-export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[]; setLines: (l: RecLine[]) => void; children?: ReactNode }) {
+export function PurchaseEntry({
+  lines,
+  setLines,
+  children,
+  order = false,
+  prepare,
+}: {
+  lines: RecLine[];
+  setLines: (l: RecLine[]) => void;
+  children?: ReactNode;
+  /** Bon de commande : réf. fournisseur, sans lot, date limite, transport ni manutention. */
+  order?: boolean;
+  /** Ligne de départ d'un article scanné (prix négocié du fournisseur), sinon le dernier prix d'achat. */
+  prepare?: (a: Article) => Promise<RecLine>;
+}) {
   const toast = useToast();
   const can = useCan();
   const [draft, setDraft] = useState<RecLine | null>(null);
@@ -99,7 +113,7 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
   const problem = (l: RecLine): string | null => {
     const t = lineTerms(l);
     if (typeof t === 'string') return t;
-    if (l.article.perishable === 1 && !l.expiry) return `Date limite obligatoire pour « ${l.article.name} » (article périssable)`;
+    if (!order && l.article.perishable === 1 && !l.expiry) return `Date limite obligatoire pour « ${l.article.name} » (article périssable)`;
     return null;
   };
 
@@ -126,12 +140,16 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
     focusPicker();
   };
 
-  const pick = (a: Article) => {
+  const pick = async (a: Article) => {
     // Un nouveau scan fait descendre la ligne en cours si elle est complète.
     if (draft && editing === null && !problem(draft)) setLines([...lines, draft]);
     else if (draft) return toast.error(`Terminez d'abord la ligne « ${draft.article.name} » (ou Échap pour l'abandonner)`);
     setEditing(null);
-    load({ ...newRecLine(a), discType: 'pct' });
+    try {
+      load({ ...(prepare ? await prepare(a) : newRecLine(a)), discType: 'pct' });
+    } catch (err) {
+      toast.error(err);
+    }
   };
 
   const edit = (i: number) => {
@@ -270,6 +288,8 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
                   <input value={draft.cost} onChange={(e) => patch({ cost: e.target.value })} />
                 )}
               </label>
+              {!order && (
+              <>
               <label className="field">
                 <span>Transport / {units}</span>
                 <input value={draft.transport ?? ''} placeholder={usual ? `écart actuel ${usual}` : '0'} onChange={(e) => patch({ transport: e.target.value })} />
@@ -282,12 +302,16 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
                 <span>N° de lot</span>
                 <input value={draft.lot} onChange={(e) => patch({ lot: e.target.value })} />
               </label>
+              </>
+              )}
             </div>
-            <div className="pe-cost">
-              <span>Prix de revient / {units}</span>
-              <b>{fcfa(costPrice(draft))}</b>
-            </div>
-            {draft.article.perishable === 1 && (
+            {!order && (
+              <div className="pe-cost">
+                <span>Prix de revient / {units}</span>
+                <b>{fcfa(costPrice(draft))}</b>
+              </div>
+            )}
+            {!order && draft.article.perishable === 1 && (
               <label className="field">
                 <span>Périme le (obligatoire)</span>
                 <input data-expiry type="date" className={draft.expiry ? '' : 'pe-required'} value={draft.expiry} onChange={(e) => patch({ expiry: e.target.value })} />
@@ -346,15 +370,15 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
           <thead>
             <tr>
               <th>N°</th>
-              <th>Réf.</th>
+              <th>{order ? 'Réf. fourn.' : 'Réf.'}</th>
               <th>Produit</th>
               <th className="r">Qté</th>
               <th>Cond.</th>
               <th className="r">Bonus</th>
               <th className="r">Remise</th>
               <th className="r">{tx('P.A HT')}</th>
-              <th className="r">Transp. + manut.</th>
-              <th className="r">P. revient</th>
+              {!order && <th className="r">Transp. + manut.</th>}
+              {!order && <th className="r">P. revient</th>}
               {anyLot && <th>Lot</th>}
               {anyLot && <th>Périme le</th>}
               <th className="r">Montant</th>
@@ -363,7 +387,7 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
           <tbody>
             {lines.length === 0 && (
               <tr>
-                <td colSpan={anyLot ? 13 : 11} className="muted">
+                <td colSpan={13} className="muted">
                   Aucune ligne : les articles saisis à gauche descendent ici.
                 </td>
               </tr>
@@ -378,7 +402,7 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
                   onDoubleClick={() => edit(i)}
                 >
                   <td>{i + 1}</td>
-                  <td className="muted">{l.article.code}</td>
+                  <td className="muted">{order ? l.supplierRef || l.article.code : l.article.code}</td>
                   <td>
                     {l.article.name}
                     {l.article.perishable === 1 && <span className="pe-pill">périssable</span>}
@@ -388,8 +412,8 @@ export function PurchaseEntry({ lines, setLines, children }: { lines: RecLine[];
                   <td className="r">{l.bonus?.trim() || '—'}</td>
                   <td className="r">{discText(l)}</td>
                   <td className="r">{amt(parseAmount(l.cost) ?? 0)}</td>
-                  <td className="r">{extra !== undefined ? amt(extra) : '—'}</td>
-                  <td className="r">{amt(costPrice(l))}</td>
+                  {!order && <td className="r">{extra !== undefined ? amt(extra) : '—'}</td>}
+                  {!order && <td className="r">{amt(costPrice(l))}</td>}
                   {anyLot && <td>{l.lot || '—'}</td>}
                   {anyLot && <td>{l.expiry ? dateFr(l.expiry) : '—'}</td>}
                   <td className="r">{amt(lineNetOf(l))}</td>

@@ -92,7 +92,29 @@ export interface DocColumn {
   show: boolean;
   /** Largeur en % du tableau (A4 et listing) ; 0 : le reste de la place. */
   width: number;
+  /** Alignement du contenu ; absent : texte à gauche, nombres à droite. */
+  align?: DocAlign;
 }
+
+export type DocAlign = 'left' | 'center' | 'right';
+export const DOC_ALIGNS: DocAlign[] = ['left', 'center', 'right'];
+
+/** Lignes qui se placent une à une à gauche, au centre ou à droite. */
+export const DOC_LINES = {
+  storeName: 'Nom du magasin',
+  message: 'Message d’en-tête',
+  address: 'Adresse',
+  phone: 'Téléphone',
+  niu: 'NIU et RCCM',
+  number: 'Titre et numéro',
+  seller: 'Date, vendeur, caisse',
+  customer: 'Client',
+  words: 'Montant en lettres',
+  footerText: 'Mentions',
+  thanks: 'Remerciement',
+} as const;
+export type DocLineKey = keyof typeof DOC_LINES;
+const LINE_KEYS = Object.keys(DOC_LINES) as DocLineKey[];
 
 /** Sections d'un document, dans l'ordre par défaut. */
 export const DOC_SECTIONS = {
@@ -109,13 +131,55 @@ const SECTION_KEYS = Object.keys(DOC_SECTIONS) as DocSectionKey[];
 const ROLL_PRINT_WIDTH: Partial<Record<string, number>> = { '80mm': 72, '58mm': 48 };
 
 /** Sections dans l'ordre du modèle : toutes une fois, celles qui manquent à leur place par défaut. */
-export function docSections(t: Pick<DocTemplate, 'sections'>): { key: DocSectionKey; space: number }[] {
-  const out: { key: DocSectionKey; space: number }[] = [];
+export function docSections(t: Pick<DocTemplate, 'sections'>): DocSection[] {
+  const out: DocSection[] = [];
   for (const x of t.sections ?? []) {
-    if (x && SECTION_KEYS.includes(x.key) && !out.some((o) => o.key === x.key)) out.push({ key: x.key, space: clamp(x.space, 0, 50, 0) });
+    if (x && SECTION_KEYS.includes(x.key) && !out.some((o) => o.key === x.key)) {
+      const align = DOC_ALIGNS.includes(x.align as DocAlign) ? (x.align as DocAlign) : undefined;
+      out.push({ key: x.key, space: clamp(x.space, 0, 50, 0), ...(align ? { align } : {}) });
+    }
   }
   for (const k of SECTION_KEYS) if (!out.some((o) => o.key === k)) out.push({ key: k, space: 0 });
   return out;
+}
+
+export interface DocSection {
+  key: DocSectionKey;
+  space: number;
+  /** Alignement des lignes de la section ; absent : celui du modèle. */
+  align?: DocAlign;
+}
+
+/** Alignement d'une ligne : le sien s'il est choisi, sinon celui de sa section, sinon celui du modèle. */
+export function lineAlign(t: Pick<DocTemplate, 'sections' | 'align'>, section: DocSectionKey, line: DocLineKey | null, def: DocAlign): DocAlign {
+  return (line && t.align?.[line]) || (t.sections ?? []).find((x) => x.key === section)?.align || def;
+}
+
+/** Alignement d'une colonne : le sien, sinon nombres à droite et texte à gauche. */
+export function columnAlign(c: Pick<DocColumn, 'key' | 'align'>, def?: DocAlign): DocAlign {
+  return c.align ?? def ?? (NUMERIC_COLUMNS.includes(c.key) ? 'right' : 'left');
+}
+
+/** Zones de signature deux par deux : gauche et droite, puis 3e et 4e. */
+function signPairs(t: DocTemplate, d: DocData): [string, string][] {
+  if (!t.footer.signatures) return [];
+  const f = (x: string | undefined) => fill(x ?? '', d).trim();
+  const pairs: [string, string][] = [
+    [f(t.footer.signLeft), f(t.footer.signRight)],
+    [f(t.footer.sign3), f(t.footer.sign4)],
+  ];
+  return pairs.filter(([a, b]) => a || b);
+}
+
+/** Signatures d'un ticket ESC/POS : la première à gauche, la seconde à droite sur la même ligne. */
+function receiptSigns(t: DocTemplate, d: DocData): Receipt {
+  const r: Receipt = [];
+  for (const [a, b] of signPairs(t, d)) {
+    const left = a ? `${a.replace(/\n/g, ' ')} :` : '';
+    const right = b ? `${b.replace(/\n/g, ' ')} :` : '';
+    r.push({ t: 'feed' }, a ? { t: 'row', left, right } : { t: 'text', text: right, align: 'right' }, { t: 'feed' }, { t: 'feed' });
+  }
+  return r;
 }
 
 /** Marges, largeur imprimée et espacements d'un modèle, avec leurs valeurs par défaut. */
@@ -139,12 +203,13 @@ function arrangeReceipt(t: DocTemplate, parts: SectionParts<Receipt>): Receipt {
   const { lineSpacing, sectionGap } = pageLayout(t);
   const out: Receipt = lineSpacing !== 100 ? [{ t: 'spacing', pct: lineSpacing }] : [];
   let first = true;
-  for (const { key, space } of docSections(t)) {
+  for (const { key, space, align } of docSections(t)) {
     const part = parts[key];
     if (!part?.length) continue;
     const gap = first ? space : sectionGap + space;
     if (gap > 0) out.push({ t: 'space', mm: gap });
-    out.push(...part);
+    // L'alignement de la section va aux lignes de texte qui n'en ont pas choisi un.
+    out.push(...(align ? part.map((l): ReceiptLine => (l.t === 'text' && !l.align ? { ...l, align } : l)) : part));
     first = false;
   }
   return out;
@@ -155,12 +220,13 @@ function arrangeHtml(t: DocTemplate, parts: SectionParts<string>): string {
   const { sectionGap } = pageLayout(t);
   let first = true;
   return docSections(t)
-    .map(({ key, space }) => {
+    .map(({ key, space, align }) => {
       const part = parts[key]?.trim();
       if (!part) return '';
       const gap = first ? space : sectionGap + space;
       first = false;
-      return `<div class="sec sec-${key}"${gap ? ` style="margin-top:${gap}mm"` : ''}>${part}</div>`;
+      const style = [gap ? `margin-top:${gap}mm` : '', align ? `text-align:${align}` : ''].filter(Boolean).join(';');
+      return `<div class="sec sec-${key}"${style ? ` style="${style}"` : ''}>${part}</div>`;
     })
     .join('');
 }
@@ -201,8 +267,10 @@ export interface DocTemplate {
     /** Espace entre les sections, en mm. */
     sectionGap?: number;
   };
-  /** Ordre des sections du document (glisser-déposer) et espace en plus au-dessus de chacune, en mm. */
-  sections?: { key: DocSectionKey; space: number }[];
+  /** Ordre des sections du document (glisser-déposer), espace en plus au-dessus de chacune (mm) et alignement. */
+  sections?: DocSection[];
+  /** Alignement choisi ligne par ligne (sinon celui de la section). */
+  align?: Partial<Record<DocLineKey, DocAlign>>;
   header: {
     logo: boolean;
     /** Hauteur du logo en mm. */
@@ -670,7 +738,8 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
     if (!c || !COLUMN_KEYS.includes(c.key as DocColumnKey) || seen.has(c.key as DocColumnKey)) continue;
     const key = c.key as DocColumnKey;
     seen.add(key);
-    columns.push({ key, label: str(c.label, 40, DOC_COLUMNS[key]), show: bool(c.show, false), width: clamp(c.width, 0, 100, 0) });
+    const align = DOC_ALIGNS.includes(c.align as DocAlign) ? (c.align as DocAlign) : undefined;
+    columns.push({ key, label: str(c.label, 40, DOC_COLUMNS[key]), show: bool(c.show, false), width: clamp(c.width, 0, 100, 0), ...(align ? { align } : {}) });
   }
   for (const c of base.columns) if (!seen.has(c.key)) columns.push({ ...c, show: rawCols.length ? false : c.show });
   if (!columns.some((c) => c.show)) throw new Error('Gardez au moins une colonne dans le tableau');
@@ -700,6 +769,9 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
       sectionGap: clamp(p.sectionGap, 0, 30, 0),
     },
     sections: docSections(r),
+    align: Object.fromEntries(
+      Object.entries((r.align ?? {}) as Record<string, unknown>).filter(([k, v]) => LINE_KEYS.includes(k as DocLineKey) && DOC_ALIGNS.includes(v as DocAlign)),
+    ) as Partial<Record<DocLineKey, DocAlign>>,
     header: {
       ...bools(h, base.header),
       logoSize: clamp(h.logoSize, 5, 60, base.header.logoSize),
@@ -799,27 +871,29 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   const centered = (text: string): ReceiptLine => ({ t: 'text', text, align: 'center' });
   const lines = (text: string) => fill(text, d).split('\n').map((s) => s.trim()).filter(Boolean);
   const h = t.header;
+  const hd = (line: DocLineKey, text: string): Extract<ReceiptLine, { t: 'text' }> => ({ t: 'text', text, align: lineAlign(t, 'header', line, 'center') });
   if (h.logo && d.store.logo) r.push({ t: 'image', src: d.store.logo });
-  if (h.storeName) r.push({ t: 'text', text: d.store.name, align: 'center', bold: true, big: true });
-  for (const m of [...lines(d.store.message), ...lines(h.message)]) r.push(centered(m));
-  if (h.address && d.store.address) r.push(centered(d.store.address));
-  if (h.phone && d.store.phone) r.push(centered(d.store.phone));
-  if (h.niu && d.store.niu) r.push(centered(`NIU : ${d.store.niu}`));
-  if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
+  if (h.storeName) r.push({ ...hd('storeName', d.store.name), bold: true, big: true });
+  for (const m of [...lines(d.store.message), ...lines(h.message)]) r.push(hd('message', m));
+  if (h.address && d.store.address) r.push(hd('address', d.store.address));
+  if (h.phone && d.store.phone) r.push(hd('phone', d.store.phone));
+  if (h.niu && d.store.niu) r.push(hd('niu', `NIU : ${d.store.niu}`));
+  if (h.rccm && d.store.rccm) r.push(hd('niu', `RCCM : ${d.store.rccm}`));
   if (r.length) r.push({ t: 'rule' });
   (parts.header = r), (r = []);
 
+  const ti = (line: DocLineKey) => t.align?.[line];
   const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'RETOUR CLIENT' : docTitle(t, d);
-  if (title) r.push({ t: 'text', text: title, bold: true });
-  if (d.doc.cancelled) r.push({ t: 'text', text: 'ANNULÉ', bold: true });
+  if (title) r.push({ t: 'text', text: title, bold: true, align: ti('number') });
+  if (d.doc.cancelled) r.push({ t: 'text', text: 'ANNULÉ', bold: true, align: ti('number') });
   if (duplicata(t, d)) r.push(DUPLICATA_BANNER);
-  if (t.info.number) r.push({ t: 'text', text: `${title ? 'N°' : 'Ticket'} ${d.doc.number}` });
+  if (t.info.number) r.push({ t: 'text', text: `${title ? 'N°' : 'Ticket'} ${d.doc.number}`, align: ti('number') });
   const when = t.info.date ? (t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)) : '';
   const meta = [when, t.info.seller ? d.doc.seller : '', t.info.register ? (d.doc.register ?? '') : ''].filter(Boolean).join(' · ');
-  if (meta) r.push({ t: 'text', text: meta });
+  if (meta) r.push({ t: 'text', text: meta, align: ti('seller') });
   const c = d.customer;
   if (t.customer.show && c) {
-    r.push({ t: 'text', text: `${d.partyLabel ?? 'Client'} : ${c.name}` });
+    r.push({ t: 'text', text: `${d.partyLabel ?? 'Client'} : ${c.name}`, align: ti('customer') });
     if (t.customer.code && c.code) r.push({ t: 'text', text: `Compte : ${c.code}` });
     if (t.customer.phone && c.phone) r.push({ t: 'text', text: `Tél. : ${c.phone}` });
     if (t.customer.address && c.address) r.push({ t: 'text', text: c.address });
@@ -862,7 +936,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
   if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
   if (t.info.dueDate && d.doc.dueDate) r.push({ t: 'text', text: `À régler avant le ${dayFr(d.doc.dueDate)}` });
-  if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: `Arrêté à la somme de ${numberToWordsFr(tot.ttc)} francs CFA` });
+  if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: `Arrêté à la somme de ${numberToWordsFr(tot.ttc)} francs CFA`, align: t.align?.words });
   (parts.payments = r), (r = []);
   if (d.doc.notes) r.push({ t: 'rule' }, ...d.doc.notes.split('\n').filter(Boolean).map((text): ReceiptLine => ({ t: 'text', text })));
   if (t.totals.vatDetail) {
@@ -873,12 +947,10 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
       if (!d.partyLabel) r.push({ t: 'row', left: 'dont TVA', right: money(tot.tva) });
     }
   }
-  if (t.footer.signatures) {
-    r.push({ t: 'feed' });
-    for (const s of signLabels(t, d)) r.push({ t: 'text', text: `${s} :` }, { t: 'feed' }, { t: 'feed' });
-  }
-  const bottom = [...lines(t.footer.text), ...lines(t.footer.thanks || d.store.thanks)];
-  if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
+  r.push(...receiptSigns(t, d));
+  const ft = (line: DocLineKey) => (text: string): ReceiptLine => ({ t: 'text', text, align: lineAlign(t, 'footer', line, 'center') });
+  const bottom = [...lines(t.footer.text).map(ft('footerText')), ...lines(t.footer.thanks || d.store.thanks).map(ft('thanks'))];
+  if (bottom.length) r.push({ t: 'rule' }, ...bottom);
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   parts.footer = r;
   return arrangeReceipt(t, parts);
@@ -976,6 +1048,13 @@ function documentCss(t: DocTemplate): string {
 }
 
 const nl = (s: string) => esc(s).replace(/\n/g, '<br>');
+/** Style d'alignement d'un élément HTML, rien quand il n'est pas choisi. */
+const sa = (a: DocAlign | undefined) => (a ? ` style="text-align:${a}"` : '');
+/** Classe d'une cellule selon l'alignement de sa colonne. */
+const cellClass = (a: DocAlign) => (a === 'right' ? ' class="r"' : a === 'center' ? ' class="c"' : '');
+/** Cellule d'un tableau texte : complétée à la largeur de la colonne selon son alignement. */
+const padCell = (v: string, w: number, a: DocAlign) =>
+  a === 'right' ? v.padStart(w) : a === 'center' ? v.padStart(Math.floor((w + v.length) / 2)).padEnd(w) : v.padEnd(w);
 
 /** Page HTML complète d'une facture selon son modèle : imprimée telle quelle et affichée en aperçu. */
 export function renderDocHtml(t: DocTemplate, d: DocData): string {
@@ -989,13 +1068,14 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   const noVat = docWithoutVat(d);
   const h = t.header;
   const logo = h.logo && d.store.logo ? `<img src="${esc(d.store.logo)}" alt="">` : '';
+  const al = (line: DocLineKey) => sa(t.align?.[line]);
   const ident = [
-    h.storeName ? `<h1>${esc(d.store.name)}</h1>` : '',
-    [h.address ? d.store.address : null, h.phone ? d.store.phone : null, h.niu && d.store.niu ? `NIU ${d.store.niu}` : null, h.rccm && d.store.rccm ? `RCCM ${d.store.rccm}` : null]
-      .filter(Boolean)
-      .map((v) => esc(v!))
-      .join('<br>'),
-    h.message ? `<div class="notes">${nl(fill(h.message, d))}</div>` : '',
+    h.storeName ? `<h1${al('storeName')}>${esc(d.store.name)}</h1>` : '',
+    h.address && d.store.address ? `<div${al('address')}>${esc(d.store.address)}</div>` : '',
+    h.phone && d.store.phone ? `<div${al('phone')}>${esc(d.store.phone)}</div>` : '',
+    h.niu && d.store.niu ? `<div${al('niu')}>NIU ${esc(d.store.niu)}</div>` : '',
+    h.rccm && d.store.rccm ? `<div${al('niu')}>RCCM ${esc(d.store.rccm)}</div>` : '',
+    h.message ? `<div class="notes"${al('message')}>${nl(fill(h.message, d))}</div>` : '',
   ].join('');
   const c = d.customer;
   const cu = t.customer;
@@ -1017,7 +1097,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
       : `${logo ? `<div class="logo">${logo}</div>` : ''}<div class="head"><div class="store"><div>${ident}</div></div>${client}</div>`;
 
   const title = docTitle(t, d);
-  const titleLine = `<h2>${esc(title)}${t.info.number ? ` ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (annulé)' : ''}${
+  const titleLine = `<h2${al('number')}>${esc(title)}${t.info.number ? ` ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (annulé)' : ''}${
     d.doc.duplicate && t.footer.duplicate ? ' <span class="dup">DUPLICATA</span>' : ''
   }</h2>`;
   const meta = [
@@ -1051,10 +1131,13 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
       case 'totalTtc': return money(l.totalTtc);
     }
   };
-  const right = (k: DocColumnKey) => (NUMERIC_COLUMNS.includes(k) ? ' class="r"' : '');
+  const right = (x: DocColumn) => {
+    const a = columnAlign(x);
+    return a === 'center' ? ' style="text-align:center"' : a === 'right' ? ' class="r"' : '';
+  };
   const table = !d.lines.length ? '' : `<table class="lines"><colgroup>${columns.map((x) => `<col${x.width ? ` style="width:${x.width}%"` : ''}>`).join('')}</colgroup>
-    <thead><tr>${columns.map((x) => `<th${right(x.key)}>${esc(tx(x.label, noVat))}</th>`).join('')}</tr></thead>
-    <tbody>${d.lines.map((l, i) => `<tr>${columns.map((x) => `<td${right(x.key)}>${cell(x.key, l, i)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    <thead><tr>${columns.map((x) => `<th${right(x)}>${esc(tx(x.label, noVat))}</th>`).join('')}</tr></thead>
+    <tbody>${d.lines.map((l, i) => `<tr>${columns.map((x) => `<td${right(x)}>${cell(x.key, l, i)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 
   const tot = d.totals;
   const row = (label: string, v: number, cls = '') => `<tr${cls ? ` class="${cls}"` : ''}><td>${label}</td><td class="r">${money(v)}</td></tr>`;
@@ -1070,21 +1153,21 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
     t.totals.remaining && tot.remaining ? row('Reste à payer', tot.remaining, 'total') : '',
   ].join('');
   const left = [
-    t.totals.words && tot.ttc >= 0 ? `<p>Arrêté à la somme de <b>${esc(numberToWordsFr(tot.ttc))} francs CFA</b>${noVat ? '' : ' toutes taxes comprises'}.</p>` : '',
+    t.totals.words && tot.ttc >= 0 ? `<p${al('words')}>Arrêté à la somme de <b>${esc(numberToWordsFr(tot.ttc))} francs CFA</b>${noVat ? '' : ' toutes taxes comprises'}.</p>` : '',
     t.totals.vatDetail && noVat ? '<p class="muted">TVA non applicable.</p>' : '',
     d.doc.notes ? `<p class="notes">${nl(d.doc.notes)}</p>` : '',
   ].join('');
   const footer = [
-    t.footer.text ? `<div class="notes">${nl(fill(t.footer.text, d))}</div>` : '',
+    t.footer.text ? `<div class="notes"${al('footerText')}>${nl(fill(t.footer.text, d))}</div>` : '',
     t.footer.signatures ? `<div class="sign">${signLabels(t, d).map((x) => `<div>${nl(x)}</div>`).join('')}</div>` : '',
-    t.footer.thanks ? `<div class="thanks">${nl(fill(t.footer.thanks, d))}</div>` : '',
+    t.footer.thanks ? `<div class="thanks"${al('thanks')}>${nl(fill(t.footer.thanks, d))}</div>` : '',
   ].join('');
 
   return wrap(
     documentCss(t),
     arrangeHtml(t, {
       header: head,
-      title: `${titleLine}${meta.length ? `<div class="meta">${meta.join(' · ')}</div>` : ''}`,
+      title: `${titleLine}${meta.length ? `<div class="meta"${al('seller')}>${meta.join(' · ')}</div>` : ''}`,
       lines: table,
       totals: left || totals ? `<div class="bottom"><div class="left">${left}</div>${totals ? `<table class="totals">${totals}</table>` : ''}</div>` : '',
       footer: footer ? `<footer>${footer}</footer>` : '',
@@ -1320,7 +1403,8 @@ function styledTicketCss(t: DocTemplate): string {
   .thanks { text-align: center; font-style: italic; margin-top: 2mm; }
   .soft { text-align: center; margin-top: 1.5mm; }
   .dup { font-weight: bold; letter-spacing: 2px; }
-  .sign { margin-top: 3mm; min-height: 12mm; }`;
+  .signs { display: flex; justify-content: space-between; gap: 4mm; margin-top: 3mm; min-height: 14mm; }
+  .signs span:last-child { text-align: right; }`;
 }
 
 /** Ticket encadré ou détaillé en HTML (pilote Windows et aperçu). */
@@ -1330,25 +1414,26 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
   const c = d.customer;
   const tt = ticketTotals(t, d);
   const tot = d.totals;
+  const al = (line: DocLineKey) => sa(t.align?.[line]);
   const id = [
     h.logo && d.store.logo ? `<div class="logo"><img src="${esc(d.store.logo)}" alt=""></div>` : '',
-    h.storeName ? `<h1>${esc(d.store.name)}</h1>` : '',
+    h.storeName ? `<h1${al('storeName')}>${esc(d.store.name)}</h1>` : '',
     `<div class="id${detailed ? ' c' : ''}">`,
-    ...[d.store.message, h.message].filter(Boolean).map((m) => `<div class="notes">${nl(fill(m, d))}</div>`),
-    h.address && d.store.address ? `<div>${esc(d.store.address)}</div>` : '',
-    h.niu && d.store.niu ? `<div>NIU : ${esc(d.store.niu)}</div>` : '',
-    h.rccm && d.store.rccm ? `<div>RCCM : ${esc(d.store.rccm)}</div>` : '',
-    h.phone && d.store.phone ? `<div>Tél : ${esc(d.store.phone)}</div>` : '',
+    ...[d.store.message, h.message].filter(Boolean).map((m) => `<div class="notes"${al('message')}>${nl(fill(m, d))}</div>`),
+    h.address && d.store.address ? `<div${al('address')}>${esc(d.store.address)}</div>` : '',
+    h.niu && d.store.niu ? `<div${al('niu')}>NIU : ${esc(d.store.niu)}</div>` : '',
+    h.rccm && d.store.rccm ? `<div${al('niu')}>RCCM : ${esc(d.store.rccm)}</div>` : '',
+    h.phone && d.store.phone ? `<div${al('phone')}>Tél : ${esc(d.store.phone)}</div>` : '',
     '</div>',
   ].join('');
   const title = docTitle(t, d) || 'Facture';
   const when = t.info.date ? (t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)) : '';
-  const client = t.customer.show ? `<div>Client : ${esc((c?.name ?? 'Client comptoir').toUpperCase())}</div>` : '';
+  const client = t.customer.show ? `<div${al('customer')}>Client : ${esc((c?.name ?? 'Client comptoir').toUpperCase())}</div>` : '';
   const meta = [
     detailed ? client : '',
-    t.info.number ? `<div>${esc(title.toUpperCase())} N° ${esc(d.doc.number)}${d.doc.cancelled ? ' (ANNULÉE)' : ''}</div>` : '',
+    t.info.number ? `<div${al('number')}>${esc(title.toUpperCase())} N° ${esc(d.doc.number)}${d.doc.cancelled ? ' (ANNULÉE)' : ''}</div>` : '',
     d.doc.duplicate && t.footer.duplicate ? '<div class="dup">DUPLICATA</div>' : '',
-    t.info.seller && d.doc.seller ? `<div>Vendeur : ${esc(d.doc.seller.toUpperCase())}</div>` : '',
+    t.info.seller && d.doc.seller ? `<div${al('seller')}>Vendeur : ${esc(d.doc.seller.toUpperCase())}</div>` : '',
     detailed ? '' : client,
     t.customer.show && c && !c.counter && t.customer.phone && c.phone ? `<div>Tél. client : ${esc(c.phone)}</div>` : '',
     t.info.priceLevel && d.doc.priceLevel ? `<div>Tarif : ${esc(d.doc.priceLevel)}</div>` : '',
@@ -1358,11 +1443,11 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
   const wh = `<div class="wh"><b>${esc((d.doc.warehouse ?? '').toUpperCase())}</b><span>${when}</span></div>`;
   const columns = shown(t, d);
   const grid = columns.filter((x) => detailed || (x.key !== 'label' && x.key !== 'code'));
-  const num = (k: DocColumnKey) => (NUMERIC_COLUMNS.includes(k) && k !== 'qty' ? ' class="r"' : k === 'qty' ? ' class="c"' : '');
-  const head = `<tr>${grid.map((x) => `<th${num(x.key)}>${esc(tx(x.label, tt.noVat))}</th>`).join('')}</tr>`;
+  const num = (x: DocColumn) => cellClass(columnAlign(x, x.key === 'qty' ? 'center' : undefined));
+  const head = `<tr>${grid.map((x) => `<th${num(x)}>${esc(tx(x.label, tt.noVat))}</th>`).join('')}</tr>`;
   const rows = d.lines
     .map((l, i) => {
-      const cells = `<tr class="q">${grid.map((x) => `<td${num(x.key)}>${esc(ticketCell(x.key, l, i))}</td>`).join('')}</tr>`;
+      const cells = `<tr class="q">${grid.map((x) => `<td${num(x)}>${esc(ticketCell(x.key, l, i))}</td>`).join('')}</tr>`;
       if (detailed) return cells;
       const name = [columns.some((x) => x.key === 'code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ');
       return `<tr class="n"><td colspan="${grid.length}">${esc(name.toUpperCase())}</td></tr>${cells}`;
@@ -1389,13 +1474,13 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
     t.totals.change && tot.change ? `<div class="row"><span>Rendu monnaie</span><span>${money(tot.change)}</span></div>` : '',
     t.totals.remaining && tot.remaining ? `<div class="row b"><span>Reste à payer</span><span>${money(tot.remaining)}</span></div>` : '',
     t.customer.show && t.customer.balance && c?.balance != null ? `<div class="row"><span>Solde de votre compte</span><span>${money(c.balance)}</span></div>` : '',
-    t.totals.words && tot.ttc >= 0 ? `<div class="words">${esc(cap(numberToWordsFr(tot.ttc)))}</div>` : '',
+    t.totals.words && tot.ttc >= 0 ? `<div class="words"${sa(lineAlign(t, 'payments', 'words', 'center'))}>${esc(cap(numberToWordsFr(tot.ttc)))}</div>` : '',
   ].join('');
   const foot = [
     d.doc.notes ? `<div class="notes" style="margin-top:2mm">${nl(d.doc.notes)}</div>` : '',
-    ...signLabels(t, d).map((x) => `<div class="sign">${nl(x)} :</div>`),
-    t.footer.text ? `<div class="notes c" style="margin-top:2mm">${nl(fill(t.footer.text, d))}</div>` : '',
-    t.footer.thanks || d.store.thanks ? `<div class="thanks">${nl(fill(t.footer.thanks || d.store.thanks, d))}</div>` : '',
+    ...signPairs(t, d).map(([a, b]) => `<div class="signs"><span>${a ? `${nl(a)} :` : ''}</span><span>${b ? `${nl(b)} :` : ''}</span></div>`),
+    t.footer.text ? `<div class="notes c" style="margin-top:2mm;text-align:${lineAlign(t, 'footer', 'footerText', 'center')}">${nl(fill(t.footer.text, d))}</div>` : '',
+    t.footer.thanks || d.store.thanks ? `<div class="thanks"${sa(lineAlign(t, 'footer', 'thanks', 'center'))}>${nl(fill(t.footer.thanks || d.store.thanks, d))}</div>` : '',
     '<div class="soft">FEDO Gestion</div>',
   ].join('');
   return arrangeHtml(t, { header: id, title: `<div class="meta">${meta}</div>${wh}`, lines: table, totals: bottom, payments: pay, footer: foot });
@@ -1412,20 +1497,21 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   const tot = d.totals;
   const centered = (text: string): ReceiptLine => ({ t: 'text', text, align: 'center' });
   const split = (text: string) => fill(text, d).split('\n').map((x) => x.trim()).filter(Boolean);
+  const hd = (line: DocLineKey, text: string): Extract<ReceiptLine, { t: 'text' }> => ({ t: 'text', text, align: lineAlign(t, 'header', line, 'center') });
   if (h.logo && d.store.logo) r.push({ t: 'image', src: d.store.logo });
-  if (h.storeName) r.push({ t: 'text', text: d.store.name, align: 'center', bold: true, big: true });
-  for (const m of [...split(d.store.message), ...split(h.message)]) r.push(centered(m));
-  if (h.address && d.store.address) r.push(centered(d.store.address));
-  if (h.niu && d.store.niu) r.push(centered(`NIU : ${d.store.niu}`));
-  if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
-  if (h.phone && d.store.phone) r.push(centered(`Tél : ${d.store.phone}`));
+  if (h.storeName) r.push({ ...hd('storeName', d.store.name), bold: true, big: true });
+  for (const m of [...split(d.store.message), ...split(h.message)]) r.push(hd('message', m));
+  if (h.address && d.store.address) r.push(hd('address', d.store.address));
+  if (h.niu && d.store.niu) r.push(hd('niu', `NIU : ${d.store.niu}`));
+  if (h.rccm && d.store.rccm) r.push(hd('niu', `RCCM : ${d.store.rccm}`));
+  if (h.phone && d.store.phone) r.push(hd('phone', `Tél : ${d.store.phone}`));
   (parts.header = r), (r = []);
   r.push({ t: 'feed' });
   const title = (docTitle(t, d) || 'Facture').toUpperCase();
-  if (t.info.number) r.push({ t: 'text', text: `${title} N° ${d.doc.number}${d.doc.cancelled ? ' (ANNULÉE)' : ''}` });
+  if (t.info.number) r.push({ t: 'text', text: `${title} N° ${d.doc.number}${d.doc.cancelled ? ' (ANNULÉE)' : ''}`, align: t.align?.number });
   if (duplicata(t, d)) r.push(DUPLICATA_BANNER);
-  if (t.info.seller && d.doc.seller) r.push({ t: 'text', text: `Vendeur : ${d.doc.seller.toUpperCase()}` });
-  if (t.customer.show) r.push({ t: 'text', text: `Client : ${(c?.name ?? 'Client comptoir').toUpperCase()}` });
+  if (t.info.seller && d.doc.seller) r.push({ t: 'text', text: `Vendeur : ${d.doc.seller.toUpperCase()}`, align: t.align?.seller });
+  if (t.customer.show) r.push({ t: 'text', text: `Client : ${(c?.name ?? 'Client comptoir').toUpperCase()}`, align: t.align?.customer });
   if (t.customer.show && c && !c.counter && t.customer.phone && c.phone) r.push({ t: 'text', text: `Tél. client : ${c.phone}` });
   if (t.info.priceLevel && d.doc.priceLevel) r.push({ t: 'text', text: `Tarif : ${d.doc.priceLevel}` });
   if (t.info.dueDate && d.doc.dueDate) r.push({ t: 'text', text: `À régler avant le ${dayFr(d.doc.dueDate)}` });
@@ -1440,8 +1526,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   const lastKey = grid.at(-1)?.key;
   const lead = grid.slice(0, -1);
   const widths = lead.map((x) => Math.max(tx(x.label, tt.noVat).length, ...d.lines.map((l, i) => ticketCell(x.key, l, i).length)));
-  const lineText = (cells: string[]) =>
-    cells.map((v, k) => (NUMERIC_COLUMNS.includes(lead[k]!.key) ? v.padStart(widths[k]!) : v.padEnd(widths[k]!))).join('  ');
+  const lineText = (cells: string[]) => cells.map((v, k) => padCell(v, widths[k]!, columnAlign(lead[k]!))).join('  ');
   r.push({ t: 'row', left: lineText(lead.map((x) => tx(x.label, tt.noVat))), right: grid.length ? tx(grid.at(-1)!.label, tt.noVat) : '', bold: true });
   d.lines.forEach((l, i) => {
     if (!detailed) r.push({ t: 'text', text: [columns.some((x) => x.key === 'code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ').toUpperCase() });
@@ -1467,12 +1552,13 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change) });
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
   if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
-  if (t.totals.words && tot.ttc >= 0) r.push(centered(cap(numberToWordsFr(tot.ttc))));
+  if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: cap(numberToWordsFr(tot.ttc)), align: lineAlign(t, 'payments', 'words', 'center') });
   (parts.payments = r), (r = []);
   if (d.doc.notes) for (const x of d.doc.notes.split('\n').filter(Boolean)) r.push({ t: 'text', text: x });
-  for (const x of signLabels(t, d)) r.push({ t: 'feed' }, { t: 'text', text: `${x} :` }, { t: 'feed' });
-  const bottom = [...split(t.footer.text), ...split(t.footer.thanks || d.store.thanks)];
-  if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
+  r.push(...receiptSigns(t, d));
+  const ft = (line: DocLineKey) => (text: string): ReceiptLine => ({ t: 'text', text, align: lineAlign(t, 'footer', line, 'center') });
+  const bottom = [...split(t.footer.text).map(ft('footerText')), ...split(t.footer.thanks || d.store.thanks).map(ft('thanks'))];
+  if (bottom.length) r.push({ t: 'rule' }, ...bottom);
   r.push(centered('FEDO Gestion'));
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   parts.footer = r;

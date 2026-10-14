@@ -150,6 +150,8 @@ export interface RecLine extends TermsText, ExtraTerms {
   packUnits: number;
   lot: string;
   expiry: string;
+  /** Référence de l'article chez le fournisseur (bon de commande). */
+  supplierRef?: string | null;
   /** Transport et manutention par conditionnement saisi : vides, le prix de revient garde son écart. */
   transport?: string;
   handling?: string;

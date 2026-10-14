@@ -100,6 +100,48 @@ describe('modèles d’impression', () => {
     expect(a4.indexOf('sec-totals')).toBeLessThan(a4.indexOf('sec-header'));
   });
 
+  it('signatures du ticket côte à côte : la première à gauche, la seconde à droite', () => {
+    const base = builtin('invoice-ticket-cash-boxed');
+    const t = normalizeTemplate({ ...base, footer: { ...base.footer, signatures: true, signLeft: 'Le client', signRight: 'caissier', sign3: '', sign4: 'Le livreur' } });
+    const html = renderDocHtml(t, sampleDocData('cash'));
+    expect(html).toContain('<div class="signs"><span>Le client :</span><span>caissier :</span></div>');
+    expect(html).toContain('<div class="signs"><span></span><span>Le livreur :</span></div>');
+    const r = renderDocTicket(t, sampleDocData('cash'));
+    expect(r).toContainEqual({ t: 'row', left: 'Le client :', right: 'caissier :' });
+    expect(r).toContainEqual({ t: 'text', text: 'Le livreur :', align: 'right' });
+    const text = receiptToText(r, 32);
+    expect(text).toMatch(/Le client :\s+caissier :/);
+    const plain = normalizeTemplate({ ...builtin('invoice-ticket-cash'), footer: { ...builtin('invoice-ticket-cash').footer, signatures: true, signLeft: 'Le client', signRight: 'Le caissier' } });
+    expect(renderDocTicket(plain, sampleDocData('cash'))).toContainEqual({ t: 'row', left: 'Le client :', right: 'Le caissier :' });
+  });
+
+  it('alignement par section, par ligne et par colonne', () => {
+    const base = builtin('invoice-ticket-cash');
+    const t = normalizeTemplate({
+      ...base,
+      sections: [{ key: 'header', space: 0, align: 'left' }, { key: 'title', space: 0, align: 'right' }, { key: 'footer', space: 0, align: 'bad' }],
+      align: { storeName: 'center', thanks: 'right', nope: 'left', address: 'sideways' },
+    });
+    expect(t.align).toEqual({ storeName: 'center', thanks: 'right' });
+    expect(docSections(t).find((x) => x.key === 'footer')!.align).toBeUndefined();
+    const d = sampleDocData('cash');
+    const r = renderDocTicket(t, d);
+    const line = (text: string) => r.find((l) => l.t === 'text' && l.text.includes(text)) as { align?: string };
+    // Le nom garde le centre choisi, le reste de l'en-tête suit la section (gauche).
+    expect(line(d.store.name).align).toBe('center');
+    expect(line(`NIU : ${d.store.niu}`).align).toBe('left');
+    // Section du titre à droite : le numéro suit.
+    expect(line(d.doc.number).align).toBe('right');
+    expect(renderDocHtml(t, d)).toMatch(/<div class="r">(N°|Ticket) /);
+    // Colonne alignée au centre dans le ticket encadré et en A4 ; section alignée en HTML.
+    const boxed = builtin('invoice-ticket-cash-boxed');
+    expect(renderDocHtml(normalizeTemplate({ ...boxed, sections: [{ key: 'title', space: 0, align: 'right' }] }), d)).toContain('class="sec sec-title" style="text-align:right"');
+    const centered = normalizeTemplate({ ...boxed, columns: boxed.columns.map((c) => (c.key === 'unitPrice' ? { ...c, align: 'center' } : c)) });
+    expect(renderDocHtml(centered, d)).toMatch(/<th class="c">P\.U\.<\/th>/);
+    const a4 = normalizeTemplate({ ...builtin('invoice-a4-cash'), columns: builtin('invoice-a4-cash').columns.map((c) => (c.key === 'label' ? { ...c, align: 'right' } : c)) });
+    expect(renderDocHtml(a4, d)).toContain(`<td class="r">${d.lines[0]!.label}</td>`);
+  });
+
   it('magasin sans TVA : ni colonne ni total de TVA', () => {
     const d = sampleDocData('cash', { vatEnabled: false });
     d.lines = d.lines.map((l) => ({ ...l, vatRate: 0 }));

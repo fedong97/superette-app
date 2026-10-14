@@ -1087,3 +1087,14 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .pe-table tr.selected td { background: #e6f2ef; }
 .pe-table tr.editing td { background: #fff3dc; }
 .pe-pill { font-size: 11px; background: #e6f2ef; color: #0f5f58; border-radius: 8px; padding: 1px 5px; margin-left: 4px; }
+
+/* Choix gauche, centre, droite dans l'éditeur de modèles. */
+.align-pick { display: inline-flex; }
+.align-pick button { padding: 1px 7px; border-radius: 0; min-width: 28px; }
+.align-pick button:first-child { border-radius: 6px 0 0 6px; }
+.align-pick button:last-child { border-radius: 0 6px 6px 0; }
+.align-pick button.on { background: var(--brand); color: var(--brand-ink, #fff); border-color: var(--brand); }
+.tpl-columns input.qty { width: 56px; }
+.tpl-columns td:has(.align-pick) { white-space: nowrap; }
+.align-pick button { min-width: 24px; padding: 1px 5px; }
+.sec-align { margin-top: 3px; }

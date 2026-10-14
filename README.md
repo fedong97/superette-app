@@ -190,6 +190,7 @@ packages/core     Règles métier pures : FCFA, TVA, codes-barres, ticket, paiem
 packages/db       Base SQLite locale, migrations et services (admin, catalogue, stock, caisse, rapports)
 apps/desktop      Application Electron : processus principal, impression, synchronisation, interface React
 apps/server       Serveur central NestJS + PostgreSQL : enrôlement des PC, journal des opérations
+apps/server-app   FEDO Serveur : le serveur central en application Windows (base intégrée, interface, sauvegardes)
 ```
 
 Montants en FCFA entiers, quantités en millièmes (1 pièce = 1000, 1,250 kg = 1250), identifiants UUID pour fusionner sans collision les données de plusieurs magasins.
@@ -226,6 +227,21 @@ La mise à jour automatique lit les nouvelles versions à l'adresse `publish.url
 
 ## Installer le serveur central
 
+### FEDO Serveur pour Windows (le plus simple)
+
+`apps/server-app` emballe le serveur dans une application Windows, **FEDO Serveur**, avec sa base intégrée ([PGlite](https://pglite.dev), PostgreSQL compilé en WebAssembly) : rien d'autre à installer, ni PostgreSQL ni Node.js.
+
+```bash
+npm run build:win -w @superette/server-app   # → apps/server-app/release/FedoServeur-Setup-<version>.exe
+```
+
+- L'installateur ouvre le pare-feu Windows pour l'application, et FEDO Serveur démarre avec Windows (icône près de l'horloge ; fermer la fenêtre laisse le serveur tourner).
+- La base est dans `%APPDATA%\FEDO Serveur\donnees`, les sauvegardes dans `Documents\FEDO Serveur\Sauvegardes` (une par jour, les 30 dernières gardées ; dossier et nombre réglables).
+- L'interface (`http://localhost:3000/`, ou l'adresse du PC depuis un autre PC ou un téléphone, avec un mot de passe) montre l'état des postes, les ventes du jour par magasin, le journal de tout ce que les PC envoient, les ventes des 14 derniers jours, les sauvegardes (télécharger, restaurer) et la clé d'enrôlement, créée au premier démarrage.
+- Le port (3000) se change dans `%APPDATA%\FEDO Serveur\reglages.json`.
+
+### Serveur Node.js et PostgreSQL (VPS)
+
 Sur un serveur Linux (VPS) ou un PC toujours allumé, avec Node.js 22 et PostgreSQL 14 ou plus :
 
 ```bash
@@ -237,7 +253,7 @@ PORT=3000 \
 npm start -w @superette/server
 ```
 
-Les tables sont créées au premier démarrage. À chaque nouvelle version qui synchronise de nouvelles données (0.29.0 : inventaires, transferts, demandes de correction, ristournes, fabrication ; 0.36.0 : stock de chaque dépôt pour le stock multi-magasin), mettez à jour le serveur central avant les PC. `ENROLLMENT_KEY` (12 caractères minimum) protège l'enrôlement du premier PC ; les PC suivants n'en ont pas besoin, le code d'activation de leur caisse suffit. Sur Internet, placez le serveur derrière un proxy HTTPS (Caddy, Nginx).
+Les tables sont créées au premier démarrage. Sans `DATABASE_URL`, `DATA_DIR=/chemin/vers/un/dossier` utilise la base intégrée (sauvegardes dans `BACKUP_DIR`). Sans `ENROLLMENT_KEY`, le serveur crée une clé et l'affiche dans son interface (`http://adresse:3000/`). Le mot de passe de cette interface se donne dans `ADMIN_PASSWORD` (il se change ensuite dans l'interface). À chaque nouvelle version qui synchronise de nouvelles données (0.29.0 : inventaires, transferts, demandes de correction, ristournes, fabrication ; 0.36.0 : stock de chaque dépôt pour le stock multi-magasin), mettez à jour le serveur central avant les PC. `ENROLLMENT_KEY` (12 caractères minimum) protège l'enrôlement du premier PC ; les PC suivants n'en ont pas besoin, le code d'activation de leur caisse suffit. Sur Internet, placez le serveur derrière un proxy HTTPS (Caddy, Nginx).
 
 ## Données
 

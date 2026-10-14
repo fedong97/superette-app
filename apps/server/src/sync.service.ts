@@ -1,8 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import type { Pool } from 'pg';
 import { CONFIG, type ServerConfig } from './config';
-import { PG } from './database';
+import { type Db, PG } from './database';
 import { readLicense } from './license';
 
 /** Données partagées entre tous les magasins ; le reste ne circule qu'à l'intérieur d'un magasin. */
@@ -55,9 +54,30 @@ const hashToken = (token: string) => createHash('sha256').update(token).digest('
 @Injectable()
 export class SyncService {
   constructor(
-    @Inject(PG) private readonly pg: Pool,
+    @Inject(PG) private readonly pg: Db,
     @Inject(CONFIG) private readonly config: ServerConfig,
   ) {}
+
+  /** Clé d'enrôlement : celle de la configuration, sinon celle créée au premier démarrage. */
+  async enrollmentKey(): Promise<string> {
+    if (this.config.enrollmentKey) return this.config.enrollmentKey;
+    const { rows } = await this.pg.query<{ value: string }>("SELECT value FROM settings WHERE key = 'enrollment_key'");
+    if (rows[0]) return rows[0].value;
+    // Facile à recopier : pas de 0/O ni de 1/I/L.
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const bytes = randomBytes(12);
+    const key = Array.from(bytes, (b) => alphabet[b % alphabet.length])
+      .join('')
+      .replace(/(.{4})(?!$)/g, '$1-');
+    await this.pg.query("INSERT INTO settings (key, value) VALUES ('enrollment_key', $1) ON CONFLICT (key) DO NOTHING", [key]);
+    return this.enrollmentKey();
+  }
+
+  /** Nouvelle clé d'enrôlement (les PC déjà reliés ne sont pas touchés). */
+  async renewEnrollmentKey(): Promise<string> {
+    await this.pg.query("DELETE FROM settings WHERE key = 'enrollment_key'");
+    return this.enrollmentKey();
+  }
 
   /** Licence la plus récente reçue d'un PC, s'il y en a une. */
   async currentLicense(): Promise<{ key: string; stations: number } | null> {
@@ -107,8 +127,10 @@ export class SyncService {
 
   /** Premier poste d'un magasin : rattaché avec la clé d'enrôlement du serveur. */
   async enroll(input: { enrollmentKey: string; storeId: string; registerId: string; name?: string }) {
-    const given = Buffer.from(String(input.enrollmentKey ?? ''));
-    const expected = Buffer.from(this.config.enrollmentKey);
+    const typed = String(input.enrollmentKey ?? '').trim();
+    // La clé créée par le serveur est en majuscules : on accepte qu'elle soit tapée en minuscules.
+    const given = Buffer.from(this.config.enrollmentKey ? typed : typed.toUpperCase());
+    const expected = Buffer.from(await this.enrollmentKey());
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new ForbiddenException("Clé d'enrôlement incorrecte");
     if (!input.storeId || !input.registerId) throw new BadRequestException('Magasin et caisse obligatoires');
     return this.createDevice(input.name?.trim() || 'Poste', input.storeId, input.registerId);
@@ -149,23 +171,15 @@ export class SyncService {
         throw new BadRequestException(`Opération invalide : ${JSON.stringify(e).slice(0, 200)}`);
       }
     }
-    const client = await this.pg.connect();
-    try {
-      await client.query('BEGIN');
+    await this.pg.transaction(async (tx) => {
       for (const e of events) {
-        await client.query(
+        await tx.query(
           `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
           [e.id, device.id, e.entity, e.entityId, e.op, e.storeId, e.registerId, e.payload === null ? null : JSON.stringify(e.payload), e.createdAt],
         );
       }
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    });
     return { accepted: events.map((e) => e.id) };
   }
 

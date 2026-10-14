@@ -1,0 +1,28 @@
+appId: cm.superette.serveur
+productName: FEDO Serveur
+copyright: © FEDONG
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# PGlite lit sa base (fichiers .wasm et .data) depuis son dossier : hors de l'archive asar.
+asarUnpack:
+  - '**/node_modules/@electric-sql/pglite/**'
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: FedoServeur-Setup-${version}.exe
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: FEDO Serveur
+  language: '1036'
+  runAfterFinish: true
+  # Ouvre le pare-feu Windows pour que les autres PC joignent le serveur.
+  include: build/installer.nsh
+publish: null

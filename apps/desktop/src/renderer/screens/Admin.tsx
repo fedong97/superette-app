@@ -870,10 +870,10 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
           }}
         >
           <div className="grid2">
-            <Field label="Adresse du serveur" hint="ex. https://superette.mondomaine.cm">
+            <Field label="Adresse du serveur" hint="ex. http://192.168.1.20:3000 (affichée dans FEDO Serveur)">
               <input value={url} onChange={(e) => setUrl(e.target.value)} required />
             </Field>
-            <Field label="Clé d'enrôlement" hint="ENROLLMENT_KEY configurée sur le serveur">
+            <Field label="Clé d'enrôlement" hint="affichée dans FEDO Serveur, onglet Réglages">
               <input type="password" value={key} onChange={(e) => setKey(e.target.value)} required />
             </Field>
           </div>

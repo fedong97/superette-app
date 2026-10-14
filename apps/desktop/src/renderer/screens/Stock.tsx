@@ -5,12 +5,13 @@ import { StockByWarehouse, saveXlsx } from './Controls';
 import { Inventories } from './Inventories';
 import { Transfers } from './Transfers';
 import { Monitoring } from './Monitoring';
-import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits } from './packs';
-import { type TermsText, TermsCells, lineNet, lineTerms, noTerms } from './purchaseTerms';
+import { packCostText, purchaseUnits } from './packs';
+import { type ExtraTerms, type TermsText, lineNet, lineTerms, noTerms } from './purchaseTerms';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
 import { tx } from '../tax';
 import { ReceptionLabels } from './barcodePrint';
+import { PurchaseEntry } from './purchaseEntry';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -141,7 +142,7 @@ function StockState({ critical = false }: { critical?: boolean }) {
   );
 }
 
-export interface RecLine extends TermsText {
+export interface RecLine extends TermsText, ExtraTerms {
   article: Article;
   /** Quantité et coût HT dans le conditionnement choisi (`packUnits` unités, en millièmes). */
   qty: string;
@@ -149,6 +150,17 @@ export interface RecLine extends TermsText {
   packUnits: number;
   lot: string;
   expiry: string;
+  /** Transport et manutention par conditionnement saisi : vides, le prix de revient garde son écart. */
+  transport?: string;
+  handling?: string;
+}
+
+/** Transport et manutention d'un conditionnement, ou undefined s'ils ne sont pas saisis. */
+export function recExtraCost(l: Pick<RecLine, 'transport' | 'handling'>): number | undefined {
+  const t = (l.transport ?? '').trim();
+  const h = (l.handling ?? '').trim();
+  if (!t && !h) return undefined;
+  return (t ? parseAmount(t) ?? 0 : 0) + (h ? parseAmount(h) ?? 0 : 0);
 }
 
 /** Nouvelle ligne : un conditionnement d'achat au dernier prix. */
@@ -173,62 +185,8 @@ export function recLineInput(l: RecLine) {
     packUnits: l.packUnits,
     lotNumber: l.lot || null,
     expiry: l.expiry || null,
+    extraCost: recExtraCost(l),
   };
-}
-
-/** Lignes d'une réception libre ou d'une facture directe : quantité, prix, remise, promo N/M, lot. */
-export function RecLinesTable({ lines, setLines }: { lines: RecLine[]; setLines: (l: RecLine[]) => void }) {
-  const update = (i: number, patch: Partial<RecLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  if (!lines.length) return null;
-  return (
-    <table className="list">
-      <thead>
-        <tr>
-          <th />
-          <th>Article</th>
-          <th>Quantité</th>
-          <th>Conditionnement</th>
-          <th>{tx('Coût unitaire HT')}</th>
-          <th>Remise %</th>
-          <th>Promo N/M</th>
-          <th>N° de lot</th>
-          <th>Date limite</th>
-          <th className="r">Montant net</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((l, i) => (
-          <tr key={i}>
-            <td className="thumb-cell">{l.article.photo_thumb && <img className="thumb" src={l.article.photo_thumb} alt="" />}</td>
-            <td>{l.article.name}</td>
-            <td>
-              <input className="qty" value={l.qty} onChange={(e) => update(i, { qty: e.target.value })} />
-            </td>
-            <td>
-              <PackUnitSelect choices={packChoices(l.article)} value={l.packUnits} onChange={(u) => update(i, { ...switchUnits(l.qty, l.cost, l.packUnits, u), packUnits: u })} />
-            </td>
-            <td>
-              <input className="qty" value={l.cost} onChange={(e) => update(i, { cost: e.target.value })} />
-            </td>
-            <TermsCells line={l} onChange={(p) => update(i, p)} />
-            <td>
-              <input className="qty" value={l.lot} onChange={(e) => update(i, { lot: e.target.value })} />
-            </td>
-            <td>
-              <input type="date" value={l.expiry} required={l.article.perishable === 1} onChange={(e) => update(i, { expiry: e.target.value })} />
-            </td>
-            <td className="r">{fcfa(lineNet(l))}</td>
-            <td>
-              <button className="ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
-                ✕
-              </button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
 }
 
 function Reception() {
@@ -253,8 +211,7 @@ function Reception() {
           <input value={reference} onChange={(e) => setReference(e.target.value)} />
         </Field>
       </div>
-      <ArticlePicker onPick={(a) => setLines([...lines, newRecLine(a)])} />
-      <RecLinesTable lines={lines} setLines={setLines} />
+      <PurchaseEntry lines={lines} setLines={setLines}>
       <div className="actions">
         <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
         <button
@@ -281,6 +238,7 @@ function Reception() {
           Valider la réception
         </button>
       </div>
+      </PurchaseEntry>
     </div>
   );
 }

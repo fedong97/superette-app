@@ -5,7 +5,8 @@ import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmo
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
-import { type RecLine, RecLinesTable, newRecLine, recLineInput } from './Stock';
+import { type RecLine, recLineInput } from './Stock';
+import { PurchaseEntry } from './purchaseEntry';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
 import { hasVat, tx } from '../tax';
 import { DocPreview } from './docPreview';
@@ -1153,8 +1154,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           <input value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
       </div>
-      <ArticlePicker placeholder="Ajouter un article : scanner ou rechercher" onPick={(a) => setLines([...lines, newRecLine(a)])} />
-      <RecLinesTable lines={lines} setLines={setLines} />
+      <PurchaseEntry lines={lines} setLines={setLines}>
       {lines.length > 0 && (
         <div className="direct-foot">
           <div>
@@ -1266,6 +1266,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
           Enregistrer la facture et la réception
         </button>
       </div>
+      </PurchaseEntry>
     </div>
   );
 }

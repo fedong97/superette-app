@@ -36,6 +36,8 @@ export interface ReceptionLine {
   promoPay?: number | null;
   /** Part de la remise globale de la facture directe (HT), déduite de la ligne. */
   globalDiscount?: Fcfa;
+  /** Transport et manutention d'un conditionnement de `packUnits` : fixe le prix de revient de l'article. */
+  extraCost?: Fcfa;
 }
 
 export interface StockRow {
@@ -404,7 +406,13 @@ export class StockService extends Base {
       line.packCost !== undefined && line.packUnits === a.units && Number.isSafeInteger(line.packCost) && line.packCost >= 0
         ? line.packCost
         : Math.round((line.unitCost * a.units) / 1000);
-    const cost = a.pack_cost_price !== null && a.pack_purchase_price !== null ? Math.max(0, a.pack_cost_price + packPrice - a.pack_purchase_price) : packPrice;
+    const extra = line.extraCost;
+    const cost =
+      extra !== undefined && extra !== null && Number.isSafeInteger(extra) && extra >= 0
+        ? packPrice + Math.round((extra * a.units) / (line.packUnits && line.packUnits > 0 ? line.packUnits : 1000))
+        : a.pack_cost_price !== null && a.pack_purchase_price !== null
+          ? Math.max(0, a.pack_cost_price + packPrice - a.pack_purchase_price)
+          : packPrice;
     this.db
       .prepare('UPDATE articles SET purchase_price = ?, pack_purchase_price = ?, pack_cost_price = ?, updated_at = ? WHERE id = ?')
       .run(line.unitCost, packPrice, cost, now, line.articleId);

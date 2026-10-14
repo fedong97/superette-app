@@ -159,7 +159,7 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Filtrez par nom, code ou famille, ou sur les articles en rupture dans au moins un magasin. Imprimez en A4 ou exportez vers Excel.',
         ],
       },
-      { tab: 'receive', title: 'Réception sans commande', steps: ['Choisissez le dépôt, ajoutez les produits reçus avec la quantité, le prix et la date limite pour les périssables, puis validez.', 'Remise % et promo « N/M » (12/10 : 12 achetés, 10 payés) par ligne : le stock entre au coût net.'] },
+      { tab: 'receive', title: 'Réception sans commande', steps: ['Choisissez le dépôt, puis scannez chaque produit : le panneau de gauche demande la quantité, le bonus, la remise, le prix, le transport, la manutention, le lot et la date limite des périssables. Entrée passe au champ suivant et, sur le dernier, fait descendre la ligne dans la liste.', 'Un clic sur une ligne de la liste la remonte pour la modifier. Remise en %, en FCFA ou promo « N/M » (12/10 : 12 achetés, 10 payés) : le stock entre au coût net.'] },
       { tab: 'loss', title: 'Pertes et casse', steps: ['Produit, quantité et motif (casse, vol, péremption, consommation) : le stock baisse et la perte est tracée.'] },
       {
         tab: 'transfer',

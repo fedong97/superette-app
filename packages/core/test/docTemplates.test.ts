@@ -69,6 +69,15 @@ describe('modèles d’impression', () => {
     expect(html).toContain('size: 210mm 297mm');
   });
 
+  it('réimpression : filigrane DUPLICATA, sauf si le modèle ne l’affiche pas', () => {
+    const d = sampleDocData('cash');
+    expect(renderDocHtml(builtin('invoice-a4-cash'), d)).not.toContain('class="wm"');
+    d.doc.duplicate = true;
+    for (const id of ['invoice-a4-cash', 'invoice-listing-cash', 'invoice-ticket-cash']) expect(renderDocHtml(builtin(id), d)).toContain('<div class="wm">DUPLICATA</div>');
+    const off = { ...builtin('invoice-a4-cash'), footer: { ...builtin('invoice-a4-cash').footer, duplicate: false } };
+    expect(renderDocHtml(off, d)).not.toContain('DUPLICATA');
+  });
+
   it('magasin sans TVA : ni colonne ni total de TVA', () => {
     const d = sampleDocData('cash', { vatEnabled: false });
     d.lines = d.lines.map((l) => ({ ...l, vatRate: 0 }));
@@ -107,7 +116,7 @@ describe('modèles d’impression', () => {
     d.doc.duplicate = true;
     const text = receiptToText(renderDocTicket(builtin('invoice-ticket-credit'), d), 48);
     expect(text).toContain('FACTURE À TERME');
-    expect(text).toContain('DUPLICATA');
+    expect(text).toContain('D U P L I C A T A');
     expect(text).toContain('N° DLA1-1-000123');
     expect(text).toContain('Compte : C0012');
     expect(text).toMatch(/Reste à payer\s+19 950/);

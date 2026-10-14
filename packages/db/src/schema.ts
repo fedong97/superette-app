@@ -1438,4 +1438,13 @@ CREATE TABLE sale_deliveries (
 CREATE INDEX sale_deliveries_day ON sale_deliveries(store_id, planned_date);
 `,
   },
+  {
+    version: 32,
+    name: 'impressions du ticket et de la facture',
+    sql: `
+-- Impressions déjà faites de chaque document de la vente : à partir de la deuxième, il porte « DUPLICATA ».
+ALTER TABLE sales ADD COLUMN ticket_prints INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sales ADD COLUMN invoice_prints INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

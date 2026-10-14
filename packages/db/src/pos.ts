@@ -197,6 +197,9 @@ export interface Sale {
   change_given: Fcfa;
   /** Arrondi des espèces accordé (compris dans les remises). */
   rounding: Fcfa;
+  /** Tickets et factures (A4, listing) déjà imprimés : la réimpression porte « DUPLICATA ». */
+  ticket_prints: number;
+  invoice_prints: number;
   original_sale_id: string | null;
   cancel_reason: string | null;
   customer_id: string | null;
@@ -838,6 +841,11 @@ export class PosService extends Base {
   findSaleByNumber(number: string): Sale | null {
     const id = this.db.prepare('SELECT id FROM sales WHERE number = ?').pluck().get(number.trim().toUpperCase()) as string | undefined;
     return id ? this.getSale(id) : null;
+  }
+
+  /** Le ticket ou la facture de la vente vient d'être imprimé : le suivant portera « DUPLICATA ». */
+  markSalePrinted(id: string, doc: 'ticket' | 'invoice'): void {
+    this.db.prepare(`UPDATE sales SET ${doc === 'ticket' ? 'ticket_prints = ticket_prints' : 'invoice_prints = invoice_prints'} + 1 WHERE id = ?`).run(id);
   }
 
   listSales(opts: { sessionId?: string; storeId?: string; date?: string; customerId?: string; userId?: string; limit?: number }): Omit<Sale, 'lines' | 'payments'>[] {

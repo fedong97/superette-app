@@ -245,7 +245,8 @@ export function createPrinter(s: Services): Printer {
   }
 
   /** `html` : page complète du modèle de ticket, imprimée telle quelle par le pilote Windows. */
-  async function printReceipt(receipt: Receipt, kick: boolean, force = false, html?: string): Promise<void> {
+  /** Renvoie false si rien n'est sorti (impression automatique coupée sur le poste). */
+  async function printReceipt(receipt: Receipt, kick: boolean, force = false, html?: string): Promise<boolean> {
     const cfg = config();
     const print = cfg.enabled || force;
     if (cfg.mode === 'driver') {
@@ -253,10 +254,11 @@ export function createPrinter(s: Services): Printer {
       if (kick) await sendRaw(cfg, drawerKick()).catch((err) => errors.push(err));
       if (print) await (html ? printPage(html) : printHtml(receiptToHtml(receipt), true)).catch((err) => errors.push(err));
       if (errors.length) throw errors[0];
-      return;
+      return print;
     }
     if (print) await sendRaw(cfg, receiptToEscPos(withRaster(receipt, cfg.columns), { columns: cfg.columns, codepage: cfg.codepage, cut: cfg.cut, kick }));
     else if (kick) await sendRaw(cfg, drawerKick());
+    return print;
   }
 
   /** Document A4 (bon de commande) : la fenêtre d'impression Windows s'ouvre pour choisir l'imprimante ou « Enregistrer en PDF ». */
@@ -534,12 +536,15 @@ export function createPrinter(s: Services): Printer {
       const kick = Boolean(opts?.newSale) && saleKick(saleId);
       const t = s.receipts.saleTemplate(saleId, 'ticket', opts?.templateId);
       const ticket = t.format === 'ticket' ? t : s.receipts.saleTemplate(saleId, 'ticket');
-      const data = s.receipts.saleDoc(saleId, { duplicate: !opts?.newSale });
-      const receipt = s.receipts.ticket(saleId, { templateId: ticket.id, duplicate: !opts?.newSale });
+      const duplicate = Boolean(opts?.duplicate);
+      const data = s.receipts.saleDoc(saleId, { duplicate });
+      const receipt = s.receipts.ticket(saleId, { templateId: ticket.id, duplicate });
       const html = renderDocHtml(ticket, data);
       // Exemplaires : ceux des paramètres ou du modèle pour une vente, un seul en réimpression ; le tiroir ne s'ouvre qu'au premier.
       const copies = opts?.newSale ? Math.max(opts.copies ?? 1, ticket.page.copies) : Math.max(1, opts?.copies ?? 1);
-      for (let i = 0; i < copies; i++) await printReceipt(receipt, kick && i === 0, Boolean(opts?.force), html);
+      let printed = false;
+      for (let i = 0; i < copies; i++) printed = (await printReceipt(receipt, kick && i === 0, Boolean(opts?.force), html)) || printed;
+      return printed;
     },
 
     async saleDrawer(saleId) {

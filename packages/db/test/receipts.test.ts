@@ -76,7 +76,9 @@ describe('tickets de caisse', () => {
     const mine = { ...base, id: 'tpl-court', builtin: false, name: 'Ticket court', info: { ...base.info, title: 'FACTURE', seller: false }, totals: { ...base.totals, vatDetail: false } };
     s.admin.saveStoreSettings(ctx.userId, ctx.storeId, { printTemplates: [mine], printDefaults: { 'invoice.ticket.cash': 'tpl-court' } });
     const text = receiptToText(s.receipts.ticket(sale.id, { duplicate: true }), 32);
-    expect(text).toContain('FACTURE\nDUPLICATA\nN° DLA1-1-000001\n06/10/2026 09:00\n');
+    expect(text).toContain('FACTURE\n       D U P L I C A T A\nN° DLA1-1-000001\n06/10/2026 09:00\n');
+    // Bandeau aussi en bas du ticket : une imprimante thermique ne sait pas faire de filigrane.
+    expect(text.trimEnd().endsWith('D U P L I C A T A')).toBe(true);
     expect(text).not.toContain('dont TVA');
     // Vente comptant : modèle A4 comptant, avec le code des articles et le vendeur.
     expect(s.receipts.saleVariant(sale.id)).toBe('cash');

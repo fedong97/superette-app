@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, type Permission, type PosLayout, type PriceLevel, type Tariff, PAYMENT_METHODS, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
+import { type CartLine, type Permission, type PosLayout, type PriceLevel, type Tariff, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -381,6 +381,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const finish = (sale: Result<'pos.sell'>) => {
     setLines([]);
     setSelected(null);
+    // La fiche repart vierge ; la vente reste en mémoire pour Réimprimer et Facture A4.
     setLastSale(sale);
     setDialog(null);
     setCustomer(null);
@@ -388,6 +389,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setQuote(null);
     const delivered = delivery.on;
     resetOptions();
+    toast.ok(`Facture ${sale.number} enregistrée${sale.change_given > 0 ? ` · rendu ${fcfa(sale.change_given)}` : ''}`);
     const print = printRef.current;
     printRef.current = 'none';
     if (print === 'ticket') call('pos.printTicket', sale.id, { newSale: true, force: true }).catch((err) => toast.error(err));
@@ -579,41 +581,19 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
 
   const sel = lines.find((l) => l.key === selected);
   const salesWarehouse = (warehouses.data ?? []).find((w) => w.is_sales_default) ?? warehouses.data?.[0];
-  const shownTotal = lines.length ? totals.totalTtc : (lastSale?.total_ttc ?? 0);
-  const change = lines.length ? Math.max(0, cashGiven - cashDue) : (lastSale?.change_given ?? 0);
-  // Après validation : espèces réellement reçues (rien pour une vente entièrement à crédit).
-  const given = lines.length ? cashGiven : lastSale ? lastSale.payments.filter((p) => p.method === 'CASH').reduce((t, p) => t + p.amount, 0) : 0;
+  // Après validation la fiche est vierge : le montant de la vente précédente ne reste pas affiché.
+  const shownTotal = lines.length ? totals.totalTtc : 0;
+  const change = lines.length ? Math.max(0, cashGiven - cashDue) : 0;
+  const given = lines.length ? cashGiven : 0;
 
 
   /** Morceaux communs aux trois présentations de la caisse (Moderne, Classique, Conventionnel). */
   const paymentsPane = (
     <div className="tk-pane">
-      {lastSale && !lines.length ? (
-        <table className="list">
-          <caption>Règlement du ticket {lastSale.number}</caption>
-          <tbody>
-            {lastSale.payments.map((p, i) => (
-              <tr key={i}>
-                <td>{PAYMENT_METHODS[p.method]}</td>
-                <td>{p.reference ?? ''}</td>
-                <td className="r">{fcfa(p.amount)}</td>
-              </tr>
-            ))}
-            {lastSale.change_given > 0 && (
-              <tr>
-                <td>Rendu monnaie</td>
-                <td></td>
-                <td className="r">−{fcfa(lastSale.change_given)}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      ) : (
-        <p className="muted">
-          Le règlement se fait à la validation (F4) : espèces avec les billets, ou Encaisser (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
-          d'achat et paiements mixtes.
-        </p>
-      )}
+      <p className="muted">
+        Le règlement se fait à la validation (F4) : espèces avec les billets, ou Encaisser (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
+        d'achat et paiements mixtes.
+      </p>
     </div>
   );
   const deliveryPane = (
@@ -987,8 +967,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
   const heldCount = held.data?.length ?? 0;
-  const ficheNumber = lines.length ? (quote ? `Devis ${quote.number}` : 'Nouveau') : (lastSale?.number ?? 'Nouveau');
-  const done = !lines.length && Boolean(lastSale);
+  const ficheNumber = quote && lines.length ? `Devis ${quote.number}` : 'Nouveau';
   const tariffSelect = (
     <select value={level} onChange={(e) => pickLevel(e.target.value as PriceLevel)} title="Tarif de cette fiche ; par défaut celui du client">
       {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
@@ -1020,9 +999,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   const bandText =
     credit && customer && account.data
       ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
-      : !lines.length && lastSale?.customer_name
-        ? `${lastSale.customer_name}${lastSale.due_date ? ` · à régler avant le ${new Date(`${lastSale.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`
-        : quote && lines.length
+      : quote && lines.length
           ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
           : delivery.on
             ? `À livrer${delivery.address ? ` : ${delivery.address}` : ''}`
@@ -1111,7 +1088,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                 </button>
               )}
               <span className="pc-count">{totals.itemCount} art.</span>
-              <div className={`pc-total ${done ? 'done' : ''}`}>
+              <div className="pc-total">
                 {amount(shownTotal)}
                 <small>{tx('TTC')}</small>
               </div>
@@ -1407,7 +1384,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
             {depotSelect ? <label>Dépôt</label> : <span />}
             {depotSelect ?? <span />}
           </div>
-          <div className={`pv-total ${done ? 'done' : ''}`}>
+          <div className="pv-total">
             <span>{tx('Total TTC')}</span>
             <b>{amount(shownTotal)}</b>
           </div>
@@ -1496,7 +1473,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                   ))}
                   {!priced.length && (
                     <tr className="empty">
-                      <td colSpan={7}>{lastSale ? `Facture ${lastSale.number} enregistrée. Saisissez le produit suivant.` : 'Aucun article : saisissez ou scannez un produit.'}</td>
+                      <td colSpan={7}>Aucun article : saisissez ou scannez un produit.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1778,21 +1755,17 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                 Infos
               </button>
               <span className="tk-meta" title={title}>
-                {lines.length ? (quote ? `Devis ${quote.number}` : 'Nouveau') : (lastSale?.number ?? 'Nouveau')}
+                {ficheNumber}
               </span>
             </div>
-            {(quote && lines.length > 0) || (!lines.length && lastSale?.customer_name) ? (
-              <div className="tk-note">
-                {quote && lines.length
-                  ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
-                  : `${lastSale!.customer_name}${lastSale!.due_date ? ` · à régler avant le ${new Date(`${lastSale!.due_date}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}`}
-              </div>
+            {quote && lines.length > 0 ? (
+              <div className="tk-note">{`${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`}</div>
             ) : null}
           </div>
 
           {pane === 'lines' && (
             <div className="tk-lines">
-              {!priced.length && <p className="tk-empty">{lastSale ? `Ticket ${lastSale.number} validé. Scannez le produit suivant.` : 'Aucun article : scannez ou touchez un produit.'}</p>}
+              {!priced.length && <p className="tk-empty">Aucun article : scannez ou touchez un produit.</p>}
               {priced.map((l) => {
                 const isSel = l.key === selected;
                 const pack = l.packId ? l.packs.find((p) => p.id === l.packId) : undefined;
@@ -1874,7 +1847,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
                   ))}
               </div>
             )}
-            <div className={`tk-total ${!lines.length && lastSale ? 'done' : ''}`}>
+            <div className="tk-total">
               <span>{tx('Total TTC').toUpperCase()}</span>
               <strong>
                 {amount(shownTotal)}

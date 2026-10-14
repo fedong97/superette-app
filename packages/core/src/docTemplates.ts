@@ -688,6 +688,21 @@ const shown = (t: DocTemplate, d: DocData) => {
 };
 
 /** Ticket de caisse selon le modèle : la même description sert au pilote Windows et à l'ESC/POS. */
+/** Réimpression d'un document dont le modèle affiche la mention. */
+const duplicata = (t: DocTemplate, d: DocData) => d.doc.duplicate && t.footer.duplicate;
+/** Une imprimante à ticket ne sait pas faire de filigrane : bandeau en gros caractères en haut et en bas. */
+const DUPLICATA_BANNER: ReceiptLine = { t: 'text', text: 'DUPLICATA', align: 'center', bold: true, big: true };
+
+/** Filigrane « DUPLICATA » en diagonale, répété sur chaque page imprimée. */
+function watermark(t: DocTemplate): { css: string; html: string } {
+  const size = t.format === 'ticket' ? '12mm' : '36mm';
+  return {
+    css: `.wm { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font: bold ${size} Arial, sans-serif; letter-spacing: 0.1em;
+      color: rgba(0, 0, 0, 0.13); white-space: nowrap; pointer-events: none; z-index: 10; -webkit-print-color-adjust: exact; print-color-adjust: exact; }`,
+    html: '<div class="wm">DUPLICATA</div>',
+  };
+}
+
 export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.page.style === 'boxed' || t.page.style === 'detailed') return styledTicket(t, d);
   const r: Receipt = [];
@@ -707,7 +722,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'RETOUR CLIENT' : docTitle(t, d);
   if (title) r.push({ t: 'text', text: title, bold: true });
   if (d.doc.cancelled) r.push({ t: 'text', text: 'ANNULÉ', bold: true });
-  if (d.doc.duplicate && t.footer.duplicate) r.push({ t: 'text', text: 'DUPLICATA', bold: true });
+  if (duplicata(t, d)) r.push(DUPLICATA_BANNER);
   if (t.info.number) r.push({ t: 'text', text: `${title ? 'N°' : 'Ticket'} ${d.doc.number}` });
   const when = t.info.date ? (t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)) : '';
   const meta = [when, t.info.seller ? d.doc.seller : '', t.info.register ? (d.doc.register ?? '') : ''].filter(Boolean).join(' · ');
@@ -770,6 +785,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   }
   const bottom = [...lines(t.footer.text), ...lines(t.footer.thanks || d.store.thanks)];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
+  if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   return r;
 }
 
@@ -864,8 +880,9 @@ const nl = (s: string) => esc(s).replace(/\n/g, '<br>');
 
 /** Page HTML complète d'une facture selon son modèle : imprimée telle quelle et affichée en aperçu. */
 export function renderDocHtml(t: DocTemplate, d: DocData): string {
+  const wm = duplicata(t, d) ? watermark(t) : { css: '', html: '' };
   const wrap = (css: string, body: string) =>
-    `<!doctype html><html><head><meta charset="utf-8"><style>${pageCss(t)}${css}</style></head><body><div class="sheet">${body}</div></body></html>`;
+    `<!doctype html><html><head><meta charset="utf-8"><style>${pageCss(t)}${css}${wm.css}</style></head><body>${wm.html}<div class="sheet">${body}</div></body></html>`;
   if (t.format === 'ticket' && (t.page.style === 'boxed' || t.page.style === 'detailed')) return wrap(styledTicketCss(t), styledTicketHtml(t, d));
   if (t.format === 'ticket') return wrap(`${TICKET_CSS} .c img { max-height: ${t.header.logoSize}mm !important; }`, receiptToHtml(renderDocTicket(t, d)));
   if (t.page.style === 'framed' || t.page.style === 'side') return wrap(framedCss(t), framedBody(t, d));
@@ -1299,7 +1316,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   r.push({ t: 'feed' });
   const title = (docTitle(t, d) || 'Facture').toUpperCase();
   if (t.info.number) r.push({ t: 'text', text: `${title} N° ${d.doc.number}${d.doc.cancelled ? ' (ANNULÉE)' : ''}` });
-  if (d.doc.duplicate && t.footer.duplicate) r.push({ t: 'text', text: 'DUPLICATA', bold: true });
+  if (duplicata(t, d)) r.push(DUPLICATA_BANNER);
   if (t.info.seller && d.doc.seller) r.push({ t: 'text', text: `Vendeur : ${d.doc.seller.toUpperCase()}` });
   if (t.customer.show) r.push({ t: 'text', text: `Client : ${(c?.name ?? 'Client comptoir').toUpperCase()}` });
   if (t.customer.show && c && !c.counter && t.customer.phone && c.phone) r.push({ t: 'text', text: `Tél. client : ${c.phone}` });
@@ -1346,6 +1363,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   const bottom = [...split(t.footer.text), ...split(t.footer.thanks || d.store.thanks)];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
   r.push(centered('FEDO Gestion'));
+  if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   return r;
 }
 

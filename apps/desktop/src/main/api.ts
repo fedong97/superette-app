@@ -101,7 +101,8 @@ export interface InvoicePrintOptions {
 
 export interface Printer {
   /** `newSale` : ticket d'une vente qui vient d'être encaissée (ouvre le tiroir selon les réglages). */
-  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null; force?: boolean }): Promise<void>;
+  /** `duplicate` : le ticket a déjà été imprimé. Renvoie false si rien n'est sorti (impression automatique coupée). */
+  ticket(saleId: string, opts?: { newSale?: boolean; copies?: number; templateId?: string | null; force?: boolean; duplicate?: boolean }): Promise<boolean>;
   /** Tiroir d'une vente enregistrée sans ticket (F4) : il s'ouvre selon les réglages, comme avec le ticket. */
   saleDrawer(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
@@ -275,6 +276,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer une facture", 'FORBIDDEN');
     return fresh;
   };
+  /** La facture de la vente est déjà sortie une fois : la suivante est un duplicata. */
+  const invoiceDuplicate = (saleId: string) => s.pos.getSale(saleId).invoice_prints > 0;
   const SUPPLIERS: Permission[] = ['purchases', 'suppliers', 'purchase_invoices', 'supplier_statement'];
   const STAFF: Permission[] = ['staff', 'staff_edit', 'staff_salaries'];
   /**
@@ -794,7 +797,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const u = requireSaleAccess(saleId);
       const fresh = Boolean(opts?.newSale && can(u, POS));
       if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer un ticket", 'FORBIDDEN');
-      return printer.ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId, force: Boolean(opts?.force) });
+      const duplicate = s.pos.getSale(saleId).ticket_prints > 0;
+      return printer
+        .ticket(saleId, { newSale: fresh, copies: fresh ? settings().ticketCopies : 1, templateId: opts?.templateId, force: Boolean(opts?.force), duplicate })
+        .then((printed) => void (printed && s.pos.markSalePrinted(saleId, 'ticket')));
     },
     /** Vente enregistrée sans ticket ou en listing : le tiroir s'ouvre comme au ticket, juste après la vente par son vendeur. */
     'pos.saleDrawer': (saleId: string) => {
@@ -1133,15 +1139,23 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!Object.values(s.pos.linkedRegisters(u.id)).includes(se.register_id)) requireAmounts();
       return printer.sessionReport(sessionId, true);
     },
-    /** Facture selon un modèle : juste après la vente, ou plus tard avec le droit de réimprimer (« DUPLICATA »). */
+    /**
+     * Facture selon un modèle : juste après la vente, ou plus tard avec le droit de réimprimer.
+     * Dès que la facture (A4 ou listing) a déjà été imprimée, elle porte « DUPLICATA » ; le ticket se compte à part.
+     */
     'pos.printInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf'; doc?: 'invoice' | 'delivery' }) => {
       const fresh = invoiceAccess(saleId);
-      return printer.invoice(saleId, { ...opts, duplicate: !fresh });
+      if (opts?.doc === 'delivery') return printer.invoice(saleId, { ...opts, duplicate: !fresh });
+      return printer.invoice(saleId, { ...opts, duplicate: invoiceDuplicate(saleId) }).then((done) => {
+        if (done) s.pos.markSalePrinted(saleId, 'invoice');
+        return done;
+      });
     },
     /** Aperçu d'une facture avec le modèle choisi (ou celui par défaut du format). */
     'pos.previewInvoice': (saleId: string, opts?: { templateId?: string | null; format?: DocFormat | null; doc?: 'invoice' | 'delivery' }) => {
       const fresh = invoiceAccess(saleId);
-      return { ...printer.previewInvoice(saleId, { ...opts, duplicate: !fresh }), doc: 'invoice' as const, variant: s.receipts.saleVariant(saleId) };
+      const duplicate = opts?.doc === 'delivery' ? !fresh : invoiceDuplicate(saleId);
+      return { ...printer.previewInvoice(saleId, { ...opts, duplicate }), doc: 'invoice' as const, variant: s.receipts.saleVariant(saleId) };
     },
 
     // --- Modèles d'impression -------------------------------------------------

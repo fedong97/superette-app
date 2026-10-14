@@ -1439,7 +1439,8 @@ CREATE INDEX sale_deliveries_day ON sale_deliveries(store_id, planned_date);
 `,
   },
   {
-    version: 32,
+    // 33 : la 32 est prise par le plan SYSCOHADA et les exercices (version 0.43).
+    version: 33,
     name: 'impressions du ticket et de la facture',
     sql: `
 -- Impressions déjà faites de chaque document de la vente : à partir de la deuxième, il porte « DUPLICATA ».

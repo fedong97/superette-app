@@ -94,6 +94,77 @@ export interface DocColumn {
   width: number;
 }
 
+/** Sections d'un document, dans l'ordre par défaut. */
+export const DOC_SECTIONS = {
+  header: 'En-tête : le magasin',
+  title: 'Titre, numéro, date et client',
+  lines: 'Articles',
+  totals: 'Totaux',
+  payments: 'Règlement, rendu et montant en lettres',
+  footer: 'Pied : notes, TVA, signatures, remerciements',
+} as const;
+export type DocSectionKey = keyof typeof DOC_SECTIONS;
+const SECTION_KEYS = Object.keys(DOC_SECTIONS) as DocSectionKey[];
+/** Largeur imprimée par défaut d'un rouleau : la tête d'une imprimante 80 mm n'imprime que sur 72 mm. */
+const ROLL_PRINT_WIDTH: Partial<Record<string, number>> = { '80mm': 72, '58mm': 48 };
+
+/** Sections dans l'ordre du modèle : toutes une fois, celles qui manquent à leur place par défaut. */
+export function docSections(t: Pick<DocTemplate, 'sections'>): { key: DocSectionKey; space: number }[] {
+  const out: { key: DocSectionKey; space: number }[] = [];
+  for (const x of t.sections ?? []) {
+    if (x && SECTION_KEYS.includes(x.key) && !out.some((o) => o.key === x.key)) out.push({ key: x.key, space: clamp(x.space, 0, 50, 0) });
+  }
+  for (const k of SECTION_KEYS) if (!out.some((o) => o.key === k)) out.push({ key: k, space: 0 });
+  return out;
+}
+
+/** Marges, largeur imprimée et espacements d'un modèle, avec leurs valeurs par défaut. */
+export function pageLayout(t: DocTemplate): { left: number; right: number; printWidth: number; lineSpacing: number; sectionGap: number } {
+  const p = t.page;
+  const { width, height } = pageSize(t);
+  const roll = !height && t.format === 'ticket';
+  return {
+    left: p.marginLeft ?? p.margin,
+    right: p.marginRight ?? p.margin,
+    printWidth: roll ? Math.min(width, p.printWidth || ROLL_PRINT_WIDTH[p.paper] || width) : width,
+    lineSpacing: p.lineSpacing ?? 100,
+    sectionGap: p.sectionGap ?? 0,
+  };
+}
+
+type SectionParts<T> = Partial<Record<DocSectionKey, T>>;
+
+/** Ticket en sections remises dans l'ordre du modèle, avec l'espace voulu entre elles. */
+function arrangeReceipt(t: DocTemplate, parts: SectionParts<Receipt>): Receipt {
+  const { lineSpacing, sectionGap } = pageLayout(t);
+  const out: Receipt = lineSpacing !== 100 ? [{ t: 'spacing', pct: lineSpacing }] : [];
+  let first = true;
+  for (const { key, space } of docSections(t)) {
+    const part = parts[key];
+    if (!part?.length) continue;
+    const gap = first ? space : sectionGap + space;
+    if (gap > 0) out.push({ t: 'space', mm: gap });
+    out.push(...part);
+    first = false;
+  }
+  return out;
+}
+
+/** Même chose pour une page HTML. */
+function arrangeHtml(t: DocTemplate, parts: SectionParts<string>): string {
+  const { sectionGap } = pageLayout(t);
+  let first = true;
+  return docSections(t)
+    .map(({ key, space }) => {
+      const part = parts[key]?.trim();
+      if (!part) return '';
+      const gap = first ? space : sectionGap + space;
+      first = false;
+      return `<div class="sec sec-${key}"${gap ? ` style="margin-top:${gap}mm"` : ''}>${part}</div>`;
+    })
+    .join('');
+}
+
 export interface DocTemplate {
   id: string;
   doc: DocKind;
@@ -120,7 +191,18 @@ export interface DocTemplate {
     borders: boolean;
     /** Présentation simple ou encadrée. */
     style: DocStyle;
+    /** Marges gauche et droite en mm (sinon « Marges »). */
+    marginLeft?: number;
+    marginRight?: number;
+    /** Rouleau : largeur réellement imprimée en mm (72 sur un rouleau de 80, 48 sur un 58). */
+    printWidth?: number;
+    /** Interligne à l'intérieur des sections, en % (100 : normal). */
+    lineSpacing?: number;
+    /** Espace entre les sections, en mm. */
+    sectionGap?: number;
   };
+  /** Ordre des sections du document (glisser-déposer) et espace en plus au-dessus de chacune, en mm. */
+  sections?: { key: DocSectionKey; space: number }[];
   header: {
     logo: boolean;
     /** Hauteur du logo en mm. */
@@ -281,7 +363,7 @@ const TICKET_BASE: Omit<DocTemplate, 'id' | 'variant' | 'name'> = {
   doc: 'invoice',
   format: 'ticket',
   builtin: true,
-  page: { paper: '80mm', landscape: false, margin: 4, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false, style: 'plain' },
+  page: { paper: '80mm', landscape: false, margin: 2, font: 'mono', fontSize: 11, headerHeight: 0, footerHeight: 0, lineHeight: 0, copies: 1, borders: false, style: 'plain' },
   header: { logo: true, logoSize: 25, logoAlign: 'center', storeName: true, address: true, phone: true, niu: true, rccm: true, message: '' },
   customer: { show: true, code: false, address: false, phone: false, niu: false, balance: false },
   info: { title: '', number: true, date: true, time: true, seller: true, register: false, priceLevel: true, dueDate: true, validUntil: false },
@@ -611,7 +693,13 @@ export function normalizeTemplate(raw: unknown): DocTemplate {
       copies: clamp(p.copies, 1, 5, 1),
       borders: bool(p.borders, base.page.borders),
       style: pick(p.style, stylesFor(format), stylesFor(format).includes(base.page.style) ? base.page.style : 'plain'),
+      marginLeft: clamp(p.marginLeft, 0, 40, clamp(p.margin, 0, 40, base.page.margin)),
+      marginRight: clamp(p.marginRight, 0, 40, clamp(p.margin, 0, 40, base.page.margin)),
+      printWidth: clamp(p.printWidth, 0, 240, 0),
+      lineSpacing: clamp(p.lineSpacing, 50, 300, 100),
+      sectionGap: clamp(p.sectionGap, 0, 30, 0),
     },
+    sections: docSections(r),
     header: {
       ...bools(h, base.header),
       logoSize: clamp(h.logoSize, 5, 60, base.header.logoSize),
@@ -705,7 +793,8 @@ function watermark(t: DocTemplate): { css: string; html: string } {
 
 export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.page.style === 'boxed' || t.page.style === 'detailed') return styledTicket(t, d);
-  const r: Receipt = [];
+  let r: Receipt = [];
+  const parts: SectionParts<Receipt> = {};
   const noVat = docWithoutVat(d);
   const centered = (text: string): ReceiptLine => ({ t: 'text', text, align: 'center' });
   const lines = (text: string) => fill(text, d).split('\n').map((s) => s.trim()).filter(Boolean);
@@ -718,6 +807,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (h.niu && d.store.niu) r.push(centered(`NIU : ${d.store.niu}`));
   if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
   if (r.length) r.push({ t: 'rule' });
+  (parts.header = r), (r = []);
 
   const title = d.doc.kind === 'return' && t.doc === 'invoice' ? 'RETOUR CLIENT' : docTitle(t, d);
   if (title) r.push({ t: 'text', text: title, bold: true });
@@ -740,6 +830,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   for (const x of d.doc.extra ?? []) r.push({ t: 'text', text: x });
   r.push({ t: 'rule' });
 
+  (parts.title = r), (r = []);
   const on = new Set(shown(t, d).map((x) => x.key));
   for (const l of d.lines) {
     const left = [on.has('line') ? `${d.lines.indexOf(l) + 1}.` : '', on.has('code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ');
@@ -757,6 +848,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
     if (on.has('barcode') && l.barcode) r.push({ t: 'row', left: l.barcode, right: '', indent: 2 });
     if (t.totals.promo && l.promo) r.push({ t: 'row', left: `Promo ${l.promoName ?? ''}`.trim(), right: `-${money(l.promo)}`, indent: 2 });
   }
+  (parts.lines = r), (r = []);
   if (t.totals.ttc || t.totals.ht || t.totals.payments) r.push({ t: 'rule' });
   const tot = d.totals;
   if (t.totals.ht && (!noVat || !t.totals.ttc)) r.push({ t: 'row', left: tx('TOTAL HT FCFA', noVat), right: money(tot.ht), bold: !t.totals.ttc, big: !t.totals.ttc });
@@ -764,12 +856,14 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.totals.ttc) r.push({ t: 'row', left: 'TOTAL FCFA', right: money(tot.ttc), bold: true, big: true });
   if (t.totals.rounding && tot.rounding) r.push({ t: 'row', left: 'dont arrondi espèces', right: `-${money(tot.rounding)}`, indent: 2 });
   if (t.totals.promo && tot.promo > 0) r.push({ t: 'row', left: 'Vous avez économisé', right: money(tot.promo), bold: true });
+  (parts.totals = r), (r = []);
   if (t.totals.payments) for (const p of d.payments) r.push({ t: 'row', left: p.label, right: money(p.amount) });
   if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change), bold: true });
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
   if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
   if (t.info.dueDate && d.doc.dueDate) r.push({ t: 'text', text: `À régler avant le ${dayFr(d.doc.dueDate)}` });
   if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: `Arrêté à la somme de ${numberToWordsFr(tot.ttc)} francs CFA` });
+  (parts.payments = r), (r = []);
   if (d.doc.notes) r.push({ t: 'rule' }, ...d.doc.notes.split('\n').filter(Boolean).map((text): ReceiptLine => ({ t: 'text', text })));
   if (t.totals.vatDetail) {
     r.push({ t: 'rule' });
@@ -786,7 +880,8 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   const bottom = [...lines(t.footer.text), ...lines(t.footer.thanks || d.store.thanks)];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
-  return r;
+  parts.footer = r;
+  return arrangeReceipt(t, parts);
 }
 
 /** Rendu HTML d'un ticket (pilote Windows et aperçu). */
@@ -795,6 +890,8 @@ export function receiptToHtml(receipt: Receipt): string {
     .map((l) => {
       if (l.t === 'rule') return '<hr>';
       if (l.t === 'feed') return '<br>';
+      if (l.t === 'space') return `<div style="height:${l.mm}mm"></div>`;
+      if (l.t === 'spacing') return '';
       if (l.t === 'image') return `<div class="c"><img src="${esc(l.src)}" style="max-width:60%;max-height:30mm"></div>`;
       const cls = [l.bold ? 'b' : '', l.big ? 'big' : ''];
       if (l.t === 'text') return `<div class="${[...cls, l.align === 'center' ? 'c' : l.align === 'right' ? 'r' : ''].join(' ').trim()}">${esc(l.text)}</div>`;
@@ -820,16 +917,18 @@ export function pageSize(t: DocTemplate): { width: number; height: number } {
 function pageCss(t: DocTemplate): string {
   const { width, height } = pageSize(t);
   const m = t.page.margin;
+  const { left, right, printWidth, lineSpacing } = pageLayout(t);
+  const pad = t.format === 'ticket' ? `0 ${right}mm 0 ${left}mm` : `${m}mm ${right}mm ${m}mm ${left}mm`;
   return `
-  @page { size: ${height ? `${width}mm ${height}mm` : `${width}mm auto`}; margin: ${height ? `${m}mm` : '0'}; }
+  @page { size: ${height ? `${width}mm ${height}mm` : `${printWidth}mm auto`}; margin: ${height ? `${m}mm ${right}mm ${m}mm ${left}mm` : '0'}; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
-  body { font: ${t.page.fontSize}px/1.35 ${FONTS[t.page.font]}; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sheet { ${height ? '' : `width: ${width}mm; padding: ${t.format === 'ticket' ? `0 ${m}mm` : `${m}mm`};`} }
+  body { font: ${t.page.fontSize}px/${((1.35 * lineSpacing) / 100).toFixed(2)} ${FONTS[t.page.font]}; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sheet { ${height ? '' : `width: ${printWidth}mm; padding: ${pad};`} }
   @media screen {
     html { background: #8a8f98; }
     body { padding: 16px 0; }
-    .sheet { background: #fff; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,.35); width: ${width}mm; padding: ${height ? `${m}mm` : `3mm ${m}mm`}; ${height ? `min-height: ${height}mm;` : ''} }
+    .sheet { background: #fff; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,.35); width: ${height ? width : printWidth}mm; padding: ${height ? `${m}mm ${right}mm ${m}mm ${left}mm` : t.format === 'ticket' ? `3mm ${right}mm 3mm ${left}mm` : pad}; ${height ? `min-height: ${height}mm;` : ''} }
   }`;
 }
 
@@ -983,9 +1082,13 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
 
   return wrap(
     documentCss(t),
-    `${head}${titleLine}${meta.length ? `<div class="meta">${meta.join(' · ')}</div>` : ''}${table}
-    ${left || totals ? `<div class="bottom"><div class="left">${left}</div>${totals ? `<table class="totals">${totals}</table>` : ''}</div>` : ''}
-    ${footer ? `<footer>${footer}</footer>` : ''}`,
+    arrangeHtml(t, {
+      header: head,
+      title: `${titleLine}${meta.length ? `<div class="meta">${meta.join(' · ')}</div>` : ''}`,
+      lines: table,
+      totals: left || totals ? `<div class="bottom"><div class="left">${left}</div>${totals ? `<table class="totals">${totals}</table>` : ''}</div>` : '',
+      footer: footer ? `<footer>${footer}</footer>` : '',
+    }),
   );
 }
 
@@ -1281,24 +1384,27 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
         tt.discount ? `<div class="row" style="justify-content:center">Remise ${money(tt.discount)}</div>` : '',
         t.totals.ttc ? `<div class="net"><span>${tt.noVat ? 'Net à payer' : 'Net à payer TTC'} :</span><span class="box">${money(tot.ttc)}</span></div>` : '',
       ].join('');
-  const after = [
+  const pay = [
     t.totals.payments ? d.payments.map((p) => `<div class="row"><span>${esc(p.label)}</span><span>${money(p.amount)}</span></div>`).join('') : '',
     t.totals.change && tot.change ? `<div class="row"><span>Rendu monnaie</span><span>${money(tot.change)}</span></div>` : '',
     t.totals.remaining && tot.remaining ? `<div class="row b"><span>Reste à payer</span><span>${money(tot.remaining)}</span></div>` : '',
     t.customer.show && t.customer.balance && c?.balance != null ? `<div class="row"><span>Solde de votre compte</span><span>${money(c.balance)}</span></div>` : '',
     t.totals.words && tot.ttc >= 0 ? `<div class="words">${esc(cap(numberToWordsFr(tot.ttc)))}</div>` : '',
+  ].join('');
+  const foot = [
     d.doc.notes ? `<div class="notes" style="margin-top:2mm">${nl(d.doc.notes)}</div>` : '',
     ...signLabels(t, d).map((x) => `<div class="sign">${nl(x)} :</div>`),
     t.footer.text ? `<div class="notes c" style="margin-top:2mm">${nl(fill(t.footer.text, d))}</div>` : '',
     t.footer.thanks || d.store.thanks ? `<div class="thanks">${nl(fill(t.footer.thanks || d.store.thanks, d))}</div>` : '',
     '<div class="soft">FEDO Gestion</div>',
   ].join('');
-  return `${id}<div class="meta">${meta}</div>${wh}${table}${bottom}${after}`;
+  return arrangeHtml(t, { header: id, title: `<div class="meta">${meta}</div>${wh}`, lines: table, totals: bottom, payments: pay, footer: foot });
 }
 
 /** Ticket encadré ou détaillé pour l'imprimante ESC/POS (texte) : même contenu, sans cadres. */
 function styledTicket(t: DocTemplate, d: DocData): Receipt {
-  const r: Receipt = [];
+  let r: Receipt = [];
+  const parts: SectionParts<Receipt> = {};
   const h = t.header;
   const detailed = t.page.style === 'detailed';
   const c = d.customer;
@@ -1313,6 +1419,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   if (h.niu && d.store.niu) r.push(centered(`NIU : ${d.store.niu}`));
   if (h.rccm && d.store.rccm) r.push(centered(`RCCM : ${d.store.rccm}`));
   if (h.phone && d.store.phone) r.push(centered(`Tél : ${d.store.phone}`));
+  (parts.header = r), (r = []);
   r.push({ t: 'feed' });
   const title = (docTitle(t, d) || 'Facture').toUpperCase();
   if (t.info.number) r.push({ t: 'text', text: `${title} N° ${d.doc.number}${d.doc.cancelled ? ' (ANNULÉE)' : ''}` });
@@ -1326,6 +1433,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   const when = t.info.date ? (t.info.time ? dateTimeFr(d.doc.date) : dayFr(d.doc.date)) : '';
   r.push({ t: 'row', left: (d.doc.warehouse ?? '').toUpperCase(), right: when, bold: true });
   r.push({ t: 'rule' });
+  (parts.title = r), (r = []);
   const columns = shown(t, d);
   const grid = columns.filter((x) => detailed || (x.key !== 'label' && x.key !== 'code'));
   // Colonnes alignées : chaque colonne prend la largeur de sa plus longue valeur ; la dernière est calée à droite.
@@ -1339,6 +1447,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
     if (!detailed) r.push({ t: 'text', text: [columns.some((x) => x.key === 'code') && l.code ? l.code : '', l.label].filter(Boolean).join(' ').toUpperCase() });
     r.push({ t: 'row', left: lineText(lead.map((x) => ticketCell(x.key, l, i))), right: lastKey ? ticketCell(lastKey, l, i) : '' });
   });
+  (parts.lines = r), (r = []);
   r.push({ t: 'rule' });
   if (detailed) {
     if (tt.ht) r.push({ t: 'row', left: 'TOTAL HT', right: money(tot.ht) });
@@ -1353,18 +1462,21 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
     if (tt.discount) r.push({ t: 'row', left: 'Remise', right: money(tt.discount) });
     if (t.totals.ttc) r.push({ t: 'row', left: tt.noVat ? 'Net à payer' : 'Net à payer TTC', right: money(tot.ttc), bold: true, big: true });
   }
+  (parts.totals = r), (r = []);
   if (t.totals.payments) for (const p of d.payments) r.push({ t: 'row', left: p.label, right: money(p.amount) });
   if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change) });
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
   if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
   if (t.totals.words && tot.ttc >= 0) r.push(centered(cap(numberToWordsFr(tot.ttc))));
+  (parts.payments = r), (r = []);
   if (d.doc.notes) for (const x of d.doc.notes.split('\n').filter(Boolean)) r.push({ t: 'text', text: x });
   for (const x of signLabels(t, d)) r.push({ t: 'feed' }, { t: 'text', text: `${x} :` }, { t: 'feed' });
   const bottom = [...split(t.footer.text), ...split(t.footer.thanks || d.store.thanks)];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom.map(centered));
   r.push(centered('FEDO Gestion'));
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
-  return r;
+  parts.footer = r;
+  return arrangeReceipt(t, parts);
 }
 
 /** Facture d'exemple pour l'aperçu d'un modèle quand le magasin n'a pas encore vendu. */

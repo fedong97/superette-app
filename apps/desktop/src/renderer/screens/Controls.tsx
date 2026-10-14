@@ -132,7 +132,7 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
                 x.number,
                 dateTime(x.created_at),
                 x.kind === 'sale' ? 'Vente' : 'Retour',
-                x.status === 'cancelled' ? 'Annulé' : 'Validé',
+                x.status === 'cancelled' ? (x.hidden ? 'Supprimé' : 'Annulé') : 'Validé',
                 x.register_name,
                 x.user_name,
                 x.customer_name ?? '',
@@ -207,7 +207,7 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
                 <td className="r">{x.total_discount + x.total_promo ? fcfa(x.total_discount + x.total_promo) : ''}</td>
                 <td className={`r ${x.total_ttc < 0 ? 'neg' : ''}`}>{fcfa(x.total_ttc)}</td>
                 <td>
-                  {x.status === 'cancelled' && <span className="tag rupture" title={x.cancel_reason ?? ''}>Annulé</span>}
+                  {x.status === 'cancelled' && <span className="tag rupture" title={x.cancel_reason ?? ''}>{x.hidden ? 'Supprimé' : 'Annulé'}</span>}
                   {x.kind === 'return' && <span className="tag alerte">Retour de {x.original_number}</span>}
                 </td>
               </tr>
@@ -216,7 +216,7 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
         </table>
       )}
       {r?.truncated && <p className="muted small">Seuls les 5 000 tickets les plus récents sont affichés : réduisez la période.</p>}
-      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
+      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} onChanged={reg.reload} />}
     </>
   );
 }

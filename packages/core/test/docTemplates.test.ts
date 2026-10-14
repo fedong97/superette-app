@@ -3,6 +3,7 @@ import {
   BUILTIN_TEMPLATES,
   effectiveTemplates,
   mergeStoreSettings,
+  docSections,
   normalizeTemplate,
   parcelCount,
   receiptToText,
@@ -78,6 +79,27 @@ describe('modèles d’impression', () => {
     expect(renderDocHtml(off, d)).not.toContain('DUPLICATA');
   });
 
+  it('marges gauche et droite, largeur imprimée, interlignes et ordre des sections', () => {
+    const base = builtin('invoice-ticket-cash');
+    const t = normalizeTemplate({
+      ...base,
+      page: { ...base.page, marginLeft: 1, marginRight: 6, printWidth: 70, lineSpacing: 150, sectionGap: 3 },
+      sections: [{ key: 'footer', space: 5 }, { key: 'lines', space: 0 }],
+    });
+    expect(docSections(t).map((x) => x.key)).toEqual(['footer', 'lines', 'header', 'title', 'totals', 'payments']);
+    const html = renderDocHtml(t, sampleDocData('cash'));
+    expect(html).toContain('size: 70mm auto');
+    expect(html).toContain('padding: 0 6mm 0 1mm');
+    expect(html).toContain('font: 11px/2.02');
+    // Ticket ESC/POS : interligne en tête, puis le pied d'abord (5 mm au-dessus), et 3 mm entre les sections.
+    const r = renderDocTicket(t, sampleDocData('cash'));
+    expect(r[0]).toEqual({ t: 'spacing', pct: 150 });
+    expect(r[1]).toEqual({ t: 'space', mm: 5 });
+    expect(r.filter((l) => l.t === 'space').map((l) => (l as { mm: number }).mm)).toEqual([5, 3, 3, 3, 3, 3]);
+    const a4 = renderDocHtml({ ...builtin('invoice-a4-cash'), sections: [{ key: 'totals', space: 0 }] }, sampleDocData('cash'));
+    expect(a4.indexOf('sec-totals')).toBeLessThan(a4.indexOf('sec-header'));
+  });
+
   it('magasin sans TVA : ni colonne ni total de TVA', () => {
     const d = sampleDocData('cash', { vatEnabled: false });
     d.lines = d.lines.map((l) => ({ ...l, vatRate: 0 }));
@@ -122,7 +144,8 @@ describe('modèles d’impression', () => {
     expect(text).toMatch(/Reste à payer\s+19 950/);
     expect(text).toContain('Le client :');
     // Le même modèle en aperçu HTML.
-    expect(renderDocHtml(builtin('invoice-ticket-credit'), d)).toContain('size: 80mm auto');
+    // Rouleau de 80 mm : la tête n'imprime que sur 72 mm, la page s'y tient.
+    expect(renderDocHtml(builtin('invoice-ticket-credit'), d)).toContain('size: 72mm auto');
   });
 
   it('facture listing (F7) : encadrée, papier continu, cases DATE / CLIENT, montant en lettres, nombre de colis, net à payer', () => {

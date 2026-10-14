@@ -84,7 +84,7 @@ function Tickets() {
           ))}
         </tbody>
       </table>
-      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
+      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} onChanged={sales.reload} />}
     </>
   );
 }
@@ -133,7 +133,7 @@ function MyLastInvoices({ embedded }: { embedded?: boolean }) {
           )}
         </tbody>
       </table>
-      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} />}
+      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} onChanged={sales.reload} />}
     </div>
   );
 }
@@ -215,12 +215,31 @@ function Export() {
   );
 }
 
-/** Détail d'un ticket ou d'une facture, avec réimpression. */
-export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClose: () => void }) {
+/** Demande à la caisse de recharger une facture pour la modifier (App ouvre la bonne fiche). */
+export const EDIT_SALE_EVENT = 'fedo:edit-sale';
+export const editSale = (saleId: string) => window.dispatchEvent(new CustomEvent(EDIT_SALE_EVENT, { detail: saleId }));
+
+/** Détail d'un ticket ou d'une facture : réimpression, modification, annulation et suppression. */
+export function SaleDetail({ sale, onClose, onChanged }: { sale: Result<'pos.sale'>; onClose: () => void; onChanged?: () => void }) {
   const toast = useToast();
   const can = useCan();
   const [preview, setPreview] = useState(false);
+  const [voiding, setVoiding] = useState<'cancel' | 'hide' | null>(null);
+  const live = sale.kind === 'sale' && sale.status === 'completed';
   if (preview) return <InvoicePreview saleId={sale.id} onClose={() => setPreview(false)} />;
+  if (voiding)
+    return (
+      <VoidSaleDialog
+        sale={sale}
+        hide={voiding === 'hide'}
+        needsPin={!can('sale_cancel_free')}
+        onClose={() => setVoiding(null)}
+        onDone={() => {
+          onChanged?.();
+          onClose();
+        }}
+      />
+    );
   return (
     <Modal title={`Ticket ${sale.number}`} onClose={() => onClose()}>
       <p className="muted">
@@ -257,8 +276,73 @@ export function SaleDetail({ sale, onClose }: { sale: Result<'pos.sale'>; onClos
         <button disabled={!can('sale_reprint')} onClick={() => setPreview(true)} title="Aperçu avec le choix du modèle : facture ou bon de livraison, en A4, listing ou ticket">
           Facture ou BL (aperçu)…
         </button>
+        {live && can('sale_edit') && (
+          <button
+            title="Recharge la facture dans la caisse : ajoutez ou retirez des articles, changez les quantités, puis validez"
+            onClick={() => {
+              editSale(sale.id);
+              onClose();
+            }}
+          >
+            Modifier
+          </button>
+        )}
+        {live && (
+          <button title="Annule la facture : le stock revient et elle sort de la caisse" onClick={() => setVoiding('cancel')}>
+            Annuler
+          </button>
+        )}
+        {live && (
+          <button className="danger" title="Annule la facture et la retire du registre (toujours visible avec le filtre Annulés)" onClick={() => setVoiding('hide')}>
+            Supprimer
+          </button>
+        )}
         <button className="primary" disabled={!can('sale_reprint')} onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
           Réimprimer le ticket
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Motif (et code du gérant sans le droit) pour annuler ou supprimer une facture. */
+function VoidSaleDialog({ sale, hide, needsPin, onClose, onDone }: { sale: Result<'pos.sale'>; hide: boolean; needsPin: boolean; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!reason.trim()) return toast.error('Indiquez le motif');
+    setBusy(true);
+    try {
+      const r = await call('sales.cancel', sale.id, reason, { hide, supervisorPin: needsPin ? pin : undefined });
+      toast.ok(r.kind === 'return' ? `Journée déjà clôturée : avoir ${r.number} fait sur la caisse du jour` : hide ? `Facture ${sale.number} supprimée` : `Facture ${sale.number} annulée`);
+      onDone();
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`${hide ? 'Supprimer' : 'Annuler'} la facture ${sale.number}`} onClose={onClose}>
+      <p className="muted">
+        {fcfa(sale.total_ttc)} · la marchandise revient en stock et la vente sort de la caisse.
+        {hide ? ' La facture disparaît du registre ; elle reste visible avec le filtre « Annulés » et dans le journal.' : ''}
+        {' '}Si la journée de caisse est déjà clôturée, un avoir de toute la facture est fait sur la caisse du jour.
+      </p>
+      <Field label="Motif">
+        <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Erreur de saisie, client parti…" />
+      </Field>
+      {needsPin && (
+        <Field label="Code du gérant">
+          <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+        </Field>
+      )}
+      <div className="actions">
+        <button onClick={onClose}>Retour</button>
+        <button className="primary" disabled={busy} onClick={() => void submit()}>
+          {hide ? 'Supprimer' : 'Annuler la facture'}
         </button>
       </div>
     </Modal>

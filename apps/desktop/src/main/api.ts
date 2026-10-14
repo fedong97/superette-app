@@ -725,6 +725,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       /** Code du gérant qui a permis le tarif ou le dépôt choisis, si le caissier n'en a pas le droit. */
       optionsPin?: string;
       delivery?: DeliveryInput | null;
+      /** Facture modifiée : elle est annulée et remplacée par celle-ci ; `payments` ne porte que la différence. */
+      replacesId?: string | null;
     }) => {
       const c = ctx(POS);
       s.license.assertCanSell();
@@ -738,7 +740,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (input.lines.some((l) => l.price != null) && !can(user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
       const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(user!, ['discount']) ? user!.id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
-      return s.pos.completeSale(c, {
+      const saleInput = {
         lines: input.lines,
         payments: input.payments,
         discountAuthorizedBy: authorizedBy,
@@ -749,7 +751,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         priceLevel: input.priceLevel ?? null,
         warehouseId: input.warehouseId ?? null,
         delivery: input.delivery ?? null,
-      });
+      };
+      if (input.replacesId) {
+        const original = s.pos.getSale(input.replacesId);
+        if (!can(user!, ['sale_edit']) || (original.user_id !== user!.id && !can(user!, ['sales']))) throw new AppError("Vous n'avez pas le droit de modifier cette facture", 'FORBIDDEN');
+        return s.pos.replaceSale(c, input.replacesId, saleInput, user!.id);
+      }
+      return s.pos.completeSale(c, saleInput);
     },
     /** Taux de TVA des frais de livraison, pour le total affiché à la caisse. */
     'deliveries.feeVat': () => {
@@ -767,6 +775,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         throw new AppError(`Une vente ne s'annule que dans les ${limit} minutes qui suivent : faites un retour client`, 'TOO_LATE');
       }
       return s.pos.cancelSale(c, saleId, supervisor(supervisorPin).id, reason);
+    },
+    /**
+     * Annuler (ou « supprimer » : annuler et masquer) une facture depuis le registre ou Mes factures.
+     * Avec le droit, sur ses propres factures (toutes pour qui voit tout le registre) ; sinon avec le code du gérant.
+     * Journée clôturée : un avoir de toute la facture sur la caisse du jour.
+     */
+    'sales.cancel': (saleId: string, reason: string, opts?: { hide?: boolean; supervisorPin?: string }) => {
+      const u = requireSaleAccess(saleId);
+      const c = ctx();
+      const sale = s.pos.getSale(saleId);
+      const free = can(u, ['sale_cancel_free']) && (sale.user_id === u.id || can(u, ['sales']));
+      const by = free ? u.id : supervisor(opts?.supervisorPin ?? '').id;
+      return s.pos.voidSale(c, saleId, by, reason, { byRight: free, hide: Boolean(opts?.hide) });
+    },
+    /** Facture à recharger dans la caisse pour la modifier. */
+    'sales.editable': (saleId: string) => {
+      const u = requireSaleAccess(saleId);
+      const sale = s.pos.getSale(saleId);
+      if (!can(u, ['sale_edit']) || (sale.user_id !== u.id && !can(u, ['sales']))) throw new AppError("Vous n'avez pas le droit de modifier cette facture", 'FORBIDDEN');
+      return { ...s.pos.editableSale(saleId), number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
     },
     'pos.return': (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) =>
       s.pos.returnSale(ctx(['sale_return']), { ...input, supervisorId: supervisor(input.supervisorPin).id }),

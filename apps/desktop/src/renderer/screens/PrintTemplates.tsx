@@ -6,7 +6,10 @@ import {
   DOC_KIND_VARIANTS,
   DOC_KINDS,
   DOC_PAPERS,
+  DOC_SECTIONS,
   DOC_STYLES,
+  docSections,
+  pageLayout,
   stylesFor,
   DOC_VARIANTS,
   type DocColumn,
@@ -321,6 +324,32 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
       [cols[i], cols[j]] = [cols[j]!, cols[i]!];
       return { ...cur, columns: cols };
     });
+  /** Glisser-déposer : la colonne ou la section tirée prend la place de celle où on la lâche. */
+  const [drag, setDrag] = useState<{ list: 'columns' | 'sections'; from: number } | null>(null);
+  const sections = docSections(t);
+  const dropAt = (list: 'columns' | 'sections', to: number) => {
+    if (!drag || drag.list !== list || drag.from === to) return setDrag(null);
+    setT((cur) => {
+      const items = list === 'columns' ? [...cur.columns] : [...docSections(cur)];
+      const [moved] = items.splice(drag.from, 1);
+      items.splice(to, 0, moved as never);
+      return list === 'columns' ? { ...cur, columns: items as DocColumn[] } : { ...cur, sections: items as ReturnType<typeof docSections> };
+    });
+    setDrag(null);
+  };
+  const dragRow = (list: 'columns' | 'sections', i: number) =>
+    off
+      ? {}
+      : {
+          draggable: true,
+          onDragStart: () => setDrag({ list, from: i }),
+          onDragOver: (e: React.DragEvent) => e.preventDefault(),
+          onDrop: () => dropAt(list, i),
+          onDragEnd: () => setDrag(null),
+          className: drag?.list === list && drag.from === i ? 'dragging' : undefined,
+        };
+  const setSectionSpace = (i: number, space: number) => setT((cur) => ({ ...cur, sections: docSections(cur).map((x, j) => (j === i ? { ...x, space: Math.min(50, space) } : x)) }));
+  const layout = pageLayout(t);
   const papers = (Object.keys(DOC_PAPERS) as (keyof typeof DOC_PAPERS)[]).filter((p) => (ticket ? p.endsWith('mm') : !p.endsWith('mm')));
   const widthSum = t.columns.filter((c) => c.show && c.width).reduce((s, c) => s + c.width, 0);
 
@@ -384,8 +413,27 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
               <Field label="Taille du texte">
                 <NumberInput disabled={off} value={t.page.fontSize} onChange={(v) => set('page', { fontSize: v })} suffix="(7 à 20)" />
               </Field>
-              <Field label="Marges">
-                <NumberInput disabled={off} value={t.page.margin} onChange={(v) => set('page', { margin: v })} suffix="mm" />
+              {!ticket && (
+                <Field label="Marges haut et bas">
+                  <NumberInput disabled={off} value={t.page.margin} onChange={(v) => set('page', { margin: v })} suffix="mm" />
+                </Field>
+              )}
+              <Field label="Marge gauche">
+                <NumberInput disabled={off} value={layout.left} onChange={(v) => set('page', { marginLeft: Math.min(40, v) })} suffix="mm" />
+              </Field>
+              <Field label="Marge droite">
+                <NumberInput disabled={off} value={layout.right} onChange={(v) => set('page', { marginRight: Math.min(40, v) })} suffix="mm" />
+              </Field>
+              {ticket && (
+                <Field label="Largeur imprimée" hint="La tête d'une imprimante 80 mm n'imprime que sur 72 mm (48 mm pour le 58 mm). Baissez-la si le côté droit est coupé.">
+                  <NumberInput disabled={off} value={layout.printWidth} onChange={(v) => set('page', { printWidth: Math.min(240, v) })} suffix="mm" />
+                </Field>
+              )}
+              <Field label="Interligne dans les sections" hint="100 % : normal ; 150 % : une demi-ligne de plus">
+                <NumberInput disabled={off} value={layout.lineSpacing} onChange={(v) => set('page', { lineSpacing: Math.min(300, v) })} suffix="%" />
+              </Field>
+              <Field label="Espace entre les sections">
+                <NumberInput disabled={off} value={layout.sectionGap} onChange={(v) => set('page', { sectionGap: Math.min(30, v) })} suffix="mm" />
               </Field>
               <Field label="Exemplaires">
                 <NumberInput disabled={off} value={t.page.copies} onChange={(v) => set('page', { copies: v })} suffix="(1 à 5)" />
@@ -467,6 +515,36 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
             </div>
           </Section>
 
+          <Section title="Ordre des sections (glisser-déposer)" open>
+            <table className="list compact tpl-columns">
+              <thead>
+                <tr>
+                  <th />
+                  <th>Section</th>
+                  <th>Espace au-dessus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sections.map((x, i) => (
+                  <tr key={x.key} {...dragRow('sections', i)}>
+                    <td className="drag-handle" title="Glissez pour déplacer">
+                      ⠿
+                    </td>
+                    <td>{DOC_SECTIONS[x.key]}</td>
+                    <td>
+                      <NumberInput disabled={off} value={x.space} onChange={(v) => setSectionSpace(i, v)} suffix="mm" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <small className="muted">
+              {t.page.style === 'framed' || t.page.style === 'side'
+                ? 'Présentation encadrée : l’ordre des parties est fixe ; seuls les marges et l’interligne s’appliquent.'
+                : 'Tirez une ligne à la souris pour changer l’ordre ; l’aperçu suit. « Espace au-dessus » s’ajoute à l’espace entre les sections.'}
+            </small>
+          </Section>
+
           <Section title="Colonnes du tableau" open>
             <table className="list compact tpl-columns">
               <thead>
@@ -475,12 +553,12 @@ function TemplateEditor({ template, canEdit, onCancel, onSave }: { template: Doc
                   <th>Colonne</th>
                   <th>Titre imprimé</th>
                   {!ticket && <th>Largeur</th>}
-                  <th>Ordre</th>
+                  <th title="Glissez une ligne, ou utilisez les flèches">Ordre ⠿</th>
                 </tr>
               </thead>
               <tbody>
                 {t.columns.map((c, i) => (
-                  <tr key={c.key} className={c.show ? '' : 'inactive'}>
+                  <tr key={c.key} {...dragRow('columns', i)} className={[c.show ? '' : 'inactive', drag?.list === 'columns' && drag.from === i ? 'dragging' : ''].join(' ').trim()}>
                     <td>
                       <input type="checkbox" disabled={off} checked={c.show} onChange={(e) => setColumn(i, { show: e.target.checked })} />
                     </td>

@@ -200,6 +200,10 @@ export interface Sale {
   /** Tickets et factures (A4, listing) déjà imprimés : la réimpression porte « DUPLICATA ». */
   ticket_prints: number;
   invoice_prints: number;
+  /** Facture remplacée par celle-ci (modification). */
+  replaces_id: string | null;
+  /** Annulée puis « supprimée » : masquée du registre. */
+  hidden: number;
   original_sale_id: string | null;
   cancel_reason: string | null;
   customer_id: string | null;
@@ -858,25 +862,25 @@ export class PosService extends Base {
            AND (@date IS NULL OR date(s.created_at, 'localtime') = @date)
            AND (@customerId IS NULL OR s.customer_id = @customerId)
            AND (@userId IS NULL OR s.user_id = @userId)
+           AND s.hidden = 0
          ORDER BY s.created_at DESC, s.number DESC LIMIT @limit`,
       )
       .all({ sessionId: opts.sessionId ?? null, storeId: opts.storeId ?? null, date: opts.date ?? null, customerId: opts.customerId ?? null, userId: opts.userId ?? null, limit: opts.limit ?? 500 }) as never;
   }
 
   /**
-   * Annulation d'un ticket de la session en cours, sous code superviseur.
-   * La marchandise est remise en stock ; le ticket reste tracé comme annulé.
+   * Annule une vente de la journée en cours de sa caisse : le stock revient et elle sort des totaux.
+   * `byRight` : l'auteur a le droit d'annuler sans le code du gérant (sinon il doit être gérant).
    */
-  cancelSale(ctx: Context, saleId: string, supervisorId: string, reason: string): Sale {
-    const session = this.requireOpenSession(ctx);
+  cancelSale(ctx: Context, saleId: string, supervisorId: string, reason: string, opts: { byRight?: boolean } = {}): Sale {
     const supervisor = this.admin.getUser(supervisorId);
-    if (supervisor.role !== 'admin' && supervisor.role !== 'manager') throw new AppError('Annulation réservée au gérant', 'SUPERVISOR_REQUIRED');
+    if (!opts.byRight && supervisor.role !== 'admin' && supervisor.role !== 'manager') throw new AppError('Annulation réservée au gérant', 'SUPERVISOR_REQUIRED');
     if (!reason.trim()) throw new AppError("Le motif d'annulation est obligatoire", 'INVALID');
     const sale = this.getSale(saleId);
     if (sale.status !== 'completed' || sale.kind !== 'sale') throw new AppError('Ce ticket ne peut pas être annulé', 'INVALID');
     const hasReturns = this.db.prepare("SELECT 1 FROM sales WHERE original_sale_id = ? AND status = 'completed'").get(saleId);
     if (hasReturns) throw new AppError('Ce ticket a déjà fait l’objet d’un retour client', 'INVALID');
-    if (sale.session_id !== session.id) throw new AppError('Seuls les tickets de la session en cours peuvent être annulés ; faites un retour client', 'INVALID');
+    if (!this.dayOpen(sale)) throw new AppError('Seuls les tickets d’une journée de caisse encore ouverte peuvent être annulés ; faites un retour client', 'INVALID');
     return this.tx(() => {
       this.db.prepare("UPDATE sales SET status = 'cancelled', cancelled_by = ?, cancel_reason = ? WHERE id = ?").run(supervisorId, reason.trim(), saleId);
       this.restockSaleMovements(ctx, saleId, 'sale_cancel', saleId);
@@ -887,6 +891,119 @@ export class PosService extends Base {
       return updated;
     });
   }
+
+  /** La journée de caisse de la vente est encore ouverte (son Z n'est pas fait). */
+  dayOpen(sale: Pick<Sale, 'session_id'>): boolean {
+    return this.db.prepare("SELECT 1 FROM cash_sessions WHERE id = ? AND status = 'open'").get(sale.session_id) !== undefined;
+  }
+
+  /**
+   * Annule une facture depuis le registre : directement si sa journée de caisse est ouverte,
+   * sinon par un avoir de toute la facture sur la caisse du jour (le Z déjà fait ne bouge pas).
+   * `hide` : « Supprimer », la facture sort aussi du registre.
+   */
+  voidSale(ctx: Context, saleId: string, byId: string, reason: string, opts: { byRight?: boolean; hide?: boolean } = {}): Sale {
+    const sale = this.getSale(saleId);
+    return this.tx(() => {
+      let result: Sale;
+      if (this.dayOpen(sale)) result = this.cancelSale(ctx, saleId, byId, reason, opts);
+      else {
+        const credit = sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT');
+        result = this.returnSale(ctx, {
+          originalSaleId: saleId,
+          lines: sale.lines.map((l) => ({ lineId: l.id, qty: l.qty })),
+          refundMethod: credit ? 'CUSTOMER_CREDIT' : 'CASH',
+          supervisorId: byId,
+          reason,
+          byRight: opts.byRight,
+        });
+      }
+      if (opts.hide) {
+        this.db.prepare('UPDATE sales SET hidden = 1 WHERE id = ?').run(saleId);
+        this.audit(byId, 'sale.hide', 'sale', saleId, { number: sale.number, total: sale.total_ttc, reason });
+        this.enqueue(ctx, 'sale', saleId, 'upsert', this.getSale(saleId));
+      }
+      return result;
+    });
+  }
+
+  /**
+   * Lignes d'une facture à modifier, rechargées à la caisse : quantités, conditionnements et
+   * remises accordées (sans l'arrondi des espèces, recalculé à la validation).
+   */
+  editableSale(saleId: string): { lines: SaleLineInput[]; customerId: string | null; clientName: string | null; priceLevel: PriceLevel; paid: Fcfa } {
+    const sale = this.getSale(saleId);
+    if (sale.status !== 'completed' || sale.kind !== 'sale') throw new AppError('Cette facture ne peut pas être modifiée', 'INVALID');
+    if (!this.dayOpen(sale)) throw new AppError('La journée de caisse de cette facture est clôturée : annulez-la (avoir) puis refaites-la', 'INVALID');
+    if (this.db.prepare("SELECT 1 FROM sales WHERE original_sale_id = ? AND status = 'completed'").get(saleId)) {
+      throw new AppError('Cette facture a déjà fait l’objet d’un retour client', 'INVALID');
+    }
+    let rounding = sale.rounding;
+    const packs = this.db.prepare('SELECT id FROM article_packs WHERE article_id = ? AND name = ? ORDER BY position LIMIT 1').pluck();
+    const lines = sale.lines.map((l) => {
+      let discount = l.discount;
+      if (rounding > 0 && discount >= rounding) (discount -= rounding), (rounding = 0);
+      const packId = l.pack_name ? ((packs.get(l.article_id, l.pack_name) as string | undefined) ?? null) : null;
+      return { articleId: l.article_id, qty: l.qty, barcode: l.barcode, discount, packId };
+    });
+    return { lines, customerId: sale.customer_id, clientName: sale.customer_id ? null : sale.customer_name, priceLevel: sale.price_level, paid: this.carriedPaid(sale) };
+  }
+
+  /** Ce que le client a déjà réglé sur la facture (espèces nettes du rendu). */
+  private carriedPayments(sale: Sale): Payment[] {
+    const out: Payment[] = [];
+    let change = sale.change_given;
+    for (const p of sale.payments) {
+      let amount = p.amount;
+      if (p.method === 'CASH' && change > 0) {
+        const taken = Math.min(change, amount);
+        amount -= taken;
+        change -= taken;
+      }
+      if (amount > 0) out.push({ method: p.method, amount, reference: p.reference } as Payment);
+    }
+    return out;
+  }
+
+  private carriedPaid(sale: Sale): Fcfa {
+    return this.carriedPayments(sale).reduce((t, p) => t + p.amount, 0);
+  }
+
+  /**
+   * Modifie une facture de la journée : l'ancienne est annulée (stock remis) et la nouvelle
+   * reprend ce qui était déjà réglé ; `input.payments` ne porte que la différence encaissée.
+   */
+  replaceSale(ctx: Context, replacesId: string, input: SaleInput, byId: string): Sale {
+    const original = this.getSale(replacesId);
+    this.editableSale(replacesId);
+    // L'argent déjà reçu est dans le tiroir de cette caisse : la facture se modifie sur la même journée.
+    if (original.session_id !== this.requireOpenSession(ctx).id) throw new AppError(`Modifiez cette facture depuis sa caisse (${(this.db.prepare("SELECT name FROM registers WHERE id = ?").pluck().get(original.register_id) as string | undefined) ?? "autre caisse"})`, 'INVALID');
+    return this.tx(() => {
+      this.cancelSale(ctx, replacesId, byId, 'Facture modifiée', { byRight: true });
+      const carried = this.carriedPayments(original);
+      const total = () => computeTotals(this.priceLines(ctx.storeId, input.lines, input.priceLevel ?? original.price_level)).totalTtc;
+      // Moins d'articles qu'avant : la part à crédit baisse d'abord ; un paiement électronique ne se rend pas en espèces.
+      const nonCash = (ps: Payment[]) => ps.filter((p) => p.method !== 'CASH').reduce((t, p) => t + p.amount, 0);
+      let excess = nonCash([...carried, ...input.payments]) - total();
+      if (excess > 0) {
+        for (const p of carried.filter((x) => x.method === 'CUSTOMER_CREDIT')) {
+          const cut = Math.min(excess, p.amount);
+          p.amount -= cut;
+          excess -= cut;
+        }
+        if (excess > 0) throw new AppError('Le client a payé par MoMo, carte ou banque plus que le nouveau total : annulez la facture et remboursez-le, puis refaites-la', 'INVALID');
+      }
+      const sale = this.completeSale(ctx, { ...input, payments: [...carried.filter((p) => p.amount > 0), ...input.payments] });
+      this.db.prepare('UPDATE sales SET replaces_id = ? WHERE id = ?').run(replacesId, sale.id);
+      this.db.prepare('UPDATE sales SET cancel_reason = ? WHERE id = ?').run(`Facture modifiée : remplacée par ${sale.number}`, replacesId);
+      this.audit(byId, 'sale.edit', 'sale', sale.id, { replaces: original.number, number: sale.number, before: original.total_ttc, after: sale.total_ttc });
+      const updated = this.getSale(sale.id);
+      this.enqueue(ctx, 'sale', sale.id, 'upsert', updated);
+      this.enqueue(ctx, 'sale', replacesId, 'upsert', this.getSale(replacesId));
+      return updated;
+    });
+  }
+
 
   /** Remet en stock les quantités sorties pour un ticket, dans leurs lots d'origine. */
   private restockSaleMovements(ctx: Context, saleId: string, refType: string, refId: string, only?: Map<string, Milli>): void {
@@ -912,11 +1029,11 @@ export class PosService extends Base {
    */
   returnSale(
     ctx: Context,
-    input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorId: string; reason: string },
+    input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorId: string; reason: string; byRight?: boolean },
   ): Sale {
     const session = this.requireOpenSession(ctx);
     const supervisor = this.admin.getUser(input.supervisorId);
-    if (supervisor.role !== 'admin' && supervisor.role !== 'manager') throw new AppError('Retour réservé au gérant', 'SUPERVISOR_REQUIRED');
+    if (!input.byRight && supervisor.role !== 'admin' && supervisor.role !== 'manager') throw new AppError('Retour réservé au gérant', 'SUPERVISOR_REQUIRED');
     if (!input.reason.trim()) throw new AppError('Le motif du retour est obligatoire', 'INVALID');
     const original = this.getSale(input.originalSaleId);
     if (original.kind !== 'sale' || original.status !== 'completed') throw new AppError('Ce ticket ne peut pas faire l’objet d’un retour', 'INVALID');

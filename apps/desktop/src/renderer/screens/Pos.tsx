@@ -122,9 +122,11 @@ const tileColor = (name: string) => {
  * Plusieurs fiches peuvent être ouvertes en même temps (Caisse 1, Caisse 2).
  */
 
-export function Pos({ user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onListing, onTreasury, mode = 'cash', layout = 'modern' }: {
+export function Pos({ edit = null, user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onListing, onTreasury, mode = 'cash', layout = 'modern' }: {
   mode?: 'cash' | 'credit';
   layout?: PosLayout;
+  /** Facture à recharger pour la modifier (demandée depuis le registre ou Mes factures). */
+  edit?: { sale: Result<'sales.editable'> & { id: string }; nonce: number } | null;
   user: User;
   hasRegister: boolean;
   /** Caisse de travail : la journée affichée se recharge quand elle change. */
@@ -209,8 +211,12 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     const t = computeTotals(fee > 0 ? [...priced, { articleId: 'svc-delivery-fee', label: 'Frais de livraison', unitPrice: fee, qty: 1000, vatRate: feeVat.data ?? 0, discount: 0 }] : priced);
     return { ...t, itemCount: computeTotals(priced).itemCount };
   }, [priced, fee, feeVat.data]);
+  /** Facture en cours de modification : ce que le client a déjà réglé est repris. */
+  const [replacing, setReplacing] = useState<{ id: string; number: string; paid: number } | null>(null);
+  /** Reste à encaisser : le total, moins ce qui était déjà réglé sur la facture modifiée. */
+  const toPay = replacing ? Math.max(0, totals.totalTtc - replacing.paid) : totals.totalTtc;
   /** Total à payer si tout est réglé en espèces (arrondi des paramètres). */
-  const cashDue = roundCash(totals.totalTtc, settings.cashRounding);
+  const cashDue = roundCash(toPay, settings.cashRounding);
   // Une remise sous le maximum des paramètres passe sans le code du gérant.
   const underMax = settings.maxDiscountPct > 0 && totals.totalDiscount * 100 <= settings.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
   const discountNeedsCode = totals.totalDiscount > 0 && !has(user, 'discount') && !underMax;
@@ -342,6 +348,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   };
   const clear = () => {
     setQuote(null);
+    setReplacing(null);
     setClientName('');
     setLines([]);
     setCashGiven(0);
@@ -387,6 +394,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     setCustomer(null);
     setClientName('');
     setQuote(null);
+    setReplacing(null);
     const delivered = delivery.on;
     resetOptions();
     toast.ok(`Facture ${sale.number} enregistrée${sale.change_given > 0 ? ` · rendu ${fcfa(sale.change_given)}` : ''}`);
@@ -426,6 +434,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
           warehouseId: warehouseChoice,
           optionsPin,
           delivery: deliveryInput(),
+          replacesId: replacing?.id ?? null,
           ...pins,
         }),
       );
@@ -458,11 +467,11 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
         setDialog('customer');
         return;
       }
-      const deposit = Math.min(cashGiven, totals.totalTtc);
-      const payments: SellPayments = cashGiven >= totals.totalTtc ? [{ method: 'CASH', amount: cashGiven }] : [];
-      if (!payments.length) {
+      const deposit = Math.min(cashGiven, toPay);
+      const payments: SellPayments = cashGiven >= toPay ? (cashGiven > 0 ? [{ method: 'CASH', amount: cashGiven }] : []) : [];
+      if (cashGiven < toPay) {
         if (deposit > 0) payments.push({ method: 'CASH', amount: deposit });
-        payments.push({ method: 'CUSTOMER_CREDIT', amount: totals.totalTtc - deposit });
+        payments.push({ method: 'CUSTOMER_CREDIT', amount: toPay - deposit });
       }
       await sell(payments);
       return;
@@ -470,7 +479,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     const needsSupervisor = discountNeedsCode && !quote;
     // Payé tout en espèces : le total descend à l'arrondi réglé dans les paramètres.
     if (cashGiven >= cashDue && !needsSupervisor) {
-      await sell([{ method: 'CASH', amount: cashGiven }]);
+      await sell(cashGiven > 0 ? [{ method: 'CASH', amount: cashGiven }] : []);
       return;
     }
     setDialog('pay');
@@ -514,6 +523,30 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
       toast.error(err);
     }
   };
+
+  /** Facture à modifier : ses lignes, son client et ce qu'il a déjà réglé reviennent sur la fiche. */
+  useEffect(() => {
+    if (!edit) return;
+    if (lines.length) return void toast.error('Terminez ou mettez en attente le ticket en cours, puis relancez « Modifier »');
+    const { sale } = edit;
+    (async () => {
+      try {
+        setLines(await reload(sale.lines));
+        const c = sale.customerId ? await call('customers.get', sale.customerId) : null;
+        setCustomer(c);
+        setClientName(sale.clientName ?? '');
+        setLevelChoice(sale.priceLevel !== (c?.price_level ?? 'retail') ? sale.priceLevel : null);
+        setQuote(null);
+        setLastSale(null);
+        setCashGiven(0);
+        setReplacing({ id: sale.id, number: sale.number, paid: sale.paid });
+        setPane('lines');
+        toast.ok(`Facture ${sale.number} rechargée : modifiez puis validez`);
+      } catch (err) {
+        toast.error(err);
+      }
+    })();
+  }, [edit?.nonce]);
 
   const reprint = () => {
     if (!can('sale_reprint')) return toast.error("Vous n'avez pas le droit de réimprimer un ticket");
@@ -767,7 +800,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
     <>
     {dialog === 'pay' && (
       <PaymentDialog
-        total={totals.totalTtc}
+        total={toPay}
         needsSupervisor={discountNeedsCode}
         cashRounding={settings.cashRounding}
         allowCredit={Boolean(customer)}
@@ -967,7 +1000,7 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
   const heldCount = held.data?.length ?? 0;
-  const ficheNumber = quote && lines.length ? `Devis ${quote.number}` : 'Nouveau';
+  const ficheNumber = replacing ? `Modif. ${replacing.number}` : quote && lines.length ? `Devis ${quote.number}` : 'Nouveau';
   const tariffSelect = (
     <select value={level} onChange={(e) => pickLevel(e.target.value as PriceLevel)} title="Tarif de cette fiche ; par défaut celui du client">
       {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
@@ -996,8 +1029,11 @@ export function Pos({ user, hasRegister, registerId = null, canChooseRegister = 
       puis rouvrez la caisse.
     </div>
   );
-  const bandText =
-    credit && customer && account.data
+  const bandText = replacing
+    ? `Modification de la facture ${replacing.number} · déjà réglé ${amount(replacing.paid)} · ${
+        totals.totalTtc >= replacing.paid ? `reste à encaisser ${amount(totals.totalTtc - replacing.paid)}` : `à rendre ${amount(replacing.paid - totals.totalTtc)}`
+      } FCFA`
+    : credit && customer && account.data
       ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
       : quote && lines.length
           ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`

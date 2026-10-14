@@ -1448,4 +1448,14 @@ ALTER TABLE sales ADD COLUMN ticket_prints INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sales ADD COLUMN invoice_prints INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 34,
+    name: 'factures modifiées et masquées',
+    sql: `
+-- Facture modifiée : la nouvelle cite celle qu'elle remplace (annulée dans la même opération).
+ALTER TABLE sales ADD COLUMN replaces_id TEXT REFERENCES sales(id);
+-- « Supprimer » : facture annulée et masquée du registre (toujours visible avec le filtre Annulés et dans le journal).
+ALTER TABLE sales ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

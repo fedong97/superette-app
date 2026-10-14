@@ -1043,3 +1043,7 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .bc-codes td { vertical-align: middle; }
 @media (max-width: 900px) { .bc-print { grid-template-columns: 1fr; } }
 .tag.internal { background: #e3f3ea; color: var(--brand); font-weight: 700; }
+/* Modèles d'impression : lignes à glisser-déposer (sections, colonnes). */
+.tpl-columns tr[draggable='true'] { cursor: grab; }
+.tpl-columns tr.dragging { opacity: 0.45; }
+.tpl-columns .drag-handle { color: #9ca3af; width: 1.5em; text-align: center; }

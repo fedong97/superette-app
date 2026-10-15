@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { call } from '../api';
-import logo from '../assets/logo.svg';
+import logo from '../assets/logo.png';
 import { Field, useToast } from '../ui';
 
 /** Premier démarrage : création du premier magasin et du compte administrateur. */

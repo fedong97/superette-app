@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
-import logo from './assets/logo.svg';
+import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';

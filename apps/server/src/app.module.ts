@@ -2,6 +2,7 @@ import { type DynamicModule, Inject, Module, type OnApplicationShutdown } from '
 import { Pool } from 'pg';
 import { CONFIG, type ServerConfig } from './config';
 import { PG, migrate } from './database';
+import { StatusController } from './status.controller';
 import { SyncController } from './sync.controller';
 import { SyncService } from './sync.service';
 
@@ -12,7 +13,7 @@ export class AppModule implements OnApplicationShutdown {
   static forConfig(config: ServerConfig): DynamicModule {
     return {
       module: AppModule,
-      controllers: [SyncController],
+      controllers: [StatusController, SyncController],
       providers: [
         { provide: CONFIG, useValue: config },
         {

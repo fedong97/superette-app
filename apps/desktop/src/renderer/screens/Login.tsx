@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Result, call } from '../api';
-import logo from '../assets/logo.svg';
+import logo from '../assets/logo.png';
 import { Field, useToast } from '../ui';
 
 export function Login({ station, onDone }: { station: Result<'app.state'>['station']; onDone: () => void }) {

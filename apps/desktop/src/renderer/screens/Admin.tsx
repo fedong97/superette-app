@@ -8,6 +8,7 @@ import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
 import { PrintTemplates } from './PrintTemplates';
 import contract from '../../../build/contrat-licence.txt?raw';
+import serverLogo from '../assets/logo-serveur.png';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
@@ -774,6 +775,7 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="narrow">
       <p>
+        <img src={serverLogo} alt="" width={56} height={56} style={{ float: 'left', marginRight: 12 }} />
         Le serveur central relie les caisses et les magasins : chaque PC garde sa propre base et continue de vendre sans réseau, les opérations
         partent toutes les 20 secondes dès que la connexion revient.
       </p>

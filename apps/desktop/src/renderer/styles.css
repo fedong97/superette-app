@@ -631,7 +631,7 @@ input.qty.promo { width: 64px; }
 .stock-mm td.low button.link { color: var(--warn); }
 .stock-mm td small.block { font-size: 11px; }
 
-/* Logo FEDO Gestion sur l'écran de connexion */
+/* Logo FEDONIX 360 sur l'écran de connexion */
 .card.login .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: #1f7a5c; }
 pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.5; max-height: 65vh; overflow-y: auto; margin: 0; }
 .digest { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }

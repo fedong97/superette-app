@@ -35,7 +35,7 @@ describe('résumé du jour', () => {
     ]);
     expect(d.sessions).toMatchObject({ closed: 1, open: 0, gaps: [{ difference: -500 }] });
     expect(d.top[0]).toMatchObject({ name: 'Riz 5 kg', qty: 3_000, revenue: 13_500 });
-    expect(d.text).toContain('*Superette Akwa* · FEDO Gestion');
+    expect(d.text).toContain('*Superette Akwa* · FEDONIX 360');
     expect(d.text).toContain('Résumé du lundi 12/10/2026');
     expect(d.text).toContain(`*Ventes : ${formatFcfa(13_500)}*`);
     expect(d.text).toContain(`Espèces : ${formatFcfa(9_000)}`);

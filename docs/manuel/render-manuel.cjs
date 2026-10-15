@@ -29,7 +29,7 @@ const norm = (s) => s.normalize('NFC').replace(/[\s  ]+/g, '').replace(/[’'
     document.querySelectorAll('.toc .pg').forEach((e) => (e.textContent = '00'));
     return list;
   });
-  const footer = `<div style="font-family:Inter,Arial,sans-serif;font-size:7.5px;color:#5b6474;width:100%;padding:0 16mm;display:flex;justify-content:space-between;"><span>FEDO Gestion · Manuel d'utilisation · version ${version}</span><span>FEDONG · page <span class="pageNumber"></span></span></div>`;
+  const footer = `<div style="font-family:Inter,Arial,sans-serif;font-size:7.5px;color:#5b6474;width:100%;padding:0 16mm;display:flex;justify-content:space-between;"><span>FEDONIX 360 · Manuel d'utilisation · version ${version}</span><span>FEDONG · page <span class="pageNumber"></span></span></div>`;
   const body = async (file) => {
     await page.evaluate(() => document.documentElement.classList.add('no-cover'));
     await page.pdf({
@@ -80,7 +80,7 @@ w = PdfWriter()
 for f in sys.argv[1:3]:
     for p in PdfReader(f).pages:
         w.add_page(p)
-w.add_metadata({'/Title': "FEDO Gestion : manuel d'utilisation", '/Author': 'FEDONG', '/Subject': 'Version ' + sys.argv[4]})
+w.add_metadata({'/Title': "FEDONIX 360 : manuel d'utilisation", '/Author': 'FEDONG', '/Subject': 'Version ' + sys.argv[4]})
 with open(sys.argv[3], 'wb') as fh:
     w.write(fh)
 EOF`);

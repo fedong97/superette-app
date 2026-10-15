@@ -1331,7 +1331,7 @@ function framedBody(t: DocTemplate, d: DocData): string {
     ${t.footer.text ? `<div class="notes">${nl(fill(t.footer.text, d))}</div>` : ''}
     ${ids.some(Boolean) ? `<div class="fids"><span>${ids[0]}</span><span>${ids[1]}</span></div>` : ''}
     ${signs.length ? `<div class="fsigns">${signs.map((x) => `<span>${nl(x.toUpperCase())}</span>`).join('')}</div>` : ''}
-    <div class="fby"><span>${t.info.seller && d.doc.seller ? `${d.partyLabel ? 'ÉTABLI' : 'FACTURÉ'} PAR : ${esc(d.doc.seller.toUpperCase())}` : ''}</span><span>FEDO Gestion</span><span></span></div>
+    <div class="fby"><span>${t.info.seller && d.doc.seller ? `${d.partyLabel ? 'ÉTABLI' : 'FACTURÉ'} PAR : ${esc(d.doc.seller.toUpperCase())}` : ''}</span><span>FEDONIX 360</span><span></span></div>
   </div>`;
   return body;
 }
@@ -1481,7 +1481,7 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
     ...signPairs(t, d).map(([a, b]) => `<div class="signs"><span>${a ? `${nl(a)} :` : ''}</span><span>${b ? `${nl(b)} :` : ''}</span></div>`),
     t.footer.text ? `<div class="notes c" style="margin-top:2mm;text-align:${lineAlign(t, 'footer', 'footerText', 'center')}">${nl(fill(t.footer.text, d))}</div>` : '',
     t.footer.thanks || d.store.thanks ? `<div class="thanks"${sa(lineAlign(t, 'footer', 'thanks', 'center'))}>${nl(fill(t.footer.thanks || d.store.thanks, d))}</div>` : '',
-    '<div class="soft">FEDO Gestion</div>',
+    '<div class="soft">FEDONIX 360</div>',
   ].join('');
   return arrangeHtml(t, { header: id, title: `<div class="meta">${meta}</div>${wh}`, lines: table, totals: bottom, payments: pay, footer: foot });
 }
@@ -1559,7 +1559,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   const ft = (line: DocLineKey) => (text: string): ReceiptLine => ({ t: 'text', text, align: lineAlign(t, 'footer', line, 'center') });
   const bottom = [...split(t.footer.text).map(ft('footerText')), ...split(t.footer.thanks || d.store.thanks).map(ft('thanks'))];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom);
-  r.push(centered('FEDO Gestion'));
+  r.push(centered('FEDONIX 360'));
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   parts.footer = r;
   return arrangeReceipt(t, parts);

@@ -81,7 +81,7 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
       <form className="card setup" onSubmit={submit}>
         <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <img src={logo} alt="" width={44} height={44} />
-          Bienvenue dans FEDO Gestion
+          Bienvenue dans FEDONIX 360
         </h1>
         <p>Première installation : renseignez votre magasin et le compte administrateur. Vous pourrez ajouter d'autres magasins et caisses ensuite.</p>
         <h3>Magasin</h3>

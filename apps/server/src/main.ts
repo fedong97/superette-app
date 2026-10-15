@@ -15,6 +15,6 @@ if (require.main === module) {
   const config = loadConfig();
   void createApp(config).then(async (app) => {
     await app.listen(config.port);
-    console.log(`Serveur Superette à l'écoute sur le port ${config.port}`);
+    console.log(`Serveur FEDONIX 360 à l'écoute sur le port ${config.port}`);
   });
 }

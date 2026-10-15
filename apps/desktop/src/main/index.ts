@@ -75,11 +75,11 @@ void app.whenReady().then(() => {
   }
   const sync = createSyncRunner(services);
 
-  // Sauvegarde automatique : peu après le démarrage puis toutes les heures, une fois par jour.
+  // Sauvegarde automatique : peu après le démarrage, puis selon la fréquence réglée.
   const autoBackup = () => void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
   const backupStart = setTimeout(autoBackup, 60_000);
-  // Toutes les 5 minutes : la sauvegarde du jour, puis celle de l'heure fixe réglée.
-  const backupTimer = setInterval(autoBackup, 300_000);
+  // Chaque minute : la sauvegarde du jour, celle de la fréquence réglée (toutes les heures…) et celle de l'heure fixe.
+  const backupTimer = setInterval(autoBackup, 60_000);
   const digest = createDigestMailer(services);
 
   const system: SystemHooks = {

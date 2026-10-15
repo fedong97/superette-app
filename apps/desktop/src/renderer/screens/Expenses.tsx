@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
+import { Empty, Field, askConfirm, Modal, SupervisorPrompt, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useLoad, useToast, has, useCan } from '../ui';
 import { hasVat } from '../tax';
+import { AccountPicker } from './accountPicker';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Expense = Result<'expenses.get'>;
@@ -86,7 +87,7 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
           <input type="checkbox" checked={cancelled} onChange={(e) => setCancelled(e.target.checked)} /> Annulées
         </label>
         {has(user, 'expense_record') && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}>
             Nouvelle dépense
           </button>
         )}
@@ -590,7 +591,7 @@ function Categories() {
       <div className="filters">
         <span className="muted">Chaque catégorie passe sur un compte de charges du plan comptable (classe 6).</span>
         {can('expense_categories') && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
             Nouvelle catégorie
           </button>
         )}
@@ -632,6 +633,7 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
   const accounts = useLoad(() => call('accounting.accounts'), []);
   const [name, setName] = useState(category?.name ?? '');
   const [accountId, setAccountId] = useState(category?.account_id ?? '');
+  const [browsing, setBrowsing] = useState(false);
   const [active, setActive] = useState(category ? category.active === 1 : true);
   return (
     <Modal title={category ? category.name : 'Nouvelle catégorie'} onClose={onClose}>
@@ -650,18 +652,35 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
         <Field label="Nom">
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
-        <Field label="Compte de charges" hint="Les dépenses déjà saisies gardent leur compte">
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} required>
-            <option value="">Choisir…</option>
-            {(accounts.data ?? [])
-              .filter((a) => a.id.startsWith('6'))
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.id} · {a.label}
-                </option>
-              ))}
-          </select>
+        <Field label="Compte de charges" hint="Les dépenses déjà saisies gardent leur compte. 📖 ouvre le plan comptable pour chercher le compte.">
+          <div className="inline-pick">
+            <select value={accountId} onChange={(e) => setAccountId(e.target.value)} required>
+              <option value="">Choisir…</option>
+              {(accounts.data ?? [])
+                .filter((a) => a.id.startsWith('6'))
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.id} · {a.label}
+                  </option>
+                ))}
+            </select>
+            <button type="button" title="Ouvrir le plan comptable" onClick={() => setBrowsing(true)}>
+              📖 Plan comptable
+            </button>
+          </div>
         </Field>
+        {browsing && (
+          <AccountPicker
+            only="6"
+            value={accountId}
+            onClose={() => setBrowsing(false)}
+            onPick={(a) => {
+              setBrowsing(false);
+              setAccountId(a.id);
+              accounts.reload();
+            }}
+          />
+        )}
         <label>
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Catégorie utilisée
         </label>
@@ -697,6 +716,8 @@ const shiftMonth = (m: string, n: number) => {
 function ChargePlans() {
   const plans = useLoad(() => call('charges.plans', true), []);
   const [open, setOpen] = useState<Plan | 'new' | null>(null);
+  const [showStopped, setShowStopped] = useState(false);
+  const shown = (plans.data ?? []).filter((p) => showStopped || p.active);
   const monthly = (plans.data ?? [])
     .filter((p) => p.active)
     .reduce((t, p) => t + Math.round(p.amount / (p.frequency === 'monthly' ? 1 : p.frequency === 'quarterly' ? 3 : 12)), 0);
@@ -704,11 +725,14 @@ function ChargePlans() {
     <>
       <div className="filters">
         <span className="muted">Loyer, ENEO, CAMWATER, salaires, CNPS, gardiennage… : l'échéancier rappelle chaque échéance jusqu'à ce qu'une dépense la constate.</span>
-        <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+        <label style={{ marginLeft: 'auto' }}>
+          <input type="checkbox" checked={showStopped} onChange={(e) => setShowStopped(e.target.checked)} /> Afficher les charges arrêtées
+        </label>
+        <button data-new title="Ctrl+J" className="primary" onClick={() => setOpen('new')}>
           Nouvelle charge fixe
         </button>
       </div>
-      {plans.data?.length === 0 ? (
+      {shown.length === 0 && plans.data ? (
         <Empty>Aucune charge fixe. Définissez vos charges qui reviennent pour ne plus en oublier.</Empty>
       ) : (
         <table className="list compact">
@@ -726,7 +750,7 @@ function ChargePlans() {
             </tr>
           </thead>
           <tbody>
-            {plans.data?.map((p) => (
+            {shown.map((p) => (
               <tr key={p.id} className={`clickable ${p.active ? '' : 'inactive'}`} onClick={() => setOpen(p)}>
                 <td>{p.label}</td>
                 <td>{p.category_name}</td>
@@ -845,6 +869,25 @@ function ChargePlanDialog({ plan, onClose, onSaved }: { plan: Plan | null; onClo
           </label>
         )}
         <div className="actions">
+          {plan && (
+            <button
+              type="button"
+              className="danger"
+              style={{ marginRight: 'auto' }}
+              onClick={async () => {
+                if (!(await askConfirm(`Supprimer la charge fixe « ${plan.label} » ?\nSi des échéances sont déjà constatées, la charge est arrêtée et son historique reste.`))) return;
+                try {
+                  const r = await call('charges.deletePlan', plan.id);
+                  toast.ok(r.deleted ? 'Charge supprimée' : `Charge arrêtée après ${monthLabel(r.plan!.end_month!)} : ses échéances constatées restent`);
+                  onSaved();
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Supprimer
+            </button>
+          )}
           <button type="button" onClick={onClose}>
             Annuler
           </button>

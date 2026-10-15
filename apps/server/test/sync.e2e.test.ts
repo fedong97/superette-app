@@ -1,5 +1,8 @@
 import type { INestApplication } from '@nestjs/common';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { type Context, LicenseService, type Services, createServices, enrollStation, joinStore, openDatabase, syncOnce } from '@superette/db';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -7,6 +10,7 @@ import { createApp } from '../src/main';
 
 const DATABASE_URL = process.env['TEST_DATABASE_URL'];
 const KEY = 'cle-enrolement-de-test';
+const LOCAL = 'jeton-de-la-fenetre-du-serveur';
 /** Paire de clés de test : l'application et le serveur vérifient les licences avec la clé publique. */
 const pair = generateKeyPairSync('ed25519');
 const LICENSE_PUB = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -16,8 +20,11 @@ function licenseKey(machine: string, stations: number): string {
   return `SG1.${data.toString('base64url')}.${sign(null, data, pair.privateKey).toString('base64url')}`;
 }
 
-/** Deux PC du même magasin, puis un deuxième magasin, reliés par un vrai serveur et une vraie base PostgreSQL. */
-describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
+/**
+ * Deux PC du même magasin, puis un deuxième magasin, reliés par un vrai serveur :
+ * sur PostgreSQL si TEST_DATABASE_URL est donnée, sinon sur la base intégrée (FEDONIX 360 Serveur pour Windows).
+ */
+describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchronisation par le serveur central (base %s)', (base) => {
   let app: INestApplication;
   let url: string;
   let pc1: Services;
@@ -37,10 +44,21 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
   const stockOf = (s: Services, storeId: string) => s.stock.list(storeId).find((r) => r.article_id === articleId);
 
   beforeAll(async () => {
-    const pool = new Pool({ connectionString: DATABASE_URL });
-    await pool.query('DROP TABLE IF EXISTS events, devices, licenses, schema_migrations');
-    await pool.end();
-    app = await createApp({ databaseUrl: DATABASE_URL!, port: 0, enrollmentKey: KEY, licensePublicKey: LICENSE_PUB });
+    if (base === 'postgres') {
+      const pool = new Pool({ connectionString: DATABASE_URL });
+      await pool.query('DROP TABLE IF EXISTS events, devices, licenses, settings, schema_migrations');
+      await pool.end();
+    }
+    const where = base === 'postgres' ? { databaseUrl: DATABASE_URL! } : { dataDir: join(mkdtempSync(join(tmpdir(), 'fedo-serveur-')), 'donnees') };
+    app = await createApp({
+      ...where,
+      port: 0,
+      enrollmentKey: KEY,
+      licensePublicKey: LICENSE_PUB,
+      localAdminToken: LOCAL,
+      // Sur PostgreSQL (serveur sur Internet), le premier mot de passe vient de la configuration.
+      adminPassword: base === 'postgres' ? 'secret-gerant' : undefined,
+    });
     await app.listen(0, '127.0.0.1');
     url = await app.getUrl();
 
@@ -453,5 +471,74 @@ describe.skipIf(!DATABASE_URL)('synchronisation par le serveur central', () => {
     const code3 = pc1.admin.createRegister(ctx1.userId, ctx1.storeId).activation_code;
     await syncOnce(pc1);
     await expect(joinStore(fresh(), url, code3, 'PC caisse 3')).rejects.toThrow('permet 2 PC');
+  });
+  describe("l'interface du serveur", () => {
+    let cookie = '';
+    const get = (path: string, c = cookie) => fetch(`${url}${path}`, { headers: { cookie: c } });
+    const post = (path: string, body?: unknown, c = cookie) =>
+      fetch(`${url}${path}`, { method: 'POST', headers: { cookie: c, 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+
+    it("s'ouvre sans mot de passe dans la fenêtre du serveur, et refuse les autres", async () => {
+      expect((await get('/admin/api/overview', '')).status).toBe(401);
+      expect((await fetch(`${url}/?t=mauvais`, { redirect: 'manual' })).headers.get('set-cookie')).toBeNull();
+      const res = await fetch(`${url}/?t=${LOCAL}`, { redirect: 'manual' });
+      expect(res.status).toBe(302);
+      cookie = res.headers.get('set-cookie')!.split(';')[0]!;
+      expect((await (await get('/admin/api/session')).json()).authenticated).toBe(true);
+      expect(await (await get('/')).text()).toContain('FEDONIX 360 Serveur');
+    });
+
+    it('montre les postes, les ventes du jour et le journal des opérations', async () => {
+      const o = await (await get('/admin/api/overview')).json();
+      expect(o.database).toBe(base);
+      expect(o.devices.filter((d: { revoked: boolean }) => !d.revoked).length).toBeGreaterThanOrEqual(2);
+      expect(o.devices.find((d: { name: string }) => d.name === 'PC caisse 1')).toMatchObject({ store: 'Superette Akwa', online: true });
+      const akwa = o.stores.find((x: { name: string }) => x.name === 'Superette Akwa');
+      expect(akwa.sales).toBeGreaterThan(0);
+      expect(o.events.total).toBeGreaterThan(10);
+
+      const ventes = await (await get('/admin/api/events?group=ventes')).json();
+      expect(ventes[0]).toMatchObject({ type: expect.any(String), device: expect.any(String) });
+      expect(ventes.some((e: { type: string; summary: string }) => e.type === 'Vente' && e.summary.includes('FCFA'))).toBe(true);
+      const jours = await (await get('/admin/api/sales')).json();
+      expect(jours[0].stores.length).toBeGreaterThan(0);
+    });
+
+    it('un mot de passe ouvre l\'interface depuis un autre PC', async () => {
+      if (base === 'integree') expect((await post('/admin/api/first-password', { password: 'secret-gerant' })).status).toBe(200);
+      // Le premier mot de passe ne se choisit qu'une fois.
+      expect((await post('/admin/api/first-password', { password: 'autre-secret' })).status).toBe(400);
+      expect((await post('/admin/api/login', { password: 'faux-mot' }, '')).status).toBe(401);
+      const ok = await post('/admin/api/login', { password: 'secret-gerant' }, '');
+      expect(ok.status).toBe(200);
+      const other = ok.headers.get('set-cookie')!.split(';')[0]!;
+      expect((await get('/admin/api/overview', other)).status).toBe(200);
+    });
+
+    it.skipIf(base !== 'integree')('sauvegarde la base et la restaure', async () => {
+      const before = (await (await get('/admin/api/overview')).json()).events.total;
+      const saved = await (await post('/admin/api/backups')).json();
+      expect(saved.name).toMatch(/^fedo-serveur-.*\.tar\.gz$/);
+      expect(saved.size).toBeGreaterThan(1000);
+      const file = await get(`/admin/api/backups/${saved.name}`);
+      expect(file.headers.get('content-disposition')).toContain(saved.name);
+
+      // Une vente arrive après la sauvegarde…
+      pc1.pos.completeSale(ctx1, { lines: [{ articleId, qty: 1000 }], payments: [{ method: 'CASH', amount: 650 }] });
+      await syncOnce(pc1);
+      expect((await (await get('/admin/api/overview')).json()).events.total).toBeGreaterThan(before);
+
+      // … et la restauration ramène la base à l'état sauvegardé, en gardant une copie de l'état d'avant.
+      expect((await post(`/admin/api/backups/${saved.name}/restore`)).status).toBe(200);
+      expect((await (await get('/admin/api/overview')).json()).events.total).toBe(before);
+      const list = await (await get('/admin/api/backups')).json();
+      expect(list.some((b: { name: string }) => b.name.includes('avant-restauration'))).toBe(true);
+      // Le serveur continue de faire passer les opérations : un client créé sur le PC 2 arrive sur le PC 1.
+      const client = pc2.customers.saveCustomer(ctx2.userId, { name: 'Client après restauration' });
+      await syncOnce(pc2);
+      await syncOnce(pc1);
+      expect(pc2.sync.state().lastError).toBeNull();
+      expect(pc1.db.prepare('SELECT name FROM customers WHERE id = ?').pluck().get(client.id)).toBe('Client après restauration');
+    });
   });
 });

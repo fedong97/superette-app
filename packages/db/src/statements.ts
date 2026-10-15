@@ -343,7 +343,7 @@ export class FinancialStatementsService extends Base {
     const debit = new Map<string, number>();
     const credit = new Map<string, number>();
     let stockReopened = 0;
-    for (const e of this.accounting.entries(storeId, { to })) {
+    for (const e of this.accounting.entries(storeId, { to, since: from })) {
       const opening = e.date < from || e.journal === 'AN';
       for (const l of e.lines) {
         if (l.account[0]! >= '6') continue;
@@ -398,22 +398,42 @@ export class FinancialStatementsService extends Base {
     return { rows: v, treasury: asset(z, 'BT') - z.liabilities.get('DT')! };
   }
 
+  /**
+   * Soldes de clôture d'un exercice : comptes de bilan (le stock au CMUP, par tiers
+   * pour les comptes 40 et 41) et résultat (exercice et antérieurs non affectés),
+   * pour les à-nouveaux de l'exercice suivant.
+   */
+  closingBalances(storeId: string, from: string, to: string): { sheet: { account: string; aux: string | null; balance: number }[]; result: number } {
+    const b = this.balances(storeId, from, to);
+    const sheet = [...b.sheet]
+      .filter(([, v]) => v)
+      .map(([key, balance]) => {
+        const [account, aux] = key.split('|');
+        return { account: account!, aux: aux || null, balance };
+      })
+      .sort((x, y) => x.account.localeCompare(y.account) || (x.aux ?? '').localeCompare(y.aux ?? ''));
+    const result = -([...b.period.values()].reduce((t, v) => t + v, 0) + b.prior);
+    return { sheet, result };
+  }
+
   private balances(storeId: string, from: string, to: string): Balances {
     const r = this.accounting.roles();
     const sheet = new Map<string, number>();
     const period = new Map<string, number>();
     let prior = 0;
     let stockBefore = 0;
-    for (const e of this.accounting.entries(storeId, { to })) {
+    for (const e of this.accounting.entries(storeId, { to, since: from })) {
+      // Les à-nouveaux d'une clôture, datés du premier jour, valent ouverture.
+      const before = e.date < from || (e.closing && e.date === from);
       for (const l of e.lines) {
         const v = l.debit - l.credit;
         const cls = l.account[0]!;
         if (cls >= '6') {
-          if (e.date < from) prior += v;
+          if (before) prior += v;
           else add(period, l.account, v);
         } else {
           add(sheet, /^4[01]/.test(l.account) && l.aux ? `${l.account}|${l.aux}` : l.account, v);
-          if (l.account === r.stock && e.date < from) stockBefore += v;
+          if (l.account === r.stock && before) stockBefore += v;
         }
       }
     }

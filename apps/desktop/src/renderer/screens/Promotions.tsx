@@ -49,7 +49,7 @@ export function Promotions({ active }: { active: boolean }) {
             Toutes
           </button>
         </div>
-        <button className="primary" style={{ marginLeft: 'auto' }} disabled={!can('promotion_save')} onClick={() => setEditing('new')}>
+        <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} disabled={!can('promotion_save')} onClick={() => setEditing('new')}>
           Nouvelle promotion
         </button>
       </div>

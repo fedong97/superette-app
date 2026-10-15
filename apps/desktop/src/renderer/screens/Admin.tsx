@@ -1,4 +1,4 @@
-import { type Permission, type RegisterKind } from '@superette/core';
+import { BACKUP_FREQUENCIES, type Permission, type RegisterKind } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
@@ -7,13 +7,14 @@ import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
 import { PrintTemplates } from './PrintTemplates';
+import { FiscalYears } from './Accounting';
 import contract from '../../../build/contrat-licence.txt?raw';
 import serverLogo from '../assets/logo-serveur.png';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -30,6 +31,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
     ['settings', 'Paramètres'],
+    ...(can('accounting') || can('fiscal_years') ? ([['fiscal', 'Exercices comptables']] as [Tab, string][]) : []),
     ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
@@ -68,6 +70,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
           }}
         />
       )}
+      {tab === 'fiscal' && (can('accounting') || can('fiscal_years')) && <FiscalYears />}
       {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
@@ -112,7 +115,7 @@ function Stores({ onChanged }: { onChanged: () => void }) {
         </tbody>
       </table>
       <div className="actions">
-        <button className="primary" onClick={() => setForm({ storeCode: '', storeName: '', address: '', phone: '', taxpayerNumber: '' })}>
+        <button data-new title="Ctrl+J" className="primary" onClick={() => setForm({ storeCode: '', storeName: '', address: '', phone: '', taxpayerNumber: '' })}>
           Ajouter un magasin
         </button>
       </div>
@@ -258,7 +261,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             ))}
           </select>
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newKind === 'cash' ? 'Nom (facultatif), ex. Caisse boissons' : newKind === 'electronic' ? 'Nom (facultatif), ex. Mobile 1' : 'Nom (facultatif), ex. Banque SGC'} />
-          <button className="primary" type="submit">
+          <button data-new title="Ctrl+J" className="primary" type="submit">
             Ajouter une caisse
           </button>
         </form>
@@ -383,6 +386,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     () => (stores.data ? Promise.all(stores.data.map((st) => call('admin.registers', st.id))).then((l) => l.flat()) : Promise.resolve([])),
     [stores.data],
   );
+  const warehouses = useLoad(() => call('admin.warehouses'), []);
   const registerLabel = (id: string | null) => {
     const r = id ? registers.data?.find((x) => x.id === id) : undefined;
     if (!r) return '';
@@ -399,6 +403,8 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     registerId: string;
     emoneyRegisterId: string;
     bankRegisterId: string;
+    /** Dépôts de vente cochés ; null = selon le droit « vendre depuis un autre dépôt ». */
+    saleWarehouses: string[] | null;
     active: boolean;
   }>(null);
   const sells = (role: Role) => role === 'cashier' || role === 'seller';
@@ -434,6 +440,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   registerId: u.register_id ?? '',
                   emoneyRegisterId: u.emoney_register_id ?? '',
                   bankRegisterId: u.bank_register_id ?? '',
+                  saleWarehouses: u.sale_warehouses ? (JSON.parse(u.sale_warehouses) as string[]) : null,
                   active: u.active === 1,
                 })
               }
@@ -495,7 +502,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
       </table>
       {canManage && (
         <div className="actions">
-          <button className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', active: true })}>
+          <button data-new title="Ctrl+J" className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', saleWarehouses: null, active: true })}>
             Ajouter un utilisateur
           </button>
         </div>
@@ -514,6 +521,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     registerId: form.registerId || null,
                     emoneyRegisterId: form.emoneyRegisterId || null,
                     bankRegisterId: form.bankRegisterId || null,
+                    saleWarehouses: form.saleWarehouses,
                     active: form.active,
                     pin: form.pin || undefined,
                   });
@@ -527,6 +535,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     registerId: form.registerId || null,
                     emoneyRegisterId: form.emoneyRegisterId || null,
                     bankRegisterId: form.bankRegisterId || null,
+                    saleWarehouses: form.saleWarehouses,
                   });
                 }
                 setForm(null);
@@ -603,6 +612,38 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   </select>
                 </Field>
               ))}
+              {(warehouses.data?.length ?? 0) > 1 && (
+                <Field
+                  label="Dépôts de vente"
+                  hint="À la facturation, il voit le stock de ces dépôts ; ce qui manque dans le dépôt choisi se complète dans les autres."
+                >
+                  <label className="inline">
+                    <input
+                      type="checkbox"
+                      checked={form.saleWarehouses !== null}
+                      onChange={(e) => setForm({ ...form, saleWarehouses: e.target.checked ? [] : null })}
+                    />{' '}
+                    Choisir ses dépôts
+                  </label>
+                  {form.saleWarehouses === null ? (
+                    <small className="muted">Selon son droit : tous les dépôts s’il peut « vendre depuis un autre dépôt », sinon la surface de vente.</small>
+                  ) : (
+                    warehouses.data!.map((w) => (
+                      <label key={w.id} className="inline">
+                        <input
+                          type="checkbox"
+                          disabled={w.is_sales_default === 1}
+                          checked={w.is_sales_default === 1 || form.saleWarehouses!.includes(w.id)}
+                          onChange={(e) =>
+                            setForm({ ...form, saleWarehouses: e.target.checked ? [...form.saleWarehouses!, w.id] : form.saleWarehouses!.filter((x) => x !== w.id) })
+                          }
+                        />{' '}
+                        {w.name}
+                      </label>
+                    ))
+                  )}
+                </Field>
+              )}
               {form.id && (
                 <label className="inline">
                   <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Compte actif
@@ -831,10 +872,10 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
           }}
         >
           <div className="grid2">
-            <Field label="Adresse du serveur" hint="ex. https://superette.mondomaine.cm">
+            <Field label="Adresse du serveur" hint="ex. http://192.168.1.20:3000 (affichée dans FEDONIX 360 Serveur)">
               <input value={url} onChange={(e) => setUrl(e.target.value)} required />
             </Field>
-            <Field label="Clé d'enrôlement" hint="ENROLLMENT_KEY configurée sur le serveur">
+            <Field label="Clé d'enrôlement" hint="affichée dans FEDONIX 360 Serveur, onglet Réglages">
               <input type="password" value={key} onChange={(e) => setKey(e.target.value)} required />
             </Field>
           </div>
@@ -954,7 +995,7 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
       onChanged();
     }
   };
-  const configure = (input: { dir?: string | null; copyDir?: string | null; keep?: number }) =>
+  const configure = (input: { dir?: string | null; copyDir?: string | null; keep?: number; everyMinutes?: number }) =>
     call('backup.configure', input).then(() => {
       toast.ok('Réglage enregistré');
       status.reload();
@@ -966,7 +1007,7 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   return (
     <div>
       <p>
-        La base de ce PC est copiée chaque jour, pendant que la caisse travaille. Gardez aussi une copie hors du PC (clé USB, dossier OneDrive ou Google
+        La base de ce PC est copiée automatiquement (chaque jour, ou plus souvent selon la fréquence choisie), pendant que la caisse travaille. Gardez aussi une copie hors du PC (clé USB, dossier OneDrive ou Google
         Drive) : en cas de vol ou de panne du disque, c'est elle qui sauve les ventes, le stock et la comptabilité.
       </p>
       <table className="list narrow">
@@ -1002,6 +1043,23 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
                   {st.copy_dir && <button onClick={() => void configure({ copyDir: null })}>Retirer</button>}
                 </>
               )}
+            </td>
+          </tr>
+          <tr>
+            <th>Sauvegarde automatique</th>
+            <td>
+              {isAdmin ? (
+                <select value={st.every_minutes} onChange={(e) => void configure({ everyMinutes: Number(e.target.value) })}>
+                  {BACKUP_FREQUENCIES.map(([m, label]) => (
+                    <option key={m} value={m}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                BACKUP_FREQUENCIES.find(([m]) => m === st.every_minutes)?.[1]
+              )}
+              {st.auto_time && <span className="muted"> · et chaque jour à {st.auto_time}</span>}
             </td>
           </tr>
           <tr>

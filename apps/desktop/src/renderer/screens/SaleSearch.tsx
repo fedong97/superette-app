@@ -10,10 +10,17 @@ export type SaleRow = Result<'pos.search'>[number];
 const amount = (v: number) => formatFcfa(v, false);
 export const rowKey = (r: SaleRow) => `${r.article_id}:${r.pack_id ?? ''}`;
 
-/** Stock exprimé dans le conditionnement de la ligne : palettes pleines, canettes, kg. */
+const inPack = (r: Pick<SaleRow, 'units' | 'unit'>, q: number) => (r.units === 1000 ? qty(q, r.unit) : String(Math.max(0, Math.floor(q / r.units))));
+
+/** Stock vendable (dépôt choisi et dépôts d'appoint du vendeur) dans le conditionnement de la ligne : palettes pleines, canettes, kg. */
 export function stockIn(r: SaleRow): string {
-  if (r.units === 1000) return qty(r.stock, r.unit);
-  return String(Math.max(0, Math.floor(r.stock / r.units)));
+  return inPack(r, r.available);
+}
+
+/** Stock de chaque dépôt du vendeur (« SURFACE 2 · RÉSERVE 10 ») ; vide s'il ne vend que dans un dépôt. */
+export function stockByDepot(r: SaleRow): string {
+  if (r.stocks.length < 2) return '';
+  return r.stocks.map((w) => `${w.name} ${inPack(r, w.qty)}`).join(' · ');
 }
 
 /**
@@ -94,7 +101,9 @@ export function SaleRowList({ s, onPick }: { s: ReturnType<typeof useSaleRows>; 
           <span className="muted">{r.code}</span>
           <span className="suggest-name">{r.name}</span>
           <span className="cond">{r.pack_name}</span>
-          <span className="r muted">{r.out_of_stock ? <span className="tag danger epuise">Épuisé</span> : stockIn(r)}</span>
+          <span className="r muted" title={stockByDepot(r)}>
+            {r.out_of_stock ? <span className="tag danger epuise">Épuisé</span> : stockIn(r)}
+          </span>
           <span className="suggest-price">{amount(r.price)}</span>
         </button>
       ))}
@@ -202,7 +211,7 @@ export function SaleSearchDialog({
                 <td>{r.name}</td>
                 <td className="r">{r.out_of_stock ? <span className="tag danger epuise">Épuisé</span> : stockIn(r)}</td>
                 <td className="cond">{r.pack_name}</td>
-                <td className="muted">{r.warehouse.toUpperCase()}</td>
+                <td className="muted">{(stockByDepot(r) || r.warehouse).toUpperCase()}</td>
                 <td className="r b">{amount(r.price)}</td>
                 <td className="r muted">{r.last_price === null ? '' : amount(r.last_price)}</td>
               </tr>
@@ -281,7 +290,9 @@ export function QtyPrompt({
   // À la pièce : un nombre entier de conditionnements. Au poids : la quantité saisie.
   const qtyOk = n !== null && (!piece || n % 1000 === 0);
   const wanted = qtyOk ? (piece ? (n! / 1000) * row.units : n!) : 0;
-  const left = row.stock - inCart;
+  const left = row.available - inCart;
+  // Ce que le dépôt choisi ne couvre pas sort des autres dépôts du vendeur.
+  const fromOthers = qtyOk && wanted > Math.max(0, row.stock - inCart) && wanted <= left;
   const short = qtyOk && wanted > left;
   // Stock ignoré : on vend quand même, la prochaine réception régularise.
   const out = row.out_of_stock && !ignoreStock;
@@ -302,7 +313,13 @@ export function QtyPrompt({
           <span className="cond">{row.pack_name}</span> à <b>{fcfa(row.price)}</b>
           <span className="muted"> · stock {stockIn(row)}</span>
           {row.out_of_stock && <span className="tag danger epuise">Épuisé</span>}
+          {stockByDepot(row) && <small className="muted block">{stockByDepot(row)}</small>}
         </p>
+        {fromOthers && (
+          <p className="warn-text">
+            {row.warehouse} n'en a pas assez : le reste sortira de {row.stocks.slice(1).filter((w) => w.qty > 0).map((w) => w.name).join(', ')}.
+          </p>
+        )}
         {out ? (
           <p className="danger-text">Stock épuisé : ce {row.pack_name.toLowerCase()} ne peut pas être vendu.</p>
         ) : (
@@ -321,7 +338,7 @@ export function QtyPrompt({
         )}
         {blocked && !out && (
           <p className="danger-text">
-            Stock insuffisant : il reste {piece && row.units > 1000 ? `${Math.max(0, Math.floor(left / row.units))} ${row.pack_name.toLowerCase()}` : stockIn({ ...row, stock: Math.max(0, left) })}
+            Stock insuffisant : il reste {piece && row.units > 1000 ? `${Math.max(0, Math.floor(left / row.units))} ${row.pack_name.toLowerCase()}` : stockIn({ ...row, available: Math.max(0, left) })}
             {inCart > 0 ? ' en plus de ce qui est déjà sur la fiche' : ''}.
           </p>
         )}

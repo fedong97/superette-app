@@ -477,6 +477,7 @@ export class CashDeskService extends Base {
     if (se.status !== 'open') throw new AppError('La journée est clôturée', 'SESSION_CLOSED');
     if (iso < se.opened_at) throw new AppError(`La journée a été ouverte le ${new Date(se.opened_at).toLocaleString('fr-FR')} : choisissez une heure après`, 'INVALID');
     if (iso > this.now()) throw new AppError('Une opération ne peut pas être datée dans le futur', 'INVALID');
+    this.assertPeriodOpen(ctx.storeId, iso);
     this.tx(() => {
       if (source === 'entry') {
         this.db.prepare('UPDATE treasury_entries SET at = ?, updated_at = ? WHERE id = ?').run(iso, this.now(), id);

@@ -53,7 +53,7 @@ function Orders({ manage, creating, setCreating }: { manage: boolean; creating: 
     <>
       <div className="filters">
         {manage && (
-          <button className="primary" onClick={() => setCreating(true)}>
+          <button data-new title="Ctrl+J" className="primary" onClick={() => setCreating(true)}>
             Nouvel ordre de fabrication
           </button>
         )}
@@ -296,7 +296,7 @@ function Recipes({ manage }: { manage: boolean }) {
     <>
       <div className="filters">
         {manage && (
-          <button className="primary" onClick={() => setEditing('new')}>
+          <button data-new title="Ctrl+J" className="primary" onClick={() => setEditing('new')}>
             Nouvelle recette
           </button>
         )}

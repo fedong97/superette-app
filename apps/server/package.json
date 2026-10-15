@@ -5,12 +5,13 @@
   "description": "Serveur central : synchronisation des caisses et magasins",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/admin.page.html', 'dist/admin.page.html')\"",
     "start": "node dist/main.js",
-    "dev": "tsc -p tsconfig.build.json && node dist/main.js",
+    "dev": "npm run build && node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",

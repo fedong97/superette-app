@@ -641,6 +641,7 @@ export class PurchaseService extends Base {
     const supplierNumber = input.supplierNumber.trim();
     if (!supplierNumber) throw new AppError('Le numéro de la facture du fournisseur est obligatoire', 'INVALID');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.invoiceDate)) throw new AppError('Date de facture invalide', 'INVALID');
+    this.assertPeriodOpen(ctx.storeId, input.invoiceDate);
     for (const v of [input.totalHt, input.totalTva]) {
       if (!Number.isSafeInteger(v) || v < 0) throw new AppError('Montant invalide', 'INVALID');
     }
@@ -823,6 +824,7 @@ export class PurchaseService extends Base {
     if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     if (input.amount > invoice.balance) throw new AppError(`Le montant dépasse le reste à payer (${invoice.balance} FCFA)`, 'INVALID');
     if (input.method !== 'CASH' && !input.reference?.trim()) throw new AppError('La référence du règlement est obligatoire', 'INVALID');
+    if (input.paidAt) this.assertPeriodOpen(ctx.storeId, input.paidAt);
     // Payé par MoMo/OM : il sort de la caisse électronique choisie, sinon de la centrale (un avoir remboursé n'y est pas rattaché).
     const src = input.sessionId
       ? new EmoneyService(this.db, this.clock).openSession(ctx.storeId, input.sessionId, input.method)

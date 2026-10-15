@@ -20,8 +20,10 @@ describe('caisse : tarif et dépôt choisis pour la fiche', () => {
   it('vend au tarif gros et sort la marchandise de la réserve', () => {
     const { s, ctx, castel, shop, reserve, qty } = setup();
     expect(s.pos.searchForSale(ctx.storeId, 'castel', { priceLevel: 'wholesale', warehouseId: reserve.id }).map((r) => [r.price, r.stock, r.warehouse])).toEqual([[600, 10_000, 'Réserve']]);
-    // 5 bouteilles : la surface de vente n'en a que 2, la réserve en a 10.
+    // 5 bouteilles : la surface de vente n'en a que 2, la réserve en a 10 ; vendeur limité à la surface de vente.
+    s.admin.updateUser(ctx.userId, ctx.userId, { saleWarehouses: [] });
     expect(() => s.pos.completeSale(ctx, { lines: [{ articleId: castel.id, qty: 5_000 }], payments: [{ method: 'CASH', amount: 3_250 }] })).toThrow(/Stock insuffisant/);
+    s.admin.updateUser(ctx.userId, ctx.userId, { saleWarehouses: null });
     const sale = s.pos.completeSale(ctx, {
       lines: [{ articleId: castel.id, qty: 5_000 }],
       payments: [{ method: 'CASH', amount: 3_000 }],

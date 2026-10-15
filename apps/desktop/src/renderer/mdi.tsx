@@ -51,6 +51,7 @@ export function MdiWindow({
   onFocus,
   onChange,
   onClose,
+  onRefresh,
   children,
 }: {
   title: string;
@@ -62,6 +63,8 @@ export function MdiWindow({
   onFocus: () => void;
   onChange: (g: Geo) => void;
   onClose: () => void;
+  /** ⟳ : recharge les données de la fenêtre. */
+  onRefresh?: () => void;
   children: ReactNode;
 }) {
   const [live, setLive] = useState<Geo | null>(null);
@@ -102,6 +105,11 @@ export function MdiWindow({
       <header className="mdi-bar" onPointerDown={(e) => drag(e, 'move')} onDoubleClick={toggleMax}>
         <i aria-hidden>{icon}</i>
         <span className="mdi-title">{title}</span>
+        {onRefresh && (
+          <button type="button" className="mdi-refresh" title="Actualiser la page (F5)" onPointerDown={(e) => e.stopPropagation()} onClick={onRefresh}>
+            ⟳
+          </button>
+        )}
         <button type="button" title={g.max ? 'Remettre en fenêtre' : 'Plein écran'} onPointerDown={(e) => e.stopPropagation()} onClick={toggleMax}>
           {g.max ? '❐' : '▢'}
         </button>

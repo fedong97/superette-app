@@ -48,7 +48,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
           <button onClick={() => setImporting(true)}>Importer (CSV)</button>
         )}
         {has(user, 'article_create') && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
             Nouvel article
           </button>
         )}

@@ -55,6 +55,8 @@ export interface StockRow {
   next_expiry: string | null;
   /** Quantité en conditionnements (« 2 Carton 3 Paquet 4 Ampoule ») ; vide sans conditionnement. */
   in_packs: string;
+  /** Stock de chaque dépôt du magasin (identifiant du dépôt → quantité), pour l'aperçu par dépôt. */
+  by_warehouse: Record<string, Milli>;
 }
 
 export interface ExpiringLot {
@@ -588,9 +590,18 @@ export class StockService extends Base {
       list.push(p);
       packs.set(p.article_id, list);
     }
+    const byWarehouse = new Map<string, Record<string, Milli>>();
+    for (const x of this.db
+      .prepare('SELECT s.article_id, s.warehouse_id, s.qty FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ?')
+      .all(storeId) as { article_id: string; warehouse_id: string; qty: Milli }[]) {
+      const m = byWarehouse.get(x.article_id) ?? {};
+      m[x.warehouse_id] = x.qty;
+      byWarehouse.set(x.article_id, m);
+    }
     return rows
       .map(({ unit_name, ...r }) => ({
         ...r,
+        by_warehouse: byWarehouse.get(r.article_id) ?? {},
         value: Math.round((Math.max(0, r.qty) * r.avg_cost) / 1000),
         level: stockLevel(r.qty, { alert: r.alert_qty, max: r.max_qty }),
         in_packs: packs.has(r.article_id) ? describeInPacks(r.qty, packs.get(r.article_id)!, unit_name || 'Pièce') : '',

@@ -134,6 +134,7 @@ export class ExpenseService extends Base {
     let sessionId: string | null = null;
     let registerId: string | null = null;
     let date = input.date || this.today();
+    this.assertPeriodOpen(ctx.storeId, date);
     const emoney = new EmoneyService(this.db, this.clock);
     if (input.sessionId) {
       ({ registerId, sessionId } = emoney.openSession(ctx.storeId, input.sessionId, input.method));

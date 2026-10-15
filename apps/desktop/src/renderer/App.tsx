@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
-import logo from './assets/logo.svg';
+import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';
@@ -530,7 +530,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     };
   }, [idleMinutes]);
   useEffect(() => {
-    document.title = `FEDO Gestion v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
+    document.title = `FEDONIX 360 v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
     if (!menu && !ctxMenu) return;
@@ -896,7 +896,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ))}
       </main>
       <footer className="statusbar">
-        <span title="Version du logiciel">FEDO Gestion v{state.version}</span>
+        <span title="Version du logiciel">FEDONIX 360 v{state.version}</span>
         <span title="Magasin">{state.station?.store.name}</span>
         {state.canChooseRegister ? (
           <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
@@ -1103,7 +1103,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <Modal title="À propos" onClose={() => setHelp(null)}>
           <p>
             <img src={logo} alt="" width={48} height={48} style={{ float: 'left', marginRight: 12 }} />
-            <strong>FEDO Gestion</strong> v{state.version}
+            <strong>FEDONIX 360</strong> v{state.version}
             <br />
             Gestion commerciale pour superettes et boutiques au Cameroun : caisse, stock, multi-magasins.
             <br />© FEDONG

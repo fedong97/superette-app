@@ -8,6 +8,7 @@ import { Digest } from './AdminDigest';
 import { Settings } from './AdminSettings';
 import { PrintTemplates } from './PrintTemplates';
 import contract from '../../../build/contrat-licence.txt?raw';
+import serverLogo from '../assets/logo-serveur.png';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
@@ -637,11 +638,11 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   if (!st) return null;
   const lic = st.license;
   const digits = lic?.contact?.replace(/\D/g, '') ?? '';
-  const whatsapp = `https://wa.me/${digits.length >= 8 ? digits : ''}?text=${encodeURIComponent(`Bonjour, voici le code machine de mon PC pour la licence FEDO Gestion : ${st.machineCode}`)}`;
+  const whatsapp = `https://wa.me/${digits.length >= 8 ? digits : ''}?text=${encodeURIComponent(`Bonjour, voici le code machine de mon PC pour la licence FEDONIX 360 : ${st.machineCode}`)}`;
   return (
     <div className="narrow">
       <p>
-        FEDO Gestion s'utilise avec une licence liée à ce PC. Envoyez le code machine à votre fournisseur ; il vous renvoie une clé de licence à
+        FEDONIX 360 s'utilise avec une licence liée à ce PC. Envoyez le code machine à votre fournisseur ; il vous renvoie une clé de licence à
         coller ci-dessous. Les autres PC reliés au serveur central reçoivent la licence tout seuls.{' '}
         <button type="button" className="link" onClick={() => setShowContract(true)}>
           Lire le contrat de licence
@@ -774,6 +775,7 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="narrow">
       <p>
+        <img src={serverLogo} alt="" width={56} height={56} style={{ float: 'left', marginRight: 12 }} />
         Le serveur central relie les caisses et les magasins : chaque PC garde sa propre base et continue de vendre sans réseau, les opérations
         partent toutes les 20 secondes dès que la connexion revient.
       </p>

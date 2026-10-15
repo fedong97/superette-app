@@ -435,7 +435,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Choisissez la journée : le résumé montre les ventes, les encaissements, les caisses et leurs écarts, les meilleures ventes et ce qui demande votre attention.',
           '« Envoyer par WhatsApp » ouvre WhatsApp avec le résumé, adressé au numéro du gérant réglé à droite.',
-          'Pour l’envoi automatique, l’administrateur coche « Envoyer le résumé chaque soir », choisit l’heure, les destinataires et le compte e-mail qui envoie. Ce PC doit être allumé avec FEDO Gestion ouvert ; sinon le résumé de la veille part au démarrage suivant.',
+          'Pour l’envoi automatique, l’administrateur coche « Envoyer le résumé chaque soir », choisit l’heure, les destinataires et le compte e-mail qui envoie. Ce PC doit être allumé avec FEDONIX 360 ouvert ; sinon le résumé de la veille part au démarrage suivant.',
         ],
       },
     ],

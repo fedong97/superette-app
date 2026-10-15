@@ -82,7 +82,7 @@ function MailSettings({ initial, onSaved }: { initial: Config; onSaved: () => vo
     >
       <h3>Envoi automatique par e-mail</h3>
       <p className="muted">
-        Réglé sur ce PC uniquement : laissez-le allumé avec FEDO Gestion ouvert à l'heure d'envoi. S'il était éteint, le résumé de la veille part le
+        Réglé sur ce PC uniquement : laissez-le allumé avec FEDONIX 360 ouvert à l'heure d'envoi. S'il était éteint, le résumé de la veille part le
         lendemain au démarrage.
       </p>
       <label className="check">

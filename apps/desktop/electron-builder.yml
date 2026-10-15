@@ -1,5 +1,5 @@
 appId: cm.superette.gestion
-productName: FEDO Gestion
+productName: FEDONIX 360
 copyright: © FEDONG
 directories:
   output: release
@@ -13,13 +13,13 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  artifactName: FedoGestion-Setup-${version}.exe
+  artifactName: Fedonix360-Setup-${version}.exe
 nsis:
   oneClick: false
   perMachine: true
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: FEDO Gestion
+  shortcutName: FEDONIX 360
   language: '1036'
   # Contrat de licence à accepter pendant l'installation (aussi affiché dans Administration › Licence).
   license: build/contrat-licence.txt

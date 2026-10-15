@@ -120,7 +120,7 @@ const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{
 /** Vérifie la signature d'une clé de licence et en rend le contenu. */
 export function parseLicenseKey(key: string, publicKey: string = LICENSE_PUBLIC_KEY): LicensePayload {
   const parts = normalizeLicenseKey(key).split('.');
-  if (parts.length !== 3 || parts[0] !== PREFIX) throw new AppError("Ce texte n'est pas une clé de licence FEDO Gestion", 'LICENSE_INVALID');
+  if (parts.length !== 3 || parts[0] !== PREFIX) throw new AppError("Ce texte n'est pas une clé de licence FEDONIX 360", 'LICENSE_INVALID');
   const data = Buffer.from(parts[1]!, 'base64url');
   const signature = Buffer.from(parts[2]!, 'base64url');
   let ok = false;

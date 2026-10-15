@@ -211,7 +211,7 @@ export class DigestService extends Base {
 
 function digestText(d: Omit<DayDigest, 'text'>): string {
   const weekday = DAYS[new Date(`${d.date}T12:00:00`).getDay()];
-  const lines = [`*${d.storeName}* · FEDO Gestion`, `Résumé du ${weekday} ${frDate(d.date)}`, ''];
+  const lines = [`*${d.storeName}* · FEDONIX 360`, `Résumé du ${weekday} ${frDate(d.date)}`, ''];
   if (d.tickets === 0) {
     lines.push('Aucune vente ce jour.');
   } else {

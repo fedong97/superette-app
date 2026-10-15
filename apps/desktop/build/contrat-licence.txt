@@ -1,18 +1,18 @@
-﻿CONTRAT DE LICENCE D'UTILISATION DU LOGICIEL FEDO GESTION
+﻿CONTRAT DE LICENCE D'UTILISATION DU LOGICIEL FEDONIX 360
 
-Entre FEDONG, éditeur du logiciel FEDO Gestion (ci-après « l'Éditeur »), et la personne physique ou morale qui installe ou utilise le logiciel (ci-après « le Client »).
+Entre FEDONG, éditeur du logiciel FEDONIX 360 (ci-après « l'Éditeur »), et la personne physique ou morale qui installe ou utilise le logiciel (ci-après « le Client »).
 
-En installant ou en utilisant FEDO Gestion, le Client reconnaît avoir lu ce contrat et l'accepter sans réserve. S'il ne l'accepte pas, il ne doit ni installer ni utiliser le logiciel.
+En installant ou en utilisant FEDONIX 360, le Client reconnaît avoir lu ce contrat et l'accepter sans réserve. S'il ne l'accepte pas, il ne doit ni installer ni utiliser le logiciel.
 
 
 1. OBJET
 
-Ce contrat fixe les conditions dans lesquelles l'Éditeur concède au Client le droit d'utiliser le logiciel FEDO Gestion (caisse, stock, achats, clients, comptabilité) et ses mises à jour éventuelles.
+Ce contrat fixe les conditions dans lesquelles l'Éditeur concède au Client le droit d'utiliser le logiciel FEDONIX 360 (caisse, stock, achats, clients, comptabilité) et ses mises à jour éventuelles.
 
 
 2. PROPRIÉTÉ
 
-FEDO Gestion reste la propriété exclusive de l'Éditeur. Le Client n'acquiert qu'un droit d'utilisation personnel, non exclusif et non cessible. Le nom FEDO Gestion, le logo et la documentation appartiennent à l'Éditeur.
+FEDONIX 360 reste la propriété exclusive de l'Éditeur. Le Client n'acquiert qu'un droit d'utilisation personnel, non exclusif et non cessible. Le nom FEDONIX 360, le logo et la documentation appartiennent à l'Éditeur.
 
 
 3. LICENCE, DURÉE ET POSTES
@@ -74,4 +74,4 @@ Le contrat prend effet à l'installation du logiciel et dure tant que la licence
 Ce contrat est soumis au droit camerounais et aux Actes uniformes de l'OHADA. Les parties cherchent d'abord une solution amiable. À défaut, le litige est porté devant les juridictions compétentes du ressort du siège de l'Éditeur.
 
 
-FEDONG, éditeur de FEDO Gestion.
+FEDONG, éditeur de FEDONIX 360.

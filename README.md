@@ -1,4 +1,4 @@
-# FEDO Gestion
+# FEDONIX 360
 
 Logiciel de FEDONG (anciennement « Superette Gestion »).
 
@@ -219,7 +219,7 @@ Sur un PC Windows :
 
 ```bash
 npm install
-npm run build:win        # produit apps/desktop/release/FedoGestion-Setup-<version>.exe
+npm run build:win        # produit apps/desktop/release/Fedonix360-Setup-<version>.exe
 ```
 
 La mise à jour automatique lit les nouvelles versions à l'adresse `publish.url` de `apps/desktop/electron-builder.yml` (à remplacer par celle du serveur central).

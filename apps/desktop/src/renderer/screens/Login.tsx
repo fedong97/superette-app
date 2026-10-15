@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Result, call } from '../api';
-import logo from '../assets/logo.svg';
+import logo from '../assets/logo.png';
 import { Field, useToast } from '../ui';
 
 export function Login({ station, onDone }: { station: Result<'app.state'>['station']; onDone: () => void }) {
@@ -26,9 +26,9 @@ export function Login({ station, onDone }: { station: Result<'app.state'>['stati
       <form className="card login" onSubmit={submit}>
         <div className="brand">
           <img src={logo} alt="" width={40} height={40} />
-          <span>FEDO Gestion</span>
+          <span>FEDONIX 360</span>
         </div>
-        <h1>{station?.store.name ?? 'FEDO Gestion'}</h1>
+        <h1>{station?.store.name ?? 'FEDONIX 360'}</h1>
         <p className="muted">{station?.register?.name ?? 'Poste de gestion'}</p>
         <Field label="Identifiant">
           <input ref={loginRef} value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />

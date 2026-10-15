@@ -24,7 +24,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     show: false,
-    title: 'FEDO Gestion',
+    title: 'FEDONIX 360',
     autoHideMenuBar: true,
     backgroundColor: '#f4f5f7',
     webPreferences: {
@@ -91,7 +91,7 @@ void app.whenReady().then(() => {
       const r = await dialog.showOpenDialog({
         title: 'Choisir la sauvegarde à restaurer',
         defaultPath: services.backups.status().dir ?? undefined,
-        filters: [{ name: 'Sauvegarde FEDO Gestion', extensions: ['db'] }],
+        filters: [{ name: 'Sauvegarde FEDONIX 360', extensions: ['db'] }],
         properties: ['openFile'],
       });
       return r.canceled ? null : (r.filePaths[0] ?? null);

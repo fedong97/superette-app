@@ -109,7 +109,7 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
-    version: '0.43.0',
+    version: '0.48.0',
     items: [
       'Le logiciel s’appelle maintenant FEDONIX 360, avec son nouveau logo en 3D sur l’écran de connexion, l’icône du bureau et l’installateur.',
       'Le serveur central a son propre logo : le même, avec un serveur devant (Administration › Serveur central).',

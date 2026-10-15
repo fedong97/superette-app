@@ -16,6 +16,8 @@ interface Reglages {
   port: number;
   /** Premier démarrage fait : démarrage avec Windows déjà proposé. */
   configure?: boolean;
+  /** Démarrage avec Windows coupé à la main depuis l'icône. */
+  sansDemarrageAuto?: boolean;
 }
 
 // Le serveur s'appelait « FEDO Serveur » : on garde son dossier (%APPDATA%\FEDO Serveur)
@@ -124,6 +126,7 @@ function buildTray(port: number) {
         checked: app.getLoginItemSettings().openAtLogin,
         click: (item) => {
           app.setLoginItemSettings({ openAtLogin: item.checked, args: [HIDDEN_ARG] });
+          writeReglages({ ...readReglages(), sansDemarrageAuto: !item.checked });
           tray?.setContextMenu(menu());
         },
       },
@@ -165,6 +168,10 @@ async function start() {
     writeReglages({ ...reglages, configure: true });
   } else if (!existsSync(reglagesFile())) {
     writeReglages(reglages);
+  } else if (!reglages.sansDemarrageAuto && !app.getLoginItemSettings({ args: [HIDDEN_ARG] }).openAtLogin) {
+    // L'exécutable a changé de nom (« FEDO Serveur.exe » devenu « FEDONIX 360 Serveur.exe ») :
+    // l'ancienne entrée de démarrage pointe vers un fichier supprimé, on la refait.
+    app.setLoginItemSettings({ openAtLogin: true, args: [HIDDEN_ARG] });
   }
   buildTray(reglages.port);
   if (!process.argv.includes(HIDDEN_ARG)) showWindow(reglages.port);

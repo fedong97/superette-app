@@ -228,6 +228,8 @@ npm install
 npm run build:win        # produit apps/desktop/release/Fedonix360-Setup-<version>.exe
 ```
 
+Page du gérant : `/gerant` sur l'adresse du serveur est faite pour le téléphone et s'installe comme une application (manifeste et service worker, « Ajouter à l'écran d'accueil »). Après connexion avec le mot de passe de l'interface (case « Rester connecté » : 30 jours), elle montre pour chaque magasin, à partir du dernier état des fiches reçues des PC : chiffre du jour et de la veille, tickets et panier moyen, paiements par moyen, ventes par heure, meilleures ventes, état de chaque caisse (caissier, ouverture, dernière vente, PC muet), écarts des clôtures, ruptures (stock du magasin à zéro) et stock sous le seuil d'alerte, et les alertes. Elle s'actualise chaque minute ; un autre jour se choisit en haut.
+
 Mise à jour automatique : on dépose `Fedonix360-Setup-<version>.exe` dans l'interface de FEDONIX 360 Serveur, onglet « Mises à jour ». Le serveur écrit lui-même `latest.yml` (version, empreinte SHA-512, taille) et sert les deux fichiers à l'adresse `/mises-a-jour/`. Chaque PC relié y cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge et l'installe à sa fermeture (Administration › Mises à jour : état, « Installer maintenant », adresse internet pour une boutique sans serveur). Le serveur affiche la version de chaque PC.
 
 ## Installer le serveur central

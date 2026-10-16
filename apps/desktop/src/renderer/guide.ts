@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.53.0',
+    items: [
+      'Page du gérant sur le téléphone : ouvrez l’adresse du serveur suivie de /gerant (par exemple http://192.168.1.10:8080/gerant), avec le mot de passe de FEDONIX 360 Serveur.',
+      'Ventes du jour et comparaison avec la veille, paiements, ventes par heure, meilleures ventes, caisses ouvertes ou fermées, écarts de caisse, ruptures et stock bas, pour chaque magasin.',
+      'Alertes : manque à la clôture, caisse ouverte dont le PC ne répond plus, ruptures, PC pas à jour. « Ajouter à l’écran d’accueil » l’installe comme une application.',
+    ],
+  },
+  {
     version: '0.52.0',
     items: [
       'Paie avec retenues légales (Administration › Paramètres › Paie) : CNPS, IRPP, CAC, crédit foncier, redevance audiovisuelle et TDL au barème camerounais, tous modifiables.',

@@ -2,6 +2,7 @@ import { type DynamicModule, Inject, Module, type OnApplicationBootstrap, type O
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { BackupService } from './backup.service';
+import { ManagerService } from './manager.service';
 import { CONFIG, type ServerConfig } from './config';
 import { type Db, PG, openDb } from './database';
 import { SyncController } from './sync.controller';
@@ -27,6 +28,7 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
         AdminService,
         BackupService,
         UpdatesService,
+        ManagerService,
       ],
     };
   }

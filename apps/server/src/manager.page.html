@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f7a4d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gérant">
+<title>FEDONIX 360 Gérant</title>
+<link rel="manifest" href="/gerant/manifest.webmanifest">
+<link rel="icon" href="/gerant/icon.png">
+<link rel="apple-touch-icon" href="/gerant/icon.png">
+<style>
+  :root {
+    --vert: #1f7a4d; --vert-fonce: #155c39; --vert-clair: #e7f4ec;
+    --fond: #f4f5f7; --carte: #fff; --texte: #1d2430; --gris: #667085; --ligne: #e4e7ec;
+    --rouge: #b42318; --rouge-clair: #fef3f2; --orange: #b54708; --orange-clair: #fffaeb;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; background: var(--fond); color: var(--texte); padding-bottom: env(safe-area-inset-bottom); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--vert); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  header .haut { display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; flex: 1; }
+  header button { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.55); padding: 6px 10px; }
+  .jours { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; }
+  .jours button, .magasins button { white-space: nowrap; }
+  .jours button.actif { background: #fff; color: var(--vert-fonce); border-color: #fff; font-weight: 600; }
+  .jours input { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.55); border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 14px; color-scheme: dark; }
+  .magasins { display: flex; gap: 6px; overflow-x: auto; padding: 12px 16px 0; }
+  .magasins button { background: #fff; }
+  .magasins button.actif { background: var(--vert); color: #fff; border-color: var(--vert); }
+  main { max-width: 720px; margin: 0 auto; padding: 12px 16px 40px; }
+  button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--ligne); background: #fff; color: var(--texte); cursor: pointer; }
+  button.principal { background: var(--vert); border-color: var(--vert); color: #fff; border-radius: 8px; width: 100%; padding: 11px; font-size: 16px; }
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .kpi { background: var(--carte); border: 1px solid var(--ligne); border-radius: 12px; padding: 12px 14px; }
+  .kpi.large { grid-column: 1 / -1; }
+  .kpi .t { color: var(--gris); font-size: 13px; }
+  .kpi .v { font-size: 22px; font-weight: 650; margin-top: 2px; }
+  .kpi.large .v { font-size: 30px; }
+  .kpi .d { color: var(--gris); font-size: 13px; }
+  .hausse { color: var(--vert-fonce); }
+  .baisse { color: var(--rouge); }
+  section { background: var(--carte); border: 1px solid var(--ligne); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  section h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  section h2 .n { margin-left: auto; color: var(--gris); font-weight: 500; font-size: 13px; }
+  .liste > div { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--ligne); }
+  .liste > div:first-child { border-top: 0; }
+  .liste .g { flex: 1; min-width: 0; }
+  .liste .g small { display: block; color: var(--gris); font-size: 13px; }
+  .liste .m { white-space: nowrap; font-weight: 600; text-align: right; }
+  .liste .m small { display: block; font-weight: 400; color: var(--gris); font-size: 12px; }
+  .pastille { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .ok { background: var(--vert-clair); color: var(--vert-fonce); }
+  .non { background: #f2f4f7; color: var(--gris); }
+  .alerte { background: var(--orange-clair); color: var(--orange); }
+  .erreur { background: var(--rouge-clair); color: var(--rouge); }
+  .alertes > div { padding: 8px 10px; border-radius: 8px; margin-top: 6px; font-size: 14px; }
+  .alertes > div:first-child { margin-top: 0; }
+  .barre { height: 8px; border-radius: 4px; background: var(--vert); margin-top: 4px; }
+  .heures { display: flex; align-items: flex-end; gap: 2px; height: 90px; margin-top: 6px; }
+  .heures div { flex: 1; background: var(--vert); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
+  .heures-l { display: flex; justify-content: space-between; color: var(--gris); font-size: 11px; margin-top: 2px; }
+  .neg { color: var(--rouge); }
+  .muted { color: var(--gris); }
+  .vide { color: var(--gris); font-size: 14px; }
+  .connexion { max-width: 360px; margin: 60px auto; padding: 0 16px; }
+  .connexion img { width: 72px; height: 72px; border-radius: 16px; display: block; margin: 0 auto 12px; }
+  .connexion h1 { text-align: center; font-size: 20px; margin: 0 0 18px; }
+  .connexion input[type=password] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; border: 1px solid #d0d5dd; border-radius: 8px; margin-bottom: 12px; }
+  .connexion label { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; color: var(--gris); }
+  .message { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
+  .maj { text-align: center; color: var(--gris); font-size: 12px; margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--vert-fonce); font-size: 14px; margin-top: 6px; }
+  #installer { display: none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(() => {
+  const app = document.getElementById('app');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const fcfa = (n) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
+  const qty = (n, unit) => `${(n / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 3 })}${unit === 'kg' ? ' kg' : unit === 'litre' ? ' L' : ''}`;
+  const heure = (iso) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+  const jour = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const auj = () => jour(new Date());
+  const hier = () => { const d = new Date(); d.setDate(d.getDate() - 1); return jour(d); };
+  const KIND = { cash: 'Espèces', electronic: 'Électronique', bank: 'Banque' };
+
+  let day = auj();
+  let store = localStorage.getItem('fedo.gerant.magasin') || '';
+  let data = null;
+  let timer = null;
+  let installPrompt = null;
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/gerant/sw.js', { scope: '/gerant' }).catch(() => {});
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; render(); });
+
+  async function api(url, options) {
+    const res = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...options });
+    if (res.status === 401) { const err = new Error('Connectez-vous'); err.status = 401; throw err; }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || 'Erreur du serveur');
+    return body;
+  }
+
+  function login(message) {
+    clearInterval(timer);
+    app.innerHTML = `<div class="connexion">
+      <img src="/gerant/icon.png" alt="">
+      <h1>FEDONIX 360 Gérant</h1>
+      ${message ? `<div class="message erreur">${esc(message)}</div>` : ''}
+      <form id="f">
+        <input type="password" id="mdp" placeholder="Mot de passe de FEDONIX 360 Serveur" autocomplete="current-password" autofocus>
+        <label><input type="checkbox" id="garder" checked> Rester connecté sur ce téléphone (30 jours)</label>
+        <button class="principal" type="submit">Se connecter</button>
+      </form>
+      <p class="muted" style="font-size:13px;margin-top:16px">Le mot de passe est celui de l'interface de FEDONIX 360 Serveur.</p>
+    </div>`;
+    document.getElementById('f').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api('/admin/api/login', { method: 'POST', body: JSON.stringify({ password: document.getElementById('mdp').value, remember: document.getElementById('garder').checked }) });
+        load();
+      } catch (err) { login(err.message); }
+    };
+  }
+
+  async function load() {
+    try {
+      data = await api(`/admin/api/manager?day=${day}`);
+      render();
+    } catch (err) {
+      if (err.status === 401) return login();
+      if (!data) app.innerHTML = `<main><div class="message erreur">${esc(err.message)}</div><button onclick="location.reload()">Réessayer</button></main>`;
+    }
+    clearInterval(timer);
+    if (day === auj()) timer = setInterval(() => document.visibilityState === 'visible' && load(), 60_000);
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && data && day === auj()) load(); });
+
+  function evolution(now, before) {
+    if (!before) return '';
+    const p = Math.round(((now - before) / before) * 100);
+    return `<span class="${p >= 0 ? 'hausse' : 'baisse'}">${p >= 0 ? '+' : ''}${p} %</span> par rapport à la veille (${fcfa(before)})`;
+  }
+
+  function registerRow(r) {
+    const etat = r.state === 'open' ? `<span class="pastille ok">Ouverte</span>` : r.state === 'closed' ? `<span class="pastille non">Fermée ${heure(r.closedAt)}</span>` : `<span class="pastille non">Pas ouverte</span>`;
+    const silence = r.silent ? ` <span class="pastille alerte">PC muet</span>` : '';
+    const qui = r.cashier ? `${esc(r.cashier)}${r.openedAt ? `, depuis ${heure(r.openedAt)}` : ''}` : '';
+    return `<div><div class="g">${esc(r.name)} ${etat}${silence}<small>${qui || KIND[r.kind] || ''}${r.lastSale ? ` · dernière vente ${heure(r.lastSale)}` : ''}</small></div>
+      <div class="m">${fcfa(r.total)}<small>${r.sales} ticket(s)</small></div></div>`;
+  }
+
+  function storeBlock(s, alerts) {
+    const max = Math.max(1, ...s.byHour);
+    const first = s.byHour.findIndex((v) => v > 0);
+    const last = 23 - [...s.byHour].reverse().findIndex((v) => v > 0);
+    const hours = first < 0 ? [] : s.byHour.slice(Math.min(first, 7), Math.max(last, 20) + 1);
+    const h0 = first < 0 ? 0 : Math.min(first, 7);
+    const maxMethod = Math.max(1, ...s.byMethod.map((m) => m.amount));
+    return `
+      <div class="kpis">
+        <div class="kpi large"><div class="t">Chiffre d'affaires ${data.today ? 'du jour' : 'de la journée'}${s.returns ? ', retours déduits' : ''}</div><div class="v">${fcfa(s.net)}</div><div class="d">${evolution(s.total, s.yesterday)}</div></div>
+        <div class="kpi"><div class="t">Tickets</div><div class="v">${s.sales}</div></div>
+        <div class="kpi"><div class="t">Panier moyen</div><div class="v">${fcfa(s.average)}</div></div>
+        ${s.returns ? `<div class="kpi"><div class="t">Retours</div><div class="v neg">${fcfa(s.returns)}</div></div>` : ''}
+        <div class="kpi"><div class="t">Ruptures</div><div class="v ${s.outOfStockCount ? 'neg' : ''}">${s.outOfStockCount}</div></div>
+      </div>
+      ${alerts.length ? `<section><h2>Alertes</h2><div class="alertes">${alerts.map((a) => `<div class="${a.level}">${esc(a.text)}</div>`).join('')}</div></section>` : ''}
+      <section><h2>Caisses <span class="n">${s.registers.filter((r) => r.state === 'open').length} ouverte(s)</span></h2>
+        <div class="liste">${s.registers.map(registerRow).join('') || '<div class="vide">Aucune caisse.</div>'}</div></section>
+      <section><h2>Écarts de caisse <span class="n">${s.gaps.length}</span></h2>
+        ${s.gaps.length ? `<div class="liste">${s.gaps.map((g) => `<div><div class="g">${esc(g.register)}${g.cashier ? `, ${esc(g.cashier)}` : ''}<small>Clôture ${heure(g.closedAt)} · attendu ${fcfa(g.expected)}, compté ${fcfa(g.counted)}${g.reason ? ` · ${esc(g.reason)}` : ''}</small></div><div class="m ${g.difference < 0 ? 'neg' : ''}">${g.difference > 0 ? '+' : ''}${fcfa(g.difference)}</div></div>`).join('')}</div>` : '<div class="vide">Aucun écart sur les caisses fermées.</div>'}</section>
+      <section><h2>Paiements</h2>
+        ${s.byMethod.length ? `<div class="liste">${s.byMethod.map((m) => `<div><div class="g">${esc(m.label)}<div class="barre" style="width:${Math.max(2, Math.round((m.amount / maxMethod) * 100))}%"></div></div><div class="m">${fcfa(m.amount)}</div></div>`).join('')}</div>` : '<div class="vide">Pas encore de vente.</div>'}</section>
+      ${hours.length ? `<section><h2>Ventes par heure</h2><div class="heures">${hours.map((v, i) => `<div title="${h0 + i} h : ${fcfa(v)}" style="height:${Math.round((v / max) * 100)}%"></div>`).join('')}</div><div class="heures-l"><span>${h0} h</span><span>${h0 + hours.length - 1} h</span></div></section>` : ''}
+      <section><h2>Meilleures ventes</h2>
+        ${s.top.length ? `<div class="liste">${s.top.map((t) => `<div><div class="g">${esc(t.label)}<small>${qty(t.qty)}</small></div><div class="m">${fcfa(t.total)}</div></div>`).join('')}</div>` : '<div class="vide">Pas encore de vente.</div>'}</section>
+      <section><h2>Ruptures de stock <span class="n">${s.outOfStockCount}</span></h2>
+        ${s.outOfStock.length ? `<div class="liste">${s.outOfStock.slice(0, 15).map((a) => `<div><div class="g">${esc(a.name)}</div><div class="m neg">${qty(a.qty, a.unit)}</div></div>`).join('')}</div>${s.outOfStock.length > 15 ? `<details><summary>Voir les ${s.outOfStock.length - 15} autres</summary><div class="liste">${s.outOfStock.slice(15).map((a) => `<div><div class="g">${esc(a.name)}</div><div class="m neg">${qty(a.qty, a.unit)}</div></div>`).join('')}</div></details>` : ''}` : '<div class="vide">Aucun article épuisé.</div>'}</section>
+      <section><h2>Stock bas <span class="n">${s.lowStockCount}</span></h2>
+        ${s.lowStock.length ? `<div class="liste">${s.lowStock.slice(0, 15).map((a) => `<div><div class="g">${esc(a.name)}<small>alerte à ${qty(a.alert, a.unit)}</small></div><div class="m">${qty(a.qty, a.unit)}</div></div>`).join('')}</div>` : '<div class="vide">Aucun article sous son stock d’alerte.</div>'}</section>`;
+  }
+
+  function overview() {
+    return `
+      <div class="kpis"><div class="kpi large"><div class="t">Tous les magasins, ${data.today ? 'aujourd’hui' : 'ce jour-là'}</div><div class="v">${fcfa(data.total)}</div><div class="d">${data.sales} ticket(s)</div></div></div>
+      ${data.alerts.length ? `<section><h2>Alertes <span class="n">${data.alerts.length}</span></h2><div class="alertes">${data.alerts.map((a) => `<div class="${a.level}">${a.store ? `<b>${esc(a.store)}</b> · ` : ''}${esc(a.text)}</div>`).join('')}</div></section>` : ''}
+      <section><h2>Magasins</h2><div class="liste">${data.stores.map((s) => `<div onclick="window.choisir('${esc(s.id)}')" style="cursor:pointer"><div class="g"><b>${esc(s.name)}</b><small>${s.registers.filter((r) => r.state === 'open').length} caisse(s) ouverte(s) · ${s.sales} ticket(s)${s.gaps.length ? ` · <span class="neg">${s.gaps.length} écart(s)</span>` : ''}${s.outOfStockCount ? ` · ${s.outOfStockCount} rupture(s)` : ''}</small></div><div class="m">${fcfa(s.net)}<small>${s.yesterday ? `${s.total >= s.yesterday ? '+' : ''}${Math.round(((s.total - s.yesterday) / s.yesterday) * 100)} % / veille` : ''}</small></div></div>`).join('')}</div></section>`;
+  }
+
+  function render() {
+    if (!data) return;
+    const many = data.stores.length > 1;
+    if (!data.stores.some((s) => s.id === store)) store = many ? '' : (data.stores[0]?.id ?? '');
+    const shown = data.stores.find((s) => s.id === store);
+    const alerts = shown ? data.alerts.filter((a) => a.store === shown.name || a.store === null) : [];
+    app.innerHTML = `
+      <header>
+        <div class="haut"><h1>${shown ? esc(shown.name) : 'FEDONIX 360 Gérant'}</h1>
+          ${installPrompt ? '<button id="installer2">Installer</button>' : ''}
+          <button id="actualiser" title="Actualiser">⟳</button></div>
+        <div class="jours">
+          <button data-jour="${auj()}" class="${day === auj() ? 'actif' : ''}">Aujourd’hui</button>
+          <button data-jour="${hier()}" class="${day === hier() ? 'actif' : ''}">Hier</button>
+          <input type="date" id="date" value="${day}" max="${auj()}">
+        </div>
+      </header>
+      ${many ? `<div class="magasins"><button data-magasin="" class="${store ? '' : 'actif'}">Tous</button>${data.stores.map((s) => `<button data-magasin="${esc(s.id)}" class="${store === s.id ? 'actif' : ''}">${esc(s.name)}</button>`).join('')}</div>` : ''}
+      <main>
+        ${data.stores.length ? (shown ? storeBlock(shown, alerts) : overview()) : '<section class="vide">Aucun magasin n’a encore envoyé ses données à ce serveur.</section>'}
+        <div class="maj">Mis à jour à ${heure(data.generatedAt)}${data.today ? ' · actualisé chaque minute' : ''}</div>
+      </main>`;
+    app.querySelectorAll('[data-jour]').forEach((b) => (b.onclick = () => { day = b.dataset.jour; data = null; app.querySelector('main').style.opacity = '.5'; load(); }));
+    app.querySelectorAll('[data-magasin]').forEach((b) => (b.onclick = () => window.choisir(b.dataset.magasin)));
+    document.getElementById('date').onchange = (e) => { if (e.target.value) { day = e.target.value; load(); } };
+    document.getElementById('actualiser').onclick = load;
+    const inst = document.getElementById('installer2');
+    if (inst) inst.onclick = async () => { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; render(); };
+  }
+
+  window.choisir = (id) => {
+    store = id;
+    try { localStorage.setItem('fedo.gerant.magasin', id); } catch {}
+    render();
+    window.scrollTo(0, 0);
+  };
+
+  load();
+})();
+</script>
+</body>
+</html>

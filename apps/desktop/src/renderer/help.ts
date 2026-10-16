@@ -435,7 +435,14 @@ export const HELP: Record<WinKind, PageHelp> = {
         ],
       },
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
-      { tab: 'server', title: 'Serveur central', steps: ['Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.'] },
+      {
+        tab: 'server',
+        title: 'Serveur central',
+        steps: [
+          'Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.',
+          'Sur votre téléphone : ouvrez l’adresse du serveur suivie de /gerant, connectez-vous avec le mot de passe de FEDONIX 360 Serveur, puis « Ajouter à l’écran d’accueil ». Ventes du jour, caisses, écarts, ruptures et alertes de chaque magasin.',
+        ],
+      },
       {
         tab: 'updates',
         title: 'Mises à jour',

@@ -167,6 +167,13 @@ CREATE TABLE settings (
 CREATE INDEX events_received ON events (received_at);
 `,
   },
+  {
+    version: 4,
+    sql: `
+-- Version de FEDONIX 360 de chaque PC, pour voir qui n'a pas encore pris la mise à jour.
+ALTER TABLE devices ADD COLUMN app_version TEXT;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

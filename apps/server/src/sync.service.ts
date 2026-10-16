@@ -27,9 +27,11 @@ export const GLOBAL_ENTITIES = [
   'recipe',
   // Stock de chaque dépôt, pour l'écran « Stock multi-magasin » de tous les magasins.
   'stock_level',
+  // Points de fidélité : le client les gagne et les dépense dans tous les magasins.
+  'loyalty_move',
 ];
 
-const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year']);
+const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder']);
 
 export interface SyncEvent {
   id: string;
@@ -152,12 +154,12 @@ export class SyncService {
     return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id);
   }
 
-  async authenticate(authorization: string | undefined): Promise<Device> {
+  async authenticate(authorization: string | undefined, appVersion?: string): Promise<Device> {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     if (!token) throw new UnauthorizedException('Jeton manquant');
     const { rows } = await this.pg.query<Device>(
-      'UPDATE devices SET last_seen_at = now() WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id, name, store_id, register_id',
-      [hashToken(token)],
+      'UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id, name, store_id, register_id',
+      [hashToken(token), /^\d+\.\d+\.\d+$/.test(appVersion ?? '') ? appVersion : null],
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');
     return rows[0];

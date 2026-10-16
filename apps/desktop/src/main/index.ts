@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { autoUpdater } from 'electron-updater';
-import { AppError, openServices, restoreDatabase } from '@superette/db';
+import { AppError, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
 import { createDigestMailer } from './digest';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
+import { createUpdater } from './updater';
 
 // Le logiciel s'appelait « Superette Gestion » : on garde son dossier de données
 // (%APPDATA%\Superette Gestion) pour que les magasins retrouvent leur base après la mise à jour.
@@ -73,7 +73,9 @@ void app.whenReady().then(() => {
     }
     rmSync(marker, { force: true });
   }
+  setSyncClientVersion(app.getVersion());
   const sync = createSyncRunner(services);
+  const updater = createUpdater(services);
 
   // Sauvegarde automatique : peu après le démarrage, puis selon la fréquence réglée.
   const autoBackup = () => void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
@@ -101,6 +103,7 @@ void app.whenReady().then(() => {
       if (error) throw new AppError(error);
     },
     digest: { seal: digest.seal, sendNow: digest.sendNow },
+    updater,
     restore: (file, userId) => {
       const safetyFile = services.backups.safetyFile();
       const keep = services.backups.localSettings();
@@ -138,17 +141,12 @@ void app.whenReady().then(() => {
 
   createWindow();
 
-  // Mise à jour automatique au démarrage (installateur packagé uniquement).
-  if (app.isPackaged) {
-    autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.checkForUpdatesAndNotify().catch((e) => console.warn('Vérification de mise à jour impossible', e));
-  }
-
   app.on('before-quit', () => {
     clearTimeout(backupStart);
     clearInterval(backupTimer);
     sync.stop();
     digest.stop();
+    updater.stop();
     services.db.close();
   });
 });

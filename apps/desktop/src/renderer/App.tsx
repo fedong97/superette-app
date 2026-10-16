@@ -26,7 +26,7 @@ import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { AskHost, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, askConfirm, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
@@ -495,6 +495,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const backupLate = useLoad(() => call('backup.overdue'), []);
   const chargesLate = useLoad(() => call('charges.late'), []);
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
+  const update = useLoad(() => call('update.state'), []);
+  useEffect(() => {
+    const t = setInterval(update.reload, 5 * 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const savePref = (key: string, value: unknown) => {
     setPrefs((p) => ({ ...p, [key]: value }));
@@ -984,6 +989,18 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               {licenseLabel(state.license)}
             </span>
           ))}
+        {update.data?.status === 'ready' && (
+          <button
+            className="warn soft"
+            title="La nouvelle version s'installe à la fermeture du logiciel"
+            onClick={async () => {
+              if (!(await askConfirm(`Fermer FEDONIX 360 et installer la version ${update.data!.available} ? Le logiciel se rouvre tout seul après l'installation.`))) return;
+              call('update.install').catch(() => update.reload());
+            }}
+          >
+            Mise à jour {update.data.available} prête
+          </button>
+        )}
         {Boolean(gaps.data?.length) && (
           <button className="warn" onClick={() => open('treasury', 'history', 'Trésorerie › Historique des journées de caisse')} title="Clôtures dont l'écart attend votre motif">
             {gaps.data!.length === 1 ? '1 écart à justifier' : `${gaps.data!.length} écarts à justifier`}

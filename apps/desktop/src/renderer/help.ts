@@ -53,6 +53,7 @@ const POS: PageHelp = {
       title: 'Payer par Mobile Money, carte ou chèque',
       steps: [
         '« Encaisser » (Ctrl+E) ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
+        'Paiement mobile réglé sur ce PC : avec MTN MoMo ou Orange Money, tapez le téléphone du client et « Demander le paiement » ; il confirme sur son téléphone et le paiement s’ajoute avec sa référence.',
         'Un paiement peut être mixte : une partie en espèces, le reste en MTN par exemple.',
         'Chaque paiement va dans la caisse de son type : MTN, Orange et carte à votre caisse électronique, virement et chèque à votre caisse banque.',
       ],
@@ -223,9 +224,26 @@ export const HELP: Record<WinKind, PageHelp> = {
     intro: 'Fiches clients, comptes, règlements et ristournes.',
     sections: [
       { tab: 'list', title: 'Fiche client', steps: ['« Nouveau client » ou cliquez un client : téléphone, NIU, tarif (détail, gros), plafond de crédit et délai de paiement.'] },
+      {
+        tab: 'list',
+        title: 'Carte de fidélité',
+        steps: [
+          'À activer dans Administration › Paramètres › Carte de fidélité (points par achat, valeur d’un point, minimum).',
+          'Onglet « Fidélité » de la fiche : solde, mouvements, « Imprimer sa carte », correction avec motif (gérant).',
+          'À la caisse, scannez la carte ou tapez le téléphone du client ; il paie avec « Points fidélité » dans l’encaissement.',
+        ],
+      },
       { tab: 'statement', title: 'Extrait de compte', steps: ['Ventes à crédit et règlements d’un client sur une période ; imprimez le relevé pour le lui remettre.'] },
       { tab: 'payments', title: 'Règlements', steps: ['Liste des règlements reçus. Pour encaisser : « Encaisser un règlement » sur le compte du client, ou à la caisse par Action.'] },
-      { tab: 'receivables', title: 'Situation (balance âgée)', perm: 'receivables', steps: ['Ce que doit chaque client, par ancienneté du retard.'] },
+      {
+        tab: 'receivables',
+        title: 'Situation (balance âgée)',
+        perm: 'receivables',
+        steps: [
+          'Ce que doit chaque client, par ancienneté du retard, avec la date de sa dernière relance.',
+          '« Relancer » (ou « Relancer les clients en retard ») : le message rempli s’ouvre, modifiable ; « Ouvrir WhatsApp » l’envoie au téléphone du client, « Relevé en PDF » prépare le relevé à joindre. Chaque relance est notée.',
+        ],
+      },
       { tab: 'rebates-state', title: 'Ristournes', perm: 'rebates', steps: ['Réglez les taux par famille, puis chaque mois « Constater » et « Accorder » en avoir ou en bon.', 'Payée : en espèces depuis la caisse centrale, ou par MTN MoMo / Orange Money depuis une caisse électronique (la centrale par défaut), avec la référence du transfert.'] },
     ],
   },
@@ -418,7 +436,32 @@ export const HELP: Record<WinKind, PageHelp> = {
         ],
       },
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
-      { tab: 'server', title: 'Serveur central', steps: ['Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.'] },
+      {
+        tab: 'server',
+        title: 'Serveur central',
+        steps: [
+          'Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.',
+          'Sur votre téléphone : ouvrez l’adresse du serveur suivie de /gerant, connectez-vous avec le mot de passe de FEDONIX 360 Serveur, puis « Ajouter à l’écran d’accueil ». Ventes du jour, caisses, écarts, ruptures et alertes de chaque magasin.',
+        ],
+      },
+      {
+        tab: 'updates',
+        title: 'Mises à jour',
+        steps: [
+          'Le PC cherche une nouvelle version au démarrage puis toutes les 4 heures, sur le serveur central ou à l’adresse saisie ici.',
+          'La version téléchargée s’installe à la fermeture du logiciel, ou tout de suite avec « Installer maintenant ».',
+          'Pour proposer une version aux PC : FEDONIX 360 Serveur › Mises à jour › déposer le fichier Fedonix360-Setup-x.y.z.exe.',
+        ],
+      },
+      {
+        tab: 'mobilepay',
+        title: 'Paiement mobile',
+        steps: [
+          'Choisissez le mode de MTN MoMo et d’Orange Money sur ce PC : Simulation pour essayer sans compte, Test MTN avec la clé d’abonnement de momodeveloper.mtn.com, ou Réel avec les clés du compte marchand.',
+          'Test MTN : enregistrez la clé d’abonnement « Collections », puis « Créer l’accès de test ». Numéro de test 46733123453 (payé) ou 46733123450 (refusé).',
+          'Les clés restent sur ce PC ; réglez chaque PC qui encaisse par Mobile Money. « Dernières demandes » montre chaque demande, son état et son numéro de transaction.',
+        ],
+      },
       {
         tab: 'license',
         title: 'Licence',
@@ -456,7 +499,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         tab: 'list',
         title: 'Ajouter un collaborateur',
         steps: [
-          '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée.',
+          '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée, n° CNPS, et s’il est déclaré (retenues légales sur ses salaires).',
           'Choisissez son compte de rattachement : Personnel (4211, par défaut), CNPS (4311), État (4471), Associés (4621) ou un autre compte de la classe 4.',
           'Deux sous-comptes sont créés à son nom : sous le compte de rattachement pour ses salaires dus (4211001…), et 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
           'Le rattachement ne change plus une fois qu’il a des écritures.',
@@ -469,7 +512,9 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Choisissez le mois : le salaire de base et les avances à retenir sont proposés. Corrigez si besoin, puis « Constater les salaires ».',
           '« Payer… » règle le net au bureau (caisse centrale, MoMo/OM ou banque). À la caisse : Décaisser › Remboursement / Prêt › Salaire.',
-          '« Bulletin » imprime le bulletin de paie simplifié. Les retenues CNPS et IRPP ne sont pas calculées dans cette version.',
+          'Paie activée (Administration › Paramètres › Paie) : la colonne « Retenues légales » montre la CNPS et les impôts retenus (IRPP, CAC, CFC, RAV, TDL) pour chaque collaborateur déclaré ; le net en tient compte.',
+          '« Bulletin » imprime le bulletin de paie : brut, retenues ligne par ligne, avances, net, et charges patronales pour information.',
+          '« Imprimer l’état du mois » donne ce qu’il faut verser à la CNPS (4311) et aux impôts (4471). Le versement se fait par Décaisser › Autre, sur le compte 4311 ou 4471.',
         ],
       },
       { tab: 'statement', title: 'Extrait de compte', steps: ['Salaires constatés et payés, avances versées, remboursées ou retenues, avec les deux soldes après chaque ligne.'] },

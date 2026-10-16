@@ -109,6 +109,55 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.54.0',
+    items: [
+      'Paiement Mobile Money automatique : à l’encaissement, MTN MoMo ou Orange Money › « Demander le paiement » envoie la demande au téléphone du client ; il confirme avec son code et la référence s’ajoute toute seule.',
+      'Administration › Paiement mobile : mode Simulation (sans compte, pour essayer et former), Test MTN (sandbox, avec un compte développeur gratuit) ou Réel (clés du compte marchand MTN ou Orange). Les clés restent sur le PC.',
+      'Historique des demandes avec leur état (payé, refusé avec le motif, abandonné) et le numéro de transaction.',
+    ],
+  },
+  {
+    version: '0.53.0',
+    items: [
+      'Page du gérant sur le téléphone : ouvrez l’adresse du serveur suivie de /gerant (par exemple http://192.168.1.10:8080/gerant), avec le mot de passe de FEDONIX 360 Serveur.',
+      'Ventes du jour et comparaison avec la veille, paiements, ventes par heure, meilleures ventes, caisses ouvertes ou fermées, écarts de caisse, ruptures et stock bas, pour chaque magasin.',
+      'Alertes : manque à la clôture, caisse ouverte dont le PC ne répond plus, ruptures, PC pas à jour. « Ajouter à l’écran d’accueil » l’installe comme une application.',
+    ],
+  },
+  {
+    version: '0.52.0',
+    items: [
+      'Paie avec retenues légales (Administration › Paramètres › Paie) : CNPS, IRPP, CAC, crédit foncier, redevance audiovisuelle et TDL au barème camerounais, tous modifiables.',
+      'Salaires du mois : les retenues se calculent sur le brut des collaborateurs déclarés, avec la part patronale (CNPS, CFC, FNE) ; le bulletin les détaille avec le coût total pour l’employeur.',
+      'Les écritures suivent : retenues vers la CNPS (4311) et l’État (4471), charges patronales en 664 et 641. « Imprimer l’état du mois » donne les montants à verser.',
+    ],
+  },
+  {
+    version: '0.51.0',
+    items: [
+      'Relances par WhatsApp : dans Client › Situation (balance âgée) ou le compte d’un client, « Relancer » ouvre WhatsApp avec un message prêt (solde, retard, factures dues), modifiable avant l’envoi.',
+      '« Relancer les clients en retard » enchaîne tous les clients en retard, un par un ; « Relevé en PDF » prépare le relevé à joindre au message.',
+      'Chaque relance est notée (date, auteur, montant dû) et s’affiche dans la balance âgée. Le message se règle dans Administration › Paramètres › Crédit clients.',
+    ],
+  },
+  {
+    version: '0.50.0',
+    items: [
+      'Carte de fidélité (Administration › Paramètres › Carte de fidélité) : le client enregistré gagne 1 point par tranche d’achat (1 000 FCFA par défaut) et paie avec ses points à l’encaissement (« Points fidélité »).',
+      'À la caisse, scanner la carte du client ou taper son téléphone le choisit tout de suite ; ses points s’affichent à côté de son solde et s’impriment sur le ticket.',
+      'Fiche client › Fidélité : solde, mouvements, impression de la carte à code-barres, correction avec motif (droit « Corriger les points de fidélité »).',
+      'Les points valent dans tous les magasins. Mettez à jour FEDONIX 360 Serveur avant les PC.',
+    ],
+  },
+  {
+    version: '0.49.0',
+    items: [
+      'Mises à jour automatiques : déposez le nouvel installateur dans FEDONIX 360 Serveur (onglet « Mises à jour ») et chaque PC relié le télécharge tout seul, puis l’installe à sa fermeture.',
+      'Administration › Mises à jour : version du PC, état du téléchargement, « Installer maintenant », et une adresse internet pour les boutiques sans serveur.',
+      'La barre du bas annonce « Mise à jour prête » ; FEDONIX 360 Serveur montre la version de chaque PC.',
+    ],
+  },
+  {
     version: '0.48.0',
     items: [
       'Le logiciel s’appelle maintenant FEDONIX 360, avec son nouveau logo en 3D sur l’écran de connexion, l’icône du bureau et l’installateur.',

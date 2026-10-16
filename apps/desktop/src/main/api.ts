@@ -4,6 +4,9 @@ import {
   type BarcodeLabelOptions,
   type LabelFormatId,
   barcodeLabelsHtml,
+  loyaltyCardHtml,
+  reminderMessage,
+  whatsappLink,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -75,9 +78,13 @@ import {
   type User,
   type DeliveryInput,
   type DeliveryStatus,
+  type MobileMethod,
+  type MtnConfig,
+  type OrangeConfig,
 } from '@superette/db';
 
 import type { SyncRunner } from './sync';
+import type { Updater } from './updater';
 
 /** Actions du poste qui passent par Windows (fenêtres de choix, redémarrage). */
 export interface SystemHooks {
@@ -88,6 +95,8 @@ export interface SystemHooks {
   restore(file: string, userId: string): void;
   /** Résumé du soir par e-mail : chiffre le mot de passe pour ce PC, envoie le résumé du jour. */
   digest?: { seal(password: string): string; sendNow(): Promise<string> };
+  /** Mise à jour automatique du logiciel (absente dans les tests). */
+  updater?: Updater;
 }
 
 export interface InvoicePrintOptions {
@@ -122,7 +131,8 @@ export interface Printer {
   invoice(saleId: string, opts?: InvoicePrintOptions): Promise<boolean>;
   /** Page HTML de la facture selon le modèle, pour l'aperçu. */
   previewInvoice(saleId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
-  statement(storeId: string, customerId: string, from?: string | null, to?: string | null): Promise<void>;
+  /** Relevé de compte A4, imprimé ou enregistré en PDF (false : enregistrement annulé). */
+  statement(storeId: string, customerId: string, from?: string | null, to?: string | null, output?: 'print' | 'pdf'): Promise<boolean>;
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
@@ -139,6 +149,7 @@ export interface Printer {
   /** Décharge A4 à faire signer par le bénéficiaire d'une sortie. */
   discharge(sessionId: string, source: string, id: string): Promise<void>;
   salarySlip(salaryId: string): Promise<void>;
+  payrollDeclarations(storeId: string, period: string): Promise<void>;
   staffStatement(staffId: string, from?: string | null, to?: string | null): Promise<void>;
   /** Bon d'une avance, d'un salaire ou d'un remboursement fait au bureau. */
   officeVoucher(entryId: string): Promise<void>;
@@ -151,6 +162,8 @@ export interface Printer {
   labels(html: string, format: LabelFormatId): Promise<boolean>;
   /** Étiquettes produit : directement sur l'imprimante d'étiquettes du poste pour un rouleau, sinon fenêtre d'impression. */
   barcodeLabels(html: string, format: BarcodeLabelFormatId): Promise<boolean>;
+  /** Page A4 (cartes de fidélité…) : la fenêtre d'impression Windows s'ouvre. */
+  a4(body: string): Promise<void>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
   /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
   inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
@@ -479,6 +492,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Serveur central ----------------------------------------------------
+    'update.state': () => (requireUser(), system.updater?.state() ?? null),
+    'update.check': () => (requireAdmin(), system.updater ? system.updater.check() : null),
+    'update.setUrl': (url: string) => {
+      requireAdmin();
+      if (!system.updater) throw new AppError("La mise à jour automatique n'est pas disponible sur ce poste", 'INVALID');
+      try {
+        return system.updater.setUrl(url);
+      } catch (e) {
+        throw new AppError(e instanceof Error ? e.message : String(e), 'INVALID');
+      }
+    },
+    'update.install': () => {
+      requireUser();
+      if (!system.updater) throw new AppError("La mise à jour automatique n'est pas disponible sur ce poste", 'INVALID');
+      try {
+        system.updater.install();
+      } catch (e) {
+        throw new AppError(e instanceof Error ? e.message : String(e), 'INVALID');
+      }
+    },
     'sync.state': () => (requireUser(), s.sync.state()),
     'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
@@ -1166,6 +1199,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa }[]) => s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
     'staff.cancelSalary': (id: string, reason: string) => s.staff.cancelSalary(ctx(['staff_salaries']), id, reason),
     'staff.salaries': (opts?: { period?: string | null; staffId?: string | null; unpaid?: boolean }) => s.staff.salaries(ctx(STAFF).storeId, opts ?? {}),
+    'staff.declarations': (period: string) => s.staff.declarations(ctx(['staff_salaries']).storeId, period),
+    'staff.printDeclarations': (period: string) => printer.payrollDeclarations(ctx(['staff_salaries']).storeId, period),
     'staff.printSlip': (salaryId: string) => (requireUser(STAFF), printer.salarySlip(salaryId)),
     'staff.entries': (staffId?: string | null) => s.cashdesk.officeEntries(ctx(STAFF).storeId, { staffId: staffId ?? null }),
     /** Au bureau : salaire, avance ou remboursement en espèces (caisse centrale), MoMo/OM ou banque. */
@@ -1276,6 +1311,28 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.customers.saveCustomer(u.id, { ...input, creditLimit: input.creditLimit ?? credit, paymentTermsDays: input.paymentTermsDays ?? terms }, id);
     },
     'customers.account': (id: string) => s.customers.account(ctx().storeId, id),
+    'mobilepay.methods': () => (requireUser(), s.mobilePay.enabled()),
+    'mobilepay.config': () => (requireUser(['settings_edit']), s.mobilePay.config()),
+    'mobilepay.saveConfig': (method: MobileMethod, patch: Partial<MtnConfig> | Partial<OrangeConfig>) => s.mobilePay.saveConfig(requireUser(['settings_edit']).id, method, patch),
+    'mobilepay.setupSandbox': () => s.mobilePay.setupMtnSandbox(requireUser(['settings_edit']).id),
+    'mobilepay.request': (input: { method: MobileMethod; phone: string; amount: Fcfa; label?: string | null }) => s.mobilePay.request(ctx(), input),
+    'mobilepay.status': (id: string) => (requireUser(), s.mobilePay.status(id)),
+    'mobilepay.cancel': (id: string) => s.mobilePay.cancel(ctx(), id),
+    'mobilepay.list': () => s.mobilePay.list(ctx(['settings_edit']).storeId),
+    'loyalty.status': (customerId: string) => (requireUser(), s.loyalty.status(ctx().storeId, customerId)),
+    'loyalty.history': (customerId: string) => (requireUser(['customers']), s.loyalty.history(customerId)),
+    'loyalty.balances': () => (requireUser(['customers']), Object.fromEntries(s.loyalty.balances())),
+    'loyalty.adjust': (customerId: string, points: number, reason: string) => {
+      const u = requireUser(['loyalty_adjust']);
+      return s.loyalty.adjust({ storeId: ctx().storeId, userId: u.id }, customerId, points, reason);
+    },
+    'loyalty.printCard': (customerId: string, copies?: number) => {
+      const storeId = ctx(['customers']).storeId;
+      const c = s.customers.getCustomer(customerId);
+      return printer.a4(loyaltyCardHtml({ store: s.admin.getStore(storeId).name, customer: c.name, code: c.code, phone: c.phone, logo: settings().logo || null }, copies));
+    },
+    /** Carte scannée à la caisse : code du client ou numéro de téléphone. */
+    'loyalty.findCustomer': (code: string) => (requireUser(), s.customers.findByCard(code)),
     'customers.statement': (id: string, from?: string | null, to?: string | null) =>
       s.customers.statement(ctx(['customer_statement', 'receivables']).storeId, id, { from: from ?? undefined, to: to ?? undefined }),
     'customers.sales': (id: string) => s.pos.listSales({ storeId: ctx().storeId, customerId: id, limit: 100 }),
@@ -1290,6 +1347,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx(['customer_statement', 'receivables']).storeId, id, from, to),
+    /** Relance d'un client en retard : message WhatsApp prêt à envoyer, montants et dernière relance. */
+    'customers.reminder': (id: string) => {
+      const storeId = ctx(['customer_statement', 'receivables']).storeId;
+      const store = s.admin.getStore(storeId);
+      const d = s.customers.reminderData(storeId, id);
+      const text = reminderMessage(settings().reminderTemplate, {
+        customer: d.customer.name,
+        store: store.name,
+        storePhone: store.phone,
+        balance: d.balance,
+        overdue: d.overdue,
+        items: d.items.map((i) => ({ number: i.number, date: i.created_at, dueDate: i.due_date, remaining: i.remaining, daysLate: i.days_late })),
+      });
+      return { ...d, text, link: whatsappLink(d.customer.phone, text) };
+    },
+    'customers.reminderSent': (id: string, channel: 'whatsapp' | 'pdf') => s.customers.recordReminder(ctx(['customer_statement', 'receivables']), id, channel),
+    /** Relevé en PDF à joindre dans WhatsApp : la relance est notée s'il est enregistré. */
+    'customers.reminderPdf': async (id: string) => {
+      const c = ctx(['customer_statement', 'receivables']);
+      const saved = await printer.statement(c.storeId, id, null, null, 'pdf');
+      if (saved) s.customers.recordReminder(c, id, 'pdf');
+      return saved;
+    },
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
 
     // --- Ristournes des clients spécifiques ------------------------------------

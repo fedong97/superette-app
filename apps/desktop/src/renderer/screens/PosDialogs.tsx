@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { DENOMINATIONS_FCFA, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, paymentRegisterKind, requiresReference, roundCash, settle } from '@superette/core';
+import { useEffect, useState } from 'react';
+import { DENOMINATIONS_FCFA, type LoyaltyRules, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, maxRedeemable, paymentRegisterKind, pointsForAmount, requiresReference, roundCash, settle } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, SupervisorPrompt, dateTime, fcfa, parseAmount, qty, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, SupervisorPrompt, dateTime, fcfa, parseAmount, qty, useLoad, useStoreSettings, useToast } from '../ui';
 import { hasVat, tx } from '../tax';
 
 const METHODS: PaymentMethod[] = ['CASH', 'MTN_MOMO', 'ORANGE_MONEY', 'CARD', 'VOUCHER'];
@@ -27,6 +27,8 @@ export function PaymentDialog({
   needsSupervisor,
   cashRounding = 1,
   allowCredit = false,
+  loyalty = null,
+  payerPhone = null,
   onClose,
   onPaid,
 }: {
@@ -36,6 +38,10 @@ export function PaymentDialog({
   cashRounding?: number;
   /** Un client est choisi : le reste peut aller à son compte. */
   allowCredit?: boolean;
+  /** Carte de fidélité du client choisi : il peut payer avec ses points. */
+  loyalty?: { balance: number; rules: LoyaltyRules } | null;
+  /** Téléphone du client choisi, proposé pour la demande de paiement mobile. */
+  payerPhone?: string | null;
   onClose: () => void;
   onPaid: (payments: Payment[], supervisorPin?: string) => Promise<void>;
 }) {
@@ -47,15 +53,41 @@ export function PaymentDialog({
   const [busy, setBusy] = useState(false);
   const [askPin, setAskPin] = useState(false);
   const { methods, target } = useMethods();
+  const auto = useLoad(() => call('mobilepay.methods'), []);
+  const autoMethod = method === 'MTN_MOMO' || method === 'ORANGE_MONEY' ? (auto.data ?? []).includes(method) : false;
   // Tant que tout est payé en espèces, le total descend à l'arrondi réglé.
   const allCash = payments.every((p) => p.method === 'CASH') && (payments.length > 0 || method === 'CASH');
   const due = allCash ? roundCash(total, cashRounding) : total;
   const state = settle(due, payments);
+  // Points pas encore utilisés sur ce ticket, et montant payable avec.
+  const pointsLeft = loyalty ? loyalty.balance - payments.filter((p) => p.method === 'LOYALTY').reduce((t, p) => t + p.amount / loyalty.rules.pointValue, 0) : 0;
+  const usedPoints = loyalty ? loyalty.balance - pointsLeft : 0;
+  const redeemable = loyalty ? (usedPoints > 0 ? Math.min(pointsLeft * loyalty.rules.pointValue, Math.floor(state.remaining / loyalty.rules.pointValue) * loyalty.rules.pointValue) : maxRedeemable(loyalty.balance, state.remaining, loyalty.rules)) : 0;
   const suggestions = [...new Set([state.remaining, ...[1000, 2000, 5000, 10000].map((n) => Math.ceil(state.remaining / n) * n)])].filter((v) => v > 0).slice(0, 5);
 
+  /** Vérifie un paiement avant de l'ajouter, ou avant d'envoyer la demande au téléphone du client. */
+  const check = (v: number | null, ref: string): Payment[] | null => {
+    if (!v) return (toast.error('Montant invalide'), null);
+    const next = [...payments, { method, amount: v, reference: ref.trim() || undefined }];
+    try {
+      settle(next.every((p) => p.method === 'CASH') ? roundCash(total, cashRounding) : total, next);
+    } catch (e) {
+      return (toast.error(e), null);
+    }
+    return next;
+  };
+
   const add = (value?: number) => {
-    const v = value ?? parseAmount(amount || String(state.remaining));
+    const v = value ?? parseAmount(amount || String(method === 'LOYALTY' ? redeemable : state.remaining));
     if (!v) return toast.error('Montant invalide');
+    if (method === 'LOYALTY' && loyalty) {
+      try {
+        if (pointsForAmount(v, loyalty.rules) > pointsLeft) return toast.error(`Points insuffisants : ${pointsLeft} disponibles`);
+      } catch (e) {
+        return toast.error(e);
+      }
+      if (loyalty.balance < loyalty.rules.minRedeem) return toast.error(`Il faut au moins ${loyalty.rules.minRedeem} points pour payer avec`);
+    }
     if (requiresReference(method) && !reference.trim()) return toast.error(`Saisissez la référence de la transaction ${PAYMENT_METHODS[method]}`);
     const next = [...payments, { method, amount: v, reference: reference.trim() || undefined }];
     try {
@@ -91,7 +123,22 @@ export function PaymentDialog({
                 {PAYMENT_METHODS[m]}
               </button>
             ))}
+            {loyalty && (
+              <button
+                className={method === 'LOYALTY' ? 'active' : ''}
+                disabled={redeemable <= 0}
+                title={redeemable <= 0 ? `Il faut au moins ${loyalty.rules.minRedeem} points (solde : ${pointsLeft})` : `Jusqu'à ${fcfa(redeemable)}`}
+                onClick={() => setMethod('LOYALTY')}
+              >
+                Points fidélité ({pointsLeft} pts)
+              </button>
+            )}
           </div>
+          {method === 'LOYALTY' && loyalty && (
+            <p className="muted method-target">
+              {pointsLeft} points, soit {fcfa(pointsLeft * loyalty.rules.pointValue)} ; payable sur ce ticket : {fcfa(redeemable)}
+            </p>
+          )}
           {target(method) && <p className="muted method-target">Encaissé sur {target(method)}</p>}
           {!state.complete && (
             <form
@@ -101,8 +148,27 @@ export function PaymentDialog({
               }}
             >
               <Field label={`Montant ${PAYMENT_METHODS[method]}`}>
-                <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={String(state.remaining)} />
+                <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={String(method === 'LOYALTY' ? redeemable : state.remaining)} />
               </Field>
+              {autoMethod && (
+                <MobilePayRequest
+                  method={method as 'MTN_MOMO' | 'ORANGE_MONEY'}
+                  amount={() => {
+                    const v = parseAmount(amount || String(state.remaining));
+                    return check(v, 'auto') ? v : null;
+                  }}
+                  phone={payerPhone}
+                  onPaid={(v, ref) => {
+                    const next = check(v, ref);
+                    if (!next) return;
+                    setPayments(next);
+                    setAmount('');
+                    setReference('');
+                    setMethod('CASH');
+                    toast.ok(`${PAYMENT_METHODS[method]} : ${fcfa(v)} reçus`);
+                  }}
+                />
+              )}
               {requiresReference(method) && (
                 <Field
                   label={method === 'CHEQUE' ? 'Numéro du chèque' : 'Référence de la transaction'}
@@ -171,6 +237,90 @@ export function PaymentDialog({
         />
       )}
     </Modal>
+  );
+}
+
+/**
+ * Demande de paiement envoyée au téléphone du client (MTN MoMo, Orange Money) :
+ * le client confirme avec son code, la caisse ajoute le paiement avec le
+ * numéro de transaction, sans saisie.
+ */
+function MobilePayRequest({ method, amount, phone, onPaid }: { method: 'MTN_MOMO' | 'ORANGE_MONEY'; amount: () => number | null; phone: string | null; onPaid: (amount: number, reference: string) => void }) {
+  const toast = useToast();
+  const [number, setNumber] = useState(phone ?? '');
+  const [request, setRequest] = useState<Result<'mobilepay.request'> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!request || request.status !== 'pending') return;
+    let stop = false;
+    const timer = setInterval(async () => {
+      try {
+        const r = await call('mobilepay.status', request.id);
+        if (stop) return;
+        if (r.status === 'success') {
+          setRequest(null);
+          onPaid(r.amount, r.transaction_id ?? r.id);
+        } else if (r.status !== 'pending') {
+          setRequest(null);
+          setError(r.reason ?? 'Paiement refusé');
+        }
+      } catch {
+        // Réseau coupé un instant : on réessaie au tour suivant.
+      }
+    }, 3000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [request?.id]);
+
+  if (request) {
+    return (
+      <div className="mobile-pay pending">
+        <div>
+          <b>En attente du client</b> : demande de {fcfa(request.amount)} envoyée au {request.phone}. Le client confirme avec son code secret {method === 'MTN_MOMO' ? 'MTN MoMo' : 'Orange Money'}.
+          {request.mode === 'simulation' && <small className="muted"> (simulation : confirmé dans quelques secondes)</small>}
+        </div>
+        <button
+          type="button"
+          className="ghost"
+          onClick={async () => {
+            await call('mobilepay.cancel', request.id).catch(toast.error);
+            setRequest(null);
+          }}
+        >
+          Abandonner
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mobile-pay">
+      <Field label="Téléphone du client" hint="Le client reçoit la demande de paiement et confirme avec son code ; la référence s'ajoute toute seule.">
+        <div className="inline">
+          <input inputMode="tel" value={number} onChange={(e) => setNumber(e.target.value)} placeholder="6XX XX XX XX" />
+          <button
+            type="button"
+            className="primary"
+            disabled={!number.trim()}
+            onClick={async () => {
+              const v = amount();
+              if (!v) return;
+              setError(null);
+              try {
+                setRequest(await call('mobilepay.request', { method, phone: number, amount: v, label: 'Achat en magasin' }));
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+              }
+            }}
+          >
+            Demander le paiement
+          </button>
+        </div>
+      </Field>
+      {error && <p className="neg">{error}</p>}
+      <p className="muted">Ou saisissez ci-dessous la référence reçue par SMS si le client a payé autrement.</p>
+    </div>
   );
 }
 
@@ -269,6 +419,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
   const { methods } = useMethods();
   const [reason, setReason] = useState('');
   const [askPin, setAskPin] = useState(false);
+  const loyaltyOn = useStoreSettings().loyaltyEnabled;
   const selected = sale ? sale.lines.filter((l) => (qtys[l.id] ?? 0) > 0) : [];
   const amount = selected.reduce((s, l) => s + Math.round((l.total_ttc * qtys[l.id]!) / l.qty), 0);
   return (
@@ -332,7 +483,7 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
           <div className="grid2">
             <Field label="Remboursement">
               <select value={refund} onChange={(e) => setRefund(e.target.value as PaymentMethod)}>
-                {[...methods, ...(sale.customer_id ? (['CUSTOMER_CREDIT'] as PaymentMethod[]) : [])].map((m) => (
+                {[...methods, ...(sale.customer_id ? (['CUSTOMER_CREDIT', ...(loyaltyOn ? ['LOYALTY'] : [])] as PaymentMethod[]) : [])].map((m) => (
                   <option key={m} value={m}>
                     {PAYMENT_METHODS[m]}
                   </option>

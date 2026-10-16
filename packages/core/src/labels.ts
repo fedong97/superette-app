@@ -285,3 +285,20 @@ body { font-family: Arial, Helvetica, sans-serif; color: #000; }
     .map((p) => `<div class="page">${p.map(label).join('')}</div>`)
     .join('')}</body></html>`;
 }
+
+/**
+ * Carte de fidélité au format carte bancaire (85,6 × 54 mm), à découper :
+ * magasin, nom du client et code-barres de son code (scanné à la caisse).
+ */
+export function loyaltyCardHtml(card: { store: string; customer: string; code: string; phone?: string | null; logo?: string | null }, copies = 1): string {
+  const one =
+    `<div class="fid">` +
+    `<div class="fid-head">${card.logo ? `<img src="${esc(card.logo)}" alt="">` : ''}<div><div class="fid-store">${esc(card.store)}</div><div class="fid-title">Carte de fidélité</div></div></div>` +
+    `<div class="fid-name">${esc(card.customer)}</div>${card.phone ? `<div class="fid-phone">${esc(card.phone)}</div>` : ''}` +
+    `<div class="fid-code">${barcodeWithDigitsSvg(card.code, 70, 14)}</div></div>`;
+  const style =
+    '<style>.fid-grid{display:flex;flex-wrap:wrap;gap:6mm}.fid{box-sizing:border-box;width:85.6mm;height:54mm;border:0.3mm dashed #999;border-radius:3mm;padding:3mm 4mm;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;page-break-inside:avoid}' +
+    '.fid-head{display:flex;gap:2.5mm;align-items:center}.fid-head img{max-height:10mm;max-width:18mm}.fid-store{font-weight:bold;font-size:3.6mm}.fid-title{font-size:2.8mm;color:#1f7a3a;font-weight:bold;text-transform:uppercase;letter-spacing:0.3mm}' +
+    '.fid-name{margin-top:2.5mm;font-size:4mm;font-weight:bold}.fid-phone{font-size:2.8mm;color:#555}.fid-code{margin-top:auto;text-align:center}</style>';
+  return `${style}<div class="fid-grid">${Array.from({ length: Math.max(1, Math.min(10, copies)) }, () => one).join('')}</div>`;
+}

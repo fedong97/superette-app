@@ -8,6 +8,8 @@ import { ENTITY_GROUPS, ENTITY_LABELS, summarize } from './labels';
 import { SyncService } from './sync.service';
 
 const SESSION_MS = 12 * 3_600_000;
+/** « Rester connecté » sur le téléphone du gérant : 30 jours. */
+export const LONG_SESSION_MS = 30 * 24 * 3_600_000;
 /** Un poste qui s'est synchronisé dans la dernière minute est « en ligne » (il le fait toutes les 20 secondes). */
 const ONLINE_MS = 60_000;
 
@@ -56,9 +58,9 @@ export class AdminService {
     return (await this.passwordHash()) !== null;
   }
 
-  private newSession(): string {
+  private newSession(ms = SESSION_MS): string {
     const token = randomBytes(24).toString('base64url');
-    this.sessions.set(token, Date.now() + SESSION_MS);
+    this.sessions.set(token, Date.now() + ms);
     return token;
   }
 
@@ -83,13 +85,13 @@ export class AdminService {
     return this.newSession();
   }
 
-  async login(password: string): Promise<string> {
+  async login(password: string, remember = false): Promise<string> {
     const stored = await this.passwordHash();
     if (!stored) throw new UnauthorizedException("Aucun mot de passe n'est encore choisi : ouvrez FEDONIX 360 Serveur sur le PC du serveur.");
     const [salt] = stored.split(':');
     const given = Buffer.from(hashPassword(String(password ?? ''), salt));
     if (given.length !== stored.length || !timingSafeEqual(given, Buffer.from(stored))) throw new UnauthorizedException('Mot de passe incorrect');
-    return this.newSession();
+    return this.newSession(remember ? LONG_SESSION_MS : SESSION_MS);
   }
 
   /**
@@ -156,7 +158,8 @@ export class AdminService {
       created_at: Date;
       last_seen_at: Date | null;
       revoked_at: Date | null;
-    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
+      app_version: string | null;
+    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
     const { rows: counts } = await this.pg.query<{ total: number; today: number; first: Date | null }>(
       'SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE received_at >= $1)::int AS today, MIN(received_at) AS first FROM events',
       [startOfDay()],
@@ -201,6 +204,7 @@ export class AdminService {
         lastSeenAt: d.last_seen_at,
         online: !d.revoked_at && d.last_seen_at !== null && now - new Date(d.last_seen_at).getTime() < ONLINE_MS,
         revoked: d.revoked_at !== null,
+        appVersion: d.app_version,
       })),
       stores: [...stores.values()],
       backups: {

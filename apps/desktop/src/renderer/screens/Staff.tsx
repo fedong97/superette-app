@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { computePayroll } from '@superette/core';
 import { type Result, call } from '../api';
-import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useToast } from '../ui';
+import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useStoreSettings, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
@@ -181,8 +182,11 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
     hiredOn: staff?.hired_on ?? '',
     userId: staff?.user_id ?? '',
     active: staff ? staff.active === 1 : true,
+    declared: staff ? staff.declared === 1 : true,
+    cnpsNumber: staff?.cnps_number ?? '',
     notes: staff?.notes ?? '',
   });
+  const payroll = useStoreSettings().payroll;
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   return (
     <Modal title={staff ? `Collaborateur ${staff.code}` : 'Nouveau collaborateur'} onClose={onClose}>
@@ -202,6 +206,8 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
                 userId: f.userId || null,
                 parentAccount: f.parentAccount,
                 active: f.active,
+                declared: f.declared,
+                cnpsNumber: f.cnpsNumber || null,
                 notes: f.notes || null,
               },
               staff?.id ?? null,
@@ -244,6 +250,14 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
           </Field>
           <Field label="Notes">
             <input value={f.notes} onChange={set('notes')} />
+          </Field>
+          <Field label="N° d'immatriculation CNPS">
+            <input value={f.cnpsNumber} onChange={set('cnpsNumber')} />
+          </Field>
+          <Field label="Retenues légales" hint={payroll.enabled ? 'CNPS, IRPP, CAC, CFC, RAV et TDL retenus sur ses salaires' : 'La paie avec retenues s’active dans Administration › Paramètres'}>
+            <label className="check">
+              <input type="checkbox" checked={f.declared} onChange={(e) => setF({ ...f, declared: e.target.checked })} /> Déclaré à la CNPS et aux impôts
+            </label>
           </Field>
           <Field label="Compte de rattachement" hint="Son sous-compte est créé sous ce compte : salaires constatés, paiements et extrait passent par lui">
             <select value={f.parentAccount} onChange={set('parentAccount')}>
@@ -375,9 +389,26 @@ function Salaries() {
   const month = useLoad(() => call('staff.month', period), [period]);
   const [lines, setLines] = useState<Record<string, { gross: string; deducted: string }>>({});
   const [paying, setPaying] = useState<MonthRow | null>(null);
+  const rules = useStoreSettings().payroll;
+  const decl = useLoad(() => call('staff.declarations', period), [period, month.data]);
   const rows = month.data ?? [];
+  /** Retenues légales prévues pour un brut saisi, comme les calculera l'enregistrement. */
+  const legalFor = (r: MonthRow, gross: number) => {
+    if (!rules.enabled || !r.staff.declared) return 0;
+    const p = computePayroll(gross, rules);
+    return p.employeeCnps + p.employeeTax;
+  };
   useEffect(() => {
-    setLines(Object.fromEntries(rows.filter((r) => !r.salary).map((r) => [r.staff.id, { gross: String(r.staff.base_salary || ''), deducted: String(Math.min(Math.max(0, r.staff.advances), r.staff.base_salary) || '') }])));
+    setLines(
+      Object.fromEntries(
+        rows
+          .filter((r) => !r.salary)
+          .map((r) => [
+            r.staff.id,
+            { gross: String(r.staff.base_salary || ''), deducted: String(Math.min(Math.max(0, r.staff.advances), r.staff.base_salary - legalFor(r, r.staff.base_salary)) || '') },
+          ]),
+      ),
+    );
   }, [month.data]);
   const todo = rows.filter((r) => !r.salary);
   const amount = (v?: string) => parseAmount(v ?? '') ?? 0;
@@ -410,9 +441,31 @@ function Salaries() {
         )}
       </div>
       <p className="muted">
-        Constater un salaire le passe en charge (661) et au sous-compte du collaborateur. Les avances retenues soldent son compte d’avances. Le net se paie ici (bureau) ou à la caisse avec « Décaisser ». Retenues CNPS et IRPP : pas dans cette
-        version, saisissez le salaire net.
+        Constater un salaire le passe en charge (661) et au sous-compte du collaborateur. Les avances retenues soldent son compte d’avances. Le net se paie ici (bureau) ou à la caisse avec « Décaisser ».{' '}
+        {rules.enabled
+          ? 'Les retenues CNPS, IRPP, CAC, CFC, RAV et TDL sont calculées sur le brut des collaborateurs déclarés, avec la part patronale.'
+          : 'Retenues légales non activées : saisissez le salaire net, ou activez la paie dans Administration › Paramètres.'}
       </p>
+      {decl.data && decl.data.rows.length > 0 && (
+        <div className="staff-cards">
+          <div>
+            <small>Masse salariale brute (déclarés)</small>
+            <b>{fcfa(decl.data.gross)}</b>
+          </div>
+          <div>
+            <small>À verser à la CNPS (4311)</small>
+            <b>{fcfa(decl.data.cnps)}</b>
+          </div>
+          <div>
+            <small>À verser aux impôts (4471)</small>
+            <b>{fcfa(decl.data.state)}</b>
+          </div>
+          <div>
+            <small>Se paie par Décaisser, compte 4311 ou 4471</small>
+            <button onClick={() => call('staff.printDeclarations', period).catch(toast.error)}>Imprimer l’état du mois</button>
+          </div>
+        </div>
+      )}
       {rows.length ? (
         <table className="list">
           <thead>
@@ -421,6 +474,7 @@ function Salaries() {
               <th className="r">Salaire de base</th>
               <th className="r">Avances à rembourser</th>
               <th className="r">Brut du mois</th>
+              <th className="r">Retenues légales</th>
               <th className="r">Avances retenues</th>
               <th className="r">Net à payer</th>
               <th className="r">Payé</th>
@@ -448,6 +502,7 @@ function Salaries() {
                       <input className="r narrow" inputMode="numeric" value={l?.gross ?? ''} onChange={(e) => setLines({ ...lines, [r.staff.id]: { ...l!, gross: e.target.value } })} />
                     )}
                   </td>
+                  <td className="r">{x ? (x.cnps + x.tax ? fcfa(x.cnps + x.tax) : '') : legalFor(r, amount(l?.gross)) ? fcfa(legalFor(r, amount(l?.gross))) : ''}</td>
                   <td className="r">
                     {x ? (
                       x.deducted ? fcfa(x.deducted) : ''
@@ -462,7 +517,7 @@ function Salaries() {
                     )}
                   </td>
                   <td className="r">
-                    <b>{fcfa(x ? x.net : amount(l?.gross) - amount(l?.deducted))}</b>
+                    <b>{fcfa(x ? x.net : amount(l?.gross) - legalFor(r, amount(l?.gross)) - amount(l?.deducted))}</b>
                   </td>
                   <td className="r">{x ? fcfa(x.paid) : ''}</td>
                   <td className={`r ${x && x.rest > 0 ? 'neg' : ''}`}>{x ? fcfa(x.rest) : <span className="muted">à constater</span>}</td>

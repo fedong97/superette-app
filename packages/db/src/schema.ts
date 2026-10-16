@@ -1491,4 +1491,84 @@ ALTER TABLE sales ADD COLUMN replaces_id TEXT REFERENCES sales(id);
 ALTER TABLE sales ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 35,
+    name: 'carte de fidélité',
+    sql: `
+-- Points de fidélité : chaque mouvement est gardé (gagnés, dépensés, annulés, corrigés) ;
+-- le solde d'un client est leur somme. Communs à tous les magasins, comme les clients.
+CREATE TABLE loyalty_moves (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  store_id TEXT NOT NULL,
+  sale_id TEXT,
+  kind TEXT NOT NULL CHECK (kind IN ('earn', 'redeem', 'cancel', 'return', 'adjust')),
+  points INTEGER NOT NULL,
+  reason TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX loyalty_moves_customer ON loyalty_moves(customer_id, created_at);
+CREATE INDEX loyalty_moves_sale ON loyalty_moves(sale_id);
+`,
+  },
+  {
+    version: 36,
+    name: 'relances des clients',
+    sql: `
+-- Relances envoyées aux clients en retard (WhatsApp) : date, auteur et montants du moment.
+CREATE TABLE customer_reminders (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  store_id TEXT NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'pdf')),
+  balance INTEGER NOT NULL,
+  overdue INTEGER NOT NULL,
+  user_id TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX customer_reminders_customer ON customer_reminders(store_id, customer_id, at);
+`,
+  },
+  {
+    version: 37,
+    name: 'retenues légales sur salaire',
+    sql: `
+-- Retenues légales du salaire (CNPS salariale ; IRPP, CAC, CFC, RAV, TDL) et charges patronales
+-- (CNPS patronale ; CFC patronal et FNE), avec le détail ligne par ligne en JSON pour le bulletin.
+ALTER TABLE staff_salaries ADD COLUMN cnps INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN tax INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN employer_social INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN employer_tax INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN payroll TEXT;
+-- Collaborateur déclaré à la CNPS et aux impôts : ses salaires portent les retenues légales.
+ALTER TABLE staff ADD COLUMN declared INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE staff ADD COLUMN cnps_number TEXT;
+`,
+  },
+  {
+    version: 38,
+    name: 'paiement mobile automatique',
+    sql: `
+-- Demandes de paiement envoyées au téléphone du client (MTN MoMo, Orange Money), propres à ce poste.
+CREATE TABLE mobile_payments (
+  id TEXT PRIMARY KEY,
+  method TEXT NOT NULL CHECK (method IN ('MTN_MOMO', 'ORANGE_MONEY')),
+  mode TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'success', 'failed', 'cancelled')),
+  provider_ref TEXT,
+  transaction_id TEXT,
+  reason TEXT,
+  store_id TEXT,
+  register_id TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX mobile_payments_store ON mobile_payments(store_id, created_at);
+`,
+  },
 ];

@@ -21,3 +21,6 @@ export * from './permissions';
 export * from './storeSettings';
 export * from './docTemplates';
 export * from './backup';
+export * from './loyalty';
+export * from './payroll';
+export * from './reminder';

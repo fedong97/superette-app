@@ -2,6 +2,12 @@ import type { Services } from './index';
 import type { SyncEvent } from './sync';
 import { AppError } from './util';
 
+let clientVersion: string | null = null;
+/** Version de l'application, envoyée au serveur pour qu'il sache quels PC sont à jour. */
+export function setSyncClientVersion(version: string) {
+  clientVersion = version;
+}
+
 /**
  * Échanges HTTP avec le serveur central (fetch : Node 22 et Electron).
  * Utilisé par le processus principal de l'application et par les tests.
@@ -14,6 +20,7 @@ async function request<T>(baseUrl: string, path: string, init: { method?: string
       headers: {
         'content-type': 'application/json',
         ...(init.token ? { authorization: `Bearer ${init.token}` } : {}),
+        ...(clientVersion ? { 'x-fedonix-version': clientVersion } : {}),
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: AbortSignal.timeout(60_000),

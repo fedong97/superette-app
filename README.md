@@ -14,6 +14,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Conditionnements (un code-barres « carton de 24 » sort 24 unités).
 - Articles au poids : saisie du poids ou étiquette balance à prix ou poids intégré (préfixes 21/22 paramétrables).
 - Paiements mixtes : espèces avec rendu monnaie, MTN Mobile Money et Orange Money (référence obligatoire), carte, bon d'achat.
+- Paiement Mobile Money automatique (Administration › Paiement mobile) : la caisse envoie une demande de paiement au téléphone du client (MTN MoMo API Collection « requesttopay », Orange Money API paiement marchand) et ajoute le paiement avec le numéro de transaction quand le client a confirmé. Trois modes par moyen : Simulation (aucun compte, confirmation après 5 secondes, numéro finissant par 0 refusé), Test MTN (sandbox de momodeveloper.mtn.com : l'utilisateur et la clé de l'API sont créés avec la seule clé d'abonnement, montants en EUR comme l'exige le sandbox) et Réel (XAF, environnement `mtncameroon`). Les clés restent dans les réglages du poste (table `settings`, non synchronisée) ; les demandes sont gardées dans `mobile_payments`. Le mode Réel d'Orange Money est à valider avec les accès du compte marchand.
 - Remises par ligne, validées par le code d'un gérant si le caissier n'en a pas le droit.
 - Tickets en attente (F10 rappelle un ticket, le nombre en attente s'affiche sur le bouton), annulation et retour client sous code gérant, apports et prélèvements d'espèces.
 - Aucune vente tant que la caisse n'est pas ouverte. Ouverture et clôture dans Trésorerie › Opérations de trésorerie (comme KONTROL) : choix de la caisse, journée en cours, entrées et sorties d'espèces avec heure, montant, nature, motif et tiers, ventes à crédit, attendu, relevé et différentiel à la clôture, historique des journées.
@@ -62,6 +63,9 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Les règlements soldent automatiquement les ventes les plus anciennes ; retour d'un ticket au compte du client.
 - Compte client, relevé imprimable sur une période, balance âgée (non échu, 1-30, 31-60, 61-90, plus de 90 jours).
 - Solde du client affiché en couleur sur la fiche de facturation dès qu'il est choisi : vert s'il a un avoir, rouge s'il doit, gris à zéro ; le bouton « J.. » ouvre son extrait de compte. En tapant un nom, les clients existants qui y ressemblent sont proposés.
+- Paie avec retenues légales (Administration › Paramètres › Paie, désactivée par défaut) : CNPS salariale 4,2 % et patronale 11,2 % sous plafond de 750 000 FCFA, accidents du travail 1,75 %, IRPP au barème annuel (abattements 30 % et 500 000 FCFA, rien sous 62 000 FCFA brut), CAC 10 % de l'IRPP, crédit foncier 1 % et 1,5 %, FNE 1 %, RAV et TDL par tranches ; tout est modifiable. Les collaborateurs déclarés portent les retenues : le salaire constaté garde le détail (colonnes `cnps`, `tax`, `employer_social`, `employer_tax`, `payroll` de `staff_salaries`), le net payé en tient compte, et les écritures passent les retenues du sous-compte du collaborateur vers 4311 et 4471, les charges patronales en 664 et 641. Bulletin détaillé et état mensuel des montants à verser.
+- Relances par WhatsApp (Client › Situation, ou compte du client) : message rempli pour le client (solde, part échue, factures dues) à partir d'un modèle réglable, ouvert dans WhatsApp au numéro du client (indicatif 237 ajouté), relevé A4 enregistré en PDF pour le joindre, relance de tous les clients en retard à la suite. Chaque relance est gardée (date, auteur, montants) et affichée dans la balance âgée.
+- Carte de fidélité (à activer dans Administration › Paramètres) : 1 point par tranche d'achat (1 000 FCFA par défaut), 1 point vaut 10 FCFA de remise, minimum 100 points pour payer avec ; tout est réglable. À la caisse, scanner la carte (code du client) ou taper son téléphone choisit le client ; il paie avec « Points fidélité ». Annulation et retour reprennent les points ; correction à la main avec motif (droit du gérant). Carte au format carte bancaire à imprimer, points sur le ticket. Les mouvements de points circulent vers tous les magasins ; en compta, un paiement en points passe en remise accordée (7019).
 - Ristournes des clients spécifiques (Client › Ristournes), comme KONTROL : réglage de base par famille d'articles (taux du montant acheté, montant par unité, quantité minimale sur la période, frais d'enlèvement par unité déduits quand la superette livre le client), réglage propre à un client qui remplace la base. État des ristournes sur une période (report, calculée, constatée, accordée, reste), constatation d'une période terminée (jamais deux fois), ristourne accordée en avoir sur le compte du client ou en espèces depuis la caisse centrale avec bon de ristourne à signer, régularisations avec motif, reports à nouveau. Écritures : 7019 / 4198 à la constatation, 4198 / 411 pour l'avoir, 4198 / 5712 pour les espèces.
 
 **Comptabilité SYSCOHADA et TVA**
@@ -212,6 +216,8 @@ Les tests de bout en bout du serveur (deux PC, deux magasins) tournent si `TEST_
 TEST_DATABASE_URL=postgres://superette:superette@localhost:5432/superette_test npm test
 ```
 
+Sur GitHub, la vérification (`.github/workflows/verification.yml`) lance à chaque envoi sur `main` et à chaque demande de fusion la vérification des types, tous les tests, les tests du serveur sur PostgreSQL et la construction de l'application.
+
 `npm test` recompile `better-sqlite3` pour Node, `npm run dev` le recompile pour Electron : c'est normal que le premier lancement de chacun prenne quelques secondes.
 
 ## Construire l'installateur Windows
@@ -223,7 +229,9 @@ npm install
 npm run build:win        # produit apps/desktop/release/Fedonix360-Setup-<version>.exe
 ```
 
-La mise à jour automatique lit les nouvelles versions à l'adresse `publish.url` de `apps/desktop/electron-builder.yml` (à remplacer par celle du serveur central).
+Page du gérant : `/gerant` sur l'adresse du serveur est faite pour le téléphone et s'installe comme une application (manifeste et service worker, « Ajouter à l'écran d'accueil »). Après connexion avec le mot de passe de l'interface (case « Rester connecté » : 30 jours), elle montre pour chaque magasin, à partir du dernier état des fiches reçues des PC : chiffre du jour et de la veille, tickets et panier moyen, paiements par moyen, ventes par heure, meilleures ventes, état de chaque caisse (caissier, ouverture, dernière vente, PC muet), écarts des clôtures, ruptures (stock du magasin à zéro) et stock sous le seuil d'alerte, et les alertes. Elle s'actualise chaque minute ; un autre jour se choisit en haut.
+
+Mise à jour automatique : on dépose `Fedonix360-Setup-<version>.exe` dans l'interface de FEDONIX 360 Serveur, onglet « Mises à jour ». Le serveur écrit lui-même `latest.yml` (version, empreinte SHA-512, taille) et sert les deux fichiers à l'adresse `/mises-a-jour/`. Chaque PC relié y cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge et l'installe à sa fermeture (Administration › Mises à jour : état, « Installer maintenant », adresse internet pour une boutique sans serveur). Le serveur affiche la version de chaque PC.
 
 ## Installer le serveur central
 
@@ -261,4 +269,4 @@ La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE
 
 ## Prochaines étapes
 
-1. Hébergement du serveur central (VPS ou PC toujours allumé) et adresse de mise à jour automatique.
+1. Hébergement du serveur central (VPS ou PC toujours allumé) pour les boutiques qui veulent le suivre hors du magasin.

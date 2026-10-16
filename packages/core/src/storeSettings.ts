@@ -1,5 +1,6 @@
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
 import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
+import { DEFAULT_PAYROLL, normalizePayroll, type PayrollRules } from './payroll';
 
 /**
  * Paramètres du magasin (Administration › Paramètres) : règles de vente, de
@@ -36,6 +37,8 @@ export interface StoreSettings {
   creditDefaultDays: number;
   /** Refuser une vente à crédit au client qui a une facture échue non payée. */
   creditBlockLate: boolean;
+  /** Message de relance des clients par WhatsApp ; vide : le message proposé par le logiciel. */
+  reminderTemplate: string;
 
   /** Les lots qui périment dans ce nombre de jours sont signalés. */
   expiryAlertDays: number;
@@ -87,6 +90,18 @@ export interface StoreSettings {
   /** Après une réception d'achat, proposer les étiquettes des articles à code interne. */
   labelAfterReception: boolean;
 
+  /** Carte de fidélité : les clients enregistrés gagnent des points et paient avec. */
+  loyaltyEnabled: boolean;
+  /** Montant d'achat qui donne 1 point. */
+  loyaltySpendPerPoint: number;
+  /** Valeur d'un point en FCFA quand le client paie avec ses points. */
+  loyaltyPointValue: number;
+  /** Points à avoir au minimum pour payer avec. */
+  loyaltyMinRedeem: number;
+
+  /** Paie : retenues légales (CNPS, IRPP, CAC, CFC, RAV, TDL) et charges patronales. */
+  payroll: PayrollRules;
+
   /** Modèles d'impression modifiés ou ajoutés (ceux du logiciel servent pour le reste). */
   printTemplates: DocTemplate[];
   /** Modèle choisi par emplacement (« invoice.a4.credit ») : identifiant de modèle. */
@@ -113,6 +128,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   creditDefaultLimit: 0,
   creditDefaultDays: 30,
   creditBlockLate: false,
+  reminderTemplate: '',
   expiryAlertDays: 30,
   defaultAlertQty: 0,
   transferTwoUsers: false,
@@ -136,6 +152,11 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   labelPrice: true,
   labelStore: false,
   labelAfterReception: true,
+  loyaltyEnabled: false,
+  loyaltySpendPerPoint: 1000,
+  loyaltyPointValue: 10,
+  loyaltyMinRedeem: 100,
+  payroll: DEFAULT_PAYROLL,
   printTemplates: [],
   printDefaults: {},
 };
@@ -157,8 +178,11 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   idleMinutes: [0, 480],
   pinMinLength: [4, 8],
   maxLoginAttempts: [0, 20],
+  loyaltySpendPerPoint: [1, 1e7],
+  loyaltyPointValue: [1, 1e6],
+  loyaltyMinRedeem: [0, 1e7],
 };
-const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000 };
+const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder'];
 
 /**
@@ -174,6 +198,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       next.printTemplates = normalizeTemplates(raw);
     } else if (k === 'printDefaults') {
       next.printDefaults = normalizeDefaults(raw);
+    } else if (k === 'payroll') {
+      next.payroll = normalizePayroll(raw);
     } else if (typeof def === 'boolean') {
       (next as unknown as Record<string, unknown>)[k] = Boolean(raw);
     } else if (typeof def === 'number') {
@@ -206,7 +232,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
 export function parseStoreSettings(json: string | null | undefined): StoreSettings {
   if (!json) return { ...DEFAULT_STORE_SETTINGS };
   try {
-    return { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
+    const parsed = { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
+    return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll } };
   } catch {
     return { ...DEFAULT_STORE_SETTINGS };
   }

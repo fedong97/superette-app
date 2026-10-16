@@ -2,10 +2,13 @@ import { type DynamicModule, Inject, Module, type OnApplicationBootstrap, type O
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { BackupService } from './backup.service';
+import { ManagerService } from './manager.service';
 import { CONFIG, type ServerConfig } from './config';
 import { type Db, PG, openDb } from './database';
 import { SyncController } from './sync.controller';
 import { SyncService } from './sync.service';
+import { UpdatesController } from './updates.controller';
+import { UpdatesService } from './updates.service';
 
 @Module({})
 export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -17,13 +20,15 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
   static forConfig(config: ServerConfig): DynamicModule {
     return {
       module: AppModule,
-      controllers: [SyncController, AdminController],
+      controllers: [SyncController, AdminController, UpdatesController],
       providers: [
         { provide: CONFIG, useValue: config },
         { provide: PG, useFactory: () => openDb(config) },
         SyncService,
         AdminService,
         BackupService,
+        UpdatesService,
+        ManagerService,
       ],
     };
   }

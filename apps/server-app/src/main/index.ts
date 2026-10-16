@@ -145,6 +145,7 @@ async function start() {
     server = await createApp({
       dataDir,
       backupDir: backupDir(),
+      updatesDir: join(app.getPath('userData'), 'mises-a-jour'),
       port: reglages.port,
       localAdminToken: localToken,
       version: app.getVersion(),

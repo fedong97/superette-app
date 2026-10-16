@@ -27,6 +27,7 @@ import {
 import type { AdminService } from './admin';
 import type { CatalogueService } from './catalogue';
 import type { CustomerService } from './customers';
+import type { LoyaltyService } from './loyalty';
 import type { PromotionService } from './promotions';
 import type { QuoteService } from './quotes';
 import type { StockService } from './stock';
@@ -316,6 +317,7 @@ export class PosService extends Base {
     private readonly treasury: TreasuryService,
     private readonly emoney: EmoneyService,
     private readonly deliveries: DeliveryService,
+    private readonly loyalty: LoyaltyService,
   ) {
     super(db, clock);
   }
@@ -788,6 +790,8 @@ export class PosService extends Base {
         : this.customers.getCustomer(input.customerId)
       : null;
     const due = customer && onCredit > 0 ? this.customers.dueDateFor(customer) : null;
+    const inPoints = input.payments.filter((p) => p.method === 'LOYALTY').reduce((t, p) => t + p.amount, 0);
+    this.loyalty.checkRedeem(ctx.storeId, customer?.id, inPoints);
 
     return this.tx(() => {
       const saleId = newId();
@@ -855,6 +859,7 @@ export class PosService extends Base {
       if (level !== (customer?.price_level ?? 'retail') || !warehouse.is_sales_default) {
         this.audit(ctx.userId, 'sale.options', 'sale', saleId, { number, level, warehouse: warehouse.name });
       }
+      this.loyalty.recordSale(ctx, { id: saleId, customer_id: customer?.id ?? null, total_ttc: totals.totalTtc, payments: input.payments });
       const sale = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', sale);
       if (input.delivery) this.deliveries.create(ctx, saleId, input.delivery);
@@ -925,6 +930,7 @@ export class PosService extends Base {
       this.db.prepare("UPDATE sales SET status = 'cancelled', cancelled_by = ?, cancel_reason = ? WHERE id = ?").run(supervisorId, reason.trim(), saleId);
       this.restockSaleMovements(ctx, saleId, 'sale_cancel', saleId);
       this.deliveries.cancelForSale(ctx, saleId);
+      this.loyalty.cancelSale(ctx, saleId, sale.customer_id);
       this.audit(supervisorId, 'sale.cancel', 'sale', saleId, { number: sale.number, total: sale.total_ttc, reason, cashier: ctx.userId });
       const updated = this.getSale(saleId);
       this.enqueue(ctx, 'sale', saleId, 'upsert', updated);
@@ -1098,7 +1104,7 @@ export class PosService extends Base {
         return { line, qty: l.qty, amount };
       });
     if (returned.length === 0) throw new AppError('Aucun article retourné', 'EMPTY');
-    if (input.refundMethod === 'CUSTOMER_CREDIT' && !original.customer_id) {
+    if ((input.refundMethod === 'CUSTOMER_CREDIT' || input.refundMethod === 'LOYALTY') && !original.customer_id) {
       throw new AppError('Ce ticket n’a pas de client : remboursez en espèces ou par un autre moyen', 'INVALID');
     }
     const refundSession = this.sessionFor(ctx, input.refundMethod, session.id);
@@ -1130,6 +1136,7 @@ export class PosService extends Base {
       const qtyByArticle = new Map<string, Milli>();
       for (const r of returned) qtyByArticle.set(r.line.article_id, (qtyByArticle.get(r.line.article_id) ?? 0) + r.qty);
       this.restockSaleMovements(ctx, original.id, 'sale_return', id, qtyByArticle);
+      this.loyalty.recordReturn(ctx, original, id, total, input.refundMethod);
       this.audit(input.supervisorId, 'sale.return', 'sale', id, { original: original.number, total, reason: input.reason, cashier: ctx.userId });
       const sale = this.getSale(id);
       this.enqueue(ctx, 'sale', id, 'upsert', sale);

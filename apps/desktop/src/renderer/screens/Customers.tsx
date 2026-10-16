@@ -51,6 +51,8 @@ function CustomerList({ user }: { user: User }) {
   const [debtors, setDebtors] = useState(false);
   const list = useLoad(() => call('customers.list', { search: search || undefined, includeInactive: inactive, withBalance: debtors }), [search, inactive, debtors]);
   const [open, setOpen] = useState<Customer | 'new' | null>(null);
+  const loyaltyOn = useStoreSettings().loyaltyEnabled;
+  const points = useLoad(() => (loyaltyOn ? call('loyalty.balances') : Promise.resolve({} as Record<string, number>)), [loyaltyOn, list.data]);
   return (
     <>
       <div className="filters">
@@ -80,6 +82,7 @@ function CustomerList({ user }: { user: User }) {
               <th className="r">Plafond</th>
               <th className="r">Doit</th>
               <th className="r">En retard</th>
+              {loyaltyOn && <th className="r">Points</th>}
               <th>Dernier achat</th>
             </tr>
           </thead>
@@ -93,6 +96,7 @@ function CustomerList({ user }: { user: User }) {
                 <td className="r">{c.credit_limit ? fcfa(c.credit_limit) : '—'}</td>
                 <td className={`r ${c.balance > c.credit_limit ? 'neg' : ''}`}>{c.balance ? fcfa(c.balance) : ''}</td>
                 <td className="r neg">{c.overdue ? fcfa(c.overdue) : ''}</td>
+                {loyaltyOn && <td className="r">{points.data?.[c.id] || ''}</td>}
                 <td>{c.last_sale ? dateTime(c.last_sale) : ''}</td>
               </tr>
             ))}
@@ -118,8 +122,9 @@ function CustomerList({ user }: { user: User }) {
 }
 
 function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; customer: Customer | null; onClose: () => void; onSaved: (c: Customer) => void }) {
-  const [tab, setTab] = useState<'card' | 'account' | 'statement' | 'sales'>(customer ? 'account' : 'card');
+  const [tab, setTab] = useState<'card' | 'account' | 'statement' | 'sales' | 'points'>(customer ? 'account' : 'card');
   const statement = has(user, 'customer_statement') || has(user, 'receivables');
+  const loyaltyOn = useStoreSettings().loyaltyEnabled;
   return (
     <Modal title={customer ? `${customer.code} · ${customer.name}` : 'Nouveau client'} onClose={onClose} wide>
       {customer && (
@@ -130,6 +135,7 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
             ['account', 'Compte'],
             ...(statement ? ([['statement', 'Relevé']] as ['statement', string][]) : []),
             ['sales', 'Achats'],
+            ...(loyaltyOn ? ([['points', 'Fidélité']] as ['points', string][]) : []),
             ['card', 'Fiche'],
           ]}
         />
@@ -138,7 +144,104 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
       {tab === 'account' && customer && <Account customer={customer} />}
       {tab === 'statement' && customer && statement && <Statement customer={customer} />}
       {tab === 'sales' && customer && <CustomerSales customer={customer} />}
+      {tab === 'points' && customer && <LoyaltyCard user={user} customer={customer} />}
     </Modal>
+  );
+}
+
+const LOYALTY_KINDS: Record<string, string> = { earn: 'Gagnés', redeem: 'Dépensés', cancel: 'Vente annulée', return: 'Retour', adjust: 'Correction' };
+
+/** Carte de fidélité du client : solde, mouvements, correction et impression de la carte. */
+function LoyaltyCard({ user, customer }: { user: User; customer: Customer }) {
+  const toast = useToast();
+  const status = useLoad(() => call('loyalty.status', customer.id), [customer.id]);
+  const history = useLoad(() => call('loyalty.history', customer.id), [customer.id]);
+  const [points, setPoints] = useState('');
+  const [reason, setReason] = useState('');
+  const st = status.data;
+  if (!st) return null;
+  return (
+    <div>
+      <div className="kpis">
+        <div>
+          <span>Points</span>
+          <strong>{st.balance}</strong>
+        </div>
+        <div>
+          <span>Valeur en remise</span>
+          <strong>{fcfa(st.value)}</strong>
+        </div>
+      </div>
+      <p className="muted">
+        1 point pour {fcfa(st.rules.spendPerPoint)} d'achat ; 1 point vaut {fcfa(st.rules.pointValue)} ; il faut {st.rules.minRedeem} points pour payer avec. À la caisse, scannez la
+        carte ou tapez le téléphone du client pour le choisir.
+      </p>
+      <div className="actions">
+        <button onClick={() => call('loyalty.printCard', customer.id).catch((e) => toast.error(e))}>Imprimer sa carte</button>
+      </div>
+      {has(user, 'loyalty_adjust') && (
+        <form
+          className="filters"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              const n = await call('loyalty.adjust', customer.id, Math.trunc(Number(points)), reason);
+              toast.ok(`Nouveau solde : ${n} points`);
+              setPoints('');
+              setReason('');
+              status.reload();
+              history.reload();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          <Field label="Corriger (+ ou −)">
+            <input inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value)} placeholder="ex. 50 ou -20" style={{ width: 110 }} />
+          </Field>
+          <Field label="Motif">
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Carte perdue, geste commercial…" />
+          </Field>
+          <button type="submit" disabled={!points || !reason.trim()}>
+            Enregistrer la correction
+          </button>
+        </form>
+      )}
+      {(history.data ?? []).length === 0 ? (
+        <Empty>Aucun point pour l'instant : le client en gagne à chaque achat.</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Mouvement</th>
+              <th>Pièce</th>
+              <th>Magasin</th>
+              <th>Par</th>
+              <th className="r">Points</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.data!.map((m) => (
+              <tr key={m.id}>
+                <td>{dateTime(m.created_at)}</td>
+                <td>
+                  {LOYALTY_KINDS[m.kind]}
+                  {m.reason && <small className="muted"> · {m.reason}</small>}
+                </td>
+                <td>{m.sale_number ?? ''}</td>
+                <td>{m.store_name ?? ''}</td>
+                <td>{m.user_name ?? ''}</td>
+                <td className={`r ${m.points < 0 ? 'neg' : 'pos'}`}>
+                  {m.points > 0 ? '+' : ''}
+                  {m.points}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
@@ -183,6 +286,7 @@ function Account({ customer }: { customer: Customer }) {
   const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
   const [paying, setPaying] = useState(false);
+  const [reminding, setReminding] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   if (!acc.data) return null;
   const a = acc.data;
@@ -245,6 +349,11 @@ function Account({ customer }: { customer: Customer }) {
       )}
       <div className="actions">
         {can('customer_statement', 'receivables') && <button onClick={() => call('customers.printStatement', customer.id).catch(toast.error)}>Imprimer le relevé</button>}
+        {can('customer_statement', 'receivables') && (
+          <button disabled={!a.balance} onClick={() => setReminding(true)}>
+            Relancer par WhatsApp…
+          </button>
+        )}
         {can('customer_payment') && (
           <button className="primary" disabled={!a.balance} onClick={() => setPaying(true)}>
             Encaisser un règlement
@@ -263,7 +372,107 @@ function Account({ customer }: { customer: Customer }) {
         />
       )}
       {preview && <InvoicePreview saleId={preview} onClose={() => setPreview(null)} />}
+      {reminding && <ReminderDialog queue={[customer.id]} onClose={() => setReminding(false)} />}
     </>
+  );
+}
+
+/**
+ * Relance par WhatsApp : le message rempli pour le client (modifiable), « Ouvrir WhatsApp »
+ * avec le message prêt, relevé en PDF à joindre. Avec plusieurs clients, « Suivant » passe au prochain.
+ */
+export function ReminderDialog({ queue, onClose, onSent }: { queue: string[]; onClose: () => void; onSent?: () => void }) {
+  const toast = useToast();
+  const [index, setIndex] = useState(0);
+  const id = queue[index]!;
+  const data = useLoad(() => call('customers.reminder', id), [id]);
+  const [text, setText] = useState<string | null>(null);
+  const d = data.data;
+  const message = text ?? d?.text ?? '';
+  const next = () => {
+    setText(null);
+    if (index + 1 < queue.length) setIndex(index + 1);
+    else onClose();
+  };
+  const sent = async (channel: 'whatsapp' | 'pdf') => {
+    await call('customers.reminderSent', id, channel);
+    data.reload();
+    onSent?.();
+  };
+  return (
+    <Modal title={`Relancer ${d?.customer.name ?? '…'}${queue.length > 1 ? ` (${index + 1} sur ${queue.length})` : ''}`} onClose={onClose} wide>
+      {d && (
+        <>
+          <div className="kpis">
+            <div>
+              <small>Doit</small>
+              <strong>{fcfa(d.balance)}</strong>
+            </div>
+            <div className={d.overdue ? 'neg' : ''}>
+              <small>Dont en retard</small>
+              <strong>{fcfa(d.overdue)}</strong>
+            </div>
+            <div>
+              <small>Téléphone</small>
+              <strong>{d.customer.phone || '—'}</strong>
+            </div>
+            <div>
+              <small>Dernière relance</small>
+              <strong>{d.last ? dateTime(d.last.at) : 'jamais'}</strong>
+            </div>
+          </div>
+          {d.last && (
+            <p className="muted">
+              {d.last.count} relance{d.last.count > 1 ? 's' : ''} envoyée{d.last.count > 1 ? 's' : ''} ; la dernière par {d.last.user_name ?? '—'}, quand il devait {fcfa(d.last.balance)}.
+            </p>
+          )}
+          <Field label="Message" hint="Modifiable avant l'envoi. Le modèle se règle dans Administration › Paramètres › Crédit clients.">
+            <textarea rows={12} value={message} onChange={(e) => setText(e.target.value)} />
+          </Field>
+          {!d.link && <p className="neg">Pas de numéro de téléphone valable sur la fiche : complétez-la, ou copiez le message.</p>}
+          <div className="actions">
+            <button
+              onClick={() =>
+                navigator.clipboard.writeText(message).then(
+                  () => toast.ok('Message copié'),
+                  () => toast.error('Copie impossible'),
+                )
+              }
+            >
+              Copier le message
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  if (await call('customers.reminderPdf', id)) toast.ok('Relevé enregistré : joignez-le dans WhatsApp avec le trombone');
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Relevé en PDF…
+            </button>
+            <button
+              className="primary"
+              disabled={!d.link}
+              onClick={async () => {
+                const link = `${d.link!.split('?')[0]}?text=${encodeURIComponent(message)}`;
+                window.open(link, '_blank');
+                try {
+                  await sent('whatsapp');
+                  toast.ok('Relance notée');
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Ouvrir WhatsApp
+            </button>
+            {queue.length > 1 && <button onClick={next}>{index + 1 < queue.length ? 'Suivant ›' : 'Terminer'}</button>}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -392,10 +601,12 @@ function CustomerSales({ customer }: { customer: Customer }) {
 function Receivables({ user }: { user: User }) {
   const data = useLoad(() => call('customers.receivables'), []);
   const [open, setOpen] = useState<Customer | null>(null);
+  const [remind, setRemind] = useState<string[] | null>(null);
   if (!data.data) return null;
   const { customers, totals, labels } = data.data;
   const buckets = Object.keys(labels) as (keyof typeof labels)[];
   const late = totals.balance - totals.current;
+  const lateIds = customers.filter((c) => c.balance > 0 && c.balance > c.buckets.current).map((c) => c.id);
   return (
     <>
       <div className="kpis">
@@ -416,6 +627,13 @@ function Receivables({ user }: { user: User }) {
           <strong>{customers.length}</strong>
         </div>
       </div>
+      {lateIds.length > 0 && (
+        <div className="actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="primary" onClick={() => setRemind(lateIds)}>
+            Relancer les {lateIds.length} client{lateIds.length > 1 ? 's' : ''} en retard par WhatsApp…
+          </button>
+        </div>
+      )}
       {customers.length === 0 ? (
         <Empty>Aucun client ne doit d'argent au magasin.</Empty>
       ) : (
@@ -430,6 +648,8 @@ function Receivables({ user }: { user: User }) {
                   {labels[b]}
                 </th>
               ))}
+              <th>Dernière relance</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -443,6 +663,20 @@ function Receivables({ user }: { user: User }) {
                     {c.buckets[b] ? fcfa(c.buckets[b]) : ''}
                   </td>
                 ))}
+                <td className="nowrap">{c.last_reminder ? dateFr(c.last_reminder.at.slice(0, 10)) : ''}</td>
+                <td>
+                  {c.balance > 0 && (
+                    <button
+                      className="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRemind([c.id]);
+                      }}
+                    >
+                      Relancer
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             <tr className="b">
@@ -453,6 +687,7 @@ function Receivables({ user }: { user: User }) {
                   {totals[b] ? fcfa(totals[b]) : ''}
                 </td>
               ))}
+              <td colSpan={2}></td>
             </tr>
           </tbody>
         </table>
@@ -466,6 +701,15 @@ function Receivables({ user }: { user: User }) {
             data.reload();
           }}
           onSaved={setOpen}
+        />
+      )}
+      {remind && (
+        <ReminderDialog
+          queue={remind}
+          onClose={() => {
+            setRemind(null);
+            data.reload();
+          }}
         />
       )}
     </>

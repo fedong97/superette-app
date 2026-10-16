@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ADMIN_PAGE } from './admin.page';
-import { AdminService } from './admin.service';
+import { ADMIN_PAGE, MANAGER_ICON, MANAGER_PAGE } from './admin.page';
+import { AdminService, LONG_SESSION_MS } from './admin.service';
 import { BackupService } from './backup.service';
+import { ManagerService } from './manager.service';
+import { UpdatesService } from './updates.service';
 
 const COOKIE = 'fedo_admin';
 
@@ -14,8 +16,34 @@ const cookieOf = (req: Request): string | undefined =>
 
 const isLocal = (req: Request) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
 
-const setCookie = (res: Response, token: string) =>
-  res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 3600}`);
+const setCookie = (res: Response, token: string, maxAgeMs = 12 * 3_600_000) =>
+  res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.round(maxAgeMs / 1000)}`);
+
+/** Le téléphone du gérant installe la page comme une application. */
+const MANIFEST = {
+  name: 'FEDONIX 360 Gérant',
+  short_name: 'Gérant',
+  description: 'Ventes du jour, caisses, écarts, ruptures et alertes de vos magasins',
+  start_url: '/gerant',
+  scope: '/gerant',
+  display: 'standalone',
+  background_color: '#f4f5f7',
+  theme_color: '#1f7a4d',
+  lang: 'fr',
+  icons: [
+    { src: '/gerant/icon.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: '/gerant/icon.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+  ],
+};
+
+/** Service worker minimal : l'application s'installe et s'ouvre ; les chiffres viennent toujours du serveur. */
+const SERVICE_WORKER = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', (e) => {
+  if (e.request.mode !== 'navigate') return;
+  e.respondWith(fetch(e.request).catch(() => new Response('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font:16px system-ui;padding:24px">Pas de connexion au serveur FEDONIX 360. Vérifiez le réseau puis rouvrez l’application.</p>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
+});
+`;
 
 /** Interface du serveur dans le navigateur (ou dans la fenêtre de FEDONIX 360 Serveur). */
 @Controller()
@@ -23,6 +51,8 @@ export class AdminController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(BackupService) private readonly backups: BackupService,
+    @Inject(UpdatesService) private readonly updates: UpdatesService,
+    @Inject(ManagerService) private readonly manager: ManagerService,
   ) {}
 
   private guard(req: Request) {
@@ -41,6 +71,43 @@ export class AdminController {
     return res.send(ADMIN_PAGE);
   }
 
+  // ——— Page du gérant (téléphone) ———
+
+  @Get('gerant')
+  managerPage(@Res() res: Response) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(MANAGER_PAGE);
+  }
+
+  @Get('gerant/manifest.webmanifest')
+  @Header('Content-Type', 'application/manifest+json; charset=utf-8')
+  managerManifest() {
+    return JSON.stringify(MANIFEST);
+  }
+
+  @Get('gerant/sw.js')
+  @Header('Content-Type', 'text/javascript; charset=utf-8')
+  @Header('Service-Worker-Allowed', '/gerant')
+  managerWorker() {
+    return SERVICE_WORKER;
+  }
+
+  @Get('gerant/icon.png')
+  managerIcon(@Res() res: Response) {
+    const icon = MANAGER_ICON();
+    if (!icon) return res.status(404).end();
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(icon);
+  }
+
+  @Get('admin/api/manager')
+  managerDashboard(@Req() req: Request, @Query('day') day?: string) {
+    this.guard(req);
+    return this.manager.dashboard(day || undefined);
+  }
+
   @Get('admin/api/session')
   async session(@Req() req: Request) {
     return { authenticated: this.admin.isSession(cookieOf(req)), hasPassword: await this.admin.hasPassword(), canChoose: this.admin.canChooseFirstPassword(isLocal(req)) };
@@ -48,8 +115,9 @@ export class AdminController {
 
   @Post('admin/api/login')
   @HttpCode(200)
-  async login(@Body() body: { password: string }, @Res({ passthrough: true }) res: Response) {
-    setCookie(res, await this.admin.login(body?.password));
+  async login(@Body() body: { password: string; remember?: boolean }, @Res({ passthrough: true }) res: Response) {
+    const remember = body?.remember === true;
+    setCookie(res, await this.admin.login(body?.password, remember), remember ? LONG_SESSION_MS : undefined);
     return { ok: true };
   }
 
@@ -151,5 +219,19 @@ export class AdminController {
     this.guard(req);
     await this.backups.restore(name);
     return { ok: true };
+  }
+
+  @Get('admin/api/updates')
+  updatesState(@Req() req: Request) {
+    this.guard(req);
+    return { dir: this.updates.dir(), current: this.updates.current() };
+  }
+
+  /** Dépôt d'un nouvel installateur : le fichier arrive tel quel (application/octet-stream). */
+  @Post('admin/api/updates')
+  @HttpCode(200)
+  publishUpdate(@Req() req: Request, @Query('name') name: string) {
+    this.guard(req);
+    return this.updates.publish(name, req);
   }
 }

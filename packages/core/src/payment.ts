@@ -9,6 +9,7 @@ export const PAYMENT_METHODS = {
   CHEQUE: 'Chèque',
   CUSTOMER_CREDIT: 'Crédit client',
   VOUCHER: "Bon d'achat",
+  LOYALTY: 'Points fidélité',
 } as const;
 
 export type PaymentMethod = keyof typeof PAYMENT_METHODS;
@@ -16,7 +17,7 @@ export type PaymentMethod = keyof typeof PAYMENT_METHODS;
 /**
  * Caisse qui reçoit un paiement : les espèces vont au tiroir, Mobile Money et
  * carte à la caisse électronique du caissier, virement et chèque à sa caisse banque.
- * Crédit client et bon d'achat restent sur la journée du ticket.
+ * Crédit client, bon d'achat et points fidélité restent sur la journée du ticket.
  */
 export type RegisterKind = 'cash' | 'electronic' | 'bank';
 export const ELECTRONIC_METHODS = ['MTN_MOMO', 'ORANGE_MONEY', 'CARD'] as const;

@@ -23,8 +23,9 @@ nsis:
   language: '1036'
   # Contrat de licence à accepter pendant l'installation (aussi affiché dans Administration › Licence).
   license: build/contrat-licence.txt
-# Mise à jour automatique : les nouvelles versions (.exe + latest.yml) sont
-# déposées sur le serveur central ; chaque poste vérifie au démarrage.
+# Mise à jour automatique : l'adresse réelle est choisie au lancement (serveur central
+# du PC, /mises-a-jour/, ou adresse saisie dans Administration › Mises à jour).
+# Celle-ci ne sert que de valeur de repli dans app-update.yml.
 publish:
   provider: generic
   url: https://mises-a-jour.example.cm/superette/

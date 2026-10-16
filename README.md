@@ -212,6 +212,8 @@ Les tests de bout en bout du serveur (deux PC, deux magasins) tournent si `TEST_
 TEST_DATABASE_URL=postgres://superette:superette@localhost:5432/superette_test npm test
 ```
 
+Sur GitHub, la vérification (`.github/workflows/verification.yml`) lance à chaque envoi sur `main` et à chaque demande de fusion la vérification des types, tous les tests, les tests du serveur sur PostgreSQL et la construction de l'application.
+
 `npm test` recompile `better-sqlite3` pour Node, `npm run dev` le recompile pour Electron : c'est normal que le premier lancement de chacun prenne quelques secondes.
 
 ## Construire l'installateur Windows

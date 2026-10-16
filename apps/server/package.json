@@ -5,7 +5,7 @@
   "description": "Serveur central : synchronisation des caisses et magasins",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"const fs = require('fs'); fs.copyFileSync('src/admin.page.html', 'dist/admin.page.html'); fs.copyFileSync('src/manager.page.html', 'dist/manager.page.html'); fs.copyFileSync('../server-app/build/icon.png', 'dist/icon.png')\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs = require('fs'); fs.copyFileSync('src/admin.page.html', 'dist/admin.page.html'); fs.copyFileSync('src/manager.page.html', 'dist/manager.page.html'); fs.copyFileSync('src/inventory.page.html', 'dist/inventory.page.html'); fs.copyFileSync('../server-app/build/icon.png', 'dist/icon.png')\"",
     "start": "node dist/main.js",
     "dev": "npm run build && node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -17,11 +17,13 @@
     "@nestjs/platform-express": "^11.1.0",
     "express": "^5.1.0",
     "pg": "^8.16.0",
+    "qrcode": "1.5.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
-    "@types/pg": "^8.15.0"
+    "@types/pg": "^8.15.0",
+    "@types/qrcode": "1.5.5"
   }
 }

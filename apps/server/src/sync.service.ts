@@ -102,7 +102,7 @@ export class SyncService {
   private async checkStations() {
     const license = await this.currentLicense();
     if (!license) return;
-    const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL');
+    const { rows } = await this.pg.query<{ n: string }>("SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL AND kind = 'pc'");
     if (Number(rows[0]!.n) >= license.stations) {
       throw new ForbiddenException(`La licence permet ${license.stations} PC : demandez une licence pour plus de postes.`);
     }
@@ -158,7 +158,7 @@ export class SyncService {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     if (!token) throw new UnauthorizedException('Jeton manquant');
     const { rows } = await this.pg.query<Device>(
-      'UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id, name, store_id, register_id',
+      "UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id, name, store_id, register_id",
       [hashToken(token), /^\d+\.\d+\.\d+$/.test(appVersion ?? '') ? appVersion : null],
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');

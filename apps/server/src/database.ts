@@ -174,6 +174,66 @@ CREATE INDEX events_received ON events (received_at);
 ALTER TABLE devices ADD COLUMN app_version TEXT;
 `,
   },
+  {
+    version: 5,
+    sql: `
+-- Téléphones d'inventaire (FEDONIX 360 Inventaire) : des postes à part, hors licence des PC,
+-- qui ne lisent que le catalogue et les inventaires ouverts de leur magasin.
+ALTER TABLE devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'pc';
+-- Code du QR affiché au gérant : une seule utilisation, valable 15 minutes.
+CREATE TABLE mobile_pairings (
+  code TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ
+);
+-- Compteur connecté sur un téléphone avec son identifiant et son code.
+CREATE TABLE mobile_sessions (
+  token_hash TEXT PRIMARY KEY,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  user_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ
+);
+-- Quantité comptée d'un produit à un endroit (rayon, réserve…) : la plus récente par endroit
+-- l'emporte, le total des endroits part aux PC comme une saisie de l'inventaire.
+CREATE TABLE mobile_counts (
+  id TEXT PRIMARY KEY,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  user_id TEXT NOT NULL,
+  inventory_id TEXT NOT NULL,
+  article_id TEXT NOT NULL,
+  location TEXT NOT NULL,
+  qty BIGINT,
+  detail JSONB,
+  counted_at TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX mobile_counts_article ON mobile_counts (inventory_id, article_id, location, counted_at);
+-- Code-barres inconnu relevé pendant le comptage : photo et nom, l'article est créé ensuite sur un PC.
+CREATE TABLE mobile_unknowns (
+  id TEXT PRIMARY KEY,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  user_id TEXT NOT NULL,
+  inventory_id TEXT,
+  code TEXT,
+  note TEXT,
+  qty BIGINT,
+  location TEXT,
+  photo TEXT,
+  at TIMESTAMPTZ NOT NULL,
+  done_at TIMESTAMPTZ
+);
+CREATE INDEX events_inventory ON events ((payload->>'inventory_id')) WHERE entity IN ('inventory_line', 'inventory_entry');
+-- Rayons confiés à chaque compteur pour un inventaire.
+CREATE TABLE mobile_assignments (
+  inventory_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  department_ids JSONB NOT NULL,
+  PRIMARY KEY (inventory_id, user_id)
+);
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

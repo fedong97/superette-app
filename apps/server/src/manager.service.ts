@@ -68,7 +68,7 @@ export class ManagerService {
     const users = new Map((await this.latest('user', ['name'])).map((u) => [u.entity_id, String(u['name'] ?? '')]));
     const registers = (await this.latest('register', ['name', 'number', 'store_id', 'active', 'kind'])).filter((r) => r['active'] !== 0);
     const { rows: devices } = await this.pg.query<{ name: string; store_id: string; register_id: string; last_seen_at: Date | null; app_version: string | null }>(
-      'SELECT name, store_id, register_id, last_seen_at, app_version FROM devices WHERE revoked_at IS NULL',
+      "SELECT name, store_id, register_id, last_seen_at, app_version FROM devices WHERE revoked_at IS NULL AND kind = 'pc'",
     );
 
     // Ventes de la journée et de la veille (dernier état de chaque ticket).

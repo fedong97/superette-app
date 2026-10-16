@@ -3,6 +3,8 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { BackupService } from './backup.service';
 import { ManagerService } from './manager.service';
+import { MobileController } from './mobile.controller';
+import { MobileService } from './mobile.service';
 import { CONFIG, type ServerConfig } from './config';
 import { type Db, PG, openDb } from './database';
 import { SyncController } from './sync.controller';
@@ -20,7 +22,7 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
   static forConfig(config: ServerConfig): DynamicModule {
     return {
       module: AppModule,
-      controllers: [SyncController, AdminController, UpdatesController],
+      controllers: [SyncController, AdminController, UpdatesController, MobileController],
       providers: [
         { provide: CONFIG, useValue: config },
         { provide: PG, useFactory: () => openDb(config) },
@@ -29,6 +31,7 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
         BackupService,
         UpdatesService,
         ManagerService,
+        MobileService,
       ],
     };
   }

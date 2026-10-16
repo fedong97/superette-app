@@ -159,7 +159,8 @@ export class AdminService {
       last_seen_at: Date | null;
       revoked_at: Date | null;
       app_version: string | null;
-    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
+      kind: string;
+    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version, kind FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
     const { rows: counts } = await this.pg.query<{ total: number; today: number; first: Date | null }>(
       'SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE received_at >= $1)::int AS today, MIN(received_at) AS first FROM events',
       [startOfDay()],
@@ -168,7 +169,7 @@ export class AdminService {
 
     const today = await this.salesSince(startOfDay());
     const stores = new Map<string, { storeId: string; name: string; sales: number; total: number; returns: number; lastSale: string | null }>();
-    for (const [id, name] of names) if (devices.some((d) => d.store_id === id)) stores.set(id, { storeId: id, name, sales: 0, total: 0, returns: 0, lastSale: null });
+    for (const [id, name] of names) if (devices.some((d) => d.store_id === id && d.kind === 'pc')) stores.set(id, { storeId: id, name, sales: 0, total: 0, returns: 0, lastSale: null });
     for (const s of today) {
       const id = s.store_id ?? '';
       const st = stores.get(id) ?? { storeId: id, name: names.get(id) ?? '—', sales: 0, total: 0, returns: 0, lastSale: null };
@@ -199,7 +200,8 @@ export class AdminService {
         id: d.id,
         name: d.name,
         store: names.get(d.store_id) ?? '—',
-        register: names.get(d.register_id) ?? '—',
+        register: d.kind === 'mobile' ? 'Téléphone d’inventaire' : (names.get(d.register_id) ?? '—'),
+        kind: d.kind,
         createdAt: d.created_at,
         lastSeenAt: d.last_seen_at,
         online: !d.revoked_at && d.last_seen_at !== null && now - new Date(d.last_seen_at).getTime() < ONLINE_MS,

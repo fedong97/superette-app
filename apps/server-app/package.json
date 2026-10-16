@@ -7,7 +7,7 @@
   "author": "FEDONG",
   "main": "out/main/index.js",
   "scripts": {
-    "build": "electron-vite build && node -e \"const fs = require('fs'); fs.copyFileSync('../server/src/admin.page.html', 'out/main/admin.page.html'); fs.copyFileSync('../server/src/manager.page.html', 'out/main/manager.page.html'); for (const f of ['icon.ico', 'icon.png']) fs.copyFileSync('build/' + f, 'out/main/' + f)\"",
+    "build": "electron-vite build && node -e \"const fs = require('fs'); fs.copyFileSync('../server/src/admin.page.html', 'out/main/admin.page.html'); fs.copyFileSync('../server/src/manager.page.html', 'out/main/manager.page.html'); fs.copyFileSync('../server/src/inventory.page.html', 'out/main/inventory.page.html'); for (const f of ['icon.ico', 'icon.png']) fs.copyFileSync('build/' + f, 'out/main/' + f)\"",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:win": "npm run build && electron-builder --win --x64"
@@ -19,6 +19,7 @@
     "@nestjs/platform-express": "^11.1.0",
     "express": "^5.1.0",
     "pg": "^8.16.0",
+    "qrcode": "1.5.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },

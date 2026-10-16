@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f7a4d">
+<title>Inventaire sur téléphone · FEDONIX 360</title>
+<link rel="icon" href="/gerant/icon.png">
+<style>
+  :root {
+    --vert: #1f7a4d; --vert-fonce: #155c39; --vert-clair: #e7f4ec;
+    --fond: #f4f5f7; --carte: #fff; --texte: #1d2430; --gris: #667085; --ligne: #e4e7ec;
+    --rouge: #b42318; --rouge-clair: #fef3f2; --orange: #b54708; --orange-clair: #fffaeb;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; background: var(--fond); color: var(--texte); padding-bottom: env(safe-area-inset-bottom); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--vert); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; flex: 1; }
+  header a, header button { color: #fff; border: 1px solid rgba(255,255,255,.55); background: transparent; text-decoration: none; padding: 6px 10px; border-radius: 999px; font: inherit; font-size: 14px; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
+  button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--ligne); background: #fff; color: var(--texte); cursor: pointer; }
+  button.principal { background: var(--vert); border-color: var(--vert); color: #fff; border-radius: 8px; padding: 10px 16px; font-size: 15px; }
+  button.petit { padding: 3px 10px; font-size: 13px; }
+  select { font: inherit; font-size: 15px; padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
+  section { background: var(--carte); border: 1px solid var(--ligne); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  section h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  section h2 .n { margin-left: auto; color: var(--gris); font-weight: 500; font-size: 13px; }
+  h3 { font-size: 14px; margin: 14px 0 6px; }
+  .liste > div { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--ligne); }
+  .liste > div:first-child { border-top: 0; }
+  .liste .g { flex: 1; min-width: 0; }
+  .liste .g small { display: block; color: var(--gris); font-size: 13px; }
+  .liste .m { white-space: nowrap; font-weight: 600; text-align: right; }
+  .liste .m small { display: block; font-weight: 400; color: var(--gris); font-size: 12px; }
+  .pastille { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .ok { background: var(--vert-clair); color: var(--vert-fonce); }
+  .non { background: #f2f4f7; color: var(--gris); }
+  .alerte { background: var(--orange-clair); color: var(--orange); }
+  .erreur { background: var(--rouge-clair); color: var(--rouge); }
+  .jauge { height: 10px; border-radius: 5px; background: #eef0f3; overflow: hidden; margin: 6px 0 2px; }
+  .jauge div { height: 100%; background: var(--vert); }
+  .muted { color: var(--gris); }
+  .vide { color: var(--gris); font-size: 14px; }
+  .qr { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .qr .img { width: 240px; max-width: 100%; background: #fff; border: 1px solid var(--ligne); border-radius: 12px; padding: 6px; }
+  .qr .img svg { display: block; width: 100%; height: auto; }
+  .code { font: 600 22px/1.2 ui-monospace, Consolas, monospace; letter-spacing: 2px; }
+  .ligne { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chips label { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--ligne); border-radius: 999px; padding: 3px 10px; font-size: 13px; cursor: pointer; }
+  .chips input:checked + span { font-weight: 600; color: var(--vert-fonce); }
+  .photo { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--ligne); background: #f2f4f7; }
+  .reglage { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+  .reglage small { display: block; color: var(--gris); }
+  .connexion { max-width: 360px; margin: 60px auto; padding: 0 16px; }
+  .connexion h1 { text-align: center; font-size: 20px; margin: 0 0 18px; }
+  .connexion input[type=password] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; border: 1px solid #d0d5dd; border-radius: 8px; margin-bottom: 12px; }
+  .message { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
+  details summary { cursor: pointer; color: var(--vert-fonce); font-size: 14px; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 6px 4px; border-top: 1px solid var(--ligne); }
+  th { color: var(--gris); font-weight: 500; font-size: 13px; border-top: 0; }
+  td.n, th.n { text-align: right; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(() => {
+  const app = document.getElementById('app');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const heure = (iso) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+  const date = (iso) => (iso ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+  const qty = (n, unit) => `${(n / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 3 })}${unit === 'kg' ? ' kg' : unit === 'litre' ? ' L' : ''}`;
+  const ROLES = { admin: 'Administrateur', manager: 'Gérant', stock: 'Magasinier', cashier: 'Caissier', seller: 'Vendeur', buyer: 'Resp. achats', accountant: 'Comptable' };
+
+  let data = null;
+  let pairing = null;
+  let pairStore = localStorage.getItem('fedo.inventaire.magasin') || '';
+  let timer = null;
+  let countdown = null;
+
+  async function api(url, options) {
+    const res = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...options });
+    if (res.status === 401) { const err = new Error('Connectez-vous'); err.status = 401; throw err; }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || 'Erreur du serveur');
+    return body;
+  }
+
+  function login(message) {
+    clearInterval(timer);
+    app.innerHTML = `<div class="connexion">
+      <h1>Inventaire sur téléphone</h1>
+      ${message ? `<div class="message erreur">${esc(message)}</div>` : ''}
+      <form id="f">
+        <input type="password" id="mdp" placeholder="Mot de passe de FEDONIX 360 Serveur" autocomplete="current-password" autofocus>
+        <button class="principal" style="width:100%" type="submit">Se connecter</button>
+      </form>
+    </div>`;
+    document.getElementById('f').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api('/admin/api/login', { method: 'POST', body: JSON.stringify({ password: document.getElementById('mdp').value, remember: true }) });
+        load();
+      } catch (err) { login(err.message); }
+    };
+  }
+
+  async function load() {
+    try {
+      data = await api('/admin/api/mobile');
+      render();
+    } catch (err) {
+      if (err.status === 401) return login();
+      if (!data) app.innerHTML = `<main><div class="message erreur">${esc(err.message)}</div><button onclick="location.reload()">Réessayer</button></main>`;
+    }
+    clearInterval(timer);
+    timer = setInterval(() => document.visibilityState === 'visible' && !document.querySelector('details[open].garder') && load(), 30_000);
+  }
+
+  function pairingBlock() {
+    const stores = data.stores;
+    if (!stores.some((s) => s.id === pairStore)) pairStore = stores[0]?.id ?? '';
+    const left = pairing ? Math.max(0, Math.round((Date.parse(pairing.expiresAt) - Date.now()) / 1000)) : 0;
+    return `<section><h2>Relier un téléphone</h2>
+      <p class="muted" style="margin:0 0 8px">Installez l’application FEDONIX 360 Inventaire sur le téléphone du compteur, ouvrez-la puis scannez ce QR code. Le téléphone et ce serveur doivent être sur le même réseau Wi-Fi.</p>
+      <div class="ligne">
+        ${stores.length > 1 ? `<select id="pair-store">${stores.map((s) => `<option value="${esc(s.id)}" ${s.id === pairStore ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
+        <button class="principal" id="pair" ${stores.length ? '' : 'disabled'}>${pairing ? 'Nouveau QR code' : 'Afficher le QR code'}</button>
+      </div>
+      ${!stores.length ? '<p class="vide">Aucun magasin n’a encore envoyé ses données à ce serveur.</p>' : ''}
+      ${pairing ? `<div class="qr"><div class="img">${pairing.qr}</div><div>
+        <div class="muted">Magasin</div><div><b>${esc(pairing.storeName)}</b></div>
+        <div class="muted" style="margin-top:8px">Saisie à la main</div>
+        <div>Adresse : <b>${pairing.urls.map(esc).join('</b> ou <b>') || '—'}</b></div>
+        <div>Code : <span class="code">${esc(pairing.code.replace(/(.{4})/, '$1 '))}</span></div>
+        <div class="muted" id="reste" style="margin-top:8px">${left ? `Valable encore ${Math.floor(left / 60)} min ${String(left % 60).padStart(2, '0')} s, pour un seul téléphone` : 'Code expiré : affichez-en un nouveau'}</div>
+      </div></div>` : ''}
+    </section>`;
+  }
+
+  function inventoryBlock(inv) {
+    const pct = inv.total ? Math.round((inv.counted / inv.total) * 100) : 0;
+    const users = data.users.filter((u) => !u.storeId || u.storeId === inv.storeId);
+    const assigned = new Map(inv.assignments.map((a) => [a.userId, a.departmentIds]));
+    const deptName = new Map(inv.departments.map((d) => [d.id, d.name]));
+    return `<section>
+      <h2>Inventaire n° ${esc(inv.number)}${inv.label ? ` · ${esc(inv.label)}` : ''} <span class="n">${esc(inv.store)} · ${esc(inv.warehouse)}</span></h2>
+      <div class="muted" style="font-size:13px">${inv.kind === 'global' ? 'Global' : 'Partiel'} · date d’inventaire ${esc(inv.inventoryDate.split('-').reverse().join('/'))} · ouvert le ${date(inv.openedAt)}</div>
+      <div class="jauge"><div style="width:${pct}%"></div></div>
+      <div><b>${inv.counted}</b> produit(s) compté(s) sur ${inv.total} (${pct} %)</div>
+
+      <h3>Avancement par rayon</h3>
+      <table><tr><th>Rayon</th><th class="n">Comptés</th><th class="n">Reste</th><th>Compteurs</th></tr>
+      ${inv.departments.map((d) => {
+        const who = users.filter((u) => (assigned.get(u.id) || []).includes(d.id)).map((u) => esc(u.name)).join(', ');
+        return `<tr><td>${esc(d.name)}</td><td class="n">${d.counted} / ${d.total}</td><td class="n">${d.total - d.counted ? d.total - d.counted : '<span class="pastille ok">Fini</span>'}</td><td class="muted">${who}</td></tr>`;
+      }).join('')}</table>
+
+      <h3>Compteurs</h3>
+      ${inv.counters.length ? `<table><tr><th>Personne</th><th class="n">Produits</th><th class="n">Début</th><th class="n">Dernier</th><th class="n">Par heure</th></tr>
+        ${inv.counters.map((c) => `<tr><td>${esc(c.name)}${c.phone ? ' <span class="pastille non">téléphone</span>' : ''}</td><td class="n">${c.products}</td><td class="n">${heure(c.first)}</td><td class="n">${heure(c.last)}</td><td class="n">${c.perHour ?? '—'}</td></tr>`).join('')}</table>` : '<div class="vide">Personne n’a encore compté.</div>'}
+
+      <details class="garder"><summary>Confier des rayons aux compteurs</summary>
+        ${users.length ? users.map((u) => `<div style="margin-top:10px"><b>${esc(u.name)}</b> <span class="muted">${esc(ROLES[u.role] || u.role)}</span>
+          <div class="chips">${inv.departments.filter((d) => d.id).map((d) => `<label><input type="checkbox" data-assign="${esc(inv.id)}" data-user="${esc(u.id)}" value="${esc(d.id)}" ${(assigned.get(u.id) || []).includes(d.id) ? 'checked' : ''}><span>${esc(d.name)}</span></label>`).join('') || '<span class="vide">Aucun rayon.</span>'}</div></div>`).join('') : '<div class="vide">Aucun utilisateur n’a le droit de compter. Donnez-le dans Administration › Droits par rôle.</div>'}
+        <p class="muted" style="font-size:13px">Le compteur voit d’abord ses rayons dans l’application ; il peut quand même scanner les autres produits.</p>
+      </details>
+
+      ${data.settings.recount ? `<h3>À recompter <span class="muted" style="font-weight:400">(gros écart, une seule personne)</span></h3>
+        ${inv.recount.length ? `<div class="liste">${inv.recount.map((r) => `<div><div class="g">${esc(r.name)}<small>Compté par ${esc(r.byName)}</small></div><div class="m">${qty(r.counted, r.unit)}<small>attendu ${qty(r.expected, r.unit)}</small></div></div>`).join('')}</div><p class="muted" style="font-size:13px">Ces produits apparaissent dans « À recompter » sur le téléphone des autres compteurs.</p>` : '<div class="vide">Rien à recompter.</div>'}` : ''}
+    </section>`;
+  }
+
+  function render() {
+    if (!data) return;
+    const open = data.inventories;
+    const active = data.devices.filter((d) => !d.revoked);
+    app.innerHTML = `
+      <header><a href="/gerant">‹ Gérant</a><h1>Inventaire sur téléphone</h1><button id="actualiser" title="Actualiser">⟳</button></header>
+      <main>
+        ${pairingBlock()}
+        ${open.length ? open.map(inventoryBlock).join('') : '<section><h2>Inventaires en cours</h2><div class="vide">Aucun inventaire ouvert. Créez-le sur un PC dans Stock › Inventaires : il apparaît ici et sur les téléphones.</div></section>'}
+        <section><h2>Codes inconnus <span class="n">${data.unknowns.length}</span></h2>
+          ${data.unknowns.length ? `<div class="liste">${data.unknowns.map((u) => `<div>
+            ${u.hasPhoto ? `<a href="/admin/api/mobile/unknowns/${esc(u.id)}/photo" target="_blank"><img class="photo" loading="lazy" src="/admin/api/mobile/unknowns/${esc(u.id)}/photo" alt=""></a>` : '<div class="photo"></div>'}
+            <div class="g">${esc(u.note || 'Sans nom')}<small>${u.code ? `Code ${esc(u.code)} · ` : ''}${u.qty !== null ? `${qty(u.qty)} · ` : ''}${u.location ? `${esc(u.location)} · ` : ''}${esc(u.user)}, ${date(u.at)}</small></div>
+            <button class="petit" data-done="${esc(u.id)}">Traité</button></div>`).join('')}</div>
+            <p class="muted" style="font-size:13px">Créez l’article sur un PC (avec ce code-barres), puis comptez-le : il sera ajouté à l’inventaire.</p>` : '<div class="vide">Aucun code inconnu relevé.</div>'}</section>
+        <section><h2>Réglages</h2>
+          <label class="reglage"><input type="checkbox" id="r-recount" ${data.settings.recount ? 'checked' : ''}><span>Faire recompter les gros écarts<small>Un produit compté par une seule personne, loin du stock attendu, est proposé à un autre compteur.</small></span></label>
+          <label class="reglage"><input type="checkbox" id="r-expected" ${data.settings.showExpected ? 'checked' : ''}><span>Montrer le stock attendu aux compteurs<small>Décoché : comptage à l’aveugle (conseillé). Coché : comme la fiche « compté + attendu ».</small></span></label>
+        </section>
+        <section><h2>Téléphones reliés <span class="n">${active.length}</span></h2>
+          ${data.devices.length ? `<div class="liste">${data.devices.map((d) => `<div><div class="g">${esc(d.name)} ${d.revoked ? '<span class="pastille non">Délié</span>' : d.online ? '<span class="pastille ok">En ligne</span>' : ''}<small>${esc(d.store)} · relié le ${date(d.createdAt)}${d.lastSeenAt ? ` · vu ${date(d.lastSeenAt)}` : ''}</small></div>${d.revoked ? '' : `<button class="petit" data-revoke="${esc(d.id)}">Délier</button>`}</div>`).join('')}</div>` : '<div class="vide">Aucun téléphone relié.</div>'}
+        </section>
+      </main>`;
+    document.getElementById('actualiser').onclick = load;
+    const sel = document.getElementById('pair-store');
+    if (sel) sel.onchange = () => { pairStore = sel.value; pairing = null; try { localStorage.setItem('fedo.inventaire.magasin', pairStore); } catch {} render(); };
+    document.getElementById('pair').onclick = async () => {
+      try {
+        pairing = await api('/admin/api/mobile/pairing', { method: 'POST', body: JSON.stringify({ storeId: pairStore }) });
+        render();
+        clearInterval(countdown);
+        countdown = setInterval(() => {
+          const el = document.getElementById('reste');
+          if (!el || !pairing) return clearInterval(countdown);
+          const left = Math.max(0, Math.round((Date.parse(pairing.expiresAt) - Date.now()) / 1000));
+          el.textContent = left ? `Valable encore ${Math.floor(left / 60)} min ${String(left % 60).padStart(2, '0')} s, pour un seul téléphone` : 'Code expiré : affichez-en un nouveau';
+          if (!left) clearInterval(countdown);
+        }, 1000);
+      } catch (err) { alert(err.message); }
+    };
+    app.querySelectorAll('[data-assign]').forEach((box) => (box.onchange = async () => {
+      const inv = box.dataset.assign;
+      const user = box.dataset.user;
+      const ids = [...app.querySelectorAll(`[data-assign="${inv}"][data-user="${user}"]:checked`)].map((b) => b.value);
+      try { await api('/admin/api/mobile/assign', { method: 'POST', body: JSON.stringify({ inventoryId: inv, userId: user, departmentIds: ids }) }); } catch (err) { alert(err.message); }
+    }));
+    app.querySelectorAll('[data-done]').forEach((b) => (b.onclick = async () => { await api(`/admin/api/mobile/unknowns/${b.dataset.done}/done`, { method: 'POST' }).catch((e) => alert(e.message)); load(); }));
+    app.querySelectorAll('[data-revoke]').forEach((b) => (b.onclick = async () => {
+      if (!confirm('Délier ce téléphone ? Il ne pourra plus compter tant qu’il n’est pas relié de nouveau.')) return;
+      await api(`/admin/api/mobile/devices/${b.dataset.revoke}/revoke`, { method: 'POST' }).catch((e) => alert(e.message));
+      load();
+    }));
+    const save = async () => {
+      data.settings = await api('/admin/api/mobile/settings', { method: 'POST', body: JSON.stringify({ recount: document.getElementById('r-recount').checked, showExpected: document.getElementById('r-expected').checked }) }).catch((e) => (alert(e.message), data.settings));
+      load();
+    };
+    document.getElementById('r-recount').onchange = save;
+    document.getElementById('r-expected').onchange = save;
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

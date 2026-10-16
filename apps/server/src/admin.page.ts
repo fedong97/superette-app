@@ -7,6 +7,9 @@ export const ADMIN_PAGE = readFileSync(join(__dirname, 'admin.page.html'), 'utf8
 /** Page du gérant, faite pour le téléphone et installable comme une application. */
 export const MANAGER_PAGE = readFileSync(join(__dirname, 'manager.page.html'), 'utf8');
 
+/** Page du gérant pour l'inventaire sur téléphone : relier les téléphones, suivre les comptages. */
+export const INVENTORY_PAGE = readFileSync(join(__dirname, 'inventory.page.html'), 'utf8');
+
 let icon: Buffer | null | undefined;
 /** Icône de l'application du gérant : celle de FEDONIX 360 Serveur. */
 export function MANAGER_ICON(): Buffer | null {

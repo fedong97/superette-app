@@ -1,0 +1,40 @@
+# Installateurs Windows : FEDONIX 360 (caisse) et FEDONIX 360 Serveur, construits sur Windows
+# à chaque demande de fusion ou à la demande (Actions › Installateurs › Run workflow).
+# Les deux fichiers .exe se téléchargent dans l'onglet « Summary » de l'exécution (Artifacts).
+name: Installateurs
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: installateurs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Installateurs Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: FEDONIX 360
+        working-directory: apps/desktop
+        run: npx electron-vite build && npx electron-builder --win --x64 --publish never
+      - name: FEDONIX 360 Serveur
+        working-directory: apps/server-app
+        run: npm run build && npx electron-builder --win --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FEDONIX-360-installateurs
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/latest.yml
+            apps/server-app/release/*.exe
+          if-no-files-found: error
+          retention-days: 30

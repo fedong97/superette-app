@@ -78,6 +78,9 @@ import {
   type User,
   type DeliveryInput,
   type DeliveryStatus,
+  type MobileMethod,
+  type MtnConfig,
+  type OrangeConfig,
 } from '@superette/db';
 
 import type { SyncRunner } from './sync';
@@ -1308,6 +1311,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.customers.saveCustomer(u.id, { ...input, creditLimit: input.creditLimit ?? credit, paymentTermsDays: input.paymentTermsDays ?? terms }, id);
     },
     'customers.account': (id: string) => s.customers.account(ctx().storeId, id),
+    'mobilepay.methods': () => (requireUser(), s.mobilePay.enabled()),
+    'mobilepay.config': () => (requireUser(['settings_edit']), s.mobilePay.config()),
+    'mobilepay.saveConfig': (method: MobileMethod, patch: Partial<MtnConfig> | Partial<OrangeConfig>) => s.mobilePay.saveConfig(requireUser(['settings_edit']).id, method, patch),
+    'mobilepay.setupSandbox': () => s.mobilePay.setupMtnSandbox(requireUser(['settings_edit']).id),
+    'mobilepay.request': (input: { method: MobileMethod; phone: string; amount: Fcfa; label?: string | null }) => s.mobilePay.request(ctx(), input),
+    'mobilepay.status': (id: string) => (requireUser(), s.mobilePay.status(id)),
+    'mobilepay.cancel': (id: string) => s.mobilePay.cancel(ctx(), id),
+    'mobilepay.list': () => s.mobilePay.list(ctx(['settings_edit']).storeId),
     'loyalty.status': (customerId: string) => (requireUser(), s.loyalty.status(ctx().storeId, customerId)),
     'loyalty.history': (customerId: string) => (requireUser(['customers']), s.loyalty.history(customerId)),
     'loyalty.balances': () => (requireUser(['customers']), Object.fromEntries(s.loyalty.balances())),

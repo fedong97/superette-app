@@ -823,6 +823,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         cashRounding={settings.cashRounding}
         allowCredit={Boolean(customer)}
         loyalty={fidelity.data?.enabled ? fidelity.data : null}
+        payerPhone={customer?.phone ?? null}
         onClose={() => setDialog(null)}
         onPaid={async (payments, supervisorPin) => {
           setDialog(null);

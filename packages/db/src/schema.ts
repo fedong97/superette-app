@@ -1546,4 +1546,29 @@ ALTER TABLE staff ADD COLUMN declared INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE staff ADD COLUMN cnps_number TEXT;
 `,
   },
+  {
+    version: 38,
+    name: 'paiement mobile automatique',
+    sql: `
+-- Demandes de paiement envoyées au téléphone du client (MTN MoMo, Orange Money), propres à ce poste.
+CREATE TABLE mobile_payments (
+  id TEXT PRIMARY KEY,
+  method TEXT NOT NULL CHECK (method IN ('MTN_MOMO', 'ORANGE_MONEY')),
+  mode TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'success', 'failed', 'cancelled')),
+  provider_ref TEXT,
+  transaction_id TEXT,
+  reason TEXT,
+  store_id TEXT,
+  register_id TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX mobile_payments_store ON mobile_payments(store_id, created_at);
+`,
+  },
 ];

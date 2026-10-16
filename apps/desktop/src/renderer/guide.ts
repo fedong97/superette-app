@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.54.0',
+    items: [
+      'Paiement Mobile Money automatique : à l’encaissement, MTN MoMo ou Orange Money › « Demander le paiement » envoie la demande au téléphone du client ; il confirme avec son code et la référence s’ajoute toute seule.',
+      'Administration › Paiement mobile : mode Simulation (sans compte, pour essayer et former), Test MTN (sandbox, avec un compte développeur gratuit) ou Réel (clés du compte marchand MTN ou Orange). Les clés restent sur le PC.',
+      'Historique des demandes avec leur état (payé, refusé avec le motif, abandonné) et le numéro de transaction.',
+    ],
+  },
+  {
     version: '0.53.0',
     items: [
       'Page du gérant sur le téléphone : ouvrez l’adresse du serveur suivie de /gerant (par exemple http://192.168.1.10:8080/gerant), avec le mot de passe de FEDONIX 360 Serveur.',

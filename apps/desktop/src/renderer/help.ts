@@ -53,6 +53,7 @@ const POS: PageHelp = {
       title: 'Payer par Mobile Money, carte ou chèque',
       steps: [
         '« Encaisser » (Ctrl+E) ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
+        'Paiement mobile réglé sur ce PC : avec MTN MoMo ou Orange Money, tapez le téléphone du client et « Demander le paiement » ; il confirme sur son téléphone et le paiement s’ajoute avec sa référence.',
         'Un paiement peut être mixte : une partie en espèces, le reste en MTN par exemple.',
         'Chaque paiement va dans la caisse de son type : MTN, Orange et carte à votre caisse électronique, virement et chèque à votre caisse banque.',
       ],
@@ -450,6 +451,15 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Le PC cherche une nouvelle version au démarrage puis toutes les 4 heures, sur le serveur central ou à l’adresse saisie ici.',
           'La version téléchargée s’installe à la fermeture du logiciel, ou tout de suite avec « Installer maintenant ».',
           'Pour proposer une version aux PC : FEDONIX 360 Serveur › Mises à jour › déposer le fichier Fedonix360-Setup-x.y.z.exe.',
+        ],
+      },
+      {
+        tab: 'mobilepay',
+        title: 'Paiement mobile',
+        steps: [
+          'Choisissez le mode de MTN MoMo et d’Orange Money sur ce PC : Simulation pour essayer sans compte, Test MTN avec la clé d’abonnement de momodeveloper.mtn.com, ou Réel avec les clés du compte marchand.',
+          'Test MTN : enregistrez la clé d’abonnement « Collections », puis « Créer l’accès de test ». Numéro de test 46733123453 (payé) ou 46733123450 (refusé).',
+          'Les clés restent sur ce PC ; réglez chaque PC qui encaisse par Mobile Money. « Dernières demandes » montre chaque demande, son état et son numéro de transaction.',
         ],
       },
       {

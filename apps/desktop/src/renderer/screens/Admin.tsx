@@ -5,6 +5,7 @@ import { ROLE_LABELS } from '../App';
 import { askConfirm, Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
+import { MobilePay } from './AdminMobilePay';
 import { Settings } from './AdminSettings';
 import { PrintTemplates } from './PrintTemplates';
 import { FiscalYears } from './Accounting';
@@ -14,7 +15,7 @@ import serverLogo from '../assets/logo-serveur.png';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -34,6 +35,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ...(can('accounting') || can('fiscal_years') ? ([['fiscal', 'Exercices comptables']] as [Tab, string][]) : []),
     ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
+    ...(can('settings_edit') ? ([['mobilepay', 'Paiement mobile']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
     ['updates', 'Mises à jour'],
     ['license', 'Licence'],
@@ -74,6 +76,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'fiscal' && (can('accounting') || can('fiscal_years')) && <FiscalYears />}
       {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
+      {tab === 'mobilepay' && can('settings_edit') && <MobilePay />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'updates' && <SoftwareUpdates isAdmin={user.role === 'admin'} />}
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}

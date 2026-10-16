@@ -482,7 +482,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         tab: 'list',
         title: 'Ajouter un collaborateur',
         steps: [
-          '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée.',
+          '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée, n° CNPS, et s’il est déclaré (retenues légales sur ses salaires).',
           'Choisissez son compte de rattachement : Personnel (4211, par défaut), CNPS (4311), État (4471), Associés (4621) ou un autre compte de la classe 4.',
           'Deux sous-comptes sont créés à son nom : sous le compte de rattachement pour ses salaires dus (4211001…), et 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
           'Le rattachement ne change plus une fois qu’il a des écritures.',
@@ -495,7 +495,9 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Choisissez le mois : le salaire de base et les avances à retenir sont proposés. Corrigez si besoin, puis « Constater les salaires ».',
           '« Payer… » règle le net au bureau (caisse centrale, MoMo/OM ou banque). À la caisse : Décaisser › Remboursement / Prêt › Salaire.',
-          '« Bulletin » imprime le bulletin de paie simplifié. Les retenues CNPS et IRPP ne sont pas calculées dans cette version.',
+          'Paie activée (Administration › Paramètres › Paie) : la colonne « Retenues légales » montre la CNPS et les impôts retenus (IRPP, CAC, CFC, RAV, TDL) pour chaque collaborateur déclaré ; le net en tient compte.',
+          '« Bulletin » imprime le bulletin de paie : brut, retenues ligne par ligne, avances, net, et charges patronales pour information.',
+          '« Imprimer l’état du mois » donne ce qu’il faut verser à la CNPS (4311) et aux impôts (4471). Le versement se fait par Décaisser › Autre, sur le compte 4311 ou 4471.',
         ],
       },
       { tab: 'statement', title: 'Extrait de compte', steps: ['Salaires constatés et payés, avances versées, remboursées ou retenues, avec les deux soldes après chaque ligne.'] },

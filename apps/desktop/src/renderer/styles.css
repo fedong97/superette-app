@@ -579,6 +579,7 @@ table.rights tr.selected td { background: var(--brand-soft); }
 .settings-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: center; padding: 8px 0; border-top: 1px solid #f0f2f6; }
 .settings-row:first-of-type { border-top: none; }
 .settings-row input:not([type='checkbox']):not(.qty), .settings-row select { width: 100%; }
+.payroll-scales { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
 .settings-row small { display: block; font-weight: 600; }
 .logo-preview { max-height: 56px; max-width: 160px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 label.button { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 8px 14px; cursor: pointer; white-space: nowrap; }

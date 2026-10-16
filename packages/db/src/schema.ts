@@ -1530,4 +1530,20 @@ CREATE TABLE customer_reminders (
 CREATE INDEX customer_reminders_customer ON customer_reminders(store_id, customer_id, at);
 `,
   },
+  {
+    version: 37,
+    name: 'retenues légales sur salaire',
+    sql: `
+-- Retenues légales du salaire (CNPS salariale ; IRPP, CAC, CFC, RAV, TDL) et charges patronales
+-- (CNPS patronale ; CFC patronal et FNE), avec le détail ligne par ligne en JSON pour le bulletin.
+ALTER TABLE staff_salaries ADD COLUMN cnps INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN tax INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN employer_social INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN employer_tax INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff_salaries ADD COLUMN payroll TEXT;
+-- Collaborateur déclaré à la CNPS et aux impôts : ses salaires portent les retenues légales.
+ALTER TABLE staff ADD COLUMN declared INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE staff ADD COLUMN cnps_number TEXT;
+`,
+  },
 ];

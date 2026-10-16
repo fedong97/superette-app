@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.52.0',
+    items: [
+      'Paie avec retenues légales (Administration › Paramètres › Paie) : CNPS, IRPP, CAC, crédit foncier, redevance audiovisuelle et TDL au barème camerounais, tous modifiables.',
+      'Salaires du mois : les retenues se calculent sur le brut des collaborateurs déclarés, avec la part patronale (CNPS, CFC, FNE) ; le bulletin les détaille avec le coût total pour l’employeur.',
+      'Les écritures suivent : retenues vers la CNPS (4311) et l’État (4471), charges patronales en 664 et 641. « Imprimer l’état du mois » donne les montants à verser.',
+    ],
+  },
+  {
     version: '0.51.0',
     items: [
       'Relances par WhatsApp : dans Client › Situation (balance âgée) ou le compte d’un client, « Relancer » ouvre WhatsApp avec un message prêt (solde, retard, factures dues), modifiable avant l’envoi.',

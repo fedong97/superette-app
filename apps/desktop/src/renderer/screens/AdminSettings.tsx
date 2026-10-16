@@ -1,4 +1,4 @@
-import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -116,6 +116,26 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   );
   const text = (k: keyof StoreSettings, placeholder?: string) => (
     <input disabled={!canEdit} value={String(sv(k))} placeholder={placeholder} onChange={(e) => sset(k, e.target.value as never)} />
+  );
+  const pay = sv('payroll');
+  const pset = (patch: Partial<PayrollRules>) => sset('payroll', { ...pay, ...patch });
+  const prate = (k: 'cnpsEmployee' | 'cnpsEmployer' | 'accident' | 'professional' | 'cac' | 'cfcEmployee' | 'cfcEmployer' | 'fne') => (
+    <span className="inline">
+      <PctInput disabled={!canEdit} value={pay[k]} onChange={(n) => pset({ [k]: n })} />
+      <span className="muted">%</span>
+    </span>
+  );
+  const pamount = (k: 'cnpsCeiling' | 'annualAbatement' | 'irppThreshold') => (
+    <span className="inline">
+      <input
+        inputMode="numeric"
+        disabled={!canEdit}
+        className="qty"
+        value={String(pay[k])}
+        onChange={(e) => pset({ [k]: Number(e.target.value.replace(/\D/g, '') || 0) })}
+      />
+      <span className="muted">FCFA</span>
+    </span>
   );
   const iv = (k: keyof StoreIdentity) => identity[k] ?? (st[k] as string | null) ?? '';
   const ident = (k: keyof StoreIdentity, placeholder?: string) => (
@@ -529,6 +549,49 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       ],
     ],
     [
+      'Paie',
+      'Retenues légales sur les salaires des collaborateurs déclarés (Collaborateurs et salaires) et charges patronales, au barème camerounais. Modifiez un taux si la loi de finances le change.',
+      [
+        {
+          label: 'Calculer les retenues CNPS, IRPP, CAC, CFC, RAV et TDL',
+          hint: 'Non : le salaire saisi est payé tel quel, comme avant.',
+          render: () => (
+            <select disabled={!canEdit} value={pay.enabled ? '1' : '0'} onChange={(e) => pset({ enabled: e.target.value === '1' })}>
+              <option value="1">Oui</option>
+              <option value="0">Non</option>
+            </select>
+          ),
+        },
+        { label: 'CNPS, pension vieillesse, part salariale', hint: '4,2 % du brut plafonné', render: () => prate('cnpsEmployee') },
+        { label: 'CNPS, part patronale (pension et prestations familiales)', hint: '4,2 % + 7 % du brut plafonné', render: () => prate('cnpsEmployer') },
+        { label: 'CNPS, accidents du travail (part patronale)', hint: 'Sur tout le brut. Groupe A 1,75 %, B 2,5 %, C 5 %', render: () => prate('accident') },
+        { label: 'Plafond mensuel de la CNPS', render: () => pamount('cnpsCeiling') },
+        { label: 'IRPP : abattement pour frais professionnels', hint: '30 % du brut', render: () => prate('professional') },
+        { label: 'IRPP : abattement annuel', render: () => pamount('annualAbatement') },
+        { label: 'Pas d’IRPP sous ce salaire brut mensuel', render: () => pamount('irppThreshold') },
+        { label: 'Centimes additionnels communaux (CAC)', hint: 'En % de l’IRPP', render: () => prate('cac') },
+        { label: 'Crédit foncier, part salariale', render: () => prate('cfcEmployee') },
+        { label: 'Crédit foncier, part patronale', render: () => prate('cfcEmployer') },
+        { label: 'Fonds national de l’emploi (FNE), part patronale', render: () => prate('fne') },
+        {
+          label: 'Barèmes IRPP, RAV et TDL',
+          wide: true,
+          render: () => (
+            <div className="payroll-scales">
+              <Brackets title="Barème annuel de l’IRPP" unit="%" rate disabled={!canEdit} value={pay.irpp} onChange={(irpp) => pset({ irpp })} />
+              <Brackets title="Redevance audiovisuelle (RAV), par mois" unit="FCFA" disabled={!canEdit} value={pay.rav} onChange={(rav) => pset({ rav })} />
+              <Brackets title="Taxe de développement local (TDL), par mois" unit="FCFA" disabled={!canEdit} value={pay.tdl} onChange={(tdl) => pset({ tdl })} />
+              <div>
+                <button className="ghost" disabled={!canEdit} onClick={() => sset('payroll', { ...DEFAULT_PAYROLL, enabled: pay.enabled })}>
+                  Remettre les taux et barèmes du logiciel
+                </button>
+              </div>
+            </div>
+          ),
+        },
+      ],
+    ],
+    [
       'Stock',
       '',
       [
@@ -813,5 +876,99 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       ))}
       {!shown.length && <Empty>Aucun paramètre ne correspond. Essayez un autre mot.</Empty>}
     </div>
+  );
+}
+
+/** Taux saisi en pourcentage (« 4,2 ») et gardé en centièmes de % (420). */
+function PctInput({ value, onChange, disabled }: { value: number; onChange: (n: number) => void; disabled?: boolean }) {
+  const shown = (value / 100).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <input
+      inputMode="decimal"
+      className="qty"
+      disabled={disabled}
+      value={text ?? shown}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        if (text === null) return;
+        const n = Math.round(Number(text.replace(',', '.').replace(/\s/g, '')) * 100);
+        if (Number.isFinite(n) && n >= 0 && n <= 10_000) onChange(n);
+        setText(null);
+      }}
+    />
+  );
+}
+
+/** Barème par tranches : borne haute de chaque tranche (vide pour la dernière) et taux ou montant. */
+function Brackets({ title, unit, rate, value, onChange, disabled }: { title: string; unit: string; rate?: boolean; value: PayrollBracket[]; onChange: (v: PayrollBracket[]) => void; disabled?: boolean }) {
+  const up = (i: number, patch: Partial<PayrollBracket>) => onChange(value.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+  const digits = (s: string) => Number(s.replace(/\D/g, '') || 0);
+  return (
+    <table className="list compact">
+      <thead>
+        <tr>
+          <th colSpan={3}>{title}</th>
+        </tr>
+        <tr>
+          <th>Jusqu’à (FCFA)</th>
+          <th className="r">{rate ? 'Taux' : 'Montant'}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {value.map((b, i) => (
+          <tr key={i}>
+            <td>
+              {i === value.length - 1 ? (
+                <span className="muted">au-delà</span>
+              ) : (
+                <input inputMode="numeric" className="qty" disabled={disabled} value={String(b.upTo ?? '')} onChange={(e) => up(i, { upTo: digits(e.target.value) })} />
+              )}
+            </td>
+            <td className="r">
+              <span className="inline">
+                {rate ? (
+                  <PctInput disabled={disabled} value={b.value} onChange={(n) => up(i, { value: n })} />
+                ) : (
+                  <input inputMode="numeric" className="qty" disabled={disabled} value={String(b.value)} onChange={(e) => up(i, { value: digits(e.target.value) })} />
+                )}
+                <span className="muted">{unit}</span>
+              </span>
+            </td>
+            <td>
+              {value.length > 1 && (
+                <button
+                  className="link danger"
+                  disabled={disabled}
+                  onClick={() => {
+                    const next = value.filter((_, j) => j !== i);
+                    next[next.length - 1] = { ...next[next.length - 1]!, upTo: null };
+                    onChange(next);
+                  }}
+                >
+                  Retirer
+                </button>
+              )}
+            </td>
+          </tr>
+        ))}
+        <tr>
+          <td colSpan={3}>
+            <button
+              className="link"
+              disabled={disabled}
+              onClick={() => {
+                const last = value[value.length - 1];
+                const prev = value.length > 1 ? (value[value.length - 2]!.upTo ?? 0) : 0;
+                onChange([...value.slice(0, -1), { upTo: prev + 100_000, value: last?.value ?? 0 }, { upTo: null, value: last?.value ?? 0 }]);
+              }}
+            >
+              Ajouter une tranche
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   );
 }

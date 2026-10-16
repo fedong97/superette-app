@@ -2,6 +2,7 @@ import { BrowserWindow, dialog, nativeImage } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import {
   PAYMENT_METHODS,
+  PAYROLL_LABELS,
   type Codepage,
   type Receipt,
   describeInPacks,
@@ -828,7 +829,19 @@ export function createPrinter(s: Services): Printer {
     },
 
     async salarySlip(salaryId) {
-      const { salary: x, staff: st, payments, periodLabel } = s.staff.slip(salaryId);
+      const { salary: x, staff: st, payments, payroll: p, periodLabel } = s.staff.slip(salaryId);
+      const legal = p
+        ? (['cnps', 'irpp', 'cac', 'cfc', 'rav', 'tdl'] as const)
+            .filter((k) => p[k])
+            .map((k) => `<tr><td>${esc(PAYROLL_LABELS[k])}</td><td class="r">-${money(p[k])}</td></tr>`)
+            .join('') + `<tr class="total"><td>Net après retenues légales</td><td class="r">${money(p.net)}</td></tr>`
+        : '';
+      const employer = p
+        ? `<h3>Charges patronales (pour information)</h3><table class="totals" style="width:100%">${(['employerCnps', 'employerCfc', 'employerFne'] as const)
+            .filter((k) => p[k])
+            .map((k) => `<tr><td>${esc(PAYROLL_LABELS[k])}</td><td class="r">${money(p[k])}</td></tr>`)
+            .join('')}<tr class="total"><td>Coût total pour l'employeur</td><td class="r">${money(x.gross + p.employerSocial + p.employerTax)}</td></tr></table>`
+        : '';
       const store = s.admin.getStore(x.store_id);
       const pays = payments
         .map((p) => `<tr><td>${dateFr(p.at)}</td><td>${esc(p.number)}</td><td>${esc(PAYMENT_METHODS[p.method as 'CASH'] ?? p.method)}${p.reference ? ` · ${esc(p.reference)}` : ''}${p.register_name ? ` · ${esc(p.register_name)}` : ''}</td><td class="r">${money(p.amount)}</td></tr>`)
@@ -836,17 +849,39 @@ export function createPrinter(s: Services): Printer {
       await printA4(`${a4Head(store)}
         <h1>Bulletin de paie, ${esc(periodLabel)}</h1>
         <div class="box" style="margin-bottom:6mm"><b>${esc(st.name)}</b>${st.position ? ` · ${esc(st.position)}` : ''}<br>
-          Matricule ${esc(st.code)}${st.id_card ? ` · CNI ${esc(st.id_card)}` : ''}${st.phone ? ` · ${esc(st.phone)}` : ''}${st.hired_on ? `<br>Entré(e) le ${dayFr(st.hired_on)}` : ''}</div>
+          Matricule ${esc(st.code)}${st.cnps_number ? ` · CNPS ${esc(st.cnps_number)}` : ''}${st.id_card ? ` · CNI ${esc(st.id_card)}` : ''}${st.phone ? ` · ${esc(st.phone)}` : ''}${st.hired_on ? `<br>Entré(e) le ${dayFr(st.hired_on)}` : ''}</div>
         <table class="totals" style="width:100%">
           <tr><td>Salaire brut du mois</td><td class="r">${money(x.gross)}</td></tr>
+          ${legal}
           <tr><td>Avances et acomptes retenus</td><td class="r">${x.deducted ? `-${money(x.deducted)}` : '0'}</td></tr>
           <tr class="total"><td>Net à payer</td><td class="r">${money(x.net)}</td></tr>
           <tr><td>Déjà payé</td><td class="r">${money(x.paid)}</td></tr>
           <tr class="total"><td>Reste à payer</td><td class="r">${money(x.rest)}</td></tr>
         </table>
         ${pays ? `<h3>Paiements</h3><table><thead><tr><th>Date</th><th>Pièce</th><th>Mode</th><th class="r">Montant</th></tr></thead><tbody>${pays}</tbody></table>` : ''}
-        <p class="muted">Avances restant à rembourser : ${money(Math.max(0, st.advances))} FCFA. Retenues CNPS et IRPP non calculées dans cette version.</p>
+        ${employer}
+        <p class="muted">Avances restant à rembourser : ${money(Math.max(0, st.advances))} FCFA.${p ? '' : ' Sans retenues légales (paie non activée ou collaborateur non déclaré).'}</p>
         <div style="display:flex;justify-content:space-between;margin-top:16mm"><div>Le collaborateur</div><div>L'employeur</div></div>`);
+    },
+
+    async payrollDeclarations(storeId, period) {
+      const d = s.staff.declarations(storeId, period);
+      const store = s.admin.getStore(storeId);
+      const rows = d.rows
+        .map(
+          (r) =>
+            `<tr><td>${esc(r.staff_name)}</td><td class="r">${money(r.gross)}</td><td class="r">${money(r.detail.employeeCnps)}</td><td class="r">${money(r.detail.employerSocial)}</td><td class="r">${money(r.detail.irpp + r.detail.cac)}</td><td class="r">${money(r.detail.cfc + r.detail.employerCfc)}</td><td class="r">${money(r.detail.employerFne)}</td><td class="r">${money(r.detail.rav)}</td><td class="r">${money(r.detail.tdl)}</td></tr>`,
+        )
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Charges sociales et fiscales sur salaires, ${esc(d.label)}</h1>
+        <table><thead><tr><th>Collaborateur</th><th class="r">Brut</th><th class="r">CNPS sal.</th><th class="r">CNPS pat.</th><th class="r">IRPP + CAC</th><th class="r">CFC</th><th class="r">FNE</th><th class="r">RAV</th><th class="r">TDL</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+        <table class="totals" style="width:100%;margin-top:6mm">
+          <tr><td>Masse salariale brute</td><td class="r">${money(d.gross)}</td></tr>
+          <tr class="total"><td>À verser à la CNPS (compte 4311)</td><td class="r">${money(d.cnps)}</td></tr>
+          <tr class="total"><td>À verser aux impôts (compte 4471) : IRPP ${money(d.irpp)}, CAC ${money(d.cac)}, CFC ${money(d.cfc)}, FNE ${money(d.fne)}, RAV ${money(d.rav)}, TDL ${money(d.tdl)}</td><td class="r">${money(d.state)}</td></tr>
+        </table>`);
     },
 
     async staffStatement(staffId, from, to) {

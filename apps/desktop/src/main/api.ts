@@ -146,6 +146,7 @@ export interface Printer {
   /** Décharge A4 à faire signer par le bénéficiaire d'une sortie. */
   discharge(sessionId: string, source: string, id: string): Promise<void>;
   salarySlip(salaryId: string): Promise<void>;
+  payrollDeclarations(storeId: string, period: string): Promise<void>;
   staffStatement(staffId: string, from?: string | null, to?: string | null): Promise<void>;
   /** Bon d'une avance, d'un salaire ou d'un remboursement fait au bureau. */
   officeVoucher(entryId: string): Promise<void>;
@@ -1195,6 +1196,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa }[]) => s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
     'staff.cancelSalary': (id: string, reason: string) => s.staff.cancelSalary(ctx(['staff_salaries']), id, reason),
     'staff.salaries': (opts?: { period?: string | null; staffId?: string | null; unpaid?: boolean }) => s.staff.salaries(ctx(STAFF).storeId, opts ?? {}),
+    'staff.declarations': (period: string) => s.staff.declarations(ctx(['staff_salaries']).storeId, period),
+    'staff.printDeclarations': (period: string) => printer.payrollDeclarations(ctx(['staff_salaries']).storeId, period),
     'staff.printSlip': (salaryId: string) => (requireUser(STAFF), printer.salarySlip(salaryId)),
     'staff.entries': (staffId?: string | null) => s.cashdesk.officeEntries(ctx(STAFF).storeId, { staffId: staffId ?? null }),
     /** Au bureau : salaire, avance ou remboursement en espèces (caisse centrale), MoMo/OM ou banque. */

@@ -1,5 +1,6 @@
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
 import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
+import { DEFAULT_PAYROLL, normalizePayroll, type PayrollRules } from './payroll';
 
 /**
  * Paramètres du magasin (Administration › Paramètres) : règles de vente, de
@@ -98,6 +99,9 @@ export interface StoreSettings {
   /** Points à avoir au minimum pour payer avec. */
   loyaltyMinRedeem: number;
 
+  /** Paie : retenues légales (CNPS, IRPP, CAC, CFC, RAV, TDL) et charges patronales. */
+  payroll: PayrollRules;
+
   /** Modèles d'impression modifiés ou ajoutés (ceux du logiciel servent pour le reste). */
   printTemplates: DocTemplate[];
   /** Modèle choisi par emplacement (« invoice.a4.credit ») : identifiant de modèle. */
@@ -152,6 +156,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   loyaltySpendPerPoint: 1000,
   loyaltyPointValue: 10,
   loyaltyMinRedeem: 100,
+  payroll: DEFAULT_PAYROLL,
   printTemplates: [],
   printDefaults: {},
 };
@@ -193,6 +198,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       next.printTemplates = normalizeTemplates(raw);
     } else if (k === 'printDefaults') {
       next.printDefaults = normalizeDefaults(raw);
+    } else if (k === 'payroll') {
+      next.payroll = normalizePayroll(raw);
     } else if (typeof def === 'boolean') {
       (next as unknown as Record<string, unknown>)[k] = Boolean(raw);
     } else if (typeof def === 'number') {
@@ -225,7 +232,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
 export function parseStoreSettings(json: string | null | undefined): StoreSettings {
   if (!json) return { ...DEFAULT_STORE_SETTINGS };
   try {
-    return { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
+    const parsed = { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
+    return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll } };
   } catch {
     return { ...DEFAULT_STORE_SETTINGS };
   }

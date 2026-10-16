@@ -1,5 +1,7 @@
-import type { Fcfa } from '@superette/core';
-import { AppError, Base, type Context, newId } from './util';
+import { computePayroll, type Fcfa, type Payroll } from '@superette/core';
+import type { AdminService } from './admin';
+import type { Db } from './database';
+import { AppError, Base, type Clock, type Context, newId } from './util';
 
 /** Racines des sous-comptes de tiers du personnel : rémunérations dues et avances. */
 export const STAFF_SALARY_ROOT = '4211';
@@ -14,6 +16,8 @@ export const STAFF_PARENTS: Record<string, string> = {
 export const STAFF_ADVANCE_ROOT = '4251';
 /** Compte de charge des salaires constatés. */
 export const STAFF_WAGES_ACCOUNT = '661';
+/** Comptes des retenues légales et charges patronales. */
+export const PAYROLL_ACCOUNTS = { cnps: '4311', state: '4471', social: '664', taxes: '641' } as const;
 
 export interface Staff {
   id: string;
@@ -33,6 +37,9 @@ export interface Staff {
   parent_label: string | null;
   advance_account: string;
   active: number;
+  /** Déclaré à la CNPS et aux impôts : ses salaires portent les retenues légales. */
+  declared: number;
+  cnps_number: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -51,6 +58,9 @@ export interface StaffInput {
   /** Compte de rattachement (4211 Personnel par défaut, 4311, 4471, 4621 ou un autre compte de la classe 4). */
   parentAccount?: string | null;
   active?: boolean;
+  /** Déclaré (retenues légales sur ses salaires) ; oui par défaut. */
+  declared?: boolean;
+  cnpsNumber?: string | null;
   notes?: string | null;
 }
 
@@ -69,7 +79,15 @@ export interface StaffSalary {
   period: string;
   gross: Fcfa;
   deducted: Fcfa;
-  /** Net à payer : brut moins les avances retenues. */
+  /** CNPS salariale retenue. */
+  cnps: Fcfa;
+  /** Impôts retenus : IRPP, CAC, CFC, RAV, TDL. */
+  tax: Fcfa;
+  employer_social: Fcfa;
+  employer_tax: Fcfa;
+  /** Détail des retenues et charges (JSON), absent sans retenues légales. */
+  payroll: string | null;
+  /** Net à payer : brut moins les retenues légales et les avances retenues. */
   net: Fcfa;
   paid: Fcfa;
   rest: Fcfa;
@@ -104,6 +122,14 @@ export const periodLabel = (period: string) => `${MONTHS[Number(period.slice(5, 
  * le salaire.
  */
 export class StaffService extends Base {
+  constructor(
+    db: Db,
+    clock: Clock,
+    private readonly admin?: AdminService,
+  ) {
+    super(db, clock);
+  }
+
   private query(where: string) {
     return this.db.prepare(
       `SELECT s.*, u.name AS user_name, pa.label AS parent_label FROM staff s LEFT JOIN users u ON u.id = s.user_id
@@ -232,6 +258,8 @@ export class StaffService extends Base {
         hired_on: input.hiredOn || null,
         user_id: input.userId || null,
         active: input.active === false ? 0 : 1,
+        declared: input.declared === undefined ? (current?.declared ?? 1) : input.declared ? 1 : 0,
+        cnps_number: input.cnpsNumber === undefined ? (current?.cnps_number ?? null) : input.cnpsNumber?.trim() || null,
         notes: input.notes?.trim() || null,
         now,
       };
@@ -268,6 +296,7 @@ export class StaffService extends Base {
           });
       }
       if (!current) this.db.prepare('UPDATE staff SET parent_account = ? WHERE id = ?').run(parent.id, staffId);
+      this.db.prepare('UPDATE staff SET declared = ?, cnps_number = ? WHERE id = ?').run(values.declared, values.cnps_number, staffId);
       const s = this.query('s.id = ?').get(staffId) as Staff;
       // Les libellés des sous-comptes suivent le nom du collaborateur.
       this.saveAccount(s.salary_account, this.subLabel(parent, name), now);
@@ -282,8 +311,10 @@ export class StaffService extends Base {
 
   balance(staffId: string): StaffBalance {
     const sal = this.db
-      .prepare("SELECT COALESCE(SUM(gross), 0) AS gross, COALESCE(SUM(deducted), 0) AS deducted FROM staff_salaries WHERE staff_id = ? AND status = 'active'")
-      .get(staffId) as { gross: number; deducted: number };
+      .prepare(
+        "SELECT COALESCE(SUM(gross), 0) AS gross, COALESCE(SUM(deducted), 0) AS deducted, COALESCE(SUM(cnps + tax), 0) AS legal FROM staff_salaries WHERE staff_id = ? AND status = 'active'",
+      )
+      .get(staffId) as { gross: number; deducted: number; legal: number };
     const ent = this.db
       .prepare(
         `SELECT COALESCE(SUM(CASE WHEN kind = 'staff_salary' THEN amount END), 0) AS paid,
@@ -292,7 +323,7 @@ export class StaffService extends Base {
          FROM treasury_entries WHERE staff_id = ? AND status = 'active'`,
       )
       .get(staffId) as { paid: number; lent: number; repaid: number };
-    return { due: sal.gross - sal.deducted - ent.paid, advances: ent.lent - ent.repaid - sal.deducted };
+    return { due: sal.gross - sal.legal - sal.deducted - ent.paid, advances: ent.lent - ent.repaid - sal.deducted };
   }
 
   /** Extrait de compte : salaires constatés et payés, avances versées, remboursées ou retenues. */
@@ -301,6 +332,8 @@ export class StaffService extends Base {
     const raw = this.db
       .prepare(
         `SELECT at, number, label, gross AS due, 0 AS advance FROM staff_salaries WHERE staff_id = @id AND status = 'active'
+         UNION ALL
+         SELECT at, number, 'Retenues CNPS et impôts sur ' || label, -(cnps + tax), 0 FROM staff_salaries WHERE staff_id = @id AND status = 'active' AND cnps + tax > 0
          UNION ALL
          SELECT at, number, 'Avances retenues sur ' || label, -deducted, -deducted FROM staff_salaries WHERE staff_id = @id AND status = 'active' AND deducted > 0
          UNION ALL
@@ -339,7 +372,7 @@ export class StaffService extends Base {
 
   private salaryQuery(where: string) {
     return this.db.prepare(
-      `SELECT x.*, s.name AS staff_name, u.name AS user_name, x.gross - x.deducted AS net,
+      `SELECT x.*, s.name AS staff_name, u.name AS user_name, x.gross - x.cnps - x.tax - x.deducted AS net,
               COALESCE((SELECT SUM(e.amount) FROM treasury_entries e WHERE e.salary_id = x.id AND e.status = 'active'), 0) AS paid
        FROM staff_salaries x JOIN staff s ON s.id = x.staff_id LEFT JOIN users u ON u.id = x.user_id WHERE ${where} ORDER BY x.period DESC, s.name`,
     );
@@ -376,7 +409,14 @@ export class StaffService extends Base {
       .map((s) => ({ staff: s, salary: done.find((d) => d.staff_id === s.id) ?? null }));
   }
 
-  /** Constate les salaires du mois : brut et avances retenues, un salaire par collaborateur et par mois. */
+  /** Retenues légales d'un brut pour ce collaborateur, ou null s'il n'en porte pas (paie non activée, non déclaré). */
+  payrollFor(staff: Pick<Staff, 'store_id' | 'declared'>, gross: Fcfa): Payroll | null {
+    const rules = this.admin?.storeSettings(staff.store_id).payroll;
+    if (!rules?.enabled || !staff.declared) return null;
+    return computePayroll(gross, rules);
+  }
+
+  /** Constate les salaires du mois : brut, retenues légales et avances retenues, un salaire par collaborateur et par mois. */
   recordSalaries(ctx: Context, period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa }[]): StaffSalary[] {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
     if (period > this.today().slice(0, 7)) throw new AppError("On ne constate pas le salaire d'un mois à venir", 'INVALID');
@@ -389,7 +429,9 @@ export class StaffService extends Base {
         if (s.store_id !== ctx.storeId) throw new AppError('Collaborateur introuvable', 'NOT_FOUND');
         const deducted = l.deducted ?? 0;
         if (!Number.isSafeInteger(l.gross) || !Number.isSafeInteger(deducted) || deducted < 0) throw new AppError(`Montants invalides pour ${s.name}`, 'INVALID');
-        if (deducted > l.gross) throw new AppError(`La retenue de ${s.name} dépasse son salaire`, 'INVALID');
+        const p = this.payrollFor(s, l.gross);
+        const legal = p ? p.employeeCnps + p.employeeTax : 0;
+        if (deducted > l.gross - legal) throw new AppError(`La retenue d'avances de ${s.name} dépasse son salaire net`, 'INVALID');
         if (deducted > Math.max(0, s.advances)) throw new AppError(`${s.name} n'a que ${s.advances} FCFA d'avances à retenir`, 'INVALID');
         const already = this.db.prepare("SELECT 1 FROM staff_salaries WHERE staff_id = ? AND period = ? AND status = 'active'").pluck().get(s.id, period);
         if (already) throw new AppError(`Le salaire de ${periodLabel(period)} de ${s.name} est déjà constaté`, 'INVALID');
@@ -397,12 +439,29 @@ export class StaffService extends Base {
         const now = this.now();
         this.db
           .prepare(
-            `INSERT INTO staff_salaries (id, number, store_id, staff_id, period, gross, deducted, label, status, user_id, at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+            `INSERT INTO staff_salaries (id, number, store_id, staff_id, period, gross, deducted, cnps, tax, employer_social, employer_tax, payroll, label, status, user_id, at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
           )
-          .run(id, `SAL-${this.stationPrefix()}-${String(this.nextCounter('staff.salary')).padStart(5, '0')}`, ctx.storeId, s.id, period, l.gross, deducted, `Salaire de ${periodLabel(period)}`, ctx.userId, now, now);
+          .run(
+            id,
+            `SAL-${this.stationPrefix()}-${String(this.nextCounter('staff.salary')).padStart(5, '0')}`,
+            ctx.storeId,
+            s.id,
+            period,
+            l.gross,
+            deducted,
+            p?.employeeCnps ?? 0,
+            p?.employeeTax ?? 0,
+            p?.employerSocial ?? 0,
+            p?.employerTax ?? 0,
+            p ? JSON.stringify(p) : null,
+            `Salaire de ${periodLabel(period)}`,
+            ctx.userId,
+            now,
+            now,
+          );
         this.enqueue(ctx, 'staff_salary', id, 'upsert', {});
-        this.audit(ctx.userId, 'staff.salary', 'staff', s.id, { period, gross: l.gross, deducted });
+        this.audit(ctx.userId, 'staff.salary', 'staff', s.id, { period, gross: l.gross, deducted, cnps: p?.employeeCnps ?? 0, tax: p?.employeeTax ?? 0 });
         ids.push(id);
       }
       return ids.map((id) => this.getSalary(id));
@@ -423,7 +482,33 @@ export class StaffService extends Base {
     return this.getSalary(id);
   }
 
-  /** Bulletin de paie simplifié : brut, avances retenues, net, paiements et reste. */
+  /**
+   * À déclarer pour un mois : CNPS (parts salariale et patronale, compte 4311)
+   * et impôts sur salaires (retenus et patronaux, compte 4471), par collaborateur.
+   */
+  declarations(storeId: string, period: string) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
+    const rows = this.salaries(storeId, { period })
+      .filter((x) => x.status === 'active' && x.payroll)
+      .map((x) => ({ number: x.number, staff_name: x.staff_name, gross: x.gross, detail: JSON.parse(x.payroll!) as Payroll }));
+    const sum = (f: (p: Payroll) => number) => rows.reduce((t, r) => t + f(r.detail), 0);
+    return {
+      period,
+      label: periodLabel(period),
+      rows,
+      gross: rows.reduce((t, r) => t + r.gross, 0),
+      cnps: sum((p) => p.employeeCnps + p.employerSocial),
+      state: sum((p) => p.employeeTax + p.employerTax),
+      irpp: sum((p) => p.irpp),
+      cac: sum((p) => p.cac),
+      cfc: sum((p) => p.cfc + p.employerCfc),
+      fne: sum((p) => p.employerFne),
+      rav: sum((p) => p.rav),
+      tdl: sum((p) => p.tdl),
+    };
+  }
+
+  /** Bulletin de paie : brut, retenues légales, avances retenues, net, charges patronales, paiements et reste. */
   slip(salaryId: string) {
     const salary = this.getSalary(salaryId);
     const staff = this.get(salary.staff_id);
@@ -433,6 +518,7 @@ export class StaffService extends Base {
          WHERE e.salary_id = ? AND e.status = 'active' ORDER BY e.at`,
       )
       .all(salaryId) as { number: string; at: string; amount: number; method: string; reference: string | null; register_name: string | null }[];
-    return { salary, staff, payments, periodLabel: periodLabel(salary.period) };
+    const payroll = salary.payroll ? (JSON.parse(salary.payroll) as Payroll) : null;
+    return { salary, staff, payments, payroll, periodLabel: periodLabel(salary.period) };
   }
 }

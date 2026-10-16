@@ -1,5 +1,5 @@
 import { type Fcfa, splitTtc } from '@superette/core';
-import { STAFF_WAGES_ACCOUNT } from './staff';
+import { PAYROLL_ACCOUNTS, STAFF_WAGES_ACCOUNT } from './staff';
 import { AppError, Base, type Context, newId } from './util';
 
 export const JOURNALS = {
@@ -493,15 +493,31 @@ export class AccountingService extends Base {
   /**
    * Salaires constatés : le brut en charge (661) contre le sous-compte de
    * rémunérations du collaborateur (4211…) ; les avances retenues passent de son
-   * sous-compte d'avances (4251…) à son sous-compte de rémunérations.
+   * sous-compte d'avances (4251…) à son sous-compte de rémunérations. Les
+   * retenues légales passent de son sous-compte à la CNPS (4311) et à l'État
+   * (4471) ; les charges patronales vont en 664 (CNPS) et 641 (CFC, FNE).
    */
   private staffSalaryEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT x.number, x.gross, x.deducted, x.label, date(x.at, 'localtime') AS d, s.code, s.name, s.salary_account, s.advance_account
+        `SELECT x.number, x.gross, x.deducted, x.cnps, x.tax, x.employer_social, x.employer_tax, x.label, date(x.at, 'localtime') AS d, s.code, s.name, s.salary_account, s.advance_account
          FROM staff_salaries x JOIN staff s ON s.id = x.staff_id WHERE x.store_id = ? AND x.status = 'active'`,
       )
-      .all(storeId) as { number: string; gross: number; deducted: number; label: string; d: string; code: string; name: string; salary_account: string; advance_account: string }[];
+      .all(storeId) as {
+      number: string;
+      gross: number;
+      deducted: number;
+      cnps: number;
+      tax: number;
+      employer_social: number;
+      employer_tax: number;
+      label: string;
+      d: string;
+      code: string;
+      name: string;
+      salary_account: string;
+      advance_account: string;
+    }[];
     return rows
       .filter((x) => inRange(x.d, opts.from, opts.to))
       .map((x) => {
@@ -518,6 +534,13 @@ export class AccountingService extends Base {
             side(x.salary_account, -x.gross, label, aux),
             side(x.salary_account, x.deducted, `Avances retenues, ${x.name}`, aux),
             side(x.advance_account, -x.deducted, `Avances retenues, ${x.name}`, aux),
+            side(x.salary_account, x.cnps + x.tax, `Retenues légales, ${x.name}`, aux),
+            side(PAYROLL_ACCOUNTS.cnps, -x.cnps, `CNPS salariale, ${x.name}`),
+            side(PAYROLL_ACCOUNTS.state, -x.tax, `IRPP, CAC, CFC, RAV, TDL, ${x.name}`),
+            side(PAYROLL_ACCOUNTS.social, x.employer_social, `CNPS patronale, ${x.name}`),
+            side(PAYROLL_ACCOUNTS.cnps, -x.employer_social, `CNPS patronale, ${x.name}`),
+            side(PAYROLL_ACCOUNTS.taxes, x.employer_tax, `CFC patronal et FNE, ${x.name}`),
+            side(PAYROLL_ACCOUNTS.state, -x.employer_tax, `CFC patronal et FNE, ${x.name}`),
           ].filter((l) => l.debit || l.credit),
         };
       });

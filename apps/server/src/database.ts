@@ -234,6 +234,25 @@ CREATE TABLE mobile_assignments (
 );
 `,
   },
+  {
+    version: 6,
+    sql: `
+-- Aide sans compte (famille, intérimaire…) : un code à 6 chiffres pour compter un seul
+-- inventaire, 24 heures au plus. Ses comptages arrivent sur les PC au nom d'un responsable.
+CREATE TABLE mobile_guests (
+  id UUID PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  inventory_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL,
+  on_behalf_of TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE INDEX mobile_guests_code ON mobile_guests (code) WHERE revoked_at IS NULL;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

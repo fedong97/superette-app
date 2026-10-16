@@ -41,22 +41,33 @@ export interface Hit {
 
 export interface Pairing {
   urls: string[];
+  /** Code du QR « relier un téléphone » (8 caractères), ou vide. */
   code: string;
+  /** Code d'un aide sans compte (6 chiffres) : relie le téléphone et connecte l'aide. */
+  guest?: string;
 }
 
-/** QR code affiché par le gérant : « FEDONIX360:{"u":[adresses],"c":"CODE"} ». */
+/** QR code affiché par le gérant : « FEDONIX360:{"u":[adresses],"c":"CODE"} » ou, pour un aide, « "g":"123456" ». */
 export function parsePairing(text: string): Pairing | null {
   const m = /^FEDONIX360:(\{.*\})$/s.exec(text.trim());
   if (!m) return null;
   try {
-    const data = JSON.parse(m[1]!) as { u?: unknown; c?: unknown };
+    const data = JSON.parse(m[1]!) as { u?: unknown; c?: unknown; g?: unknown };
     const urls = (Array.isArray(data.u) ? data.u : []).filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u));
     const code = typeof data.c === 'string' ? data.c : '';
-    return urls.length && code ? { urls, code } : null;
+    const guest = typeof data.g === 'string' && /^\d{6}$/.test(data.g) ? data.g : '';
+    if (!urls.length || (!code && !guest)) return null;
+    return guest ? { urls, code, guest } : { urls, code };
   } catch {
     return null;
   }
 }
+
+/** Code d'aide tapé à la main : 6 chiffres, espaces permis. */
+export const guestCode = (input: string): string | null => {
+  const c = input.replace(/\s/g, '');
+  return /^\d{6}$/.test(c) ? c : null;
+};
 
 /** Adresse saisie à la main : « 192.168.1.10 », « 192.168.1.10:3000 » ou une adresse complète. */
 export function normalizeUrl(input: string): string | null {

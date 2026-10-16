@@ -76,6 +76,8 @@
 
   let data = null;
   let pairing = null;
+  /** Dernier accès d'aide créé, avec son QR code, par inventaire. */
+  const guestQr = new Map();
   let pairStore = localStorage.getItem('fedo.inventaire.magasin') || '';
   let timer = null;
   let countdown = null;
@@ -162,6 +164,8 @@
       ${inv.counters.length ? `<table><tr><th>Personne</th><th class="n">Produits</th><th class="n">Début</th><th class="n">Dernier</th><th class="n">Par heure</th></tr>
         ${inv.counters.map((c) => `<tr><td>${esc(c.name)}${c.phone ? ' <span class="pastille non">téléphone</span>' : ''}</td><td class="n">${c.products}</td><td class="n">${heure(c.first)}</td><td class="n">${heure(c.last)}</td><td class="n">${c.perHour ?? '—'}</td></tr>`).join('')}</table>` : '<div class="vide">Personne n’a encore compté.</div>'}
 
+      ${guestsBlock(inv, users)}
+
       <details class="garder"><summary>Confier des rayons aux compteurs</summary>
         ${users.length ? users.map((u) => `<div style="margin-top:10px"><b>${esc(u.name)}</b> <span class="muted">${esc(ROLES[u.role] || u.role)}</span>
           <div class="chips">${inv.departments.filter((d) => d.id).map((d) => `<label><input type="checkbox" data-assign="${esc(inv.id)}" data-user="${esc(u.id)}" value="${esc(d.id)}" ${(assigned.get(u.id) || []).includes(d.id) ? 'checked' : ''}><span>${esc(d.name)}</span></label>`).join('') || '<span class="vide">Aucun rayon.</span>'}</div></div>`).join('') : '<div class="vide">Aucun utilisateur n’a le droit de compter. Donnez-le dans Administration › Droits par rôle.</div>'}
@@ -171,6 +175,28 @@
       ${data.settings.recount ? `<h3>À recompter <span class="muted" style="font-weight:400">(gros écart, une seule personne)</span></h3>
         ${inv.recount.length ? `<div class="liste">${inv.recount.map((r) => `<div><div class="g">${esc(r.name)}<small>Compté par ${esc(r.byName)}</small></div><div class="m">${qty(r.counted, r.unit)}<small>attendu ${qty(r.expected, r.unit)}</small></div></div>`).join('')}</div><p class="muted" style="font-size:13px">Ces produits apparaissent dans « À recompter » sur le téléphone des autres compteurs.</p>` : '<div class="vide">Rien à recompter.</div>'}` : ''}
     </section>`;
+  }
+
+  function guestsBlock(inv, users) {
+    const active = (inv.guests || []).filter((g) => g.active);
+    const shown = guestQr.get(inv.id);
+    const boss = users.slice().sort((a, b) => (['manager', 'admin'].includes(b.role) ? 1 : 0) - (['manager', 'admin'].includes(a.role) ? 1 : 0));
+    return `<h3>Aides sans compte <span class="muted" style="font-weight:400">(famille, intérimaires…)</span></h3>
+      ${active.length ? `<div class="liste">${active.map((g) => `<div><div class="g">${esc(g.name)} <span class="pastille ok">Actif</span><small>Code <b>${esc(g.code)}</b> · jusqu’à ${date(g.expiresAt)} · signé sur le PC au nom de ${esc(g.onBehalfOf)}</small></div><button class="petit" data-guest-off="${esc(g.id)}">Couper</button></div>`).join('')}</div>` : '<div class="vide">Aucun aide pour cet inventaire.</div>'}
+      ${shown ? `<div class="qr"><div class="img">${shown.qr}</div><div>
+        <div><b>${esc(shown.name)}</b> scanne ce QR code avec l’application FEDONIX 360 Inventaire</div>
+        <div class="muted" style="margin-top:8px">ou tape le code sur l’écran de connexion (« Je suis un aide »)</div>
+        <div class="code">${esc(shown.code.replace(/(\d{3})/, '$1 '))}</div>
+        <div class="muted" style="margin-top:8px">Valable jusqu’à ${date(shown.expiresAt)}, et seulement pour cet inventaire : l’accès s’arrête à la clôture.</div>
+      </div></div>` : ''}
+      <details class="garder"><summary>Ajouter un aide</summary>
+        <div class="ligne" style="margin-top:8px">
+          <input id="guest-name-${esc(inv.id)}" placeholder="Nom de l’aide (ex. : Paul)" maxlength="40" style="font:inherit;font-size:15px;padding:8px 10px;border:1px solid #d0d5dd;border-radius:8px;flex:1;min-width:160px">
+          <select id="guest-boss-${esc(inv.id)}" title="Responsable">${boss.map((u) => `<option value="${esc(u.id)}">Au nom de ${esc(u.name)}</option>`).join('')}</select>
+          <button class="principal" data-guest-add="${esc(inv.id)}" ${boss.length ? '' : 'disabled'}>Créer l’accès</button>
+        </div>
+        <p class="muted" style="font-size:13px">L’aide compte sans identifiant ni mot de passe, seulement cet inventaire, sans voir les prix ni le stock attendu, 24 heures au plus. Sur le PC, ses comptages sont signés au nom du responsable choisi ; ici, vous voyez son nom.</p>
+      </details>`;
   }
 
   function render() {
@@ -218,6 +244,23 @@
       const user = box.dataset.user;
       const ids = [...app.querySelectorAll(`[data-assign="${inv}"][data-user="${user}"]:checked`)].map((b) => b.value);
       try { await api('/admin/api/mobile/assign', { method: 'POST', body: JSON.stringify({ inventoryId: inv, userId: user, departmentIds: ids }) }); } catch (err) { alert(err.message); }
+    }));
+    app.querySelectorAll('[data-guest-add]').forEach((b) => (b.onclick = async () => {
+      const inv = b.dataset.guestAdd;
+      const name = document.getElementById(`guest-name-${inv}`).value.trim();
+      if (!name) return alert('Indiquez le nom de l’aide');
+      try {
+        const g = await api('/admin/api/mobile/guests', { method: 'POST', body: JSON.stringify({ inventoryId: inv, name, onBehalfOf: document.getElementById(`guest-boss-${inv}`).value }) });
+        guestQr.set(inv, g);
+        b.closest('details').open = false;
+        load();
+      } catch (err) { alert(err.message); }
+    }));
+    app.querySelectorAll('[data-guest-off]').forEach((b) => (b.onclick = async () => {
+      if (!confirm('Couper cet accès ? L’aide ne pourra plus compter ; ce qu’il a déjà compté reste.')) return;
+      await api(`/admin/api/mobile/guests/${b.dataset.guestOff}/revoke`, { method: 'POST' }).catch((e) => alert(e.message));
+      for (const [k, v] of guestQr) if (v.id === b.dataset.guestOff) guestQr.delete(k);
+      load();
     }));
     app.querySelectorAll('[data-done]').forEach((b) => (b.onclick = async () => { await api(`/admin/api/mobile/unknowns/${b.dataset.done}/done`, { method: 'POST' }).catch((e) => alert(e.message)); load(); }));
     app.querySelectorAll('[data-revoke]').forEach((b) => (b.onclick = async () => {

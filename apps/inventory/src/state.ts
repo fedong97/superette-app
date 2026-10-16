@@ -257,13 +257,37 @@ export function setRapid(rapid: boolean) {
 
 // ——— Rattachement et connexion ———
 
-export async function pair(urls: string[], code: string, deviceName: string) {
+/** Relie le téléphone (QR du gérant) ; avec un code d'aide, connecte aussi l'aide. */
+export async function pair(urls: string[], code: string, deviceName: string, guest?: string) {
   const url = await findServer(urls);
   if (!url) throw new ApiError(`Serveur introuvable à ${urls.join(' ou ')}. Le téléphone est-il sur le Wi-Fi du magasin ?`, 0);
-  const r = await request<{ token: string; storeId: string; storeName: string }>(url, '/api/v1/mobile/pair', { body: { code, name: deviceName } });
+  const r = await request<{ token: string; storeId: string; storeName: string; session?: string; user?: User }>(url, '/api/v1/mobile/pair', {
+    body: guest ? { guest, name: deviceName } : { code, name: deviceName },
+  });
   const config: Config = { urls: [...new Set([url, ...urls])], url, token: r.token, storeId: r.storeId, storeName: r.storeName, deviceName };
   await save('config', config);
   set({ config, online: true });
+  if (r.session && r.user) await startSession({ token: r.session, user: r.user });
+}
+
+async function startSession(session: Session) {
+  await save('session', session);
+  set({
+    session,
+    counts: countsOf(session.user.id),
+    history: historyOf(session.user.id),
+    archives: archivesByUser[session.user.id] ?? [],
+    online: true,
+  });
+  await sync();
+}
+
+/** Aide sans compte sur un téléphone déjà relié : le code à 6 chiffres donné par le gérant. */
+export async function loginGuest(code: string) {
+  const config = state.config;
+  if (!config) return;
+  const r = await request<{ session: string; user: User }>(config.url, '/api/v1/mobile/guest', { body: { code }, auth: { token: config.token } });
+  await startSession({ token: r.session, user: r.user });
 }
 
 export async function login(loginName: string, pin: string) {
@@ -282,10 +306,7 @@ export async function login(loginName: string, pin: string) {
     }
     throw e;
   });
-  const session = { token: r.session, user: r.user };
-  await save('session', session);
-  set({ session, counts: countsOf(r.user.id), history: historyOf(r.user.id), archives: archivesByUser[r.user.id] ?? [], online: true });
-  await sync();
+  await startSession({ token: r.session, user: r.user });
 }
 
 /** Changer d'utilisateur : ses saisies pas encore envoyées partent quand même, à son nom. */
@@ -524,9 +545,10 @@ async function doSync() {
       notify('Ce téléphone a été délié par le gérant. Reliez-le de nouveau avec un QR code.', 'erreur');
     } else if (e instanceof ApiError && e.status === 401) {
       // Session terminée côté serveur : il faut se reconnecter, les saisies restent sur le téléphone.
+      const wasGuest = state.session?.user.role === 'guest';
       await save('session', null);
-      set({ session: null });
-      notify('Reconnectez-vous pour continuer.', 'erreur');
+      set({ session: null, counts: countsOf(undefined), history: historyOf(undefined), archives: [] });
+      notify(wasGuest ? 'Votre accès d’aide est terminé (inventaire clôturé ou accès coupé par le gérant). Merci pour votre aide !' : 'Reconnectez-vous pour continuer.', 'erreur');
     } else {
       notify(e instanceof Error ? e.message : 'Erreur de synchronisation', 'erreur');
     }

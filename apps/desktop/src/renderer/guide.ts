@@ -116,6 +116,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Onglet Produits : tous les produits de l’inventaire à toucher pour les compter, avec « 120 / 450 comptés » et les filtres À compter, Comptés, Tous et par rayon.',
       'Menu ☰ de l’inventaire : remettre à 0 un endroit ou tout l’inventaire (après confirmation), et mon récapitulatif par endroit à partager en fichier.',
       'Inventaires En cours et Clôturés : quand le gérant clôture sur le PC, mes comptages restent consultables sur le téléphone.',
+      'Aides sans compte (famille, intérimaires) : sur FEDONIX 360 Gérant › Inventaire, « Ajouter un aide » donne un QR code et un code à 6 chiffres. L’aide compte tout de suite, sans identifiant, seulement cet inventaire, sans prix ni stock attendu ; l’accès s’arrête à la clôture ou après 24 h, et « Couper » l’arrête aussitôt. Sur le PC ses comptages sont signés au nom du responsable choisi, le gérant voit son nom.',
     ],
   },
   {

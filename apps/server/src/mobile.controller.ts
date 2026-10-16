@@ -28,7 +28,7 @@ export class MobileController {
 
   @Post('api/v1/mobile/pair')
   @HttpCode(200)
-  pair(@Body() body: { code: string; name?: string }) {
+  pair(@Body() body: { code?: string; guest?: string; name?: string }) {
     return this.mobile.pair(body);
   }
 
@@ -36,6 +36,12 @@ export class MobileController {
   @HttpCode(200)
   async login(@Headers('authorization') auth: string | undefined, @Body() body: { login: string; pin: string }) {
     return this.mobile.login(await this.mobile.device(auth), body);
+  }
+
+  @Post('api/v1/mobile/guest')
+  @HttpCode(200)
+  async guest(@Headers('authorization') auth: string | undefined, @Body() body: { code: string }) {
+    return this.mobile.loginGuest(await this.mobile.device(auth), body);
   }
 
   @Post('api/v1/mobile/logout')
@@ -85,6 +91,12 @@ export class MobileController {
     if (!this.admin.isSession(cookieOf(req))) throw new UnauthorizedException('Connectez-vous');
   }
 
+  /** Adresses du serveur mises dans les QR codes : celle du gérant puis celles du réseau du magasin. */
+  private urls(req: Request) {
+    const host = req.headers.host && !/^(localhost|127\.|\[::1\])/.test(req.headers.host) ? [`${req.protocol}://${req.headers.host}`] : [];
+    return [...new Set([...host, ...this.admin.addresses()])].slice(0, 4);
+  }
+
   @Get('gerant/inventaire')
   page(@Res() res: Response) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -107,10 +119,26 @@ export class MobileController {
   async pairing(@Req() req: Request, @Body() body: { storeId: string }) {
     this.guard(req);
     const pairing = await this.mobile.createPairing(body?.storeId);
-    const host = req.headers.host && !/^(localhost|127\.|\[::1\])/.test(req.headers.host) ? [`${req.protocol}://${req.headers.host}`] : [];
-    const urls = [...new Set([...host, ...this.admin.addresses()])].slice(0, 4);
+    const urls = this.urls(req);
     const content = `FEDONIX360:${JSON.stringify({ u: urls, c: pairing.code })}`;
     return { ...pairing, urls, qr: await qrSvg(content, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }) };
+  }
+
+  /** Accès d'un aide sans compte : code à 6 chiffres et QR code qui relie aussi son téléphone. */
+  @Post('admin/api/mobile/guests')
+  @HttpCode(200)
+  async createGuest(@Req() req: Request, @Body() body: { inventoryId: string; name: string; onBehalfOf: string; hours?: number }) {
+    this.guard(req);
+    const guest = await this.mobile.createGuest(body);
+    const content = `FEDONIX360:${JSON.stringify({ u: this.urls(req), g: guest.code })}`;
+    return { ...guest, qr: await qrSvg(content, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }) };
+  }
+
+  @Post('admin/api/mobile/guests/:id/revoke')
+  @HttpCode(200)
+  revokeGuest(@Req() req: Request, @Param('id') id: string) {
+    this.guard(req);
+    return this.mobile.revokeGuest(id);
   }
 
   @Post('admin/api/mobile/assign')

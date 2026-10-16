@@ -6,6 +6,7 @@ import {
   exportCountFile,
   fileArticle,
   formatQty,
+  guestCode,
   levels,
   lookup,
   normalizeUrl,
@@ -49,6 +50,11 @@ describe('application d’inventaire', () => {
     expect(parsePairing('FEDONIX360:{"u":["http://192.168.1.10:3000"],"c":"ABCD2345"}')).toEqual({ urls: ['http://192.168.1.10:3000'], code: 'ABCD2345' });
     expect(parsePairing('https://exemple.cm')).toBeNull();
     expect(parsePairing('FEDONIX360:{"u":[],"c":"X"}')).toBeNull();
+    // QR d'un aide sans compte : relie le téléphone et connecte l'aide.
+    expect(parsePairing('FEDONIX360:{"u":["http://192.168.1.10:3000"],"g":"042917"}')).toEqual({ urls: ['http://192.168.1.10:3000'], code: '', guest: '042917' });
+    expect(parsePairing('FEDONIX360:{"u":["http://192.168.1.10:3000"],"g":"12"}')).toBeNull();
+    expect(guestCode('042 917')).toBe('042917');
+    expect(guestCode('ABCD2345')).toBeNull();
     expect(normalizeUrl('192.168.1.10')).toBe('http://192.168.1.10:3000');
     expect(normalizeUrl('192.168.1.10:8080/')).toBe('http://192.168.1.10:8080');
     expect(normalizeUrl('https://fedonix.exemple.cm')).toBe('https://fedonix.exemple.cm');

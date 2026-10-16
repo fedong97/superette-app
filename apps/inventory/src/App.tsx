@@ -11,6 +11,7 @@ import {
   csvRows,
   exportCountFile,
   formatQty,
+  guestCode,
   levels,
   lookup,
   normalizeUrl,
@@ -176,11 +177,11 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const go = async (urls: string[], pairingCode: string) => {
+  const go = async (urls: string[], pairingCode: string, guest?: string) => {
     setBusy(true);
     setError('');
     try {
-      await S.pair(urls, pairingCode, name.trim() || 'Téléphone d’inventaire');
+      await S.pair(urls, pairingCode, name.trim() || 'Téléphone d’inventaire', guest ?? guestCode(pairingCode) ?? undefined);
     } catch (e) {
       setError(message(e));
       beepError();
@@ -195,7 +196,7 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
       if (!p) return;
       setCamera(false);
       beepOk();
-      void go(p.urls, p.code);
+      void go(p.urls, p.code, p.guest);
     },
     (e) => {
       setCamera(false);
@@ -208,7 +209,10 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
     <div className="page center">
       <img className="logo" src="./icon.png" alt="" />
       <h1>FEDONIX 360 Inventaire</h1>
-      <p className="muted">Reliez ce téléphone au magasin. Le gérant ouvre FEDONIX 360 Gérant › Inventaire et affiche le QR code.</p>
+      <p className="muted">
+        Reliez ce téléphone au magasin : le gérant ouvre FEDONIX 360 Gérant › Inventaire et affiche le QR code. Vous venez aider sans compte ? Scannez le QR code d’aide que le
+        gérant vous montre.
+      </p>
       <label className="field">
         Nom de ce téléphone
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. : Samsung d’Awa" maxLength={60} />
@@ -234,7 +238,7 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
             <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="192.168.1.10:3000" inputMode="url" autoCapitalize="off" />
           </label>
           <label className="field">
-            Code affiché sous le QR
+            Code affiché sous le QR, ou code d’aide (6 chiffres)
             <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="ABCD 2345" autoCapitalize="characters" />
           </label>
           <button className="big" disabled={busy || !address || !code}>
@@ -256,6 +260,7 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
 
 function Login({ onFiles }: { onFiles: () => void }) {
   const s = useStore();
+  const [guest, setGuest] = useState(false);
   const [login, setLogin] = useState(() => localStorage.getItem('dernier-identifiant') ?? '');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
@@ -265,8 +270,12 @@ function Login({ onFiles }: { onFiles: () => void }) {
     <div className="page center">
       <img className="logo" src="./icon.png" alt="" />
       <h1>{s.config!.storeName}</h1>
-      <p className="muted">Connectez-vous avec votre identifiant et votre code de FEDONIX 360.</p>
+      {guest ? <GuestLogin onBack={() => setGuest(false)} /> : null}
+      <p className="muted" hidden={guest}>
+        Connectez-vous avec votre identifiant et votre code de FEDONIX 360.
+      </p>
       <form
+        hidden={guest}
         className="card"
         onSubmit={async (e) => {
           e.preventDefault();
@@ -296,6 +305,11 @@ function Login({ onFiles }: { onFiles: () => void }) {
           {busy ? 'Connexion…' : 'Se connecter'}
         </button>
       </form>
+      {!guest ? (
+        <button className="big" onClick={() => setGuest(true)}>
+          Je suis un aide (sans compte)
+        </button>
+      ) : null}
       {s.pending ? <p className="muted">{s.pending} saisie(s) attendent d’être envoyées.</p> : null}
       <button className="link" onClick={() => setMenu(true)}>
         Réglages du téléphone
@@ -303,6 +317,69 @@ function Login({ onFiles }: { onFiles: () => void }) {
       <FileModeLink onFiles={onFiles} />
       {menu ? <Settings onClose={() => setMenu(false)} /> : null}
     </div>
+  );
+}
+
+/** Aide sans compte : le code à 6 chiffres ou le QR code d'aide affiché par le gérant. */
+function GuestLogin({ onBack }: { onBack: () => void }) {
+  const [code, setCode] = useState('');
+  const [camera, setCamera] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const go = async (c: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      await S.loginGuest(c);
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur. Vérifiez le Wi-Fi du magasin.' : message(e));
+      beepError();
+    } finally {
+      setBusy(false);
+    }
+  };
+  useCamera(
+    camera,
+    (text) => {
+      const g = parsePairing(text)?.guest ?? guestCode(text);
+      if (!g) return;
+      setCamera(false);
+      beepOk();
+      void go(g);
+    },
+    (e) => {
+      setCamera(false);
+      setError(message(e));
+    },
+  );
+  if (camera) return <CameraOverlay title="QR code d’aide" hint="Visez le QR code d’aide affiché par le gérant" onStop={() => setCamera(false)} />;
+  const valid = guestCode(code);
+  return (
+    <form
+      className="card"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid) void go(valid);
+      }}
+    >
+      <p className="muted">Le gérant vous a créé un accès pour cet inventaire : scannez son QR code ou tapez le code à 6 chiffres. Pas besoin d’identifiant.</p>
+      {native ? (
+        <button type="button" className="big primary" disabled={busy} onClick={() => setCamera(true)}>
+          Scanner le QR code d’aide
+        </button>
+      ) : null}
+      <label className="field">
+        Code d’aide
+        <input value={code} onChange={(e) => setCode(e.target.value.replace(/[^\d ]/g, ''))} inputMode="numeric" maxLength={7} placeholder="123 456" />
+      </label>
+      {error ? <div className="notice erreur">{error}</div> : null}
+      <button className="big" disabled={busy || !valid}>
+        {busy ? 'Connexion…' : 'Commencer à compter'}
+      </button>
+      <button type="button" className="link" onClick={onBack}>
+        J’ai un identifiant
+      </button>
+    </form>
   );
 }
 
@@ -399,10 +476,10 @@ function Inventories({ onChoose, onRecap, onLeaveFiles }: { onChoose: (id: strin
             ) : null}
             {openFiles.map((f) => card(f, () => onChoose(f.id)))}
             {error ? <div className="notice erreur">{error}</div> : null}
-            <button className="big" onClick={() => picker.current?.click()}>
+            <button className="big" hidden={s.session?.user.role === 'guest'} onClick={() => picker.current?.click()}>
               Ouvrir une fiche de comptage (fichier)
             </button>
-            <p className="muted small">
+            <p className="muted small" hidden={s.session?.user.role === 'guest'}>
               Sans Wi-Fi au magasin : exportez sur le PC la fiche à remplir (Inventaires › Fiche Excel) ou un fichier texte « code;nom;quantité », envoyez-la sur ce
               téléphone, comptez, puis renvoyez la fiche remplie au PC (bouton Importer).
             </p>

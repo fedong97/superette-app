@@ -20,6 +20,7 @@ describe('inventaire sur téléphone', () => {
   let invId = '';
   let device = '';
   let session = '';
+  let guestSession = '';
   const A: Record<string, string> = {};
 
   const admin = (path: string, body?: unknown) =>
@@ -243,14 +244,55 @@ describe('inventaire sur téléphone', () => {
     await admin('/admin/api/mobile/settings', { showExpected: false });
   });
 
+  it('fait compter un aide sans compte, au nom de son responsable, sur cet inventaire seulement', async () => {
+    await admin('/admin/api/mobile/settings', { showExpected: true });
+    const g = await (await admin('/admin/api/mobile/guests', { inventoryId: invId, name: 'Lucas', onBehalfOf: ctx.userId })).json();
+    expect(g.code).toMatch(/^\d{6}$/);
+    expect(g.qr).toContain('<svg');
+    // Téléphone de l'aide, pas encore relié : le QR de l'aide le relie et le connecte.
+    const paired = await (
+      await fetch(`${url}/api/v1/mobile/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ guest: g.code, name: 'Tecno de Lucas' }) })
+    ).json();
+    expect(paired.user).toMatchObject({ name: 'Lucas (aide)', role: 'guest' });
+    const asGuest = (path: string, body?: unknown) => {
+      const headers = { authorization: `Bearer ${paired.token}`, 'x-fedonix-session': paired.session, 'content-type': 'application/json' };
+      return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
+    };
+    const list = (await (await asGuest('/inventories')).json()).inventories;
+    expect(list.map((i: { id: string }) => i.id)).toEqual([invId]);
+    expect(list[0].expected).toBeNull();
+    await admin('/admin/api/mobile/settings', { showExpected: false });
+    const res = await (await asGuest('/counts', { counts: [count(A.lait!, 'Réserve', 4_000, at(30)), count(A.lait!, 'Rayon', 1_000, at(31), 'autre-inventaire')] })).json();
+    expect(res.accepted).toHaveLength(1);
+    expect(res.rejected).toEqual([expect.objectContaining({ reason: 'Inventaire non confié à cet aide' })]);
+    await syncOnce(pc);
+    // Sur le PC, la saisie est au nom du responsable (un vrai utilisateur) ; le gérant voit l'aide.
+    expect(line(invId, A.lait!)).toMatchObject({ counted_by_name: "Steve" });
+    const o = await (await admin('/admin/api/mobile')).json();
+    const inv = o.inventories.find((i: { id: string }) => i.id === invId);
+    expect(inv.counters.find((c: { name: string }) => c.name === 'Lucas (aide)')).toMatchObject({ products: 1, phone: true });
+    expect(inv.guests[0]).toMatchObject({ name: 'Lucas', code: g.code, onBehalfOf: 'Steve', active: true });
+    // Le même code sert aussi sur un téléphone du magasin déjà relié.
+    expect((await phone('/guest', { code: '000000' })).status).toBe(401);
+    expect((await (await phone('/guest', { code: g.code })).json()).user).toMatchObject({ name: 'Lucas (aide)' });
+    await admin(`/admin/api/mobile/guests/${g.id}/revoke`, {});
+    expect((await asGuest('/inventories')).status).toBe(401);
+    // Un second aide, encore actif quand l'inventaire est clôturé.
+    const g2 = await (await admin('/admin/api/mobile/guests', { inventoryId: invId, name: 'Inès', onBehalfOf: ctx.userId })).json();
+    guestSession = (await (await phone('/guest', { code: g2.code })).json()).session;
+    expect((await phone('/inventories', undefined, guestSession)).status).toBe(200);
+  });
+
   it('refuse les comptages d’un inventaire clôturé, puis le téléphone délié', async () => {
     pc.inventories.close(ctx, invId);
     await syncOnce(pc);
     const res = await (await phone('/counts', { counts: [count(A.biere!, 'Rayon', 1_000, at(35))] })).json();
     expect(res).toMatchObject({ accepted: [], rejected: [{ reason: 'Inventaire clôturé' }] });
+    const ended = await phone('/inventories', undefined, guestSession);
+    expect([ended.status, (await ended.json()).message]).toEqual([401, expect.stringContaining('Accès d’aide terminé')]);
     expect((await (await phone('/inventories')).json()).inventories.map((i: { id: string }) => i.id)).not.toContain(invId);
     const o = await (await admin('/admin/api/mobile')).json();
-    await admin(`/admin/api/mobile/devices/${o.devices[0].id}/revoke`, {});
+    await admin(`/admin/api/mobile/devices/${o.devices.find((d: { name: string }) => d.name === 'Téléphone Awa').id}/revoke`, {});
     expect((await phone('/inventories')).status).toBe(401);
   });
 

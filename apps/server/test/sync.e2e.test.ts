@@ -46,7 +46,7 @@ describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchroni
   beforeAll(async () => {
     if (base === 'postgres') {
       const pool = new Pool({ connectionString: DATABASE_URL });
-      await pool.query('DROP TABLE IF EXISTS mobile_sessions, mobile_counts, mobile_unknowns, mobile_assignments, mobile_pairings, events, devices, licenses, settings, schema_migrations');
+      await pool.query('DROP TABLE IF EXISTS mobile_sessions, mobile_counts, mobile_unknowns, mobile_assignments, mobile_guests, mobile_pairings, events, devices, licenses, settings, schema_migrations');
       await pool.end();
     }
     const where = base === 'postgres' ? { databaseUrl: DATABASE_URL! } : { dataDir: join(mkdtempSync(join(tmpdir(), 'fedo-serveur-')), 'donnees') };

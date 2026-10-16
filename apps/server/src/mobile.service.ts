@@ -18,6 +18,11 @@ const RECOUNT_RATIO = 0.1;
 const MAX_PHOTO = 600_000;
 /** Vignette d'un article envoyée au téléphone : les plus lourdes sont laissées de côté. */
 const MAX_THUMB = 30_000;
+/** Durée maximale d'un accès d'aide. */
+const GUEST_MS = 24 * 3_600_000;
+/** Codes d'aide faux tolérés sur tout le serveur avant une pause (6 chiffres : on ne les devine pas). */
+const GUEST_MAX_FAILURES = 20;
+export const GUEST_PREFIX = 'guest:';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
@@ -48,6 +53,20 @@ export interface MobileDevice {
 export interface MobileCaller {
   device: MobileDevice;
   user: { id: string; name: string; role: string };
+  /** Aide sans compte : un seul inventaire, comptages signés sur les PC au nom de `onBehalfOf`. */
+  guest?: { id: string; inventoryId: string; onBehalfOf: string };
+}
+
+interface GuestRow {
+  id: string;
+  store_id: string;
+  inventory_id: string;
+  name: string;
+  code: string;
+  on_behalf_of: string;
+  created_at: Date;
+  expires_at: Date;
+  revoked_at: Date | null;
 }
 
 export interface MobileCountInput {
@@ -94,6 +113,7 @@ interface OpenInventory {
 @Injectable()
 export class MobileService {
   private readonly failures = new Map<string, { count: number; until: number }>();
+  private guestFailures = { count: 0, until: 0 };
 
   constructor(@Inject(PG) private readonly pg: Db) {}
 
@@ -203,7 +223,17 @@ export class MobileService {
 
   private async userNames(): Promise<Map<string, string>> {
     const rows = await this.latest('user', '', [], "jsonb_build_object('name', payload->'name')");
-    return new Map(rows.map((r) => [r.entity_id, str(r.payload['name'])]));
+    const names = new Map(rows.map((r) => [r.entity_id, str(r.payload['name'])]));
+    const { rows: guests } = await this.pg.query<{ id: string; name: string }>('SELECT id, name FROM mobile_guests');
+    for (const g of guests) names.set(`${GUEST_PREFIX}${g.id}`, `${g.name} (aide)`);
+    return names;
+  }
+
+  /** Utilisateur inscrit sur les PC pour une saisie : l'aide compte au nom de son responsable. */
+  private async pcUser(userId: string): Promise<string> {
+    if (!userId.startsWith(GUEST_PREFIX)) return userId;
+    const { rows } = await this.pg.query<{ on_behalf_of: string }>('SELECT on_behalf_of FROM mobile_guests WHERE id = $1', [userId.slice(GUEST_PREFIX.length)]);
+    return rows[0]?.on_behalf_of ?? userId;
   }
 
   private async departments(): Promise<{ departments: Map<string, string>; families: Map<string, string> }> {
@@ -240,7 +270,8 @@ export class MobileService {
     return { code, storeId, storeName: str(store['name']), expiresAt: expiresAt.toISOString() };
   }
 
-  async pair(input: { code: string; name?: string }) {
+  async pair(input: { code?: string; guest?: string; name?: string }) {
+    if (input?.guest) return this.pairGuest(str(input.guest), str(input.name));
     const code = str(input?.code)
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '');
@@ -264,6 +295,105 @@ export class MobileService {
     });
     const store = await this.one('store', storeId);
     return { deviceId, token, storeId, storeName: str(store?.['name']) };
+  }
+
+  // ——— Aides sans compte ———
+
+  /** Accès d'un aide à un inventaire : un code à 6 chiffres, affiché au gérant avec son QR code. */
+  async createGuest(input: { inventoryId: string; name: string; onBehalfOf: string; hours?: number }) {
+    const name = str(input?.name).trim().slice(0, 40);
+    if (!name) throw new BadRequestException('Indiquez le nom de l’aide');
+    const { inv } = await this.inventory(str(input?.inventoryId));
+    if (!inv) throw new BadRequestException('Inventaire introuvable ou déjà clôturé');
+    const boss = await this.one('user', str(input?.onBehalfOf));
+    if (!boss || boss['active'] === 0) throw new BadRequestException('Choisissez le responsable au nom duquel l’aide compte');
+    const hours = Math.min(24, Math.max(1, Math.round(Number(input?.hours) || 24)));
+    let code = '';
+    for (let i = 0; i < 20 && !code; i++) {
+      const c = String(randomBytes(4).readUInt32BE() % 1_000_000).padStart(6, '0');
+      const { rows } = await this.pg.query('SELECT 1 FROM mobile_guests WHERE code = $1 AND revoked_at IS NULL AND expires_at > now()', [c]);
+      if (!rows.length) code = c;
+    }
+    if (!code) throw new HttpException('Réessayez', HttpStatus.SERVICE_UNAVAILABLE);
+    const id = randomUUID();
+    const expiresAt = new Date(Date.now() + hours * 3_600_000);
+    await this.pg.query('INSERT INTO mobile_guests (id, store_id, inventory_id, name, code, on_behalf_of, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
+      id,
+      inv.storeId,
+      inv.id,
+      name,
+      code,
+      str(input.onBehalfOf),
+      expiresAt,
+    ]);
+    return { id, name, code, inventoryId: inv.id, expiresAt: expiresAt.toISOString() };
+  }
+
+  async revokeGuest(id: string) {
+    const { rows } = await this.pg.query('UPDATE mobile_guests SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING id', [id]);
+    if (!rows[0]) throw new NotFoundException('Accès introuvable ou déjà coupé');
+    await this.pg.query('DELETE FROM mobile_sessions WHERE user_id = $1', [`${GUEST_PREFIX}${id}`]);
+    return { ok: true };
+  }
+
+  /** Aide encore valable : pas coupé, pas expiré, inventaire toujours ouvert. */
+  private async activeGuest(where: 'id' | 'code', value: string): Promise<GuestRow | null> {
+    const { rows } = await this.pg.query<GuestRow>(`SELECT * FROM mobile_guests WHERE ${where} = $1 AND revoked_at IS NULL AND expires_at > now() ORDER BY created_at DESC LIMIT 1`, [
+      value,
+    ]);
+    const g = rows[0];
+    if (!g) return null;
+    const { inv } = await this.inventory(g.inventory_id);
+    return inv ? g : null;
+  }
+
+  private async guestByCode(raw: string): Promise<GuestRow> {
+    const now = Date.now();
+    if (this.guestFailures.until > now && this.guestFailures.count >= GUEST_MAX_FAILURES) {
+      throw new HttpException('Trop de codes faux : réessayez dans quelques minutes', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const code = raw.replace(/\D/g, '');
+    const g = code.length === 6 ? await this.activeGuest('code', code) : null;
+    if (!g) {
+      if (this.guestFailures.until <= now) this.guestFailures = { count: 0, until: now + LOCK_MS };
+      this.guestFailures.count++;
+      throw new UnauthorizedException('Code d’aide incorrect, expiré, ou inventaire clôturé');
+    }
+    return g;
+  }
+
+  private async guestSession(deviceId: string, g: GuestRow) {
+    const session = randomBytes(32).toString('base64url');
+    await this.pg.query('INSERT INTO mobile_sessions (token_hash, device_id, user_id, last_seen_at) VALUES ($1, $2, $3, now())', [
+      hashToken(session),
+      deviceId,
+      `${GUEST_PREFIX}${g.id}`,
+    ]);
+    const store = await this.one('store', g.store_id);
+    return { session, user: { id: `${GUEST_PREFIX}${g.id}`, name: `${g.name} (aide)`, role: 'guest' }, storeName: str(store?.['name']) };
+  }
+
+  /** Connexion d'un aide sur un téléphone déjà relié au magasin. */
+  async loginGuest(device: MobileDevice, input: { code: string }) {
+    const g = await this.guestByCode(str(input?.code));
+    if (g.store_id !== device.store_id) throw new ForbiddenException('Ce code est pour un autre magasin');
+    return this.guestSession(device.id, g);
+  }
+
+  /** Téléphone de l'aide, pas encore relié : le QR (ou le code) de l'aide le relie et le connecte. */
+  private async pairGuest(code: string, name: string) {
+    const g = await this.guestByCode(code);
+    const deviceId = randomUUID();
+    const token = randomBytes(32).toString('base64url');
+    await this.pg.query("INSERT INTO devices (id, name, store_id, register_id, token_hash, kind) VALUES ($1, $2, $3, $4, $5, 'mobile')", [
+      deviceId,
+      name.trim().slice(0, 60) || `Téléphone de ${g.name}`,
+      g.store_id,
+      `mobile:${deviceId}`,
+      hashToken(token),
+    ]);
+    const login = await this.guestSession(deviceId, g);
+    return { deviceId, token, storeId: g.store_id, storeName: login.storeName, session: login.session, user: login.user };
   }
 
   async device(authorization: string | undefined): Promise<MobileDevice> {
@@ -311,6 +441,18 @@ export class MobileService {
       device.id,
     ]);
     if (!rows[0]) throw new UnauthorizedException('Connectez-vous');
+    if (rows[0].user_id.startsWith(GUEST_PREFIX)) {
+      const g = await this.activeGuest('id', rows[0].user_id.slice(GUEST_PREFIX.length));
+      if (!g) {
+        await this.pg.query('DELETE FROM mobile_sessions WHERE token_hash = $1', [hashToken(session)]);
+        throw new UnauthorizedException('Accès d’aide terminé (inventaire clôturé, accès coupé ou expiré)');
+      }
+      return {
+        device,
+        user: { id: rows[0].user_id, name: `${g.name} (aide)`, role: 'guest' },
+        guest: { id: g.id, inventoryId: g.inventory_id, onBehalfOf: g.on_behalf_of },
+      };
+    }
     const user = await this.one('user', rows[0].user_id);
     if (!user || user['active'] === 0) throw new UnauthorizedException('Utilisateur désactivé');
     return { device, user: { id: rows[0].user_id, name: str(user['name']), role: str(user['role']) } };
@@ -423,7 +565,7 @@ export class MobileService {
       const expected = levels.get(r.article_id);
       if (!line || line.counted === null || expected === undefined) continue;
       // Compté ensuite sur un PC : la vérification se fait là-bas.
-      if (line.counted_by && line.counted_by !== r.users[0]) continue;
+      if (line.counted_by && line.counted_by !== (await this.pcUser(r.users[0]!))) continue;
       const gap = Math.abs(Number(line.counted) - expected);
       if (gap >= RECOUNT_MIN && gap >= Math.abs(expected) * RECOUNT_RATIO) out.push({ articleId: r.article_id, counted: Number(line.counted), expected, by: r.users[0]! });
     }
@@ -436,7 +578,9 @@ export class MobileService {
     const warehouses = new Map((await this.latest('warehouse', '', [], "jsonb_build_object('name', payload->'name')")).map((w) => [w.entity_id, str(w.payload['name'])]));
     const users = await this.userNames();
     const out = [];
+    const showExpected = settings.showExpected && !caller.guest;
     for (const inv of await this.openInventories(caller.device.store_id)) {
+      if (caller.guest && inv.id !== caller.guest.inventoryId) continue;
       const lines = await this.lines(inv.id);
       const levels = settings.showExpected || settings.recount ? await this.stockLevels(inv.warehouseId) : new Map<string, number>();
       const { rows: assigned } = await this.pg.query<{ department_ids: string[] }>('SELECT department_ids FROM mobile_assignments WHERE inventory_id = $1 AND user_id = $2', [
@@ -464,10 +608,10 @@ export class MobileService {
         mine,
         assigned: assigned[0]?.department_ids ?? [],
         recount,
-        expected: settings.showExpected ? Object.fromEntries([...lines.keys()].map((a) => [a, levels.get(a) ?? 0])) : null,
+        expected: showExpected ? Object.fromEntries([...lines.keys()].map((a) => [a, levels.get(a) ?? 0])) : null,
       });
     }
-    return { inventories: out, catalogVersion: await this.catalogVersion(), showExpected: settings.showExpected, user: caller.user };
+    return { inventories: out, catalogVersion: await this.catalogVersion(), showExpected, user: caller.user };
   }
 
   /**
@@ -503,6 +647,10 @@ export class MobileService {
       const invId = str(c.inventoryId);
       if (!inventories.has(invId)) inventories.set(invId, await this.inventory(invId));
       const { inv, status } = inventories.get(invId)!;
+      if (caller.guest && invId !== caller.guest.inventoryId) {
+        rejected.push({ id, reason: 'Inventaire non confié à cet aide' });
+        continue;
+      }
       if (!inv || inv.storeId !== caller.device.store_id) {
         rejected.push({ id, reason: status === 'closed' ? 'Inventaire clôturé' : status === 'cancelled' ? 'Inventaire annulé' : 'Inventaire introuvable' });
         continue;
@@ -535,6 +683,7 @@ export class MobileService {
     const now = new Date();
     // Tout est lu avant la transaction : la base intégrée n'a qu'une connexion.
     const events: [string, string, Json][] = [];
+    const me = await this.pcUser(caller.user.id);
     for (const articleId of articleIds) {
       const places = (await this.locationCounts(inv.id, articleId)).filter((p) => p.qty !== null);
       const latestPlace = [...places].sort((a, b) => b.counted_at.getTime() - a.counted_at.getTime())[0];
@@ -565,9 +714,10 @@ export class MobileService {
         counted,
         counted_detail: detail ? JSON.stringify(detail) : null,
         counted_at: counted === null ? null : countedAt,
-        counted_by: counted === null ? null : (latestPlace?.user_id ?? caller.user.id),
+        counted_by: counted === null ? null : latestPlace ? await this.pcUser(latestPlace.user_id) : me,
       };
-      const entry = { id: randomUUID(), inventory_id: inv.id, article_id: articleId, user_id: caller.user.id, counted, at: countedAt };
+      // `counter` : la personne qui a vraiment compté (un aide), pour le suivi du gérant ; les PC l'ignorent.
+      const entry = { id: randomUUID(), inventory_id: inv.id, article_id: articleId, user_id: me, counter: caller.user.id, counted, at: countedAt };
       events.push(['inventory_line', line.id, line], ['inventory_entry', entry.id, entry]);
     }
     await this.pg.transaction(async (tx) => {
@@ -643,6 +793,7 @@ export class MobileService {
       if (await this.canCount(u.entity_id, role)) eligible.push({ id: u.entity_id, name: str(u.payload['name']), role, storeId: (u.payload['store_id'] as string | null) ?? null });
     }
 
+    const { rows: guests } = await this.pg.query<GuestRow>('SELECT * FROM mobile_guests WHERE created_at > now() - interval \'7 days\' ORDER BY created_at DESC');
     const inventories = [];
     for (const inv of await this.openInventories()) {
       const lines = await this.lines(inv.id);
@@ -657,8 +808,8 @@ export class MobileService {
       }
       // Compteurs : chaque saisie, sur un PC ou un téléphone, avec sa personne et son heure.
       const { rows: entries } = await this.pg.query<{ user_id: string; n: number; first: string; last: string }>(
-        `SELECT payload->>'user_id' AS user_id, COUNT(DISTINCT payload->>'article_id')::int AS n, MIN(payload->>'at') AS first, MAX(payload->>'at') AS last
-         FROM events WHERE entity = 'inventory_entry' AND payload->>'inventory_id' = $1 GROUP BY payload->>'user_id'`,
+        `SELECT COALESCE(payload->>'counter', payload->>'user_id') AS user_id, COUNT(DISTINCT payload->>'article_id')::int AS n, MIN(payload->>'at') AS first, MAX(payload->>'at') AS last
+         FROM events WHERE entity = 'inventory_entry' AND payload->>'inventory_id' = $1 GROUP BY COALESCE(payload->>'counter', payload->>'user_id')`,
         [inv.id],
       );
       const { rows: phoneUsers } = await this.pg.query<{ user_id: string }>('SELECT DISTINCT user_id FROM mobile_counts WHERE inventory_id = $1', [inv.id]);
@@ -704,6 +855,16 @@ export class MobileService {
         counters,
         assignments: assignments.map((a) => ({ userId: a.user_id, departmentIds: a.department_ids })),
         recount: settings.recount ? recount : [],
+        guests: guests
+          .filter((g) => g.inventory_id === inv.id)
+          .map((g) => ({
+            id: g.id,
+            name: g.name,
+            code: g.code,
+            onBehalfOf: users.get(g.on_behalf_of) ?? '',
+            expiresAt: g.expires_at,
+            active: !g.revoked_at && new Date(g.expires_at).getTime() > now,
+          })),
       });
     }
 

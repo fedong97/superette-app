@@ -1512,4 +1512,22 @@ CREATE INDEX loyalty_moves_customer ON loyalty_moves(customer_id, created_at);
 CREATE INDEX loyalty_moves_sale ON loyalty_moves(sale_id);
 `,
   },
+  {
+    version: 36,
+    name: 'relances des clients',
+    sql: `
+-- Relances envoyées aux clients en retard (WhatsApp) : date, auteur et montants du moment.
+CREATE TABLE customer_reminders (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  store_id TEXT NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'pdf')),
+  balance INTEGER NOT NULL,
+  overdue INTEGER NOT NULL,
+  user_id TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX customer_reminders_customer ON customer_reminders(store_id, customer_id, at);
+`,
+  },
 ];

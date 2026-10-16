@@ -5,6 +5,8 @@ import {
   type LabelFormatId,
   barcodeLabelsHtml,
   loyaltyCardHtml,
+  reminderMessage,
+  whatsappLink,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -126,7 +128,8 @@ export interface Printer {
   invoice(saleId: string, opts?: InvoicePrintOptions): Promise<boolean>;
   /** Page HTML de la facture selon le modèle, pour l'aperçu. */
   previewInvoice(saleId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
-  statement(storeId: string, customerId: string, from?: string | null, to?: string | null): Promise<void>;
+  /** Relevé de compte A4, imprimé ou enregistré en PDF (false : enregistrement annulé). */
+  statement(storeId: string, customerId: string, from?: string | null, to?: string | null, output?: 'print' | 'pdf'): Promise<boolean>;
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
@@ -1330,6 +1333,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx(['customer_statement', 'receivables']).storeId, id, from, to),
+    /** Relance d'un client en retard : message WhatsApp prêt à envoyer, montants et dernière relance. */
+    'customers.reminder': (id: string) => {
+      const storeId = ctx(['customer_statement', 'receivables']).storeId;
+      const store = s.admin.getStore(storeId);
+      const d = s.customers.reminderData(storeId, id);
+      const text = reminderMessage(settings().reminderTemplate, {
+        customer: d.customer.name,
+        store: store.name,
+        storePhone: store.phone,
+        balance: d.balance,
+        overdue: d.overdue,
+        items: d.items.map((i) => ({ number: i.number, date: i.created_at, dueDate: i.due_date, remaining: i.remaining, daysLate: i.days_late })),
+      });
+      return { ...d, text, link: whatsappLink(d.customer.phone, text) };
+    },
+    'customers.reminderSent': (id: string, channel: 'whatsapp' | 'pdf') => s.customers.recordReminder(ctx(['customer_statement', 'receivables']), id, channel),
+    /** Relevé en PDF à joindre dans WhatsApp : la relance est notée s'il est enregistré. */
+    'customers.reminderPdf': async (id: string) => {
+      const c = ctx(['customer_statement', 'receivables']);
+      const saved = await printer.statement(c.storeId, id, null, null, 'pdf');
+      if (saved) s.customers.recordReminder(c, id, 'pdf');
+      return saved;
+    },
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
 
     // --- Ristournes des clients spécifiques ------------------------------------

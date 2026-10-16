@@ -22,3 +22,4 @@ export * from './storeSettings';
 export * from './docTemplates';
 export * from './backup';
 export * from './loyalty';
+export * from './reminder';

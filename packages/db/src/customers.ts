@@ -68,6 +68,17 @@ export interface OpenItem {
   bucket: AgingBucket;
 }
 
+export interface CustomerReminder {
+  customer_id: string;
+  at: string;
+  channel: 'whatsapp' | 'pdf';
+  balance: Fcfa;
+  overdue: Fcfa;
+  user_name: string | null;
+  /** Nombre de relances envoyées à ce client. */
+  count: number;
+}
+
 export interface CustomerAccount {
   customer: Customer;
   balance: Fcfa;
@@ -431,7 +442,7 @@ export class CustomerService extends Base {
 
   /** Balance âgée du magasin : ce que doivent les clients, par ancienneté du retard. */
   receivables(storeId: string): {
-    customers: { id: string; code: string; name: string; phone: string | null; credit_limit: Fcfa; balance: Fcfa; buckets: Record<AgingBucket, Fcfa> }[];
+    customers: { id: string; code: string; name: string; phone: string | null; credit_limit: Fcfa; balance: Fcfa; buckets: Record<AgingBucket, Fcfa>; last_reminder: CustomerReminder | null }[];
     totals: Record<AgingBucket, Fcfa> & { balance: Fcfa };
     labels: typeof AGING_LABELS;
   } {
@@ -444,13 +455,14 @@ export class CustomerService extends Base {
       .all(storeId, storeId) as string[];
     const empty = (): Record<AgingBucket, Fcfa> => ({ current: 0, d30: 0, d60: 0, d90: 0, older: 0 });
     const totals = { ...empty(), balance: 0 };
+    const reminders = this.lastReminders(storeId);
     const customers = ids
       .map((id) => {
         const c = this.getCustomer(id);
         const { balance, openItems } = this.ledger(storeId, id);
         const buckets = empty();
         for (const i of openItems) buckets[i.bucket] += i.remaining;
-        return { id, code: c.code, name: c.name, phone: c.phone, credit_limit: c.credit_limit, balance, buckets };
+        return { id, code: c.code, name: c.name, phone: c.phone, credit_limit: c.credit_limit, balance, buckets, last_reminder: reminders.get(id) ?? null };
       })
       .filter((c) => c.balance !== 0)
       .sort((a, b) => b.balance - a.balance);
@@ -460,5 +472,36 @@ export class CustomerService extends Base {
     }
     return { customers, totals, labels: AGING_LABELS };
   }
-}
 
+  /** Ce qu'il faut pour relancer un client : nom, téléphone, montants et factures dues. */
+  reminderData(storeId: string, customerId: string): { customer: Customer; balance: Fcfa; overdue: Fcfa; items: OpenItem[]; last: CustomerReminder | null } {
+    const acc = this.account(storeId, customerId);
+    return { customer: acc.customer, balance: acc.balance, overdue: acc.overdue, items: acc.openItems, last: this.lastReminders(storeId).get(customerId) ?? null };
+  }
+
+  /** Une relance vient d'être envoyée (ou son relevé enregistré) : on la garde avec les montants du moment. */
+  recordReminder(ctx: Pick<Context, 'storeId' | 'registerId' | 'userId'>, customerId: string, channel: 'whatsapp' | 'pdf'): CustomerReminder {
+    const acc = this.account(ctx.storeId, customerId);
+    const id = newId();
+    const at = this.now();
+    this.db
+      .prepare('INSERT INTO customer_reminders (id, customer_id, store_id, channel, balance, overdue, user_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, customerId, ctx.storeId, channel, acc.balance, acc.overdue, ctx.userId, at);
+    this.enqueue(ctx, 'customer_reminder', id, 'upsert', {});
+    this.audit(ctx.userId, 'customer.reminder', 'customer', customerId, { channel, balance: acc.balance, overdue: acc.overdue });
+    return this.lastReminders(ctx.storeId).get(customerId)!;
+  }
+
+  /** Dernière relance de chaque client du magasin. */
+  lastReminders(storeId: string): Map<string, CustomerReminder> {
+    const rows = this.db
+      .prepare(
+        `SELECT r.customer_id, r.at, r.channel, r.balance, r.overdue, u.name AS user_name,
+                (SELECT COUNT(*) FROM customer_reminders x WHERE x.store_id = r.store_id AND x.customer_id = r.customer_id) AS count
+         FROM customer_reminders r LEFT JOIN users u ON u.id = r.user_id
+         WHERE r.store_id = ? AND r.at = (SELECT MAX(at) FROM customer_reminders y WHERE y.store_id = r.store_id AND y.customer_id = r.customer_id)`,
+      )
+      .all(storeId) as CustomerReminder[];
+    return new Map(rows.map((r) => [r.customer_id, r]));
+  }
+}

@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.51.0',
+    items: [
+      'Relances par WhatsApp : dans Client › Situation (balance âgée) ou le compte d’un client, « Relancer » ouvre WhatsApp avec un message prêt (solde, retard, factures dues), modifiable avant l’envoi.',
+      '« Relancer les clients en retard » enchaîne tous les clients en retard, un par un ; « Relevé en PDF » prépare le relevé à joindre au message.',
+      'Chaque relance est notée (date, auteur, montant dû) et s’affiche dans la balance âgée. Le message se règle dans Administration › Paramètres › Crédit clients.',
+    ],
+  },
+  {
     version: '0.50.0',
     items: [
       'Carte de fidélité (Administration › Paramètres › Carte de fidélité) : le client enregistré gagne 1 point par tranche d’achat (1 000 FCFA par défaut) et paie avec ses points à l’encaissement (« Points fidélité »).',

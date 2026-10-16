@@ -728,7 +728,7 @@ export function createPrinter(s: Services): Printer {
       return { templateId: t.id, html: renderDocHtml(t, s.receipts.quoteDoc(quoteId)) };
     },
 
-    async statement(storeId, customerId, from, to) {
+    async statement(storeId, customerId, from, to, output) {
       const store = s.admin.getStore(storeId);
       const c = s.customers.getCustomer(customerId);
       const acc = s.customers.account(storeId, customerId);
@@ -742,7 +742,7 @@ export function createPrinter(s: Services): Printer {
       const open = acc.openItems
         .map((i) => `<tr><td>${esc(i.number)}</td><td>${dayFr(i.created_at)}</td><td>${dayFr(i.due_date)}</td><td class="r">${money(i.remaining)}</td><td>${i.days_late ? `${i.days_late} j de retard` : ''}</td></tr>`)
         .join('');
-      await printA4(`<div class="head">
+      const body = `<div class="head">
           <div><h1>${esc(store.name)}</h1>${[store.address, store.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
           <div class="box"><b>${esc(c.name)}</b><br>${[c.address, c.phone, `Compte ${c.code}`].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
         </div>
@@ -752,7 +752,13 @@ export function createPrinter(s: Services): Printer {
         <tbody>${from ? `<tr><td colspan="5">Solde au ${dayFr(from)}</td><td class="r">${money(st.opening)}</td></tr>` : ''}${rows}
         <tr class="total"><td colspan="5">Solde dû (FCFA)</td><td class="r">${money(st.closing)}</td></tr></tbody></table>
         ${open ? `<h3>Factures restant dues</h3><table><thead><tr><th>Pièce</th><th>Date</th><th>Échéance</th><th class="r">Reste dû</th><th></th></tr></thead><tbody>${open}</tbody></table>` : ''}
-        <p class="muted">Plafond de crédit : ${money(c.credit_limit)} FCFA · Délai de paiement : ${c.payment_terms_days} jours</p>`);
+        <p class="muted">Plafond de crédit : ${money(c.credit_limit)} FCFA · Délai de paiement : ${c.payment_terms_days} jours</p>`;
+      if (output === 'pdf') {
+        const name = `releve-${c.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || c.code}.pdf`;
+        return saveA4Pdf(body, name);
+      }
+      await printA4(body);
+      return true;
     },
 
     async customerReceipt(paymentId) {

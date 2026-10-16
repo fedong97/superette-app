@@ -286,6 +286,7 @@ function Account({ customer }: { customer: Customer }) {
   const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
   const [paying, setPaying] = useState(false);
+  const [reminding, setReminding] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   if (!acc.data) return null;
   const a = acc.data;
@@ -348,6 +349,11 @@ function Account({ customer }: { customer: Customer }) {
       )}
       <div className="actions">
         {can('customer_statement', 'receivables') && <button onClick={() => call('customers.printStatement', customer.id).catch(toast.error)}>Imprimer le relevé</button>}
+        {can('customer_statement', 'receivables') && (
+          <button disabled={!a.balance} onClick={() => setReminding(true)}>
+            Relancer par WhatsApp…
+          </button>
+        )}
         {can('customer_payment') && (
           <button className="primary" disabled={!a.balance} onClick={() => setPaying(true)}>
             Encaisser un règlement
@@ -366,7 +372,107 @@ function Account({ customer }: { customer: Customer }) {
         />
       )}
       {preview && <InvoicePreview saleId={preview} onClose={() => setPreview(null)} />}
+      {reminding && <ReminderDialog queue={[customer.id]} onClose={() => setReminding(false)} />}
     </>
+  );
+}
+
+/**
+ * Relance par WhatsApp : le message rempli pour le client (modifiable), « Ouvrir WhatsApp »
+ * avec le message prêt, relevé en PDF à joindre. Avec plusieurs clients, « Suivant » passe au prochain.
+ */
+export function ReminderDialog({ queue, onClose, onSent }: { queue: string[]; onClose: () => void; onSent?: () => void }) {
+  const toast = useToast();
+  const [index, setIndex] = useState(0);
+  const id = queue[index]!;
+  const data = useLoad(() => call('customers.reminder', id), [id]);
+  const [text, setText] = useState<string | null>(null);
+  const d = data.data;
+  const message = text ?? d?.text ?? '';
+  const next = () => {
+    setText(null);
+    if (index + 1 < queue.length) setIndex(index + 1);
+    else onClose();
+  };
+  const sent = async (channel: 'whatsapp' | 'pdf') => {
+    await call('customers.reminderSent', id, channel);
+    data.reload();
+    onSent?.();
+  };
+  return (
+    <Modal title={`Relancer ${d?.customer.name ?? '…'}${queue.length > 1 ? ` (${index + 1} sur ${queue.length})` : ''}`} onClose={onClose} wide>
+      {d && (
+        <>
+          <div className="kpis">
+            <div>
+              <small>Doit</small>
+              <strong>{fcfa(d.balance)}</strong>
+            </div>
+            <div className={d.overdue ? 'neg' : ''}>
+              <small>Dont en retard</small>
+              <strong>{fcfa(d.overdue)}</strong>
+            </div>
+            <div>
+              <small>Téléphone</small>
+              <strong>{d.customer.phone || '—'}</strong>
+            </div>
+            <div>
+              <small>Dernière relance</small>
+              <strong>{d.last ? dateTime(d.last.at) : 'jamais'}</strong>
+            </div>
+          </div>
+          {d.last && (
+            <p className="muted">
+              {d.last.count} relance{d.last.count > 1 ? 's' : ''} envoyée{d.last.count > 1 ? 's' : ''} ; la dernière par {d.last.user_name ?? '—'}, quand il devait {fcfa(d.last.balance)}.
+            </p>
+          )}
+          <Field label="Message" hint="Modifiable avant l'envoi. Le modèle se règle dans Administration › Paramètres › Crédit clients.">
+            <textarea rows={12} value={message} onChange={(e) => setText(e.target.value)} />
+          </Field>
+          {!d.link && <p className="neg">Pas de numéro de téléphone valable sur la fiche : complétez-la, ou copiez le message.</p>}
+          <div className="actions">
+            <button
+              onClick={() =>
+                navigator.clipboard.writeText(message).then(
+                  () => toast.ok('Message copié'),
+                  () => toast.error('Copie impossible'),
+                )
+              }
+            >
+              Copier le message
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  if (await call('customers.reminderPdf', id)) toast.ok('Relevé enregistré : joignez-le dans WhatsApp avec le trombone');
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Relevé en PDF…
+            </button>
+            <button
+              className="primary"
+              disabled={!d.link}
+              onClick={async () => {
+                const link = `${d.link!.split('?')[0]}?text=${encodeURIComponent(message)}`;
+                window.open(link, '_blank');
+                try {
+                  await sent('whatsapp');
+                  toast.ok('Relance notée');
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Ouvrir WhatsApp
+            </button>
+            {queue.length > 1 && <button onClick={next}>{index + 1 < queue.length ? 'Suivant ›' : 'Terminer'}</button>}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -495,10 +601,12 @@ function CustomerSales({ customer }: { customer: Customer }) {
 function Receivables({ user }: { user: User }) {
   const data = useLoad(() => call('customers.receivables'), []);
   const [open, setOpen] = useState<Customer | null>(null);
+  const [remind, setRemind] = useState<string[] | null>(null);
   if (!data.data) return null;
   const { customers, totals, labels } = data.data;
   const buckets = Object.keys(labels) as (keyof typeof labels)[];
   const late = totals.balance - totals.current;
+  const lateIds = customers.filter((c) => c.balance > 0 && c.balance > c.buckets.current).map((c) => c.id);
   return (
     <>
       <div className="kpis">
@@ -519,6 +627,13 @@ function Receivables({ user }: { user: User }) {
           <strong>{customers.length}</strong>
         </div>
       </div>
+      {lateIds.length > 0 && (
+        <div className="actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="primary" onClick={() => setRemind(lateIds)}>
+            Relancer les {lateIds.length} client{lateIds.length > 1 ? 's' : ''} en retard par WhatsApp…
+          </button>
+        </div>
+      )}
       {customers.length === 0 ? (
         <Empty>Aucun client ne doit d'argent au magasin.</Empty>
       ) : (
@@ -533,6 +648,8 @@ function Receivables({ user }: { user: User }) {
                   {labels[b]}
                 </th>
               ))}
+              <th>Dernière relance</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -546,6 +663,20 @@ function Receivables({ user }: { user: User }) {
                     {c.buckets[b] ? fcfa(c.buckets[b]) : ''}
                   </td>
                 ))}
+                <td className="nowrap">{c.last_reminder ? dateFr(c.last_reminder.at.slice(0, 10)) : ''}</td>
+                <td>
+                  {c.balance > 0 && (
+                    <button
+                      className="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRemind([c.id]);
+                      }}
+                    >
+                      Relancer
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             <tr className="b">
@@ -556,6 +687,7 @@ function Receivables({ user }: { user: User }) {
                   {totals[b] ? fcfa(totals[b]) : ''}
                 </td>
               ))}
+              <td colSpan={2}></td>
             </tr>
           </tbody>
         </table>
@@ -569,6 +701,15 @@ function Receivables({ user }: { user: User }) {
             data.reload();
           }}
           onSaved={setOpen}
+        />
+      )}
+      {remind && (
+        <ReminderDialog
+          queue={remind}
+          onClose={() => {
+            setRemind(null);
+            data.reload();
+          }}
         />
       )}
     </>

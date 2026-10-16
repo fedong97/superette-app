@@ -1,4 +1,4 @@
-import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -502,6 +502,20 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         { label: 'Plafond de crédit d’un nouveau client', hint: '0 : pas de crédit sans accord du gérant', render: () => num('creditDefaultLimit', 'FCFA') },
         { label: 'Délai de paiement d’un nouveau client', render: () => num('creditDefaultDays', 'jours') },
         { label: 'Bloquer le crédit d’un client qui a une facture échue', hint: 'Le gérant peut passer outre avec son code.', render: () => yes('creditBlockLate') },
+        {
+          label: 'Message de relance WhatsApp',
+          hint: `Champs remplacés pour chaque client : ${Object.entries(REMINDER_FIELDS).map(([k, v]) => `${k} (${v})`).join(', ')}. Vide : le message proposé.`,
+          wide: true,
+          render: () => (
+            <textarea
+              rows={8}
+              style={{ width: '100%' }}
+              disabled={!canEdit}
+              value={sv('reminderTemplate') || DEFAULT_REMINDER_TEMPLATE}
+              onChange={(e) => sset('reminderTemplate', e.target.value === DEFAULT_REMINDER_TEMPLATE ? '' : e.target.value)}
+            />
+          ),
+        },
       ],
     ],
     [

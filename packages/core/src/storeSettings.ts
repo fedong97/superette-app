@@ -36,6 +36,8 @@ export interface StoreSettings {
   creditDefaultDays: number;
   /** Refuser une vente à crédit au client qui a une facture échue non payée. */
   creditBlockLate: boolean;
+  /** Message de relance des clients par WhatsApp ; vide : le message proposé par le logiciel. */
+  reminderTemplate: string;
 
   /** Les lots qui périment dans ce nombre de jours sont signalés. */
   expiryAlertDays: number;
@@ -122,6 +124,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   creditDefaultLimit: 0,
   creditDefaultDays: 30,
   creditBlockLate: false,
+  reminderTemplate: '',
   expiryAlertDays: 30,
   defaultAlertQty: 0,
   transferTwoUsers: false,
@@ -174,7 +177,7 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   loyaltyPointValue: [1, 1e6],
   loyaltyMinRedeem: [0, 1e7],
 };
-const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000 };
+const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder'];
 
 /**

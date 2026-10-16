@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.55.0',
+    items: [
+      'Application Android FEDONIX 360 Inventaire : le compteur scanne les codes-barres avec l’appareil photo (ou une douchette Bluetooth), tape la quantité en cartons et unités, et compte même sans réseau ; tout part au serveur dès que le Wi-Fi revient.',
+      'Le téléphone se relie au magasin avec le QR code de FEDONIX 360 Gérant › Inventaire ; chaque compteur se connecte avec son identifiant et son code (droit « Saisir le stock physique »).',
+      'Un même produit compté au rayon et en réserve s’additionne. Mode rafale : chaque scan ajoute 1. Code inconnu : photo et nom envoyés au gérant.',
+      'Le gérant suit l’avancement par rayon et par compteur (produits par heure), confie des rayons à chacun, et fait recompter par un collègue les gros écarts. La clôture reste sur le PC.',
+    ],
+  },
+  {
     version: '0.54.0',
     items: [
       'Paiement Mobile Money automatique : à l’encaissement, MTN MoMo ou Orange Money › « Demander le paiement » envoie la demande au téléphone du client ; il confirme avec son code et la référence s’ajoute toute seule.',

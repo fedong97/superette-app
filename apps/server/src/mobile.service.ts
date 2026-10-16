@@ -440,7 +440,12 @@ export class MobileService {
    * produit touché, le total des endroits devient la quantité comptée de la
    * ligne d'inventaire, envoyée aux PC comme une saisie faite sur un PC.
    */
-  async pushCounts(caller: MobileCaller, counts: MobileCountInput[]) {
+  /**
+   * `sentAt` : heure du téléphone à l'envoi. Une horloge de téléphone en avance
+   * ou en retard décale ses comptages d'autant ; on les remet à l'heure du serveur
+   * pour que les ventes faites après le comptage soient bien déduites.
+   */
+  async pushCounts(caller: MobileCaller, counts: MobileCountInput[], sentAt?: string) {
     if (!Array.isArray(counts) || counts.length > 1000) throw new BadRequestException('Lot de comptages invalide (1000 au plus)');
     const accepted: string[] = [];
     const rejected: { id: string; reason: string }[] = [];
@@ -448,10 +453,12 @@ export class MobileService {
     const inventories = new Map<string, Awaited<ReturnType<MobileService['inventory']>>>();
     const articles = new Map<string, boolean>();
     const soon = Date.now() + 10 * 60_000;
+    const sent = Date.parse(str(sentAt));
+    const skew = Number.isFinite(sent) && Math.abs(Date.now() - sent) > 60_000 ? Date.now() - sent : 0;
     for (const c of counts) {
       const id = str(c?.id);
       if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Comptage sans identifiant');
-      const at = Date.parse(str(c.countedAt));
+      const at = Date.parse(str(c.countedAt)) + skew;
       const qtyOk = c.qty === null || (Number.isSafeInteger(c.qty) && c.qty >= 0 && c.qty < 1e12);
       const detail = Array.isArray(c.detail) && c.detail.length <= 4 && c.detail.every((n) => Number.isFinite(n) && n >= 0) ? c.detail : null;
       if (!qtyOk || !Number.isFinite(at) || at > soon) {

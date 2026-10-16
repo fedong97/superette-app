@@ -148,6 +148,15 @@ describe('inventaire sur téléphone', () => {
     );
   });
 
+  it('remet à l’heure du serveur les comptages d’un téléphone qui retarde', async () => {
+    // Le téléphone retarde d'une heure : son comptage serait avant la réception du stock.
+    const late = (iso: string) => new Date(Date.parse(iso) - 3_600_000).toISOString();
+    const c = count(A.biere!, 'Rayon', 4_000, late(at(12)));
+    await phone('/counts', { counts: [c], sentAt: late(new Date().toISOString()) });
+    await syncOnce(pc);
+    expect(line(invId, A.biere!)).toMatchObject({ counted: 11_000, difference: -1_000 });
+  });
+
   it('fait recompter un gros écart par un autre compteur', async () => {
     await phone('/counts', { counts: [count(A.lait!, 'Rayon', 9_000, at(15))] });
     expect((await (await phone('/inventories')).json()).inventories[0].recount).toEqual([]);

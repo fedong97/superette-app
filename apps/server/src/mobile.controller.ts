@@ -57,8 +57,8 @@ export class MobileController {
 
   @Post('api/v1/mobile/counts')
   @HttpCode(200)
-  async counts(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: { counts: MobileCountInput[] }) {
-    return this.mobile.pushCounts(await this.mobile.caller(auth, session), body?.counts);
+  async counts(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: { counts: MobileCountInput[]; sentAt?: string }) {
+    return this.mobile.pushCounts(await this.mobile.caller(auth, session), body?.counts, body?.sentAt);
   }
 
   @Post('api/v1/mobile/unknowns')

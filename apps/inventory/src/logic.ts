@@ -199,3 +199,151 @@ export function newId(): string {
   if (c?.randomUUID) return c.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
 }
+
+// ——— Mode fichier : fiche de comptage ouverte sans serveur ———
+
+/** Ligne d'une fiche de comptage importée. */
+export interface FileLine {
+  code: string;
+  name: string;
+  /** « CARTON de 24 » (fiche du PC) ou « CARTON » (fichier texte). */
+  pack: string | null;
+  department: string | null;
+  /** Quantité déjà inscrite dans le fichier, en millièmes. */
+  qty: number | null;
+}
+
+export interface ParsedFile {
+  format: 'pc' | 'txt';
+  title: string | null;
+  lines: FileLine[];
+}
+
+const num = (v: string | undefined): number | null => {
+  const s = (v ?? '').trim().replace(/\s/g, '').replace(',', '.');
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+/** Cellules d'un CSV : séparateur point-virgule, tabulation ou virgule, guillemets d'Excel. */
+export function csvRows(text: string): string[][] {
+  const raw = text.replace(/^﻿/, '').split(/\r?\n/).filter((r) => r.trim());
+  if (!raw.length) return [];
+  // Séparateur le plus présent dans les premières lignes (la première peut être un titre).
+  const sample = raw.slice(0, 5).join('\n');
+  const sep = [';', '\t', ','].map((c) => [c, sample.split(c).length] as const).sort((x, y) => y[1] - x[1])[0]![0];
+  return raw.map((line) => {
+    const cells: string[] = [];
+    let cur = '';
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!;
+      if (quoted) {
+        if (ch === '"' && line[i + 1] === '"') (cur += '"'), i++;
+        else if (ch === '"') quoted = false;
+        else cur += ch;
+      } else if (ch === '"' && !cur) quoted = true;
+      else if (ch === sep) cells.push(cur.trim()), (cur = '');
+      else cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  });
+}
+
+/**
+ * Fiche de comptage : celle du PC (CSV ou Excel, ligne d'en-tête « Code ;
+ * Produit ; Rayon ; Conditionnement ; Compté… ») ou un fichier texte sans
+ * en-tête « CODE;NOM (CONDITIONNEMENT);QUANTITÉ ».
+ */
+export function parseCountFile(rows: string[][]): ParsedFile {
+  const headAt = rows.findIndex((r) => r.some((c) => /^code/i.test(c.trim())) && r.some((c) => /produit|nom|désignation|designation|libell/i.test(c)));
+  if (headAt >= 0) {
+    const head = rows[headAt]!.map((h) => h.trim().toLowerCase());
+    const at = (re: RegExp) => head.findIndex((h) => re.test(h));
+    const codeAt = at(/^code/);
+    const nameAt = at(/produit|nom|désignation|designation|libell/);
+    const deptAt = at(/rayon|famille|département/);
+    const packAt = at(/^conditionnement/);
+    const countPackAt = at(/compt.*condition/);
+    const countUnitAt = at(/compt.*unit/);
+    const qtyAt = countUnitAt >= 0 ? countUnitAt : at(/compt|quant|qt/);
+    const title = headAt > 0 ? (rows[0]!.find((c) => c.trim()) ?? null) : null;
+    const lines: FileLine[] = [];
+    for (const r of rows.slice(headAt + 1)) {
+      const code = r[codeAt]?.trim();
+      if (!code) continue;
+      const pack = packAt >= 0 ? r[packAt]?.trim() || null : null;
+      const per = Number(/de\s+([\d.,]+)/i.exec(pack ?? '')?.[1]?.replace(',', '.') ?? 0);
+      const units = num(r[qtyAt]);
+      const packs = countPackAt >= 0 ? num(r[countPackAt]) : null;
+      const qty = units === null && packs === null ? null : Math.round(((units ?? 0) + (packs ?? 0) * per) * 1000);
+      lines.push({ code, name: r[nameAt]?.trim() || code, pack, department: deptAt >= 0 ? r[deptAt]?.trim() || null : null, qty });
+    }
+    return { format: 'pc', title, lines };
+  }
+  const lines: FileLine[] = [];
+  for (const r of rows) {
+    const code = r[0]?.trim();
+    if (!code || r.length < 2) continue;
+    const label = r[1]?.trim() ?? '';
+    const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(label);
+    lines.push({ code, name: (m ? m[1] : label) || code, pack: m ? m[2]!.trim() || null : null, department: null, qty: (() => {
+      const n = num(r[2]);
+      return n === null ? null : Math.round(n * 1000);
+    })() });
+  }
+  return { format: 'txt', title: null, lines };
+}
+
+/** Article d'une ligne de fiche : celui du catalogue s'il est connu, sinon un article du fichier. */
+export function fileArticle(line: FileLine, index: Map<string, Hit>): Article {
+  const known = lookup(index, line.code);
+  if (known) return known.article;
+  const m = /^(.*?)\s+de\s+([\d.,]+)\s*$/i.exec(line.pack ?? '');
+  const units = m ? Math.round(Number(m[2]!.replace(',', '.')) * 1000) : 0;
+  return {
+    id: `f:${line.code}`,
+    code: line.code,
+    name: line.name,
+    unit: 'piece',
+    unitName: m ? null : line.pack,
+    otherRef: null,
+    departmentId: null,
+    barcodes: [],
+    packs: m && units > 1000 ? [{ name: m[1]!, units, barcode: null }] : [],
+    thumb: null,
+  };
+}
+
+const n3 = (milli: number) => String(milli / 1000).replace('.', ',');
+const cell = (v: string) => (/[;"\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
+/** Fiche remplie, à réimporter sur le PC (bouton Importer) ou dans l'outil d'origine. */
+export function exportCountFile(format: 'pc' | 'txt', articles: Article[], totals: Map<string, number>, lineOf: (a: Article) => FileLine | undefined): string {
+  if (format === 'txt') {
+    return articles
+      .map((a) => {
+        const l = lineOf(a);
+        const pack = l?.pack ?? a.unitName ?? '';
+        return [a.code, `${l?.name ?? a.name}${pack ? ` (${pack})` : ''}`, n3(totals.get(a.id) ?? 0)].join(';');
+      })
+      .join('\r\n');
+  }
+  const head = 'Code;Produit;Rayon;Compté;Détail';
+  return `﻿${[
+    head,
+    ...articles
+      .filter((a) => totals.has(a.id))
+      .map((a) => [cell(a.code), cell(lineOf(a)?.name ?? a.name), cell(lineOf(a)?.department ?? ''), n3(totals.get(a.id)!), cell(formatQty(totals.get(a.id)!, a))].join(';')),
+  ].join('\r\n')}`;
+}
+
+/** Récapitulatif d'un compteur : une ligne par produit et par endroit, puis le total du produit. */
+export function recapCsv(rows: { location: string; article: Article; qty: number }[]): string {
+  const sorted = [...rows].sort((x, y) => x.article.name.localeCompare(y.article.name, 'fr') || x.location.localeCompare(y.location, 'fr'));
+  const totals = new Map<string, number>();
+  for (const r of sorted) totals.set(r.article.id, (totals.get(r.article.id) ?? 0) + r.qty);
+  return `﻿${['Code;Produit;Endroit;Quantité;Détail;Total du produit', ...sorted.map((r) => [cell(r.article.code), cell(r.article.name), cell(r.location), n3(r.qty), cell(formatQty(r.qty, r.article)), n3(totals.get(r.article.id)!)].join(';'))].join('\r\n')}`;
+}

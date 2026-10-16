@@ -571,3 +571,13 @@ html.camera .app > *:not(.camera-ui) {
 .toggle.on-dark {
   color: #fff;
 }
+
+.pill.ok {
+  background: #e3f5ec;
+  color: #157347;
+}
+
+.segmented + .select,
+.list h2 {
+  margin-top: 8px;
+}

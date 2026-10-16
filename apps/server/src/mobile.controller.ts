@@ -50,6 +50,18 @@ export class MobileController {
     return this.mobile.catalog(since);
   }
 
+  @Get('api/v1/mobile/find')
+  async find(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('q') q?: string) {
+    await this.mobile.caller(auth, session);
+    return this.mobile.find(q ?? '');
+  }
+
+  @Get('api/v1/mobile/articles/:id/thumb')
+  async thumb(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Param('id') id: string) {
+    await this.mobile.caller(auth, session);
+    return this.mobile.thumb(id);
+  }
+
   @Get('api/v1/mobile/inventories')
   async inventories(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
     return this.mobile.inventories(await this.mobile.caller(auth, session));

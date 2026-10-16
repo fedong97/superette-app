@@ -1,6 +1,8 @@
 import { BarcodeFormat, BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { Capacitor } from '@capacitor/core';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { Share } from '@capacitor/share';
 
 /** Vrai dans l'application Android ; faux dans un navigateur (essais sur PC). */
 export const native = Capacitor.isNativePlatform();
@@ -130,4 +132,25 @@ export function listenWedge(onCode: (code: string) => void): () => void {
   };
   window.addEventListener('keydown', onKey);
   return () => window.removeEventListener('keydown', onKey);
+}
+
+/**
+ * Fichier texte partagé depuis le téléphone (WhatsApp, e-mail, Drive…) ; dans
+ * un navigateur, il est téléchargé.
+ */
+export async function shareFile(name: string, text: string, title: string) {
+  if (!native) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
+  }
+  const { uri } = await Filesystem.writeFile({ path: name, data: text, directory: Directory.Cache, encoding: Encoding.UTF8 });
+  await Share.share({ title, files: [uri], dialogTitle: title }).catch((e: unknown) => {
+    // Fenêtre de partage fermée sans choisir d'application : rien à signaler.
+    if (!/cancel/i.test(e instanceof Error ? e.message : String(e))) throw e;
+  });
 }

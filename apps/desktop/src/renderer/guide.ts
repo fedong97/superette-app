@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.56.0',
+    items: [
+      'Inventaire sur téléphone : les codes-barres et les noms sont retrouvés même sur un gros catalogue. Les photos ne sont plus téléchargées avec le catalogue (une fiche affiche la sienne à l’ouverture), et un code ou un nom introuvable sur le téléphone est cherché sur le serveur.',
+      'Mode fichier, sans serveur ni Wi-Fi : le téléphone ouvre la fiche à remplir du PC (Excel ou CSV) ou un fichier texte « code;nom (conditionnement);quantité », on compte, puis « Exporter la fiche remplie » l’envoie par WhatsApp ou e-mail ; le PC la reprend avec le bouton Importer de l’inventaire.',
+      'Onglet Produits : tous les produits de l’inventaire à toucher pour les compter, avec « 120 / 450 comptés » et les filtres À compter, Comptés, Tous et par rayon.',
+      'Menu ☰ de l’inventaire : remettre à 0 un endroit ou tout l’inventaire (après confirmation), et mon récapitulatif par endroit à partager en fichier.',
+      'Inventaires En cours et Clôturés : quand le gérant clôture sur le PC, mes comptages restent consultables sur le téléphone.',
+    ],
+  },
+  {
     version: '0.55.0',
     items: [
       'Application Android FEDONIX 360 Inventaire : le compteur scanne les codes-barres avec l’appareil photo (ou une douchette Bluetooth), tape la quantité en cartons et unités, et compte même sans réseau ; tout part au serveur dès que le Wi-Fi revient.',

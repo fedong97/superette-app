@@ -123,6 +123,27 @@ describe('inventaire sur téléphone', () => {
     expect(await (await phone(`/catalog?since=${c.version}`)).json()).toEqual({ version: c.version, unchanged: true });
   });
 
+  it('envoie le catalogue sans les photos, puis la photo d’une fiche à part', async () => {
+    const thumb = `data:image/jpeg;base64,${'A'.repeat(2000)}`;
+    pc.catalogue.setPhoto(ctx.userId, A.lait!, { photo: thumb, thumb });
+    await syncOnce(pc);
+    const c = await (await phone('/catalog')).json();
+    expect(c.articles.every((a: { thumb: unknown }) => a.thumb === null)).toBe(true);
+    expect(await (await phone(`/articles/${A.lait}/thumb`)).json()).toEqual({ thumb });
+    expect(await (await phone(`/articles/${A.biere}/thumb`)).json()).toEqual({ thumb: null });
+  });
+
+  it('cherche sur le serveur un code ou un nom que le téléphone ne trouve pas', async () => {
+    const ids = async (q: string) => ((await (await phone(`/find?q=${encodeURIComponent(q)}`)).json()).articles as { id: string }[]).map((a) => a.id);
+    expect(await ids('6001234567899')).toEqual([A.biere]);
+    // Code-barres lu sans le zéro de tête, ou avec.
+    expect(await ids('06001234567899')).toEqual([A.biere]);
+    expect(await ids('biere')).toEqual([A.biere]);
+    expect(await ids('LAIT 1')).toEqual([A.lait]);
+    expect(await ids('x')).toEqual([]);
+    expect((await phone('/find?q=lait', undefined, 'faux')).status).toBe(401);
+  });
+
   it('additionne les endroits, garde la dernière saisie de chaque endroit et l’envoie aux PC', async () => {
     const list = await (await phone('/inventories')).json();
     expect(list.inventories).toHaveLength(1);

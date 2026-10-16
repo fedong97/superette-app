@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { type Article, buildIndex, formatQty, levels, lookup, normalizeUrl, parsePairing, partsToDetail, partsToQty, phoneTotal, placeKey, search } from '../src/logic';
+import {
+  type Article,
+  buildIndex,
+  csvRows,
+  exportCountFile,
+  fileArticle,
+  formatQty,
+  levels,
+  lookup,
+  normalizeUrl,
+  parseCountFile,
+  parsePairing,
+  partsToDetail,
+  partsToQty,
+  phoneTotal,
+  placeKey,
+  recapCsv,
+  search,
+} from '../src/logic';
 
 const art = (over: Partial<Article>): Article => ({
   id: 'a',
@@ -88,5 +106,57 @@ describe('application d’inventaire', () => {
         { location: 'Réserve', qty: 48_000 },
       ],
     });
+  });
+
+  it('ouvre la fiche à remplir du PC (CSV ou Excel) avec ses conditionnements', () => {
+    const rows = csvRows(
+      [
+        'Inventaire n° 12 · Magasin · fiche de comptage à remplir puis à réimporter (bouton Importer)',
+        'Code;Produit;Rayon;Conditionnement;Compté (conditionnements);Compté (unités)',
+        '20010;Mutzig 50 cl;Boissons;CARTON de 24;;',
+        '"30001";"Savon ""Lux"" 100 g";Hygiène;;;3',
+        '30002;Biscuit;;PAQUET de 12;2;1',
+      ].join('\r\n'),
+    );
+    const f = parseCountFile(rows);
+    expect(f.format).toBe('pc');
+    expect(f.title).toContain('Inventaire n° 12');
+    expect(f.lines).toEqual([
+      { code: '20010', name: 'Mutzig 50 cl', pack: 'CARTON de 24', department: 'Boissons', qty: null },
+      { code: '30001', name: 'Savon "Lux" 100 g', pack: null, department: 'Hygiène', qty: 3000 },
+      { code: '30002', name: 'Biscuit', pack: 'PAQUET de 12', department: null, qty: 25_000 },
+    ]);
+    const index = buildIndex([mutzig]);
+    // Article connu du téléphone : celui du catalogue ; sinon un article de la fiche.
+    expect(fileArticle(f.lines[0]!, index).id).toBe('mutzig');
+    expect(fileArticle(f.lines[2]!, index)).toMatchObject({ id: 'f:30002', packs: [{ name: 'PAQUET', units: 12_000 }] });
+  });
+
+  it('ouvre un fichier texte « code;nom (conditionnement);quantité » et le rend rempli au même format', () => {
+    const f = parseCountFile(csvRows('A12;HUILE MAYOR 1L (CARTON);0\nB7;SUCRE EN MORCEAUX;2,5\n'));
+    expect(f.format).toBe('txt');
+    expect(f.lines).toEqual([
+      { code: 'A12', name: 'HUILE MAYOR 1L', pack: 'CARTON', department: null, qty: 0 },
+      { code: 'B7', name: 'SUCRE EN MORCEAUX', pack: null, department: null, qty: 2500 },
+    ]);
+    const arts = f.lines.map((l) => fileArticle(l, new Map()));
+    const out = exportCountFile('txt', arts, new Map([['f:A12', 14_000]]), (a) => f.lines.find((l) => l.code === a.code));
+    expect(out).toBe('A12;HUILE MAYOR 1L (CARTON);14\r\nB7;SUCRE EN MORCEAUX;0');
+  });
+
+  it('exporte pour le bouton Importer du PC et partage le récapitulatif par endroit', () => {
+    const pc = exportCountFile('pc', [mutzig, riz], new Map([['mutzig', 51_000]]), () => undefined);
+    expect(pc).toBe('﻿Code;Produit;Rayon;Compté;Détail\r\n20010;Mutzig 50 cl;;51;2 CARTON + 3 (51)');
+    const recap = recapCsv([
+      { location: 'Réserve', article: mutzig, qty: 48_000 },
+      { location: 'Rayon', article: mutzig, qty: 3_000 },
+      { location: 'Rayon', article: riz, qty: 1_500 },
+    ]);
+    expect(recap.split('\r\n')).toEqual([
+      '﻿Code;Produit;Endroit;Quantité;Détail;Total du produit',
+      '20010;Mutzig 50 cl;Rayon;3;3;51',
+      '20010;Mutzig 50 cl;Réserve;48;2 CARTON (48);51',
+      '20011;Riz parfumé 25 kg;Rayon;1,5;1,5 kg;1,5',
+    ]);
   });
 });

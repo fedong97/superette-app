@@ -1,5 +1,5 @@
 import { ApiError, findServer, request } from './api';
-import { type Article, type Catalog, type Hit, type PlaceCount, buildIndex, newId, placeKey } from './logic';
+import { type Article, type Catalog, type FileLine, type Hit, type ParsedFile, type PlaceCount, buildIndex, fileArticle, newId, placeKey } from './logic';
 import { clearAll, load, save } from './storage';
 
 /** Téléphone relié à un magasin par le QR code du gérant. */
@@ -40,6 +40,29 @@ export interface ServerInventory {
   recount: string[];
   expected: Record<string, number> | null;
 }
+
+/** Fiche de comptage ouverte sur le téléphone, sans serveur (mode fichier). */
+export interface FileInventory extends ServerInventory {
+  file: true;
+  format: 'pc' | 'txt';
+  fileName: string;
+  createdAt: string;
+  closed: boolean;
+  articles: Article[];
+  lines: Record<string, FileLine>;
+}
+
+/** Inventaire clôturé sur le PC : ce que la personne y a compté, gardé en lecture seule. */
+export interface Archive {
+  inventory: ServerInventory;
+  counts: Record<string, PlaceCount>;
+  closedAt: string;
+}
+
+export const isFile = (inv: ServerInventory): inv is FileInventory => (inv as FileInventory).file === true;
+const isFileId = (id: string) => id.startsWith('f-');
+/** Comptages des fiches : rangés à part, ils ne changent pas avec la personne connectée. */
+const LOCAL = 'local';
 
 interface OutCount {
   id: string;
@@ -89,6 +112,8 @@ export interface State {
   index: Map<string, Hit>;
   articles: Map<string, Article>;
   inventories: ServerInventory[];
+  files: FileInventory[];
+  archives: Archive[];
   showExpected: boolean;
   /** Comptages de l'utilisateur connecté sur ce téléphone, par inventaire, produit et endroit. */
   counts: Record<string, PlaceCount>;
@@ -101,6 +126,8 @@ export interface State {
   locations: string[];
   location: string;
   rapid: boolean;
+  /** Dernière erreur du téléchargement du catalogue (affichée à la place des produits introuvables). */
+  catalogError: string | null;
 }
 
 const DEFAULT_LOCATIONS = ['Rayon', 'Réserve', 'Chambre froide'];
@@ -113,6 +140,8 @@ let state: State = {
   index: new Map(),
   articles: new Map(),
   inventories: [],
+  files: [],
+  archives: [],
   showExpected: false,
   counts: {},
   history: [],
@@ -124,6 +153,7 @@ let state: State = {
   locations: DEFAULT_LOCATIONS,
   location: 'Rayon',
   rapid: false,
+  catalogError: null,
 };
 
 let outbox: OutCount[] = [];
@@ -131,6 +161,15 @@ let unknowns: OutUnknown[] = [];
 /** Comptages et historique de chaque personne qui a compté sur ce téléphone. */
 let countsByUser: Record<string, Record<string, PlaceCount>> = {};
 let historyByUser: Record<string, HistoryItem[]> = {};
+let archivesByUser: Record<string, Archive[]> = {};
+
+/** Comptages visibles : ceux de la personne connectée et ceux des fiches. */
+function countsOf(userId: string | undefined) {
+  return { ...(userId ? countsByUser[userId] : {}), ...countsByUser[LOCAL] };
+}
+function historyOf(userId: string | undefined) {
+  return [...(userId ? (historyByUser[userId] ?? []) : []), ...(historyByUser[LOCAL] ?? [])].sort((a, b) => b.at.localeCompare(a.at));
+}
 
 const listeners = new Set<() => void>();
 export const subscribe = (fn: () => void) => {
@@ -172,16 +211,20 @@ export async function init() {
   unknowns = await load<OutUnknown[]>('unknowns', []);
   countsByUser = await load('counts', {});
   historyByUser = await load('history', {});
-  const userId = session?.user.id ?? '';
+  archivesByUser = await load('archives', {});
+  const files = await load<FileInventory[]>('files', []);
+  const userId = session?.user.id;
   set({
     ready: true,
     config,
     session,
     ...withCatalog(catalog),
     inventories: inventories.list,
+    files,
+    archives: userId ? (archivesByUser[userId] ?? []) : [],
     showExpected: inventories.showExpected,
-    counts: countsByUser[userId] ?? {},
-    history: historyByUser[userId] ?? [],
+    counts: countsOf(userId),
+    history: historyOf(userId),
     locations: prefs.locations?.length ? prefs.locations : DEFAULT_LOCATIONS,
     location: prefs.location || 'Rayon',
     rapid: Boolean(prefs.rapid),
@@ -241,7 +284,7 @@ export async function login(loginName: string, pin: string) {
   });
   const session = { token: r.session, user: r.user };
   await save('session', session);
-  set({ session, counts: countsByUser[r.user.id] ?? {}, history: historyByUser[r.user.id] ?? [], online: true });
+  set({ session, counts: countsOf(r.user.id), history: historyOf(r.user.id), archives: archivesByUser[r.user.id] ?? [], online: true });
   await sync();
 }
 
@@ -253,7 +296,7 @@ export async function logout() {
     await request(state.config.url, '/api/v1/mobile/logout', { body: {}, auth: { token: state.config.token, session: session.token } }).catch(() => undefined);
   }
   await save('session', null);
-  set({ session: null, counts: {}, history: [] });
+  set({ session: null, counts: countsOf(undefined), history: historyOf(undefined), archives: [] });
 }
 
 /** Délier le téléphone : tout ce qui est en mémoire est effacé. */
@@ -263,7 +306,8 @@ export async function unpair() {
   unknowns = [];
   countsByUser = {};
   historyByUser = {};
-  set({ config: null, session: null, ...withCatalog(null), inventories: [], counts: {}, history: [], notices: [] });
+  archivesByUser = {};
+  set({ config: null, session: null, ...withCatalog(null), inventories: [], files: [], archives: [], counts: {}, history: [], notices: [] });
 }
 
 export async function setServerAddress(url: string) {
@@ -291,9 +335,15 @@ async function switchServer(): Promise<boolean> {
 
 function persistCounts() {
   const userId = state.session?.user.id;
-  if (!userId) return;
-  countsByUser[userId] = state.counts;
-  historyByUser[userId] = state.history;
+  const local: Record<string, PlaceCount> = {};
+  const mine: Record<string, PlaceCount> = {};
+  for (const [k, v] of Object.entries(state.counts)) (isFileId(k) ? local : mine)[k] = v;
+  countsByUser[LOCAL] = local;
+  historyByUser[LOCAL] = state.history.filter((h) => isFileId(h.inventoryId));
+  if (userId) {
+    countsByUser[userId] = mine;
+    historyByUser[userId] = state.history.filter((h) => !isFileId(h.inventoryId));
+  }
   void save('counts', countsByUser);
   void save('history', historyByUser);
   void save('outbox', outbox);
@@ -308,7 +358,8 @@ function syncSoon() {
 /** Enregistre la quantité d'un produit à l'endroit choisi (null : efface l'endroit). */
 export function record(inventoryId: string, articleId: string, qty: number | null, detail: number[] | null, location = state.location) {
   const session = state.session;
-  if (!session) return;
+  const file = isFileId(inventoryId);
+  if (!session && !file) return;
   const key = placeKey(inventoryId, articleId, location);
   const before = state.counts[key] ?? null;
   const at = new Date().toISOString();
@@ -317,11 +368,116 @@ export function record(inventoryId: string, articleId: string, qty: number | nul
   if (after) counts[key] = after;
   else delete counts[key];
   const id = newId();
-  outbox.push({ id, inventoryId, articleId, location, qty, detail, countedAt: at, session: session.token });
-  const history = [{ id, inventoryId, articleId, location, before, after, at }, ...state.history].slice(0, 200);
+  if (!file) outbox.push({ id, inventoryId, articleId, location, qty, detail, countedAt: at, session: session!.token });
+  const history = [{ id, inventoryId, articleId, location, before, after, at }, ...state.history].slice(0, 300);
   set({ counts, history });
   persistCounts();
-  syncSoon();
+  if (!file) syncSoon();
+}
+
+/** Remet à 0 mes comptages d'un inventaire : un endroit, ou tous (location null). */
+export function resetCounts(inventoryId: string, location: string | null): number {
+  const prefix = `${inventoryId}|`;
+  const keys = Object.keys(state.counts).filter((k) => k.startsWith(prefix) && (location === null || k.endsWith(`|${location}`)));
+  const file = isFileId(inventoryId);
+  const at = new Date().toISOString();
+  const counts = { ...state.counts };
+  for (const k of keys) {
+    const [, articleId, ...rest] = k.split('|');
+    const place = rest.join('|');
+    delete counts[k];
+    if (!file && state.session) outbox.push({ id: newId(), inventoryId, articleId: articleId!, location: place, qty: null, detail: null, countedAt: at, session: state.session.token });
+  }
+  // Les saisies effacées ne peuvent plus être annulées une par une.
+  const gone = new Set(keys);
+  const history = state.history.filter((h) => !gone.has(placeKey(h.inventoryId, h.articleId, h.location)));
+  set({ counts, history });
+  persistCounts();
+  if (!file) syncSoon();
+  return keys.length;
+}
+
+// ——— Mode fichier ———
+
+const saveFiles = (files: FileInventory[]) => {
+  set({ files });
+  void save('files', files);
+};
+
+/** Ouvre une fiche de comptage (fichier du PC ou fichier texte) comme un inventaire du téléphone. */
+export function openFile(fileName: string, parsed: ParsedFile): FileInventory {
+  const id = `f-${newId()}`;
+  const articles: Article[] = [];
+  const lines: Record<string, FileLine> = {};
+  const seen = new Set<string>();
+  for (const line of parsed.lines) {
+    const a = fileArticle(line, state.index);
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    articles.push(a);
+    lines[a.id] = line;
+  }
+  const title = fileName.replace(/\.(csv|txt|xlsx)$/i, '');
+  const inv: FileInventory = {
+    file: true,
+    format: parsed.format,
+    fileName,
+    createdAt: new Date().toISOString(),
+    closed: false,
+    articles,
+    lines,
+    id,
+    number: title.slice(0, 40),
+    label: parsed.title,
+    kind: 'file',
+    warehouseId: '',
+    warehouseName: 'Fichier',
+    inventoryDate: new Date().toISOString().slice(0, 10),
+    departmentIds: [],
+    articleIds: articles.map((a) => a.id),
+    counted: [],
+    mine: [],
+    assigned: [],
+    recount: [],
+    expected: null,
+  };
+  saveFiles([inv, ...state.files]);
+  // Quantités déjà inscrites dans le fichier : un endroit à part, modifiable.
+  const counts = { ...state.counts };
+  for (const a of articles) {
+    const q = lines[a.id]?.qty;
+    if (q) counts[placeKey(id, a.id, 'Déjà dans le fichier')] = { qty: q, detail: null, at: inv.createdAt };
+  }
+  set({ counts });
+  persistCounts();
+  return inv;
+}
+
+export function updateFile(id: string, patch: Partial<Pick<FileInventory, 'number' | 'closed'>>) {
+  saveFiles(state.files.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+}
+
+export function deleteFile(id: string) {
+  resetCounts(id, null);
+  saveFiles(state.files.filter((f) => f.id !== id));
+}
+
+/** Produit compté qui n'était pas dans la fiche (scan d'un article du catalogue ou produit noté à la main). */
+export function addToFile(id: string, article: Article, line?: FileLine) {
+  const f = state.files.find((x) => x.id === id);
+  if (!f || f.articleIds.includes(article.id)) return;
+  saveFiles(
+    state.files.map((x) =>
+      x.id === id
+        ? {
+            ...x,
+            articles: [...x.articles, article],
+            articleIds: [...x.articleIds, article.id],
+            lines: { ...x.lines, [article.id]: line ?? { code: article.code, name: article.name, pack: null, department: null, qty: null } },
+          }
+        : x,
+    ),
+  );
 }
 
 /** Annule une saisie : l'endroit reprend la quantité d'avant. */
@@ -438,28 +594,88 @@ async function refresh(config: Config) {
       }
     }
   }
-  // Inventaires clôturés : leurs comptages ne servent plus.
+  // Inventaires clôturés : mes comptages sont gardés à part, en lecture seule.
   const open = new Set(r.inventories.map((i) => i.id));
+  const closing = new Map<string, Record<string, PlaceCount>>();
   for (const key of Object.keys(counts)) {
-    if (!open.has(key.split('|')[0]!)) {
-      delete counts[key];
-      changed = true;
-    }
+    const invId = key.split('|')[0]!;
+    if (isFileId(invId) || open.has(invId)) continue;
+    if (!closing.has(invId)) closing.set(invId, {});
+    closing.get(invId)![key] = counts[key]!;
+    delete counts[key];
+    changed = true;
+  }
+  const userId = state.session?.user.id;
+  if (userId && closing.size) {
+    const closedAt = new Date().toISOString();
+    const added = [...closing]
+      .map(([invId, c]) => {
+        const inventory = state.inventories.find((i) => i.id === invId);
+        return inventory ? { inventory, counts: c, closedAt } : null;
+      })
+      .filter((x): x is Archive => Boolean(x));
+    archivesByUser[userId] = [...added, ...(archivesByUser[userId] ?? []).filter((a) => !closing.has(a.inventory.id))].slice(0, 20);
+    void save('archives', archivesByUser);
+    set({ archives: archivesByUser[userId] });
   }
   set({ inventories: r.inventories, showExpected: r.showExpected, ...(changed ? { counts } : {}) });
   if (changed) persistCounts();
   await save('inventories', { list: r.inventories, showExpected: r.showExpected });
-  if (r.catalogVersion !== state.catalog?.version) await refreshCatalog(config);
+  if (r.catalogVersion !== state.catalog?.version || !state.catalog?.articles.length) await refreshCatalog(config).catch(() => undefined);
 }
 
-export async function refreshCatalog(config = state.config) {
+export async function refreshCatalog(config = state.config, full = false) {
   if (!config || !state.session) return;
-  const r = await request<Catalog & { unchanged?: boolean }>(config.url, `/api/v1/mobile/catalog${state.catalog ? `?since=${encodeURIComponent(state.catalog.version)}` : ''}`, {
-    auth: auth(),
-    timeout: 60_000,
-  });
+  const since = state.catalog?.articles.length && !full ? `?since=${encodeURIComponent(state.catalog.version)}` : '';
+  let r: Catalog & { unchanged?: boolean };
+  try {
+    r = await request<Catalog & { unchanged?: boolean }>(config.url, `/api/v1/mobile/catalog${since}`, { auth: auth(), timeout: 120_000 });
+  } catch (e) {
+    set({ catalogError: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+  set({ catalogError: null });
   if (r.unchanged) return;
-  const catalog = { version: r.version, articles: r.articles, departments: r.departments };
+  const catalog = { version: r.version, articles: r.articles ?? [], departments: r.departments ?? [] };
   await save('catalog', catalog);
   set(withCatalog(catalog));
+}
+
+/**
+ * Le serveur cherche un code ou un nom que le téléphone ne trouve pas. Les
+ * articles trouvés rejoignent le catalogue du téléphone ; un code connu du
+ * serveur mais absent ici veut dire que le catalogue est en retard : il est
+ * retéléchargé en entier.
+ */
+export async function findOnServer(query: string): Promise<Article[]> {
+  const config = state.config;
+  if (!config || !state.session || query.trim().length < 2) return [];
+  const r = await request<{ articles: Article[] }>(config.url, `/api/v1/mobile/find?q=${encodeURIComponent(query.trim())}`, { auth: auth(), timeout: 8_000 });
+  const fresh = r.articles.filter((a) => !state.articles.has(a.id));
+  if (fresh.length && state.catalog) {
+    const catalog = { ...state.catalog, articles: [...state.catalog.articles, ...fresh] };
+    set(withCatalog(catalog));
+    void save('catalog', catalog);
+    void refreshCatalog(config, true).catch(() => undefined);
+  } else if (fresh.length) {
+    set(withCatalog({ version: '', articles: fresh, departments: [] }));
+    void refreshCatalog(config, true).catch(() => undefined);
+  }
+  return r.articles;
+}
+
+const thumbs = new Map<string, Promise<string | null>>();
+/** Photo d'un article, demandée à l'ouverture de sa fiche. */
+export function thumbOf(articleId: string): Promise<string | null> {
+  const config = state.config;
+  if (!config || !state.session || articleId.startsWith('f:')) return Promise.resolve(null);
+  if (!thumbs.has(articleId)) {
+    thumbs.set(
+      articleId,
+      request<{ thumb: string | null }>(config.url, `/api/v1/mobile/articles/${encodeURIComponent(articleId)}/thumb`, { auth: auth() })
+        .then((r) => r.thumb)
+        .catch(() => (thumbs.delete(articleId), null)),
+    );
+  }
+  return thumbs.get(articleId)!;
 }

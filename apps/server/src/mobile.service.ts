@@ -329,17 +329,13 @@ export class MobileService {
     return rows[0]?.v ?? '0';
   }
 
-  /** Catalogue : articles, codes-barres, conditionnements et rayons. Rien n'est renvoyé s'il n'a pas changé. */
-  async catalog(since?: string) {
-    const version = await this.catalogVersion();
-    if (since && since === version) return { version, unchanged: true };
-    const { departments, families } = await this.departments();
-    const rows = await this.latest('article', '', [], "payload - 'photo' || jsonb_build_object('thumb', payload->'photo'->'thumb')");
-    const articles = rows
+  /** Articles vendus du magasin, au format du téléphone (sans photo). */
+  private async phoneArticles(families: Map<string, string>, extra = '', params: unknown[] = []) {
+    const rows = await this.latest('article', extra, params, "payload - 'photo'");
+    return rows
       .filter((r) => r.payload['active'] !== 0 && r.payload['is_service'] !== 1)
       .map((r) => {
         const p = r.payload;
-        const thumb = typeof p['thumb'] === 'string' && (p['thumb'] as string).length <= MAX_THUMB ? (p['thumb'] as string) : null;
         return {
           id: r.entity_id,
           code: str(p['code']),
@@ -348,20 +344,59 @@ export class MobileService {
           unitName: (p['unit_name'] as string | null) ?? null,
           otherRef: (p['other_ref'] as string | null) ?? null,
           departmentId: families.get(str(p['family_id'])) || null,
-          barcodes: ((p['barcodes'] as { code: string; pack_qty: number }[] | undefined) ?? []).map((b) => ({ code: b.code, packQty: Number(b.pack_qty ?? 1000) })),
+          barcodes: ((p['barcodes'] as { code: string; pack_qty: number }[] | undefined) ?? []).map((b) => ({ code: String(b.code).trim(), packQty: Number(b.pack_qty ?? 1000) || 1000 })),
           packs:
             p['unit'] === 'piece'
               ? ((p['packs'] as { name: string; units: number; barcode: string | null }[] | undefined) ?? []).map((k) => ({
                   name: k.name,
                   units: Number(k.units),
-                  barcode: k.barcode ?? null,
+                  barcode: k.barcode ? String(k.barcode).trim() : null,
                 }))
               : [],
-          thumb,
+          // Les photos partent à part (une par fiche ouverte) : le catalogue reste léger.
+          thumb: null as string | null,
         };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+      });
+  }
+
+  /**
+   * Catalogue : articles, codes-barres, conditionnements et rayons, sans les
+   * photos. Rien n'est renvoyé s'il n'a pas changé.
+   */
+  async catalog(since?: string) {
+    const version = await this.catalogVersion();
+    if (since && since === version) return { version, unchanged: true };
+    const { departments, families } = await this.departments();
+    const articles = (await this.phoneArticles(families)).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     return { version, articles, departments: [...departments].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'fr')) };
+  }
+
+  /**
+   * Recherche faite par le serveur quand le téléphone ne trouve pas : code
+   * article, code-barres, code d'un conditionnement, autre référence, ou mots
+   * du nom. Couvre un catalogue pas encore (ou mal) téléchargé.
+   */
+  async find(query: string) {
+    const q = (query ?? '').trim();
+    if (q.length < 2) return { articles: [] };
+    const { families } = await this.departments();
+    const all = await this.phoneArticles(families);
+    const fold = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const variants = new Set([q, q.replace(/^0+/, ''), `0${q}`]);
+    const exact = all.filter(
+      (a) => variants.has(a.code) || (a.otherRef && variants.has(a.otherRef)) || a.barcodes.some((b) => variants.has(b.code)) || a.packs.some((k) => k.barcode && variants.has(k.barcode)),
+    );
+    if (exact.length) return { articles: exact.slice(0, 20) };
+    const words = fold(q).split(/\s+/);
+    const byName = all.filter((a) => words.every((w) => fold(a.name).includes(w)) || a.code.toLowerCase().startsWith(q.toLowerCase()));
+    return { articles: byName.sort((a, b) => a.name.localeCompare(b.name, 'fr')).slice(0, 40) };
+  }
+
+  /** Vignette d'un article, pour la fiche produit du téléphone. */
+  async thumb(articleId: string) {
+    const rows = await this.latest('article', 'AND entity_id = $2', [articleId], "jsonb_build_object('thumb', payload->'photo'->'thumb')");
+    const t = rows[0]?.payload['thumb'];
+    return { thumb: typeof t === 'string' && t.length <= MAX_THUMB ? t : null };
   }
 
   /** Comptages des téléphones pour un produit : le dernier par endroit. */

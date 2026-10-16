@@ -1,7 +1,28 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ApiError } from './api';
-import { beepError, beepOk, listenWedge, native, shrinkPhoto, startCamera, toggleTorch } from './device';
-import { type Article, addDetail, formatQty, levels, lookup, normalizeUrl, parsePairing, partsToDetail, partsToQty, phoneTotal, placeKey, search } from './logic';
+import { readXlsxRows } from '@superette/core/src/xlsxRead';
+import { beepError, beepOk, listenWedge, native, shareFile, shrinkPhoto, startCamera, toggleTorch } from './device';
+import {
+  type Article,
+  type Hit,
+  type PlaceCount,
+  addDetail,
+  buildIndex,
+  csvRows,
+  exportCountFile,
+  formatQty,
+  levels,
+  lookup,
+  normalizeUrl,
+  parseCountFile,
+  parsePairing,
+  partsToDetail,
+  partsToQty,
+  phoneTotal,
+  placeKey,
+  recapCsv,
+  search,
+} from './logic';
 import * as S from './state';
 
 const VERSION = __APP_VERSION__;
@@ -10,24 +31,53 @@ const useStore = () => useSyncExternalStore(S.subscribe, S.getState);
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const heure = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
 
+const remember = (key: string, value: string | null) => {
+  try {
+    if (value) sessionStorage.setItem(key, value);
+    else sessionStorage.removeItem(key);
+  } catch {
+    /* rien */
+  }
+};
+const recall = (key: string) => {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
 export function App() {
   const s = useStore();
-  const [inventoryId, setInventoryId] = useState<string | null>(() => sessionStorage.getItem('inventaire') || null);
+  const [inventoryId, setInventoryId] = useState<string | null>(() => recall('inventaire'));
+  const [recapId, setRecapId] = useState<string | null>(null);
+  // Mode fichier : compter sans serveur ni connexion, à partir d'une fiche.
+  const [fileMode, setFileMode] = useState(() => recall('mode-fichier') === '1');
   const choose = (id: string | null) => {
     setInventoryId(id);
-    try {
-      if (id) sessionStorage.setItem('inventaire', id);
-      else sessionStorage.removeItem('inventaire');
-    } catch {
-      /* rien */
-    }
+    remember('inventaire', id);
+  };
+  const files = (on: boolean) => {
+    setFileMode(on);
+    remember('mode-fichier', on ? '1' : null);
   };
   if (!s.ready) return <div className="splash">FEDONIX 360 Inventaire</div>;
-  const inventory = s.inventories.find((i) => i.id === inventoryId) ?? null;
+  const connected = Boolean(s.config && s.session);
+  const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
+  const archive = s.archives.find((a) => a.inventory.id === recapId);
+  const recapFile = s.files.find((f) => f.id === recapId);
+  let page: ReactNode;
+  if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
+  else if (recapFile) page = <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
+  else if (inventory && recapId === inventory.id) page = <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
+  else if (inventory && !(S.isFile(inventory) && inventory.closed)) page = <Count inventory={inventory} onBack={() => choose(null)} onRecap={() => setRecapId(inventory.id)} />;
+  else if (connected || fileMode) page = <Inventories onChoose={choose} onRecap={setRecapId} onLeaveFiles={connected ? undefined : () => files(false)} />;
+  else if (!s.config) page = <Pairing onFiles={() => files(true)} />;
+  else page = <Login onFiles={() => files(true)} />;
   return (
     <div className="app">
       <Notices />
-      {!s.config ? <Pairing /> : !s.session ? <Login /> : inventory ? <Count inventory={inventory} onBack={() => choose(null)} /> : <Inventories onChoose={choose} />}
+      {page}
     </div>
   );
 }
@@ -109,7 +159,15 @@ function useCamera(active: boolean, onCode: (code: string) => void, onError: (e:
 
 // ——— Rattachement au magasin ———
 
-function Pairing() {
+function FileModeLink({ onFiles }: { onFiles: () => void }) {
+  return (
+    <button className="link" onClick={onFiles}>
+      Compter avec un fichier, sans serveur
+    </button>
+  );
+}
+
+function Pairing({ onFiles }: { onFiles: () => void }) {
   const [camera, setCamera] = useState(false);
   const [manual, setManual] = useState(!native);
   const [address, setAddress] = useState('');
@@ -188,6 +246,7 @@ function Pairing() {
           Saisir l’adresse et le code à la main
         </button>
       )}
+      <FileModeLink onFiles={onFiles} />
       <p className="muted small">Version {VERSION}</p>
     </div>
   );
@@ -195,7 +254,7 @@ function Pairing() {
 
 // ——— Connexion du compteur ———
 
-function Login() {
+function Login({ onFiles }: { onFiles: () => void }) {
   const s = useStore();
   const [login, setLogin] = useState(() => localStorage.getItem('dernier-identifiant') ?? '');
   const [pin, setPin] = useState('');
@@ -241,6 +300,7 @@ function Login() {
       <button className="link" onClick={() => setMenu(true)}>
         Réglages du téléphone
       </button>
+      <FileModeLink onFiles={onFiles} />
       {menu ? <Settings onClose={() => setMenu(false)} /> : null}
     </div>
   );
@@ -248,58 +308,136 @@ function Login() {
 
 // ——— Choix de l'inventaire ———
 
-function Inventories({ onChoose }: { onChoose: (id: string) => void }) {
+async function readCountFile(f: File) {
+  if (/\.xlsx$/i.test(f.name)) return parseCountFile(await readXlsxRows(new Uint8Array(await f.arrayBuffer())));
+  const buf = await f.arrayBuffer();
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    // CSV enregistré par Excel sans UTF-8 : accents en Windows-1252.
+    text = new TextDecoder('windows-1252').decode(buf);
+  }
+  return parseCountFile(csvRows(text));
+}
+
+function progress(inv: S.ServerInventory, counts: Record<string, PlaceCount>) {
+  const counted = new Set(inv.counted.map((c) => c.articleId));
+  for (const k of Object.keys(counts)) if (k.startsWith(`${inv.id}|`)) counted.add(k.split('|')[1]!);
+  return counted.size;
+}
+
+function Inventories({ onChoose, onRecap, onLeaveFiles }: { onChoose: (id: string) => void; onRecap: (id: string) => void; onLeaveFiles?: () => void }) {
   const s = useStore();
   const [menu, setMenu] = useState(false);
+  const [filter, setFilter] = useState<'open' | 'closed'>('open');
+  const [error, setError] = useState('');
+  const picker = useRef<HTMLInputElement>(null);
+  const connected = Boolean(s.config && s.session);
+  const openFiles = s.files.filter((f) => !f.closed);
+  const closedFiles = s.files.filter((f) => f.closed);
+  const card = (inv: S.ServerInventory, onClick: () => void, extra?: string) => {
+    const done = progress(inv, s.counts);
+    const pct = inv.articleIds.length ? Math.round((done / inv.articleIds.length) * 100) : 0;
+    const file = S.isFile(inv);
+    return (
+      <button key={inv.id} className="card inventory" onClick={onClick}>
+        <div className="row">
+          <b className="grow">
+            {file ? inv.number : `N° ${inv.number}`}
+            {inv.label && !file ? ` · ${inv.label}` : ''}
+          </b>
+          <span className="pill">{file ? 'Fichier' : inv.kind === 'global' ? 'Global' : 'Partiel'}</span>
+        </div>
+        <div className="muted">
+          {file ? `Ouvert le ${new Date(inv.createdAt).toLocaleDateString('fr-FR')}` : `${inv.warehouseName} · date ${inv.inventoryDate.split('-').reverse().join('/')}`}
+          {extra ? ` · ${extra}` : ''}
+        </div>
+        <div className="gauge">
+          <div style={{ width: `${pct}%` }} />
+        </div>
+        <div className="muted small">
+          {done} / {inv.articleIds.length} produits comptés
+          {inv.assigned.length ? ` · ${inv.assigned.length} rayon(s) pour vous` : ''}
+          {inv.recount.length ? ` · ${inv.recount.length} à recompter` : ''}
+        </div>
+      </button>
+    );
+  };
   return (
     <div className="page">
       <header className="bar">
         <div className="grow">
-          <b>{s.config!.storeName}</b>
-          <small>{s.session!.user.name}</small>
+          <b>{connected ? s.config!.storeName : 'Mode fichier'}</b>
+          <small>{connected ? s.session!.user.name : 'Sans serveur ni connexion'}</small>
         </div>
-        <Status />
+        {connected ? <Status /> : null}
         <button className="ghost" onClick={() => setMenu(true)} aria-label="Menu">
           ☰
         </button>
       </header>
       <main>
-        <h2>Inventaires en cours</h2>
-        {!s.catalog ? <div className="card muted">Téléchargement du catalogue…</div> : null}
-        {s.inventories.map((inv) => {
-          const counted = new Set(inv.counted.map((c) => c.articleId));
-          for (const k of Object.keys(s.counts)) if (k.startsWith(`${inv.id}|`)) counted.add(k.split('|')[1]!);
-          const pct = inv.articleIds.length ? Math.round((counted.size / inv.articleIds.length) * 100) : 0;
-          return (
-            <button key={inv.id} className="card inventory" onClick={() => onChoose(inv.id)}>
-              <div className="row">
-                <b className="grow">
-                  N° {inv.number}
-                  {inv.label ? ` · ${inv.label}` : ''}
-                </b>
-                <span className="pill">{inv.kind === 'global' ? 'Global' : 'Partiel'}</span>
+        <div className="tabs">
+          <button className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>
+            En cours
+          </button>
+          <button className={filter === 'closed' ? 'on' : ''} onClick={() => setFilter('closed')}>
+            Clôturés{s.archives.length + closedFiles.length ? ` (${s.archives.length + closedFiles.length})` : ''}
+          </button>
+        </div>
+        {filter === 'open' ? (
+          <>
+            {connected && !s.catalog ? <div className="card muted">Téléchargement du catalogue…</div> : null}
+            {connected ? s.inventories.map((inv) => card(inv, () => onChoose(inv.id))) : null}
+            {connected && !s.inventories.length ? (
+              <div className="card muted">
+                Aucun inventaire ouvert dans ce magasin. Le gérant le crée sur un PC (Stock › Inventaires), puis il apparaît ici.
+                <button className="big" onClick={() => void S.sync()}>
+                  Actualiser
+                </button>
               </div>
-              <div className="muted">
-                {inv.warehouseName} · date {inv.inventoryDate.split('-').reverse().join('/')}
-              </div>
-              <div className="gauge">
-                <div style={{ width: `${pct}%` }} />
-              </div>
-              <div className="muted small">
-                {counted.size} / {inv.articleIds.length} produits comptés
-                {inv.assigned.length ? ` · ${inv.assigned.length} rayon(s) pour vous` : ''}
-                {inv.recount.length ? ` · ${inv.recount.length} à recompter` : ''}
-              </div>
+            ) : null}
+            {openFiles.map((f) => card(f, () => onChoose(f.id)))}
+            {error ? <div className="notice erreur">{error}</div> : null}
+            <button className="big" onClick={() => picker.current?.click()}>
+              Ouvrir une fiche de comptage (fichier)
             </button>
-          );
-        })}
-        {!s.inventories.length ? (
-          <div className="card muted">
-            Aucun inventaire ouvert dans ce magasin. Le gérant le crée sur un PC (Stock › Inventaires), puis il apparaît ici.
-            <button className="big" onClick={() => void S.sync()}>
-              Actualiser
-            </button>
-          </div>
+            <p className="muted small">
+              Sans Wi-Fi au magasin : exportez sur le PC la fiche à remplir (Inventaires › Fiche Excel) ou un fichier texte « code;nom;quantité », envoyez-la sur ce
+              téléphone, comptez, puis renvoyez la fiche remplie au PC (bouton Importer).
+            </p>
+            <input
+              ref={picker}
+              type="file"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (!f) return;
+                setError('');
+                try {
+                  const parsed = await readCountFile(f);
+                  if (!parsed.lines.length) throw new Error('Aucun produit trouvé dans ce fichier. Il faut une colonne Code et une colonne Produit, ou des lignes « code;nom;quantité ».');
+                  onChoose(S.openFile(f.name, parsed).id);
+                } catch (err) {
+                  setError(message(err));
+                }
+              }}
+            />
+          </>
+        ) : (
+          <>
+            {s.archives.map((a) => card(a.inventory, () => onRecap(a.inventory.id), `clôturé le ${new Date(a.closedAt).toLocaleDateString('fr-FR')}`))}
+            {closedFiles.map((f) => card(f, () => onRecap(f.id), 'clôturé'))}
+            {!s.archives.length && !closedFiles.length ? (
+              <div className="card muted">Aucun inventaire clôturé. Quand le gérant clôture un inventaire sur le PC, vos comptages restent consultables ici.</div>
+            ) : null}
+          </>
+        )}
+        {onLeaveFiles ? (
+          <button className="link" onClick={onLeaveFiles}>
+            {s.config ? 'Se connecter au magasin' : 'Relier ce téléphone au magasin'}
+          </button>
         ) : null}
       </main>
       {menu ? <Settings onClose={() => setMenu(false)} /> : null}
@@ -309,25 +447,80 @@ function Inventories({ onChoose }: { onChoose: (id: string) => void }) {
 
 // ——— Comptage ———
 
-type Tab = 'saisies' | 'reste' | 'recompter';
+type Tab = 'saisies' | 'produits' | 'recompter';
 
 interface Sheet {
   article: Article;
   level: number;
 }
 
-function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: () => void }) {
+/** Catalogue d'un inventaire : celui du magasin, ou pour une fiche ses produits d'abord. */
+interface Cat {
+  find: (code: string) => Hit | null;
+  articles: Map<string, Article>;
+  list: Article[];
+}
+
+function useCat(inventory: S.ServerInventory): Cat {
   const s = useStore();
+  return useMemo(() => {
+    if (!S.isFile(inventory)) return { find: (c: string) => lookup(s.index, c), articles: s.articles, list: s.catalog?.articles ?? [] };
+    const own = buildIndex(inventory.articles);
+    const articles = new Map(s.articles);
+    for (const a of inventory.articles) articles.set(a.id, a);
+    const ids = new Set(inventory.articles.map((a) => a.id));
+    return {
+      find: (c: string) => lookup(own, c) ?? lookup(s.index, c),
+      articles,
+      list: [...inventory.articles, ...(s.catalog?.articles ?? []).filter((a) => !ids.has(a.id))],
+    };
+  }, [inventory, s.index, s.articles, s.catalog]);
+}
+
+/** Bandeau quand le catalogue n'est pas là : les codes ne peuvent pas être reconnus sur le téléphone. */
+function CatalogState() {
+  const s = useStore();
+  const [busy, setBusy] = useState(false);
+  if (!s.session || (s.catalog?.articles.length && !s.catalogError)) return null;
+  const retry = async () => {
+    setBusy(true);
+    await S.refreshCatalog(undefined, true).catch(() => undefined);
+    setBusy(false);
+  };
+  return (
+    <div className="notice erreur">
+      {s.catalog?.articles.length
+        ? `Catalogue pas à jour (${s.catalogError}). Les produits récents sont cherchés sur le serveur.`
+        : s.catalogError
+          ? `Catalogue pas téléchargé : ${s.catalogError}. Les codes sont cherchés sur le serveur tant qu’il répond.`
+          : s.catalog
+            ? 'Le serveur n’a envoyé aucun article. Vérifiez sur le PC que la synchronisation avec le serveur marche (barre d’état en bas).'
+            : 'Téléchargement du catalogue…'}{' '}
+      <button className="small-btn" disabled={busy} onClick={() => void retry()}>
+        {busy ? '…' : 'Réessayer'}
+      </button>
+    </div>
+  );
+}
+
+function Count({ inventory, onBack, onRecap }: { inventory: S.ServerInventory; onBack: () => void; onRecap: () => void }) {
+  const s = useStore();
+  const cat = useCat(inventory);
+  const catRef = useRef(cat);
+  catRef.current = cat;
+  const file = S.isFile(inventory);
   const [camera, setCamera] = useState(false);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [unknown, setUnknown] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [remote, setRemote] = useState<{ q: string; list: Article[] } | null>(null);
   const [tab, setTab] = useState<Tab>('saisies');
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
   const [menu, setMenu] = useState(false);
   const [newPlace, setNewPlace] = useState(false);
   const seen = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const busy = useRef(false);
 
   const inList = useMemo(() => new Set(inventory.articleIds), [inventory.articleIds]);
   const show = (text: string, ok: boolean) => {
@@ -336,26 +529,10 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
     flashTimer.current = setTimeout(() => setFlash(null), 2500);
   };
 
-  const onCode = (raw: string, fromCamera: boolean) => {
-    const code = raw.trim();
-    const now = Date.now();
-    // La caméra relit le même code tant qu'il est devant l'objectif : on attend qu'il sorte du champ.
-    if (fromCamera && code === seen.current.code && now - seen.current.at < 2000) {
-      seen.current.at = now;
-      return;
-    }
-    seen.current = { code, at: now };
-    if (sheet || unknown) return;
-    // État du moment (pas celui du dernier affichage) : deux scans rapprochés s'additionnent bien.
-    const st = S.getState();
-    const hit = lookup(st.index, code);
-    if (!hit) {
-      beepError();
-      setCamera(false);
-      setUnknown(code);
-      return;
-    }
+  const accept = (hit: Hit) => {
     beepOk();
+    const st = S.getState();
+    if (file && !inList.has(hit.article.id)) S.addToFile(inventory.id, hit.article);
     if (st.rapid) {
       const key = placeKey(inventory.id, hit.article.id, st.location);
       const before = st.counts[key];
@@ -369,6 +546,32 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
     }
     setCamera(false);
     setSheet({ article: hit.article, level: hit.level });
+  };
+
+  const onCode = (raw: string, fromCamera: boolean) => {
+    const code = raw.trim();
+    const now = Date.now();
+    // La caméra relit le même code tant qu'il est devant l'objectif : on attend qu'il sorte du champ.
+    if (fromCamera && code === seen.current.code && now - seen.current.at < 2000) {
+      seen.current.at = now;
+      return;
+    }
+    seen.current = { code, at: now };
+    if (sheet || unknown || busy.current) return;
+    const hit = catRef.current.find(code);
+    if (hit) return accept(hit);
+    // Pas sur le téléphone : le serveur a peut-être l'article (catalogue en retard ou pas téléchargé).
+    busy.current = true;
+    void S.findOnServer(code)
+      .catch(() => [] as Article[])
+      .then(() => {
+        busy.current = false;
+        const again = catRef.current.find(code) ?? lookup(S.getState().index, code);
+        if (again) return accept(again);
+        beepError();
+        setCamera(false);
+        setUnknown(code);
+      });
   };
 
   useCamera(
@@ -388,13 +591,26 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
     for (const k of Object.keys(s.counts)) if (k.startsWith(`${inventory.id}|`)) set.add(k.split('|')[1]!);
     return set;
   }, [inventory, s.counts]);
-  const results = useMemo(() => (query.trim().length >= 2 ? search(s.catalog?.articles ?? [], query, 40) : []), [query, s.catalog]);
+  const local = useMemo(() => (query.trim().length >= 2 ? search(cat.list, query, 40) : []), [query, cat.list]);
+  // Rien sur le téléphone : on demande au serveur, une fois la frappe terminée.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2 || local.length || !s.session) return;
+    const t = setTimeout(() => {
+      void S.findOnServer(q)
+        .then((list) => setRemote({ q, list }))
+        .catch(() => setRemote({ q, list: [] }));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [query, local.length, s.session]);
+  const results = local.length ? local : remote && remote.q === query.trim() ? remote.list : [];
   const historyHere = s.history.filter((h) => h.inventoryId === inventory.id);
   const latestByKey = new Map<string, string>();
   for (const h of historyHere) {
     const k = placeKey(h.inventoryId, h.articleId, h.location);
     if (!latestByKey.has(k)) latestByKey.set(k, h.id);
   }
+  const open = (a: Article) => (setSheet({ article: a, level: levels(a).length - 1 }), setQuery(''));
 
   if (camera) {
     return (
@@ -418,17 +634,18 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
           ‹
         </button>
         <div className="grow">
-          <b>N° {inventory.number}</b>
+          <b>{file ? inventory.number : `N° ${inventory.number}`}</b>
           <small>
-            {counted.size} / {inventory.articleIds.length} comptés · {s.session!.user.name}
+            {counted.size} / {inventory.articleIds.length} comptés{s.session && !file ? ` · ${s.session.user.name}` : ''}
           </small>
         </div>
-        <Status />
+        {!file && s.session ? <Status /> : null}
         <button className="ghost" onClick={() => setMenu(true)} aria-label="Menu">
           ☰
         </button>
       </header>
       <main>
+        {!file ? <CatalogState /> : null}
         <div className="places">
           {s.locations.map((l) => (
             <button key={l} className={`chip ${l === s.location ? 'on' : ''}`} onClick={() => S.setLocation(l)}>
@@ -457,14 +674,10 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && query.trim()) {
-              const hit = lookup(s.index, query);
-              if (hit) {
+              if (cat.find(query)) {
                 onCode(query, false);
                 setQuery('');
-              } else if (results.length === 1) {
-                setSheet({ article: results[0]!, level: levels(results[0]!).length - 1 });
-                setQuery('');
-              }
+              } else if (results.length === 1) open(results[0]!);
             }
           }}
           placeholder="Nom ou code du produit"
@@ -473,13 +686,13 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
         {query.trim().length >= 2 ? (
           <div className="list">
             {results.map((a) => (
-              <ArticleRow key={a.id} article={a} inventory={inventory} onClick={() => (setSheet({ article: a, level: levels(a).length - 1 }), setQuery(''))} />
+              <ArticleRow key={a.id} article={a} inventory={inventory} onClick={() => open(a)} />
             ))}
             {!results.length ? (
               <div className="empty">
-                Aucun produit trouvé.{' '}
+                {!local.length && s.session && (!remote || remote.q !== query.trim()) ? 'Recherche sur le serveur…' : 'Aucun produit trouvé.'}{' '}
                 <button className="link" onClick={() => (setUnknown(query.trim()), setQuery(''))}>
-                  Signaler un produit inconnu
+                  {file ? 'Ajouter un produit à la fiche' : 'Signaler un produit inconnu'}
                 </button>
               </div>
             ) : null}
@@ -490,17 +703,19 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
               <button className={tab === 'saisies' ? 'on' : ''} onClick={() => setTab('saisies')}>
                 Mes saisies
               </button>
-              <button className={tab === 'reste' ? 'on' : ''} onClick={() => setTab('reste')}>
-                Reste à compter
+              <button className={tab === 'produits' ? 'on' : ''} onClick={() => setTab('produits')}>
+                Produits
               </button>
-              <button className={tab === 'recompter' ? 'on' : ''} onClick={() => setTab('recompter')}>
-                À recompter{inventory.recount.length ? ` (${inventory.recount.length})` : ''}
-              </button>
+              {!file ? (
+                <button className={tab === 'recompter' ? 'on' : ''} onClick={() => setTab('recompter')}>
+                  À recompter{inventory.recount.length ? ` (${inventory.recount.length})` : ''}
+                </button>
+              ) : null}
             </div>
             {tab === 'saisies' ? (
               <div className="list">
                 {historyHere.slice(0, 60).map((h) => {
-                  const a = s.articles.get(h.articleId);
+                  const a = cat.articles.get(h.articleId);
                   if (!a) return null;
                   const last = latestByKey.get(placeKey(h.inventoryId, h.articleId, h.location)) === h.id;
                   return (
@@ -521,18 +736,22 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
                   );
                 })}
                 {!historyHere.length ? (
-                  <div className="empty">Scannez un produit pour commencer. Les quantités partent toutes seules au serveur, même après une coupure.</div>
+                  <div className="empty">
+                    {file
+                      ? 'Scannez un produit ou ouvrez l’onglet Produits pour toucher celui que vous comptez. Exportez la fiche remplie depuis le menu ☰.'
+                      : 'Scannez un produit pour commencer. Les quantités partent toutes seules au serveur, même après une coupure.'}
+                  </div>
                 ) : null}
               </div>
-            ) : tab === 'reste' ? (
-              <Remaining inventory={inventory} counted={counted} onOpen={(a) => setSheet({ article: a, level: levels(a).length - 1 })} />
+            ) : tab === 'produits' ? (
+              <Products inventory={inventory} cat={cat} counted={counted} onOpen={(a) => setSheet({ article: a, level: levels(a).length - 1 })} />
             ) : (
               <div className="list">
                 <p className="muted small">
                   Un collègue a trouvé un gros écart sur ces produits. Recomptez-les à l’endroit où ils sont rangés : votre saisie remplace la sienne pour cet endroit.
                 </p>
                 {inventory.recount
-                  .map((id) => s.articles.get(id))
+                  .map((id) => cat.articles.get(id))
                   .filter((a): a is Article => Boolean(a))
                   .map((a) => (
                     <ArticleRow key={a.id} article={a} inventory={inventory} onClick={() => setSheet({ article: a, level: levels(a).length - 1 })} />
@@ -556,10 +775,14 @@ function Count({ inventory, onBack }: { inventory: S.ServerInventory; onBack: ()
         />
       ) : null}
       {unknown !== null ? (
-        <Unknown code={unknown} inventoryId={inventory.id} onClose={(saved) => (setUnknown(null), saved && show('Produit inconnu signalé au gérant', true))} />
+        <Unknown
+          code={unknown}
+          inventory={inventory}
+          onClose={(saved) => (setUnknown(null), saved && show(file ? 'Produit ajouté à la fiche' : 'Produit inconnu signalé au gérant', true))}
+        />
       ) : null}
       {newPlace ? <NewPlace onClose={() => setNewPlace(false)} /> : null}
-      {menu ? <Settings onClose={() => setMenu(false)} /> : null}
+      {menu ? <InventoryMenu inventory={inventory} onRecap={onRecap} onBack={onBack} onClose={() => setMenu(false)} /> : null}
     </div>
   );
 }
@@ -578,51 +801,74 @@ function ArticleRow({ article, inventory, onClick }: { article: Article; invento
           {mine.places.length ? ` · vous : ${formatQty(mine.total, article)}` : server ? ` · compté : ${formatQty(server.qty, article)}${server.by ? ` (${server.by})` : ''}` : ''}
         </small>
       </div>
-      <span className="chev">›</span>
+      {mine.places.length || server ? <span className="pill ok">✓</span> : <span className="chev">›</span>}
     </div>
   );
 }
 
-function Remaining({ inventory, counted, onOpen }: { inventory: S.ServerInventory; counted: Set<string>; onOpen: (a: Article) => void }) {
+/** Tous les produits de l'inventaire, à toucher pour les compter, avec le filtre Comptés / Pas comptés. */
+function Products({ inventory, cat, counted, onOpen }: { inventory: S.ServerInventory; cat: Cat; counted: Set<string>; onOpen: (a: Article) => void }) {
   const s = useStore();
   const [dept, setDept] = useState<string>(inventory.assigned.length ? 'mine' : 'all');
+  const [which, setWhich] = useState<'left' | 'done' | 'all'>('left');
   const [limit, setLimit] = useState(80);
   const departments = s.catalog?.departments ?? [];
+  const all = useMemo(
+    () =>
+      inventory.articleIds
+        .map((id) => cat.articles.get(id))
+        .filter((a): a is Article => Boolean(a))
+        .sort((a, b) => a.name.localeCompare(b.name, 'fr')),
+    [inventory.articleIds, cat.articles],
+  );
   const usedDepts = useMemo(() => {
-    const ids = new Set<string>();
-    for (const id of inventory.articleIds) {
-      const d = s.articles.get(id)?.departmentId;
-      if (d) ids.add(d);
-    }
+    const ids = new Set(all.map((a) => a.departmentId).filter(Boolean));
     return departments.filter((d) => ids.has(d.id));
-  }, [inventory.articleIds, s.articles, departments]);
-  const left = inventory.articleIds
-    .filter((id) => !counted.has(id))
-    .map((id) => s.articles.get(id))
-    .filter((a): a is Article => Boolean(a))
-    .filter((a) => (dept === 'all' ? true : dept === 'mine' ? inventory.assigned.includes(a.departmentId ?? '') : a.departmentId === dept))
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  }, [all, departments]);
+  const inDept = all.filter((a) => (dept === 'all' ? true : dept === 'mine' ? inventory.assigned.includes(a.departmentId ?? '') : a.departmentId === dept));
+  const doneHere = inDept.filter((a) => counted.has(a.id)).length;
+  const shown = inDept.filter((a) => (which === 'all' ? true : which === 'done' ? counted.has(a.id) : !counted.has(a.id)));
+  const missing = inventory.articleIds.length - all.length;
   return (
     <div className="list">
-      <select className="select" value={dept} onChange={(e) => (setDept(e.target.value), setLimit(80))}>
-        {inventory.assigned.length ? <option value="mine">Mes rayons</option> : null}
-        <option value="all">Tous les rayons</option>
-        {usedDepts.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name}
-          </option>
-        ))}
-      </select>
-      <p className="muted small">{left.length} produit(s) pas encore comptés.</p>
-      {left.slice(0, limit).map((a) => (
+      <div className="segmented">
+        <button className={which === 'left' ? 'on' : ''} onClick={() => (setWhich('left'), setLimit(80))}>
+          À compter ({inDept.length - doneHere})
+        </button>
+        <button className={which === 'done' ? 'on' : ''} onClick={() => (setWhich('done'), setLimit(80))}>
+          Comptés ({doneHere})
+        </button>
+        <button className={which === 'all' ? 'on' : ''} onClick={() => (setWhich('all'), setLimit(80))}>
+          Tous
+        </button>
+      </div>
+      {usedDepts.length || inventory.assigned.length ? (
+        <select className="select" value={dept} onChange={(e) => (setDept(e.target.value), setLimit(80))}>
+          {inventory.assigned.length ? <option value="mine">Mes rayons</option> : null}
+          <option value="all">Tous les rayons</option>
+          {usedDepts.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <div className="gauge">
+        <div style={{ width: `${inDept.length ? Math.round((doneHere / inDept.length) * 100) : 0}%` }} />
+      </div>
+      <p className="muted small">
+        {doneHere} / {inDept.length} comptés
+        {missing > 0 ? ` · ${missing} produit(s) pas encore dans le catalogue du téléphone` : ''}
+      </p>
+      {shown.slice(0, limit).map((a) => (
         <ArticleRow key={a.id} article={a} inventory={inventory} onClick={() => onOpen(a)} />
       ))}
-      {left.length > limit ? (
+      {shown.length > limit ? (
         <button className="big" onClick={() => setLimit(limit + 200)}>
           Afficher plus
         </button>
       ) : null}
-      {!left.length ? <div className="empty">Tout est compté ici.</div> : null}
+      {!shown.length ? <div className="empty">{which === 'left' ? 'Tout est compté ici.' : 'Rien ici pour le moment.'}</div> : null}
     </div>
   );
 }
@@ -658,6 +904,14 @@ function ProductSheet({
   const expected = s.showExpected ? inventory.expected?.[article.id] : undefined;
   const newHere = entered === null ? null : mode === 'add' && here ? here.qty + entered : entered;
   const deptName = s.catalog?.departments.find((d) => d.id === article.departmentId)?.name;
+  const [thumb, setThumb] = useState<string | null>(article.thumb);
+  useEffect(() => {
+    let live = true;
+    if (!article.thumb) void S.thumbOf(article.id).then((t) => live && setThumb(t));
+    return () => {
+      live = false;
+    };
+  }, [article]);
   const bump = (i: number, delta: number) =>
     setParts((p) =>
       p.map((v, j) => {
@@ -670,6 +924,7 @@ function ProductSheet({
     if (entered === null || newHere === null) return setError('Quantité invalide');
     if (!parts.some((p) => p.trim())) return setError('Saisissez la quantité comptée');
     const detail = partsToDetail(lv, parts);
+    if (outside && S.isFile(inventory)) S.addToFile(inventory.id, article);
     S.record(inventory.id, article.id, newHere, mode === 'add' && here ? addDetail(here.detail, detail) : detail);
     onClose(`${article.name} : ${formatQty(newHere, article)} (${s.location})`);
   };
@@ -677,7 +932,7 @@ function ProductSheet({
     <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet">
         <div className="row">
-          {article.thumb ? <img className="thumb big-thumb" src={article.thumb} alt="" /> : null}
+          {thumb ? <img className="thumb big-thumb" src={thumb} alt="" /> : null}
           <div className="grow">
             <h2>{article.name}</h2>
             <div className="muted small">
@@ -686,7 +941,7 @@ function ProductSheet({
             </div>
           </div>
         </div>
-        {outside ? <div className="notice info">Ce produit n’est pas dans la liste de cet inventaire : il y sera ajouté.</div> : null}
+        {outside ? <div className="notice info">Ce produit n’est pas dans la liste de {S.isFile(inventory) ? 'cette fiche' : 'cet inventaire'} : il y sera ajouté.</div> : null}
         <div className="facts">
           <div>
             <small>Ici ({s.location})</small>
@@ -777,17 +1032,35 @@ function ProductSheet({
   );
 }
 
-function Unknown({ code, inventoryId, onClose }: { code: string; inventoryId: string; onClose: (saved: boolean) => void }) {
+function Unknown({ code, inventory, onClose }: { code: string; inventory: S.ServerInventory; onClose: (saved: boolean) => void }) {
+  const file = S.isFile(inventory);
   const [note, setNote] = useState('');
   const [qty, setQty] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const send = () => {
+    const n = qty.trim() ? Number(qty.replace(',', '.')) : null;
+    if (n !== null && !(n >= 0)) return setError('Quantité invalide');
+    if (file) {
+      // Fiche sans serveur : le produit est ajouté à la fiche, avec sa quantité.
+      if (!note.trim()) return setError('Notez le nom du produit');
+      const id = code || `sans-code-${Date.now().toString(36)}`;
+      const article: Article = { id: `f:${id}`, code: id, name: note.trim(), unit: 'piece', unitName: null, otherRef: null, departmentId: null, barcodes: [], packs: [], thumb: null };
+      S.addToFile(inventory.id, article, { code: id, name: note.trim(), pack: null, department: null, qty: null });
+      if (n !== null) S.record(inventory.id, article.id, Math.round(n * 1000), null);
+      return onClose(true);
+    }
+    if (!note.trim() && !photo && !code) return setError('Notez le nom ou prenez une photo');
+    S.addUnknown({ inventoryId: inventory.id, code, note: note.trim(), qty: n === null ? null : Math.round(n * 1000), photo });
+    onClose(true);
+  };
   return (
     <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose(false)}>
       <div className="sheet">
-        <h2>Produit inconnu</h2>
+        <h2>{file ? 'Produit absent de la fiche' : 'Produit inconnu'}</h2>
         <p className="muted">
-          {code ? `Le code ${code} n’est pas dans le catalogue.` : 'Produit sans code.'} Prenez-le en photo et notez son nom : le gérant créera l’article, puis vous le compterez.
+          {code ? `Le code ${code} n’est ni dans ${file ? 'la fiche' : 'le catalogue du téléphone'} ni sur le serveur.` : 'Produit sans code.'}{' '}
+          {file ? 'Notez son nom et sa quantité : il sera ajouté à la fiche.' : 'Prenez-le en photo et notez son nom : le gérant créera l’article, puis vous le compterez.'}
         </p>
         <label className="field">
           Nom lu sur l’emballage
@@ -797,35 +1070,198 @@ function Unknown({ code, inventoryId, onClose }: { code: string; inventoryId: st
           Quantité trouvée
           <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="0" />
         </label>
-        <label className="photo-btn">
-          {photo ? <img src={photo} alt="" /> : <span>Prendre une photo</span>}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (f) setPhoto(await shrinkPhoto(f).catch(() => null));
-            }}
-          />
-        </label>
+        {!file ? (
+          <label className="photo-btn">
+            {photo ? <img src={photo} alt="" /> : <span>Prendre une photo</span>}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f) setPhoto(await shrinkPhoto(f).catch(() => null));
+              }}
+            />
+          </label>
+        ) : null}
         {error ? <div className="notice erreur">{error}</div> : null}
-        <button
-          className="big primary"
-          onClick={() => {
-            const n = qty.trim() ? Number(qty.replace(',', '.')) : null;
-            if (n !== null && !(n >= 0)) return setError('Quantité invalide');
-            if (!note.trim() && !photo && !code) return setError('Notez le nom ou prenez une photo');
-            S.addUnknown({ inventoryId, code, note: note.trim(), qty: n === null ? null : Math.round(n * 1000), photo });
-            onClose(true);
-          }}
-        >
-          Envoyer au gérant
+        <button className="big primary" onClick={send}>
+          {file ? 'Ajouter à la fiche' : 'Envoyer au gérant'}
         </button>
         <button className="link" onClick={() => onClose(false)}>
           Annuler
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Menu d'un inventaire : récapitulatif, remise à 0, et pour une fiche l'export, le nom, la clôture. */
+function InventoryMenu({ inventory, onRecap, onBack, onClose }: { inventory: S.ServerInventory; onRecap: () => void; onBack: () => void; onClose: () => void }) {
+  const s = useStore();
+  const file = S.isFile(inventory) ? inventory : null;
+  const [settings, setSettings] = useState(false);
+  const [info, setInfo] = useState('');
+  const [name, setName] = useState(file?.number ?? '');
+  const mineHere = Object.keys(s.counts).filter((k) => k.startsWith(`${inventory.id}|`));
+  const atPlace = mineHere.filter((k) => k.endsWith(`|${s.location}`)).length;
+  const reset = (location: string | null) => {
+    const what = location ? `vos ${atPlace} comptage(s) de l’endroit « ${location} »` : `vos ${mineHere.length} comptage(s) de tout l’inventaire`;
+    if (!confirm(`Remettre à 0 ${what} ? Les quantités seront effacées${file ? '' : ' aussi sur le serveur'}.`)) return;
+    setInfo(`${S.resetCounts(inventory.id, location)} comptage(s) remis à 0.`);
+  };
+  if (settings) return <Settings onClose={onClose} />;
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <h2>{file ? file.number : `Inventaire N° ${inventory.number}`}</h2>
+        {info ? <div className="notice info">{info}</div> : null}
+        <button className="big primary" onClick={() => (onClose(), onRecap())}>
+          {file ? 'Récapitulatif et export de la fiche' : 'Mon récapitulatif (à partager)'}
+        </button>
+        <button className="big" disabled={!atPlace} onClick={() => reset(s.location)}>
+          Remettre à 0 l’endroit « {s.location} »
+        </button>
+        <button className="big" disabled={!mineHere.length} onClick={() => reset(null)}>
+          Remettre à 0 tout l’inventaire
+        </button>
+        {file ? (
+          <>
+            <label className="field">
+              Nom de la fiche
+              <div className="row">
+                <input className="grow" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
+                <button className="small-btn" disabled={!name.trim() || name.trim() === file.number} onClick={() => (S.updateFile(file.id, { number: name.trim() }), setInfo('Fiche renommée.'))}>
+                  Renommer
+                </button>
+              </div>
+            </label>
+            <button
+              className="big"
+              onClick={() => {
+                if (!confirm('Clôturer cette fiche ? Elle passe dans « Clôturés » : elle reste exportable, et vous pourrez la rouvrir.')) return;
+                S.updateFile(file.id, { closed: true });
+                onClose();
+                onBack();
+              }}
+            >
+              Clôturer la fiche
+            </button>
+            <button
+              className="link danger"
+              onClick={() => {
+                if (!confirm('Supprimer cette fiche et tous ses comptages du téléphone ?')) return;
+                S.deleteFile(file.id);
+                onClose();
+                onBack();
+              }}
+            >
+              Supprimer la fiche
+            </button>
+          </>
+        ) : null}
+        {s.config ? (
+          <button className="link" onClick={() => setSettings(true)}>
+            Réglages du téléphone
+          </button>
+        ) : null}
+        <button className="link" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Ce que j'ai compté, par endroit, avec le partage du fichier (et pour une fiche, l'export pour le PC). */
+function Recap({ inventory, counts, closed, onClose }: { inventory: S.ServerInventory; counts: Record<string, PlaceCount>; closed: boolean; onClose: () => void }) {
+  const s = useStore();
+  const cat = useCat(inventory);
+  const file = S.isFile(inventory) ? inventory : null;
+  const [error, setError] = useState('');
+  const prefix = `${inventory.id}|`;
+  const rows = Object.entries(counts)
+    .filter(([k]) => k.startsWith(prefix))
+    .map(([k, v]) => {
+      const [, articleId, ...rest] = k.split('|');
+      const article = cat.articles.get(articleId!);
+      return article ? { location: rest.join('|'), article, qty: v.qty } : null;
+    })
+    .filter((r): r is { location: string; article: Article; qty: number } => Boolean(r));
+  const places = [...new Set(rows.map((r) => r.location))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const totals = new Map<string, number>();
+  for (const r of rows) totals.set(r.article.id, (totals.get(r.article.id) ?? 0) + r.qty);
+  const who = s.session?.user.name ?? s.config?.deviceName ?? 'telephone';
+  const safe = (v: string) => v.normalize('NFD').replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  const run = async (fn: () => Promise<void>) => {
+    setError('');
+    try {
+      await fn();
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  const shareRecap = () =>
+    run(() => shareFile(`recapitulatif-${safe(inventory.number)}-${safe(who)}.csv`, recapCsv(rows), `Récapitulatif de l’inventaire ${inventory.number} (${who})`));
+  const exportFile = () =>
+    run(async () => {
+      if (!file) return;
+      const ext = file.format === 'txt' ? 'txt' : 'csv';
+      await shareFile(`${safe(file.number)}-rempli.${ext}`, exportCountFile(file.format, file.articles, totals, (a) => file.lines[a.id]), `Fiche remplie ${file.number}`);
+    });
+  return (
+    <div className="page">
+      <header className="bar">
+        <button className="ghost" onClick={onClose} aria-label="Retour">
+          ‹
+        </button>
+        <div className="grow">
+          <b>Récapitulatif · {file ? file.number : `N° ${inventory.number}`}</b>
+          <small>
+            {totals.size} produit(s) compté(s) · {places.length} endroit(s){closed ? ' · clôturé' : ''}
+          </small>
+        </div>
+      </header>
+      <main>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        {file ? (
+          <>
+            <button className="big primary" onClick={() => void exportFile()}>
+              Exporter la fiche remplie pour le PC
+            </button>
+            <p className="muted small">
+              Envoyez-la par WhatsApp ou e-mail, puis sur le PC : Inventaires › ouvrir l’inventaire › Importer. Le total de chaque produit (tous endroits) remplit la colonne
+              Compté.
+            </p>
+          </>
+        ) : null}
+        <button className={`big ${file ? '' : 'primary'}`} disabled={!rows.length} onClick={() => void shareRecap()}>
+          Partager mon récapitulatif
+        </button>
+        {file && closed ? (
+          <button className="big" onClick={() => (S.updateFile(file.id, { closed: false }), onClose())}>
+            Rouvrir la fiche
+          </button>
+        ) : null}
+        {places.map((place) => (
+          <div key={place} className="list">
+            <h2>{place}</h2>
+            {rows
+              .filter((r) => r.location === place)
+              .sort((a, b) => a.article.name.localeCompare(b.article.name, 'fr'))
+              .map((r) => (
+                <div key={r.article.id} className="row item">
+                  <div className="grow">
+                    {r.article.name}
+                    <small>{r.article.code}</small>
+                  </div>
+                  <b>{formatQty(r.qty, r.article)}</b>
+                </div>
+              ))}
+          </div>
+        ))}
+        {!rows.length ? <div className="empty">Rien compté sur ce téléphone pour cet inventaire.</div> : null}
+      </main>
     </div>
   );
 }

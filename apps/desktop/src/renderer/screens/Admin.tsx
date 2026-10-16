@@ -14,7 +14,7 @@ import serverLogo from '../assets/logo-serveur.png';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -35,6 +35,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
+    ['updates', 'Mises à jour'],
     ['license', 'Licence'],
     ...(can('dashboard') ? ([['digest', 'Résumé du jour']] as [Tab, string][]) : []),
     ...(can('audit') ? ([['audit', "Journal d'audit"]] as [Tab, string][]) : []),
@@ -74,6 +75,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
+      {tab === 'updates' && <SoftwareUpdates isAdmin={user.role === 'admin'} />}
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'digest' && can('dashboard') && <Digest isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && can('audit') && <Audit />}
@@ -909,6 +911,120 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
               ))}
             </tbody>
           </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+const UPDATE_STATUS: Record<string, string> = {
+  idle: 'Pas encore vérifié',
+  checking: 'Vérification…',
+  none: 'Ce PC a la dernière version',
+  downloading: 'Téléchargement de la nouvelle version…',
+  ready: 'Nouvelle version prête',
+  error: 'Vérification impossible',
+};
+
+/** Mise à jour automatique : version de ce PC, adresse lue, état et installation. */
+function SoftwareUpdates({ isAdmin }: { isAdmin: boolean }) {
+  const toast = useToast();
+  const state = useLoad(() => call('update.state'));
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const t = setInterval(state.reload, 3000);
+    return () => clearInterval(t);
+  }, []);
+  const st = state.data;
+  if (st === undefined) return null;
+  if (st === null || !st.enabled) {
+    return <p className="muted narrow">La mise à jour automatique ne fonctionne que dans le logiciel installé (pas en mode développement).</p>;
+  }
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) toast.ok(ok);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+      state.reload();
+    }
+  };
+  return (
+    <div className="narrow">
+      <p>
+        FEDONIX 360 se met à jour tout seul : il cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge sans gêner la caisse et
+        l'installe à la prochaine fermeture du logiciel. Les nouvelles versions se déposent dans FEDONIX 360 Serveur, onglet « Mises à jour ».
+      </p>
+      <table className="list">
+        <tbody>
+          <tr>
+            <th>Version de ce PC</th>
+            <td>{st.version}</td>
+          </tr>
+          <tr>
+            <th>Adresse des mises à jour</th>
+            <td>{st.url ?? <span className="muted">aucune : reliez ce PC au serveur central ou saisissez une adresse ci-dessous</span>}</td>
+          </tr>
+          <tr>
+            <th>État</th>
+            <td className={st.status === 'error' ? 'neg' : st.status === 'ready' ? 'pos' : ''}>
+              {UPDATE_STATUS[st.status]}
+              {st.status === 'downloading' && ` ${st.available} (${st.percent} %)`}
+              {st.status === 'ready' && ` : ${st.available}`}
+              {st.status === 'error' && st.error && <div className="muted">{st.error}</div>}
+            </td>
+          </tr>
+          <tr>
+            <th>Dernière vérification</th>
+            <td>{st.lastCheck ? dateTime(st.lastCheck) : 'jamais'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="actions">
+        {isAdmin && (
+          <button disabled={busy || !st.url || st.status === 'checking' || st.status === 'downloading'} onClick={() => run(() => call('update.check'))}>
+            Vérifier maintenant
+          </button>
+        )}
+        {st.status === 'ready' && (
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={async () => {
+              if (!(await askConfirm(`Fermer FEDONIX 360 et installer la version ${st.available} ? Le logiciel se rouvre tout seul après l'installation.`))) return;
+              void run(() => call('update.install'));
+            }}
+          >
+            Installer maintenant
+          </button>
+        )}
+      </div>
+      {isAdmin && (
+        <>
+          <h3>Adresse des mises à jour</h3>
+          <p className="muted">
+            Laissez vide pour utiliser le serveur central auquel ce PC est relié. Pour une boutique sans serveur, saisissez l'adresse internet où l'éditeur dépose
+            les nouvelles versions.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void run(() => call('update.setUrl', url ?? st.customUrl), 'Adresse enregistrée');
+            }}
+          >
+            <Field label="Adresse (facultative)" hint="ex. https://mises-a-jour.fedonix360.cm/">
+              <input value={url ?? st.customUrl} onChange={(e) => setUrl(e.target.value)} placeholder="Serveur central de ce PC" />
+            </Field>
+            <div className="actions">
+              <button type="submit" disabled={busy}>
+                Enregistrer l'adresse
+              </button>
+            </div>
+          </form>
         </>
       )}
     </div>

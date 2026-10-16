@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.49.0',
+    items: [
+      'Mises à jour automatiques : déposez le nouvel installateur dans FEDONIX 360 Serveur (onglet « Mises à jour ») et chaque PC relié le télécharge tout seul, puis l’installe à sa fermeture.',
+      'Administration › Mises à jour : version du PC, état du téléchargement, « Installer maintenant », et une adresse internet pour les boutiques sans serveur.',
+      'La barre du bas annonce « Mise à jour prête » ; FEDONIX 360 Serveur montre la version de chaque PC.',
+    ],
+  },
+  {
     version: '0.48.0',
     items: [
       'Le logiciel s’appelle maintenant FEDONIX 360, avec son nouveau logo en 3D sur l’écran de connexion, l’icône du bureau et l’installateur.',

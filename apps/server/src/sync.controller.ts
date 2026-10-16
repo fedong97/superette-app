@@ -49,8 +49,8 @@ export class SyncController {
   }
 
   @Get('sync/pull')
-  async pull(@Headers('authorization') auth: string | undefined, @Query('since') since?: string, @Query('limit') limit?: string) {
-    const device = await this.sync.authenticate(auth);
+  async pull(@Headers('authorization') auth: string | undefined, @Headers('x-fedonix-version') version: string | undefined, @Query('since') since?: string, @Query('limit') limit?: string) {
+    const device = await this.sync.authenticate(auth, version);
     return this.sync.pull(device, Number(since ?? 0), Number(limit ?? 1000));
   }
 }

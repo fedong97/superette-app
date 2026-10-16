@@ -6,6 +6,8 @@ export interface ServerConfig {
   dataDir?: string;
   /** Dossier des sauvegardes automatiques de la base intégrée. */
   backupDir?: string;
+  /** Dossier des installateurs servis aux PC pour la mise à jour automatique. */
+  updatesDir?: string;
   port: number;
   /**
    * Clé secrète pour rattacher le premier poste d'un magasin (saisie une fois dans l'application).
@@ -34,6 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     databaseUrl: dataDir ? undefined : (env['DATABASE_URL'] ?? 'postgres://superette:superette@localhost:5432/superette'),
     dataDir,
     backupDir: env['BACKUP_DIR'] || undefined,
+    updatesDir: env['UPDATES_DIR'] || undefined,
     port: Number(env['PORT'] ?? 3000),
     enrollmentKey,
     adminPassword: env['ADMIN_PASSWORD'] || undefined,

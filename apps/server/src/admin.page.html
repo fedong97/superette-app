@@ -80,7 +80,7 @@
 
   var ONGLETS = [
     ['accueil', 'Accueil'], ['postes', 'Postes'], ['activite', 'Activité'],
-    ['ventes', 'Ventes'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
+    ['ventes', 'Ventes'], ['majs', 'Mises à jour'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
   ];
 
   function esc(v) {
@@ -209,7 +209,7 @@
   }
 
   function afficher(silencieux) {
-    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, sauvegardes: vueSauvegardes, reglages: vueReglages };
+    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, majs: vueMajs, sauvegardes: vueSauvegardes, reglages: vueReglages };
     var o = onglet;
     if (!silencieux) page.innerHTML = '<p class="muted">Chargement…</p>';
     vues[o]().then(function (html) {
@@ -287,10 +287,10 @@
     var liste = actions ? o.devices : o.devices.filter(function (d) { return !d.revoked; });
     var h = '<div class="bloc"><h3 style="margin-top:0">Postes</h3>';
     if (!liste.length) return h + '<p class="muted">Aucun PC relié.</p></div>';
-    h += '<table><thead><tr><th>PC</th><th>Magasin</th><th>Caisse</th><th>État</th><th>Dernière synchronisation</th>' + (actions ? '<th>Relié le</th><th></th>' : '') + '</tr></thead><tbody>';
+    h += '<table><thead><tr><th>PC</th><th>Magasin</th><th>Caisse</th><th>État</th><th>Version</th><th>Dernière synchronisation</th>' + (actions ? '<th>Relié le</th><th></th>' : '') + '</tr></thead><tbody>';
     h += liste.map(function (d) {
       var pastille = d.revoked ? '<span class="pastille non">Délié</span>' : d.online ? '<span class="pastille ok">En ligne</span>' : '<span class="pastille alerte">Hors ligne</span>';
-      return '<tr><td>' + esc(d.name) + '</td><td>' + esc(d.store) + '</td><td>' + esc(d.register) + '</td><td>' + pastille + '</td><td>' + esc(depuis(d.lastSeenAt)) + '</td>' +
+      return '<tr><td>' + esc(d.name) + '</td><td>' + esc(d.store) + '</td><td>' + esc(d.register) + '</td><td>' + pastille + '</td><td>' + esc(d.appVersion || '—') + '</td><td>' + esc(depuis(d.lastSeenAt)) + '</td>' +
         (actions ? '<td>' + esc(date(d.createdAt)) + '</td><td>' + (d.revoked ? '' : '<button class="danger" data-delier="' + esc(d.id) + '" data-nom="' + esc(d.name) + '">Délier</button>') + '</td>' : '') + '</tr>';
     }).join('');
     return h + '</tbody></table></div>';
@@ -383,6 +383,32 @@
     });
   }
 
+  // ——— Mises à jour des PC ———
+
+  function vueMajs() {
+    return Promise.all([apercu(), api('updates')]).then(function (r) {
+      var o = r[0], u = r[1], c = u.current;
+      var actifs = o.devices.filter(function (d) { return !d.revoked; });
+      var h = '<h2>Mises à jour des PC</h2>' +
+        '<div class="bloc"><p style="margin-top:0">Déposez ici le nouvel installateur de FEDONIX 360 (par exemple <code>Fedonix360-Setup-0.49.0.exe</code>). ' +
+        'Chaque PC relié le télécharge tout seul et l\'installe à sa prochaine fermeture, sans rien perdre.</p>' +
+        (c ? '<p>Version proposée aux PC : <b>' + esc(c.version) + '</b> (' + esc(c.file) + ', ' + taille(c.size) + ', déposée ' + esc(depuis(c.at)) + ')</p>'
+           : '<p class="muted">Aucune version déposée pour l\'instant.</p>') +
+        '<div class="ligne"><div><input type="file" id="installateur" accept=".exe"></div><div><button class="principal" id="deposer">Déposer et proposer aux PC</button></div></div>' +
+        '<p class="muted" id="progression"></p>' +
+        '<p class="muted">Dossier : <code>' + esc(u.dir) + '</code></p></div>';
+      if (actifs.length) {
+        h += '<div class="bloc"><h3 style="margin-top:0">Version de chaque PC</h3><table><thead><tr><th>PC</th><th>Magasin</th><th>Version</th><th></th></tr></thead><tbody>' +
+          actifs.map(function (d) {
+            var aJour = c && d.appVersion === c.version;
+            return '<tr><td>' + esc(d.name) + '</td><td>' + esc(d.store) + '</td><td>' + esc(d.appVersion || 'inconnue') + '</td><td>' +
+              (!c ? '' : aJour ? '<span class="pastille ok">À jour</span>' : '<span class="pastille alerte">En attente</span>') + '</td></tr>';
+          }).join('') + '</tbody></table><p class="muted">Un PC « en attente » prend la mise à jour quand il est fermé puis rouvert. Sa version s\'affiche à sa prochaine synchronisation.</p></div>';
+      }
+      return h;
+    });
+  }
+
   // ——— Réglages ———
 
   function vueReglages() {
@@ -448,6 +474,28 @@
         action(r, function () {
           return api('backups/settings', { method: 'POST', body: { dir: document.getElementById('dossier').value, keep: Number(document.getElementById('garder').value) } });
         }, 'Réglages enregistrés').then(function () { afficher(true); });
+      };
+    },
+    majs: function () {
+      var b = document.getElementById('deposer');
+      b.onclick = function () {
+        var f = document.getElementById('installateur').files[0];
+        if (!f) { toast('Choisissez d\'abord le fichier .exe'); return; }
+        var p = document.getElementById('progression');
+        b.disabled = true;
+        var x = new XMLHttpRequest();
+        x.open('POST', '/admin/api/updates?name=' + encodeURIComponent(f.name));
+        x.setRequestHeader('Content-Type', 'application/octet-stream');
+        x.upload.onprogress = function (e) { if (e.lengthComputable) p.textContent = 'Envoi : ' + Math.round(e.loaded * 100 / e.total) + ' %'; };
+        x.onload = function () {
+          b.disabled = false;
+          var d = null;
+          try { d = JSON.parse(x.responseText); } catch (e) { d = null; }
+          if (x.status >= 200 && x.status < 300) { toast('Version ' + d.version + ' proposée aux PC'); afficher(true); }
+          else { p.textContent = ''; toast((d && d.message) || ('Erreur ' + x.status)); }
+        };
+        x.onerror = function () { b.disabled = false; p.textContent = ''; toast('Envoi interrompu'); };
+        x.send(f);
       };
     },
     reglages: function () {

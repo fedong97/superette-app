@@ -78,6 +78,7 @@ import {
 } from '@superette/db';
 
 import type { SyncRunner } from './sync';
+import type { Updater } from './updater';
 
 /** Actions du poste qui passent par Windows (fenêtres de choix, redémarrage). */
 export interface SystemHooks {
@@ -88,6 +89,8 @@ export interface SystemHooks {
   restore(file: string, userId: string): void;
   /** Résumé du soir par e-mail : chiffre le mot de passe pour ce PC, envoie le résumé du jour. */
   digest?: { seal(password: string): string; sendNow(): Promise<string> };
+  /** Mise à jour automatique du logiciel (absente dans les tests). */
+  updater?: Updater;
 }
 
 export interface InvoicePrintOptions {
@@ -479,6 +482,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Serveur central ----------------------------------------------------
+    'update.state': () => (requireUser(), system.updater?.state() ?? null),
+    'update.check': () => (requireAdmin(), system.updater ? system.updater.check() : null),
+    'update.setUrl': (url: string) => {
+      requireAdmin();
+      if (!system.updater) throw new AppError("La mise à jour automatique n'est pas disponible sur ce poste", 'INVALID');
+      try {
+        return system.updater.setUrl(url);
+      } catch (e) {
+        throw new AppError(e instanceof Error ? e.message : String(e), 'INVALID');
+      }
+    },
+    'update.install': () => {
+      requireUser();
+      if (!system.updater) throw new AppError("La mise à jour automatique n'est pas disponible sur ce poste", 'INVALID');
+      try {
+        system.updater.install();
+      } catch (e) {
+        throw new AppError(e instanceof Error ? e.message : String(e), 'INVALID');
+      }
+    },
     'sync.state': () => (requireUser(), s.sync.state()),
     'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),

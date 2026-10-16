@@ -156,7 +156,8 @@ export class AdminService {
       created_at: Date;
       last_seen_at: Date | null;
       revoked_at: Date | null;
-    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
+      app_version: string | null;
+    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
     const { rows: counts } = await this.pg.query<{ total: number; today: number; first: Date | null }>(
       'SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE received_at >= $1)::int AS today, MIN(received_at) AS first FROM events',
       [startOfDay()],
@@ -201,6 +202,7 @@ export class AdminService {
         lastSeenAt: d.last_seen_at,
         online: !d.revoked_at && d.last_seen_at !== null && now - new Date(d.last_seen_at).getTime() < ONLINE_MS,
         revoked: d.revoked_at !== null,
+        appVersion: d.app_version,
       })),
       stores: [...stores.values()],
       backups: {

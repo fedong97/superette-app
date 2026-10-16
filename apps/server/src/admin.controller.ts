@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { ADMIN_PAGE } from './admin.page';
 import { AdminService } from './admin.service';
 import { BackupService } from './backup.service';
+import { UpdatesService } from './updates.service';
 
 const COOKIE = 'fedo_admin';
 
@@ -23,6 +24,7 @@ export class AdminController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(BackupService) private readonly backups: BackupService,
+    @Inject(UpdatesService) private readonly updates: UpdatesService,
   ) {}
 
   private guard(req: Request) {
@@ -151,5 +153,19 @@ export class AdminController {
     this.guard(req);
     await this.backups.restore(name);
     return { ok: true };
+  }
+
+  @Get('admin/api/updates')
+  updatesState(@Req() req: Request) {
+    this.guard(req);
+    return { dir: this.updates.dir(), current: this.updates.current() };
+  }
+
+  /** Dépôt d'un nouvel installateur : le fichier arrive tel quel (application/octet-stream). */
+  @Post('admin/api/updates')
+  @HttpCode(200)
+  publishUpdate(@Req() req: Request, @Query('name') name: string) {
+    this.guard(req);
+    return this.updates.publish(name, req);
   }
 }

@@ -152,12 +152,12 @@ export class SyncService {
     return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id);
   }
 
-  async authenticate(authorization: string | undefined): Promise<Device> {
+  async authenticate(authorization: string | undefined, appVersion?: string): Promise<Device> {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     if (!token) throw new UnauthorizedException('Jeton manquant');
     const { rows } = await this.pg.query<Device>(
-      'UPDATE devices SET last_seen_at = now() WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id, name, store_id, register_id',
-      [hashToken(token)],
+      'UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id, name, store_id, register_id',
+      [hashToken(token), /^\d+\.\d+\.\d+$/.test(appVersion ?? '') ? appVersion : null],
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');
     return rows[0];

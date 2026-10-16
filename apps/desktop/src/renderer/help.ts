@@ -420,6 +420,15 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
       { tab: 'server', title: 'Serveur central', steps: ['Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.'] },
       {
+        tab: 'updates',
+        title: 'Mises à jour',
+        steps: [
+          'Le PC cherche une nouvelle version au démarrage puis toutes les 4 heures, sur le serveur central ou à l’adresse saisie ici.',
+          'La version téléchargée s’installe à la fermeture du logiciel, ou tout de suite avec « Installer maintenant ».',
+          'Pour proposer une version aux PC : FEDONIX 360 Serveur › Mises à jour › déposer le fichier Fedonix360-Setup-x.y.z.exe.',
+        ],
+      },
+      {
         tab: 'license',
         title: 'Licence',
         steps: [

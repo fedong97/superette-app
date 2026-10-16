@@ -571,7 +571,7 @@ function CatalogState() {
         : s.catalogError
           ? `Catalogue pas téléchargé : ${s.catalogError}. Les codes sont cherchés sur le serveur tant qu’il répond.`
           : s.catalog
-            ? 'Le serveur n’a envoyé aucun article. Vérifiez sur le PC que la synchronisation avec le serveur marche (barre d’état en bas).'
+            ? 'Le serveur n’a aucun produit. Sur le PC principal (version 0.57 ou plus), ouvrez Administration › Serveur central et touchez « Renvoyer au serveur ce qui lui manque », puis Réessayer ici.'
             : 'Téléchargement du catalogue…'}{' '}
       <button className="small-btn" disabled={busy} onClick={() => void retry()}>
         {busy ? '…' : 'Réessayer'}

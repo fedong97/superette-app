@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { type Services, enrollStation, joinStore, syncOnce } from '@superette/db';
+import { type Services, enrollStation, joinStore, resendMissing, syncOnce } from '@superette/db';
 
 const INTERVAL_MS = 20_000;
 
@@ -26,6 +26,12 @@ export function createSyncRunner(s: Services) {
 
   return {
     now: () => run(() => syncOnce(s)),
+    /** Renvoie au serveur les données qu'il n'a pas, puis synchronise. */
+    resend: () =>
+      run(async () => {
+        const { queued } = await resendMissing(s);
+        return { ...(await syncOnce(s)), queued };
+      }),
     connect: (url: string, enrollmentKey: string) => run(() => enrollStation(s, url.trim(), enrollmentKey.trim(), hostname())),
     join: (url: string, activationCode: string) => run(() => joinStore(s, url.trim(), activationCode.trim(), hostname())),
     stop: () => clearInterval(timer),

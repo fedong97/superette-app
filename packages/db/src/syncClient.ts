@@ -55,6 +55,16 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
     // Stock du magasin pour l'écran « Stock multi-magasin » des autres magasins.
     const station = s.admin.station();
     if (station) s.sync.publishStock(station.store.id);
+    // Une fois par serveur : ce qui lui manque repart (serveur réinstallé, sauvegarde restaurée).
+    if (!s.sync.resendChecked() && Date.now() >= nextResendTry) {
+      try {
+        await resendMissing(s);
+      } catch (e) {
+        // Serveur pas encore mis à jour : on réessaiera plus tard, la synchronisation continue.
+        if (e instanceof AppError && e.code === 'SYNC_OFFLINE') throw e;
+        nextResendTry = Date.now() + 3_600_000;
+      }
+    }
     for (;;) {
       const batch = s.sync.pending(500);
       if (batch.length === 0) break;
@@ -93,6 +103,32 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
     throw e;
   }
   return { sent, received, conflicts };
+}
+
+let nextResendTry = 0;
+
+/**
+ * Compare les données de référence du PC (produits, rayons, dépôts,
+ * utilisateurs, stock, inventaires…) à celles du serveur et remet dans la file
+ * d'envoi celles qu'il n'a pas. Rien n'est renvoyé de ce que le serveur a déjà.
+ */
+export async function resendMissing(s: Services): Promise<{ queued: number }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce poste n'est pas relié au serveur central", 'SYNC_NOT_CONFIGURED');
+  const station = s.admin.station();
+  let queued = 0;
+  for (const t of s.sync.resendTargets(station?.store.id ?? null)) {
+    if (t.ids.length === 0) continue;
+    const { ids } = await request<{ ids: string[] }>(creds.url, '/api/v1/sync/known', { token: creds.token, body: { entity: t.entity } });
+    const known = new Set(ids);
+    queued += s.sync.requeue(
+      t.entity,
+      t.ids.filter((id) => !known.has(id)),
+      t.storeId,
+    );
+  }
+  s.sync.markResendChecked();
+  return { queued };
 }
 
 /** Relie le poste principal (déjà configuré) au serveur avec la clé d'enrôlement, puis envoie tout son historique. */

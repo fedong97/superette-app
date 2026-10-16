@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.57.0',
+    items: [
+      'Serveur central : le PC vérifie que le serveur a bien tous ses produits, rayons, dépôts, utilisateurs, stocks et inventaires, et lui renvoie seul ce qui manque (serveur réinstallé, sauvegarde restaurée). Le téléphone d’inventaire retrouve ainsi le catalogue.',
+      'Administration › Serveur central › « Renvoyer au serveur ce qui lui manque » fait cette vérification à la demande. Rien n’est effacé ni envoyé en double.',
+    ],
+  },
+  {
     version: '0.56.0',
     items: [
       'Inventaire sur téléphone : les codes-barres et les noms sont retrouvés même sur un gros catalogue. Les photos ne sont plus téléchargées avec le catalogue (une fiche affiche la sienne à l’ouverture), et un code ou un nom introuvable sur le téléphone est cherché sur le serveur.',

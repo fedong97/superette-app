@@ -41,6 +41,13 @@ export class SyncController {
     return this.sync.push(device, body?.events);
   }
 
+  @Post('sync/known')
+  @HttpCode(200)
+  async known(@Headers('authorization') auth: string | undefined, @Body() body: { entity: string }) {
+    const device = await this.sync.authenticate(auth);
+    return this.sync.known(device, String(body?.entity ?? ''));
+  }
+
   @Post('license')
   @HttpCode(200)
   async license(@Headers('authorization') auth: string | undefined, @Body() body: { key: string }) {

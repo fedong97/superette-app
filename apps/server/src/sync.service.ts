@@ -185,6 +185,20 @@ export class SyncService {
     return { accepted: events.map((e) => e.id) };
   }
 
+  /**
+   * Identifiants que le serveur a pour une entité (partagée, ou du magasin du
+   * poste) : le PC renvoie ce qui manque après une réinstallation du serveur.
+   */
+  async known(device: Device, entity: string): Promise<{ ids: string[] }> {
+    if (!KNOWN_ENTITIES.has(entity)) throw new BadRequestException(`Entité inconnue : ${String(entity).slice(0, 50)}`);
+    const global = GLOBAL_ENTITIES.includes(entity);
+    const { rows } = await this.pg.query<{ entity_id: string }>(
+      `SELECT DISTINCT entity_id FROM events WHERE entity = $1 ${global ? '' : 'AND (store_id = $2 OR store_id IS NULL)'}`,
+      global ? [entity] : [entity, device.store_id],
+    );
+    return { ids: rows.map((r) => r.entity_id) };
+  }
+
   /** Opérations des autres postes : données partagées + celles du magasin du poste. */
   async pull(device: Device, since: number, limit: number): Promise<{ events: SyncEvent[]; cursor: number; hasMore: boolean; license: string | null }> {
     const max = Math.min(Math.max(limit || 1000, 1), 5000);

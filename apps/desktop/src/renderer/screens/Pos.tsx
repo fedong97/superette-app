@@ -7,7 +7,7 @@ import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
-import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockIn, useSaleRows } from './SaleSearch';
+import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
 import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
 import { tx } from '../tax';
 
@@ -122,7 +122,7 @@ const tileColor = (name: string) => {
  * Plusieurs fiches peuvent être ouvertes en même temps (Caisse 1, Caisse 2).
  */
 
-export function Pos({ edit = null, user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onListing, onTreasury, mode = 'cash', layout = 'modern' }: {
+export function Pos({ edit = null, user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onTreasury, mode = 'cash', layout = 'modern' }: {
   mode?: 'cash' | 'credit';
   layout?: PosLayout;
   /** Facture à recharger pour la modifier (demandée depuis le registre ou Mes factures). */
@@ -143,7 +143,6 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   onClose: () => void;
   /** Passe de la vente au comptant à la vente à crédit (et inversement). */
   onSwitchMode?: () => void;
-  onListing: () => void;
   /** Ouvre Trésorerie › Opérations de trésorerie (ouverture et clôture). */
   onTreasury: () => void;
 }) {
@@ -151,6 +150,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const session = useLoad(() => call('pos.session'), []);
   const quickKeys = useLoad(() => call('catalogue.quickKeys'), []);
   const warehouses = useLoad(() => call('admin.warehouses'), []);
+  // Dépôts où ce vendeur vend sans le code du gérant.
+  const myWarehouses = useLoad(() => call('pos.saleWarehouses'), []);
   const [lines, setLines] = useState<PosLine[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [input, setInput] = useState('');
@@ -553,6 +554,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     if (lastSale) call('pos.printTicket', lastSale.id).catch(toast.error);
     else toast.error('Aucun ticket à réimprimer');
   };
+  /** Fiche vide : Listing (F7) réimprime la dernière facture au format listing, comme Ticket (F2) le dernier ticket. */
+  const reprintListing = () => {
+    if (!can('sale_reprint')) return toast.error("Vous n'avez pas le droit de réimprimer une facture");
+    if (lastSale) call('pos.printInvoice', lastSale.id, { format: 'listing' }).catch(toast.error);
+    else toast.error('Aucune facture à réimprimer');
+  };
 
   const openDrawer = () => {
     if (!can('drawer_open')) return toast.error("Vous n'avez pas le droit d'ouvrir le tiroir sans vente");
@@ -566,13 +573,13 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       const fn: Record<string, () => void> = {
         F1: () => openSearch(input),
         // Fiche en cours : F2 valide et imprime le ticket, F7 le listing, F4 enregistre sans imprimer.
-        // Fiche vide : F2 réimprime le dernier ticket, F7 ouvre « Mes factures ».
+        // Fiche vide : F2 réimprime le dernier ticket, F7 la dernière facture en listing.
         F2: () => (lines.length ? void validate('ticket') : reprint()),
         F3: () => void hold(),
         F4: () => void validate('none'),
         F5: openDrawer,
         F6: () => selected !== null && setDialog('discount'),
-        F7: () => (lines.length ? void validate('listing') : onListing()),
+        F7: () => (lines.length ? void validate('listing') : reprintListing()),
         F8: () => setDialog('customer'),
         F9: printA4,
         F10: () => can('sale_resume') && setDialog('held'),
@@ -989,14 +996,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     focusScan();
   };
   const closeFiche = () => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose());
-  /** F2 et F7 : valident la fiche en cours ; sur une fiche vide, réimpriment le dernier ticket ou ouvrent « Mes factures ». */
+  /** F2 et F7 : valident la fiche en cours ; sur une fiche vide, réimpriment le dernier ticket ou la dernière facture en listing. */
   const ticketKey = () => (lines.length ? void validate('ticket') : reprint());
-  const listingKey = () => (lines.length ? void validate('listing') : onListing());
+  const listingKey = () => (lines.length ? void validate('listing') : reprintListing());
   const pickLevel = (k: PriceLevel) =>
     chooseOption(`Passer cette fiche au tarif ${PRICE_LEVELS[k].toLowerCase()}.`, 'sale_tariff', k === usualLevel, () => setLevelChoice(k === usualLevel ? null : k));
   const pickWarehouse = (id: string) => {
     const w = warehouses.data?.find((x) => x.id === id);
-    if (w) chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', w.id === salesWarehouse?.id, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id));
+    const mine = w?.id === salesWarehouse?.id || Boolean(w && myWarehouses.data?.includes(w.id));
+    if (w) chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', mine, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id));
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
   const heldCount = held.data?.length ?? 0;
@@ -1316,7 +1324,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
               Encaisser <kbd>Ctrl+E</kbd>
             </button>
             <hr />
-            <button onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Liste des factures'}>
+            <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'}>
               Listing <kbd>F7</kbd>
             </button>
             <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket' : 'Réimprimer le dernier ticket'}>
@@ -1579,7 +1587,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket' : 'Réimprimer le dernier ticket'}>
             Ticket <kbd>F2</kbd>
           </button>
-          <button onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Liste des factures'}>
+          <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'}>
             Listing <kbd>F7</kbd>
           </button>
           <button disabled={!lastSale || lines.length > 0} onClick={printA4}>
@@ -1679,8 +1687,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                   <button
                     type="button"
                     key={rowKey(r)}
-                    className={`pos-tile ${i === suggestions.active ? 'hit' : ''} ${r.out_of_stock ? 'out' : r.stock < r.units * 5 ? 'low' : ''}`}
+                    className={`pos-tile ${i === suggestions.active ? 'hit' : ''} ${r.out_of_stock ? 'out' : r.available < r.units * 5 ? 'low' : ''}`}
                     style={tileColor(r.name)}
+                    title={stockByDepot(r) || undefined}
                     // mousedown : choisir avant que la zone de saisie perde le focus.
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -1925,7 +1934,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>📄</i>Facture A4 <kbd>F9</kbd>
         </button>
-        <button onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Mes factures'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+        <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
         </button>
         <button disabled={!lines.length} onClick={async () => {

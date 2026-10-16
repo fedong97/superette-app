@@ -68,11 +68,19 @@ export function useToast() {
   };
 }
 
-/** Charge des données et les recharge à la demande. */
+/**
+ * Numéro d'actualisation de la fenêtre : le bouton ⟳ (ou F5) l'augmente et
+ * toutes les données chargées par `useLoad` dans la fenêtre se rechargent,
+ * sans perdre l'onglet ni la saisie en cours.
+ */
+export const RefreshCtx = createContext(0);
+
+/** Charge des données et les recharge à la demande (et à chaque actualisation de la fenêtre). */
 export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []): { data: T | undefined; reload: () => void; error: unknown } {
   const [data, setData] = useState<T>();
   const [error, setError] = useState<unknown>();
   const [tick, setTick] = useState(0);
+  const refresh = useContext(RefreshCtx);
   useEffect(() => {
     let alive = true;
     loader().then(
@@ -83,7 +91,7 @@ export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []): { da
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, tick]);
+  }, [...deps, tick, refresh]);
   return { data, error, reload: () => setTick((t) => t + 1) };
 }
 

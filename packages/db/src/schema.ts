@@ -9,6 +9,9 @@
  * - chaque écriture métier ajoute une ligne dans `outbox`, la file d'envoi
  *   vers le serveur central (synchronisation en phase 1, étape suivante).
  */
+
+import { SYSCOHADA_SQL } from './syscohada';
+
 export const MIGRATIONS: { version: number; name: string; sql: string; /** Reconstruit une table : clés étrangères suspendues le temps de la migration. */ rebuild?: boolean }[] = [
   {
     version: 1,
@@ -1436,6 +1439,36 @@ CREATE TABLE sale_deliveries (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX sale_deliveries_day ON sale_deliveries(store_id, planned_date);
+`,
+  },
+  {
+    version: 32,
+    name: 'plan SYSCOHADA complet, exercices comptables, correction des écritures, dépôts de vente par utilisateur',
+    sql: `
+-- Plan comptable SYSCOHADA révisé : les comptes manquants (les comptes déjà là gardent leur libellé et leur rôle).
+${SYSCOHADA_SQL}
+-- Exercices comptables : ouverts, puis clôturés (plus aucune écriture datée dedans, à-nouveaux générés).
+-- Identifiant fixe « magasin:date de début » pour que deux PC ne créent pas deux fois le même exercice.
+CREATE TABLE fiscal_years (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  result INTEGER,
+  closed_at TEXT,
+  closed_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX fiscal_years_store ON fiscal_years(store_id, start_date);
+-- À-nouveaux générés par la clôture d'un exercice (identifiant de l'exercice clôturé).
+ALTER TABLE manual_entries ADD COLUMN closing_of TEXT;
+-- Écriture de correction d'une écriture automatique : « journal|date|pièce » de l'écriture corrigée.
+ALTER TABLE manual_entries ADD COLUMN corrects TEXT;
+ALTER TABLE manual_entries ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+-- Dépôts où l'utilisateur peut vendre (liste JSON d'identifiants ; NULL : le dépôt de vente seulement).
+ALTER TABLE users ADD COLUMN sale_warehouses TEXT;
 `,
   },
   {

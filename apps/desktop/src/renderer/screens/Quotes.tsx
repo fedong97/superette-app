@@ -48,7 +48,7 @@ export function Quotes({ user }: { user: User }) {
           <option value="">Tous</option>
         </select>
         <input placeholder="N°, client" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="primary" style={{ marginLeft: 'auto' }} disabled={!has(user, 'quote_save')} onClick={() => setEditing('new')}>
+        <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} disabled={!has(user, 'quote_save')} onClick={() => setEditing('new')}>
           Nouveau devis
         </button>
       </div>

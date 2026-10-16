@@ -31,19 +31,72 @@ interface Draft {
  * de marchandises » de KONTROL : liste des bons, puis le bon avec ses
  * statuts (brouillon, expédié, réceptionné).
  */
-export function Transfers() {
-  const [openId, setOpenId] = useState<string | 'new' | null>(null);
-  return openId ? <TransferForm id={openId === 'new' ? null : openId} onBack={() => setOpenId(null)} onOpen={setOpenId} /> : <TransferList onOpen={setOpenId} />;
+export function Transfers({ startNew = false }: { startNew?: boolean }) {
+  const [openId, setOpenId] = useState<string | 'new' | null>(startNew ? 'new' : null);
+  return openId ? (
+    <TransferForm key={openId} id={openId === 'new' ? null : openId} onBack={() => setOpenId(null)} onOpen={setOpenId} />
+  ) : (
+    <TransferList onOpen={setOpenId} />
+  );
+}
+
+/** Supprimer depuis la liste ou la fiche : brouillon effacé, sinon annulé avec retour du stock. */
+async function removeTransfer(t: Transfer): Promise<{ deleted: boolean } | null> {
+  const question =
+    t.status === 'draft'
+      ? `Supprimer le brouillon n° ${t.number} ?`
+      : t.status === 'shipped'
+        ? `Supprimer le transfert n° ${t.number} ? Il est annulé et la marchandise revient dans ${t.from_name}.`
+        : `Supprimer le transfert n° ${t.number} ? Il est annulé : la marchandise quitte ${t.to_name} et revient dans ${t.from_name}.`;
+  if (!(await askConfirm(question))) return null;
+  return call('transfers.remove', t.id);
+}
+
+/** Modifier un transfert expédié ou réceptionné : annulé puis repris dans un nouveau brouillon. */
+async function reopenTransfer(t: Transfer): Promise<Transfer | null> {
+  const where = t.status === 'received' ? `quitte ${t.to_name} et revient dans ${t.from_name}` : `revient dans ${t.from_name}`;
+  if (!(await askConfirm(`Modifier le transfert n° ${t.number} ? Il est annulé (la marchandise ${where}) et un nouveau brouillon reprend ses lignes, à corriger puis à expédier.`))) return null;
+  return call('transfers.reopen', t.id);
 }
 
 function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
   const can = useCan();
+  const toast = useToast();
   const [status, setStatus] = useState<Status | ''>('');
-  const list = useLoad(() => call('transfers.list', status || null), [status]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
+  const warehouses = useLoad(() => call('admin.warehouses'), []);
+  const list = useLoad(() => call('transfers.list', status || null, { from: from || null, to: to || null, warehouseId: warehouseId || null }), [status, from, to, warehouseId]);
+  const canEdit = can('transfer_create');
+  const canCancel = can('transfer_cancel');
+  const edit = async (t: Transfer) => {
+    if (t.status === 'draft' || t.status === 'cancelled') return onOpen(t.id);
+    try {
+      const copy = await reopenTransfer(t);
+      if (copy) {
+        toast.ok(`Transfert n° ${t.number} annulé ; brouillon n° ${copy.number} à corriger`);
+        onOpen(copy.id);
+      }
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const remove = async (t: Transfer) => {
+    try {
+      const r = await removeTransfer(t);
+      if (r) {
+        toast.ok(r.deleted ? 'Brouillon supprimé' : `Transfert n° ${t.number} annulé`);
+        list.reload();
+      }
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   return (
     <div>
       <div className="filters">
-        <button className="primary" disabled={!can('transfer_create')} onClick={() => onOpen('new')}>
+        <button data-new title="Ctrl+J" className="primary" disabled={!canEdit} onClick={() => onOpen('new')}>
           Nouveau transfert
         </button>
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | '')}>
@@ -54,6 +107,20 @@ function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
             </option>
           ))}
         </select>
+        <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} title="Départ ou destination">
+          <option value="">Tous les dépôts</option>
+          {warehouses.data?.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+        <label>
+          Du <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          au <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
         <span className="muted">Un transfert expédié n'est plus dans le dépôt de départ ; il entre dans le dépôt d'arrivée à la réception.</span>
       </div>
       {list.data?.length === 0 ? (
@@ -73,6 +140,7 @@ function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
               <th>B. route</th>
               <th>B. réception</th>
               <th>Imprimé le</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -92,6 +160,18 @@ function TransferList({ onOpen }: { onOpen: (id: string | 'new') => void }) {
                 <td>{t.route_number ?? ''}</td>
                 <td>{t.reception_number ?? ''}</td>
                 <td>{t.printed_at ? dateTime(t.printed_at) : ''}</td>
+                <td className="nowrap" onClick={(e) => e.stopPropagation()}>
+                  {t.status !== 'cancelled' && canEdit && (t.status === 'draft' || canCancel) && (
+                    <button className="link" onClick={() => void edit(t)}>
+                      Modifier
+                    </button>
+                  )}{' '}
+                  {t.status !== 'cancelled' && canCancel && (
+                    <button className="link danger-text" onClick={() => void remove(t)}>
+                      Supprimer
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -372,7 +452,7 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
           </div>
         </div>
         <aside className="transfer-actions">
-          <button onClick={() => onOpen('new')} disabled={!transfer || !canCreate}>
+          <button data-new title="Ctrl+J" onClick={() => onOpen('new')} disabled={!transfer || !canCreate}>
             Nouveau transfert
           </button>
           {editable && (
@@ -432,19 +512,46 @@ function TransferForm({ id, onBack, onOpen }: { id: string | null; onBack: () =>
               Enlever une ligne
             </button>
           )}
-          {(status === 'draft' || status === 'shipped') && transfer && can('transfer_cancel') && (
+          {(status === 'shipped' || status === 'received') && transfer && canCreate && can('transfer_cancel') && (
+            <button
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const copy = await reopenTransfer(transfer);
+                  if (!copy) return;
+                  toast.ok(`Transfert n° ${transfer.number} annulé ; brouillon n° ${copy.number} à corriger`);
+                  onOpen(copy.id);
+                } catch (err) {
+                  toast.error(err);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Modifier le transfert
+            </button>
+          )}
+          {status !== 'cancelled' && transfer && can('transfer_cancel') && (
             <button
               className="danger"
               disabled={busy}
               onClick={async () => {
-                if (!(await askConfirm(status === 'shipped' ? 'Annuler ce transfert ? La marchandise revient dans le dépôt de départ.' : 'Annuler ce brouillon ?'))) return;
-                void run(async () => {
-                  await call('transfers.cancel', transfer.id);
-                  await load(transfer.id);
-                }, 'Transfert annulé');
+                setBusy(true);
+                try {
+                  const r = await removeTransfer(transfer);
+                  if (!r) return;
+                  toast.ok(r.deleted ? 'Brouillon supprimé' : `Transfert n° ${transfer.number} annulé`);
+                  if (r.deleted) onBack();
+                  else await load(transfer.id);
+                } catch (err) {
+                  toast.error(err);
+                } finally {
+                  setBusy(false);
+                }
               }}
             >
-              Annuler le transfert
+              Supprimer le transfert
             </button>
           )}
           <button className="close" onClick={onBack}>

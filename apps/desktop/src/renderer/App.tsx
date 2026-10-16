@@ -24,10 +24,11 @@ import { Staff, type StaffTab } from './screens/Staff';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
-import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, WhatsNew } from './screens/Guide';
+import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { AskHost, Field, Modal, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
+import { ctrlJ } from './newShortcut';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
 
 type AppState = Result<'app.state'>;
@@ -41,6 +42,8 @@ interface Win {
   crumb?: string;
   /** Change à chaque réouverture sur un autre onglet, pour repartir de cet onglet. */
   nonce: number;
+  /** Augmente à chaque actualisation (⟳ ou F5) : les données de la fenêtre se rechargent. */
+  rev?: number;
 }
 
 
@@ -65,7 +68,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
-  accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'chart_accounts'] },
+  accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'journal_edit', 'chart_accounts', 'fiscal_years'] },
   treasury: { label: 'Opérations de trésorerie', perm: ['treasury', 'cash_history', 'central_cash'] },
   dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
   admin: { label: 'Administration', perm: ['admin'] },
@@ -76,7 +79,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs';
+  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
   /** Trait de séparation entre deux groupes, comme dans KONTROL. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -132,9 +135,19 @@ const MENU_COLORS: Record<string, string> = {
   Administration: '#64748b',
   Aide: '#94a3b8',
 };
-/** Menus directement dans la barre verte ; les autres sont dans « Tous les menus ». */
-const RAIL_MENUS = ['Facturation', 'Vente', 'Achats', 'Produit', 'Magasinier', 'Client', 'Trésorerie'];
-const RAIL_LABELS: Record<string, string> = { Facturation: 'Caisse', Vente: 'Ventes', Magasinier: 'Stock', Client: 'Clients', Administration: 'Réglages' };
+/** Réglages et Aide restent en bas de la barre verte ; les autres menus s'y affichent au choix de chacun. */
+const RAIL_FIXED = ['Administration', 'Aide'];
+const RAIL_LABELS: Record<string, string> = {
+  Facturation: 'Caisse',
+  Vente: 'Ventes',
+  Magasinier: 'Stock',
+  Client: 'Clients',
+  Fournisseur: 'Fournisseurs',
+  Charge: 'Charges',
+  Transfert: 'Transferts',
+  Comptabilité: 'Compta',
+  Administration: 'Réglages',
+};
 
 const MENUS: [string, MenuItem[]][] = [
   [
@@ -142,6 +155,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Synchroniser maintenant', action: 'sync' },
       { label: 'Personnaliser les onglets rapides', action: 'tabs' },
+      { label: 'Personnaliser la barre latérale', action: 'rail' },
       { label: "Changer d'utilisateur", action: 'logout' },
       { label: 'Quitter', action: 'quit' },
     ],
@@ -308,7 +322,13 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
-  ['Transfert', [{ label: 'Transfert entre dépôts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_direct'] }]],
+  [
+    'Transfert',
+    [
+      { label: 'Nouveau transfert', open: ['stock', 'transferNew'], perm: 'transfer_create' },
+      { label: 'Liste des transferts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_ship', 'transfer_receive', 'transfer_cancel', 'transfer_direct'] },
+    ],
+  ],
   [
     'Magasinier',
     [
@@ -329,6 +349,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Balance générale', open: ['accounting', 'balance'], perm: 'accounting' },
       { label: 'Bilan et compte de résultat', open: ['accounting', 'statements'], perm: 'statements' },
       { label: 'Plan comptable', open: ['accounting', 'accounts'], perm: ['accounting', 'chart_accounts'] },
+      { label: 'Exercices comptables', open: ['accounting', 'fiscal'], perm: ['accounting', 'fiscal_years'] },
       { label: 'Export des ventes (CSV)', open: ['sales', 'export'], perm: 'accounting_export' },
     ],
   ],
@@ -351,6 +372,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Droits par rôle', open: ['admin', 'rights'] },
       { label: 'Privilèges par utilisateur', open: ['admin', 'privileges'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
+      { label: 'Exercices comptables', open: ['admin', 'fiscal'], perm: ['accounting', 'fiscal_years'] },
       { label: "Modèles d'impression", open: ['admin', 'templates'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Serveur central', open: ['admin', 'server'] },
@@ -461,7 +483,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Écran « Tous les menus » : chaque menu en tuile, avec tous ses écrans. */
   const [allMenus, setAllMenus] = useState(false);
   const [chooseRegister, setChooseRegister] = useState(false);
-  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | null>(null);
+  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | null>(null);
+  /** Place du menu ouvert depuis la barre verte (elle défile : le menu s'affiche par-dessus). */
+  const [menuAt, setMenuAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
   // Menu du clic droit : sur un onglet rapide (le déplacer, le retirer) ou sur un écran d'un menu (l'épingler).
@@ -553,11 +577,19 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       } else if (e.key === 'F1' && !onPos) {
         e.preventDefault();
         setHelp('page');
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'j' && !onPos) {
+        // Ctrl+J : nouveau ; dans un formulaire, enregistre et en rouvre un vide.
+        e.preventDefault();
+        ctrlJ();
+      } else if (e.key === 'F5' && !onPos && !e.ctrlKey) {
+        // F5 actualise la fenêtre de devant (à la caisse, F5 ouvre le tiroir).
+        e.preventDefault();
+        if (active) refreshWin(active);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onPos]);
+  }, [onPos, active]);
 
   // Taille de la zone de travail : les fenêtres restent dedans quand l'écran change.
   useEffect(() => {
@@ -608,6 +640,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     window.addEventListener(EDIT_SALE_EVENT, onEdit);
     return () => window.removeEventListener(EDIT_SALE_EVENT, onEdit);
   });
+  /** ⟳ : recharge les données de la fenêtre sans la fermer. */
+  const refreshWin = (kind: WinKind) => setWins((ws) => ws.map((w) => (w.kind === kind ? { ...w, rev: (w.rev ?? 0) + 1 } : w)));
   const close = (kind: WinKind | null) => {
     if (!kind) return;
     setWins(wins.filter((w) => w.kind !== kind));
@@ -639,7 +673,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'quit') return window.close();
-    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs') return setHelp(item.action);
+    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail') return setHelp(item.action);
     if (item.action === 'help') return setHelp('page');
     if (item.action === 'openInvoice') return setFinding(true);
     if (item.action === 'sync') {
@@ -664,8 +698,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   ];
 
   /** Liste d'un menu, ouverte à côté de la barre verte (ou sous le nom de l'utilisateur). */
-  const MenuDrop = ({ name, items, up, right }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean }) => (
-    <div className={`menu-drop ${up ? 'up' : ''} ${right ? 'right' : ''}`} onClick={(e) => e.stopPropagation()}>
+  const MenuDrop = ({ name, items, up, right, at }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean; at?: typeof menuAt }) => (
+    <div
+      className={`menu-drop ${up ? 'up' : ''} ${right ? 'right' : ''} ${at ? 'fixed' : ''}`}
+      style={at ? { left: at.left, top: at.top ?? 'auto', bottom: at.bottom ?? 'auto', maxHeight: `calc(100vh - ${(at.top ?? at.bottom ?? 0) + 10}px)` } : undefined}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="menu-title">{name}</div>
       {items.map((i, n) =>
         i.sep ? (
@@ -690,8 +728,20 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       )}
     </div>
   );
-  const railMenus = visibleMenus.filter(([name]) => RAIL_MENUS.includes(name));
-  const railBottom = visibleMenus.filter(([name]) => name === 'Administration' || name === 'Aide');
+  // Barre verte : les menus choisis par l'utilisateur, dans son ordre ; par défaut tous.
+  const railChoice = prefs.railMenus as string[] | undefined;
+  const railMenus = railChoice
+    ? railChoice.flatMap((n) => visibleMenus.filter(([name]) => name === n && !RAIL_FIXED.includes(name)))
+    : visibleMenus.filter(([name]) => !RAIL_FIXED.includes(name));
+  const railBottom = visibleMenus.filter(([name]) => RAIL_FIXED.includes(name));
+  /** Ouvre un menu de la barre verte à hauteur de son bouton (vers le haut dans la moitié basse de l'écran). */
+  const toggleRailMenu = (name: string, btn: HTMLElement) => {
+    setAllMenus(false);
+    if (menu === name) return setMenu(null);
+    const r = btn.getBoundingClientRect();
+    setMenuAt(r.top > window.innerHeight / 2 ? { left: r.right + 8, bottom: Math.max(10, window.innerHeight - r.bottom) } : { left: r.right + 8, top: r.top });
+    setMenu(name);
+  };
 
   const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : sync.data.pending ? `Serveur : ${sync.data.pending} en attente` : 'Serveur : connecté';
   const activeWin = wins.find((w) => w.kind === active);
@@ -706,26 +756,27 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
           <img src={logo} alt="" />
         </button>
-        {railMenus.map(([name, items]) => (
-          <div key={name} className="menu">
-            <button
-              className={`rail-item ${menu === name ? 'open' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
-                setAllMenus(false);
-                setMenu(menu === name ? null : name);
-                chargesLate.reload();
-                gaps.reload();
-              }}
-            >
-              <i aria-hidden>{MENU_ICONS[name]}</i>
-              {RAIL_LABELS[name] ?? name}
-            </button>
-            {menu === name && <MenuDrop name={name} items={visibleItems(items)} />}
-          </div>
-        ))}
-        <span className="rail-grow" />
+        <div className="rail-scroll" onWheel={() => menu && setMenu(null)}>
+          {railMenus.map(([name, items]) => (
+            <div key={name} className="menu">
+              <button
+                className={`rail-item ${menu === name ? 'open' : ''}`}
+                title={name}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
+                  toggleRailMenu(name, e.currentTarget);
+                  chargesLate.reload();
+                  gaps.reload();
+                }}
+              >
+                <i aria-hidden>{MENU_ICONS[name]}</i>
+                {RAIL_LABELS[name] ?? name}
+              </button>
+              {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
+            </div>
+          ))}
+        </div>
         <button
           className={`rail-item ${allMenus ? 'open' : ''}`}
           title="Tous les menus"
@@ -740,21 +791,23 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           <i aria-hidden>▦</i>
           Tous les menus
         </button>
+        <button className="rail-item small" title="Choisir les menus de cette barre et leur ordre" onClick={() => (setMenu(null), setHelp('rail'))}>
+          <i aria-hidden>✎</i>
+          Personnaliser
+        </button>
         {railBottom.map(([name, items]) => (
           <div key={name} className="menu">
             <button
               className={`rail-item ${menu === name ? 'open' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
-                // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
-                setAllMenus(false);
-                setMenu(menu === name ? null : name);
+                toggleRailMenu(name, e.currentTarget);
               }}
             >
               <i aria-hidden>{MENU_ICONS[name]}</i>
               {RAIL_LABELS[name] ?? name}
             </button>
-            {menu === name && <MenuDrop name={name} items={visibleItems(items)} up />}
+            {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
           </div>
         ))}
       </nav>
@@ -853,7 +906,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             onFocus={() => focus(w.kind)}
             onChange={(g) => saveGeo(w.kind, g)}
             onClose={() => close(w.kind)}
+            onRefresh={() => refreshWin(w.kind)}
           >
+            <RefreshCtx.Provider value={w.rev ?? 0}>
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
               <Pos
                 user={user}
@@ -870,7 +925,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
                 onClose={() => close(w.kind)}
                 onSwitchMode={() => (w.kind === 'credit' ? open('cash1', undefined, 'Facturation › Vente au comptant 1') : open('credit', undefined, 'Facturation › Vente à crédit'))}
-                onListing={() => open('sales', 'tickets', 'Facturation › Mes factures')}
                 onTreasury={() => open('treasury', 'day', 'Trésorerie › Opérations de trésorerie')}
               />
             )}
@@ -892,6 +946,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
+            </RefreshCtx.Provider>
           </MdiWindow>
         ))}
       </main>
@@ -1052,6 +1107,18 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       {help === 'palette' && <CommandPalette entries={paletteEntries} onClose={() => setHelp(null)} />}
       {help === 'guide' && <GettingStarted role={user.role} canOpen={canWin} onOpen={([kind, tab]) => open(kind, tab)} onClose={() => setHelp(null)} />}
       {help === 'news' && <WhatsNew version={state.version} onClose={() => setHelp(null)} />}
+      {help === 'rail' && (
+        <RailEditor
+          menus={visibleMenus.map(([name]) => name).filter((n) => !RAIL_FIXED.includes(n))}
+          current={railMenus.map(([name]) => name)}
+          label={(n) => `${MENU_ICONS[n] ?? ''} ${RAIL_LABELS[n] ?? n}`}
+          onSave={(list) => {
+            savePref('railMenus', list);
+            setHelp(null);
+          }}
+          onClose={() => setHelp(null)}
+        />
+      )}
       {help === 'tabs' && (
         <QuickTabsEditor
           current={quickTabs}
@@ -1070,7 +1137,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['Ctrl+K', 'Rechercher un écran par son nom'],
                 ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
                 ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
-                ['F7', 'Valider et imprimer la facture listing (fiche vide : Mes factures)'],
+                ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière en listing)'],
+                ['F5', 'Actualiser la page (à la caisse : ouvrir le tiroir)'],
+                ['Ctrl+J', 'Nouveau (article, client, fournisseur…) ; dans un formulaire : enregistrer et en ouvrir un nouveau'],
                 ['F4 ou Entrée sur saisie vide', 'Enregistrer la fiche sans imprimer'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],
                 ['F3', 'Mettre la fiche en attente'],

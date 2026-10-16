@@ -104,6 +104,20 @@ export class Base {
    * Préfixe propre à ce poste (code magasin + numéro de caisse), pour que
    * deux PC qui créent des fiches hors ligne ne produisent pas le même code.
    */
+  /**
+   * Refuse une écriture datée dans un exercice clôturé : la clôture fige les
+   * comptes et les à-nouveaux de l'exercice suivant. Il faut d'abord le rouvrir.
+   */
+  protected assertPeriodOpen(storeId: string, date: string): void {
+    const closed = this.db
+      .prepare("SELECT start_date, end_date FROM fiscal_years WHERE store_id = ? AND status = 'closed' AND start_date <= ? AND end_date >= ?")
+      .get(storeId, date.slice(0, 10), date.slice(0, 10)) as { start_date: string; end_date: string } | undefined;
+    if (closed) {
+      const fr = (d: string) => d.split('-').reverse().join('/');
+      throw new AppError(`L'exercice du ${fr(closed.start_date)} au ${fr(closed.end_date)} est clôturé : rouvrez-le d'abord (Comptabilité › Exercices)`, 'PERIOD_CLOSED');
+    }
+  }
+
   protected stationPrefix(): string {
     const row = this.db
       .prepare(

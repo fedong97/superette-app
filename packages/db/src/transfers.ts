@@ -75,7 +75,7 @@ export class TransferService extends Base {
     super(db, clock);
   }
 
-  list(storeId: string, opts: { status?: TransferStatus | null; id?: string } = {}): Transfer[] {
+  list(storeId: string, opts: { status?: TransferStatus | null; id?: string; from?: string | null; to?: string | null; warehouseId?: string | null } = {}): Transfer[] {
     return this.db
       .prepare(
         `SELECT t.*, wf.name AS from_name, wt.name AS to_name, uc.name AS created_by_name, us.name AS shipped_by_name, ur.name AS received_by_name,
@@ -87,9 +87,11 @@ export class TransferService extends Base {
          JOIN warehouses wf ON wf.id = t.from_warehouse_id JOIN warehouses wt ON wt.id = t.to_warehouse_id
          JOIN users uc ON uc.id = t.created_by LEFT JOIN users us ON us.id = t.shipped_by LEFT JOIN users ur ON ur.id = t.received_by
          WHERE t.store_id = @storeId AND (@status IS NULL OR t.status = @status) AND (@id IS NULL OR t.id = @id)
+           AND (@from IS NULL OR date(t.created_at, 'localtime') >= @from) AND (@to IS NULL OR date(t.created_at, 'localtime') <= @to)
+           AND (@wh IS NULL OR t.from_warehouse_id = @wh OR t.to_warehouse_id = @wh)
          ORDER BY t.created_at DESC`,
       )
-      .all({ storeId, status: opts.status ?? null, id: opts.id ?? null }) as Transfer[];
+      .all({ storeId, status: opts.status ?? null, id: opts.id ?? null, from: opts.from ?? null, to: opts.to ?? null, wh: opts.warehouseId ?? null }) as Transfer[];
   }
 
   private header(id: string): Transfer {
@@ -225,32 +227,96 @@ export class TransferService extends Base {
     });
   }
 
-  /** Brouillon : abandonné. Expédié : la marchandise revient dans le dépôt de départ. */
+  /**
+   * Annule un transfert. Brouillon : abandonné. Expédié : la marchandise revient
+   * dans le dépôt de départ. Réceptionné : elle quitte le dépôt d'arrivée et
+   * revient dans celui de départ, si le dépôt d'arrivée l'a encore.
+   */
   cancel(ctx: Context, id: string): Transfer {
-    const t = this.requireStatus(id, 'draft', 'shipped');
+    const t = this.requireStatus(id, 'draft', 'shipped', 'received');
     return this.tx(() => {
-      if (t.status === 'shipped') {
-        const lines = this.db.prepare('SELECT article_id, qty, unit_cost, lots FROM transfer_lines WHERE transfer_id = ?').all(id) as {
+      if (t.status !== 'draft') {
+        const lines = this.db.prepare('SELECT article_id, qty, received_qty, unit_cost, lots FROM transfer_lines WHERE transfer_id = ?').all(id) as {
           article_id: string;
           qty: Milli;
+          received_qty: Milli | null;
           unit_cost: Fcfa;
           lots: string | null;
         }[];
-        for (const l of lines)
-          this.stock.transferIn(ctx, {
-            articleId: l.article_id,
-            warehouseId: t.from_warehouse_id,
-            qty: l.qty,
-            unitCost: l.unit_cost,
-            lots: JSON.parse(l.lots ?? '[]') as TransferLot[],
-            refId: id,
-            reason: `Annulation du transfert n° ${t.number}`,
-          });
+        const reason = `Annulation du transfert n° ${t.number}`;
+        if (t.status === 'received') {
+          const stockOf = this.db.prepare('SELECT a.name, COALESCE(s.qty, 0) AS qty FROM articles a LEFT JOIN stock s ON s.article_id = a.id AND s.warehouse_id = ? WHERE a.id = ?');
+          const missing = lines
+            .map((l) => ({ l, ...(stockOf.get(t.to_warehouse_id, l.article_id) as { name: string; qty: Milli }) }))
+            .filter((x) => (x.l.received_qty ?? x.l.qty) > x.qty)
+            .map((x) => x.name);
+          if (missing.length) throw new AppError(`Annulation impossible : ${t.to_name} n'a plus assez de ${missing.join(', ')}`, 'INSUFFICIENT_STOCK');
+          for (const l of lines) {
+            const received = l.received_qty ?? l.qty;
+            if (received > 0) this.stock.transferOut(ctx, { articleId: l.article_id, warehouseId: t.to_warehouse_id, qty: received, refId: id, reason });
+          }
+        }
+        for (const l of lines) {
+          const back = t.status === 'received' ? (l.received_qty ?? l.qty) : l.qty;
+          if (back > 0)
+            this.stock.transferIn(ctx, {
+              articleId: l.article_id,
+              warehouseId: t.from_warehouse_id,
+              qty: back,
+              unitCost: l.unit_cost,
+              lots: JSON.parse(l.lots ?? '[]') as TransferLot[],
+              refId: id,
+              reason,
+            });
+        }
       }
       this.db.prepare("UPDATE transfers SET status = 'cancelled', cancelled_at = ?, cancelled_by = ? WHERE id = ?").run(this.now(), ctx.userId, id);
-      this.audit(ctx.userId, 'transfer.cancel', 'transfer', id);
+      this.audit(ctx.userId, 'transfer.cancel', 'transfer', id, { from: t.status });
       this.enqueue(ctx, 'transfer', id, 'upsert', {});
       return this.header(id);
+    });
+  }
+
+  /**
+   * Supprime un transfert. Un brouillon est effacé ; un transfert expédié ou
+   * réceptionné est annulé (la marchandise revient au dépôt de départ) et reste
+   * dans la liste, barré, pour garder la trace des mouvements.
+   */
+  remove(ctx: Context, id: string): { deleted: boolean } {
+    const t = this.requireStatus(id, 'draft', 'shipped', 'received');
+    if (t.status !== 'draft') {
+      this.cancel(ctx, id);
+      return { deleted: false };
+    }
+    return this.tx(() => {
+      this.db.prepare('DELETE FROM transfer_lines WHERE transfer_id = ?').run(id);
+      this.db.prepare('DELETE FROM transfers WHERE id = ?').run(id);
+      this.audit(ctx.userId, 'transfer.delete', 'transfer', id, { number: t.number });
+      this.enqueue(ctx, 'transfer', id, 'delete', {});
+      return { deleted: true };
+    });
+  }
+
+  /**
+   * Modifier un transfert déjà expédié ou réceptionné : il est annulé (le stock
+   * revient au dépôt de départ) et un nouveau brouillon reprend ses dépôts et
+   * ses lignes, à corriger puis à expédier.
+   */
+  reopen(ctx: Context, id: string): Transfer {
+    const t = this.requireStatus(id, 'shipped', 'received');
+    return this.tx(() => {
+      const lines = this.db.prepare('SELECT article_id, qty, pack_position FROM transfer_lines WHERE transfer_id = ? ORDER BY position').all(id) as {
+        article_id: string;
+        qty: Milli;
+        pack_position: number;
+      }[];
+      this.cancel(ctx, id);
+      return this.create(ctx, {
+        fromWarehouseId: t.from_warehouse_id,
+        toWarehouseId: t.to_warehouse_id,
+        label: `Correction du transfert n° ${t.number}${t.label ? ` : ${t.label}` : ''}`,
+        lines: lines.map((l) => ({ articleId: l.article_id, qty: l.qty, packPosition: l.pack_position })),
+      });
     });
   }
 

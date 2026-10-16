@@ -147,6 +147,10 @@ export interface SaleSearchRow {
   /** Stock du dépôt de vente, en unités de détail. */
   stock: Milli;
   warehouse: string;
+  /** Stock de chaque dépôt où le vendeur peut vendre, dépôt choisi en premier : la vente s'y complète. */
+  stocks: { warehouse_id: string; name: string; qty: Milli }[];
+  /** Total vendable : la somme de ces dépôts. */
+  available: Milli;
   /** PV TTC au tarif du client. */
   price: Fcfa;
   /** Dernier prix de vente de ce conditionnement (à ce client s'il est choisi). */
@@ -599,19 +603,21 @@ export class PosService extends Base {
   searchForSale(
     storeId: string,
     query: string,
-    opts: { customerId?: string | null; includeEmpty?: boolean; limit?: number; priceLevel?: PriceLevel | null; warehouseId?: string | null } = {},
+    opts: { customerId?: string | null; includeEmpty?: boolean; limit?: number; priceLevel?: PriceLevel | null; warehouseId?: string | null; userId?: string | null } = {},
   ): SaleSearchRow[] {
     const articles = this.catalogue.suggestArticles(query, storeId, 50);
     if (articles.length === 0) return [];
     const level = opts.priceLevel ?? (opts.customerId ? this.customers.getCustomer(opts.customerId).price_level : 'retail');
     const warehouse = this.saleWarehouse(storeId, opts.warehouseId);
+    const sources = this.saleSources(storeId, opts.userId ?? null, warehouse);
     const ids = articles.map((a) => a.id);
     const marks = ids.map(() => '?').join(',');
-    const stock = new Map(
-      (this.db.prepare(`SELECT article_id, qty FROM stock WHERE warehouse_id = ? AND article_id IN (${marks})`).all(warehouse.id, ...ids) as { article_id: string; qty: Milli }[]).map(
-        (r) => [r.article_id, r.qty],
-      ),
-    );
+    const stock = new Map<string, Milli>();
+    for (const r of this.db
+      .prepare(`SELECT article_id, warehouse_id, qty FROM stock WHERE warehouse_id IN (${sources.map(() => '?').join(',')}) AND article_id IN (${marks})`)
+      .all(...sources.map((w) => w.id), ...ids) as { article_id: string; warehouse_id: string; qty: Milli }[]) {
+      stock.set(`${r.article_id}|${r.warehouse_id}`, r.qty);
+    }
     // Dernier prix : la ligne la plus récente pour chaque article et conditionnement (MAX ramène sa ligne).
     const last = new Map(
       (
@@ -629,8 +635,10 @@ export class PosService extends Base {
     const unitLabel = { piece: 'Pièce', kg: 'Kg', litre: 'Litre' } as const;
     const rows: SaleSearchRow[] = [];
     for (const a of articles) {
-      const qty = stock.get(a.id) ?? 0;
-      const base = { article_id: a.id, code: a.code, other_ref: a.other_ref, name: a.name, unit: a.unit, stock: qty, warehouse: warehouse.name };
+      const stocks = sources.map((w) => ({ warehouse_id: w.id, name: w.name, qty: stock.get(`${a.id}|${w.id}`) ?? 0 }));
+      // Seul le stock positif d'un dépôt d'appoint complète la vente.
+      const qty = stocks.reduce((t, w, i) => t + (i === 0 ? w.qty : Math.max(0, w.qty)), 0);
+      const base = { article_id: a.id, code: a.code, other_ref: a.other_ref, name: a.name, unit: a.unit, stock: stocks[0]!.qty, warehouse: warehouse.name, stocks, available: qty };
       for (const p of a.packs) {
         rows.push({
           ...base,
@@ -659,33 +667,64 @@ export class PosService extends Base {
   }
 
   /**
-   * Un produit épuisé ne se vend pas : le stock du dépôt de vente doit couvrir
-   * le ticket. Avec « Ignorer la gestion des stocks », la vente passe et renvoie
-   * les lignes vendues sans stock, que la prochaine réception régularise.
+   * Dépôts d'où sort une vente : le dépôt choisi, puis les autres dépôts où le
+   * vendeur peut vendre (dépôt de vente d'abord), qui complètent une ligne que
+   * le dépôt choisi ne couvre pas.
    */
-  private assertInStock(storeId: string, lines: { articleId: string; label: string; qty: Milli }[], warehouseId?: string | null): { label: string; qty: Milli; stock: Milli }[] {
-    const warehouse = this.saleWarehouse(storeId, warehouseId);
+  private saleSources(storeId: string, userId: string | null, chosen: { id: string; name: string }): { id: string; name: string }[] {
+    const others = userId ? this.admin.saleWarehousesFor(storeId, userId).filter((w) => w.id !== chosen.id) : [];
+    return [chosen, ...others];
+  }
+
+  /**
+   * Un produit épuisé ne se vend pas : chaque ligne sort du dépôt choisi, et ce
+   * qui y manque se complète dans les autres dépôts du vendeur. Avec « Ignorer
+   * la gestion des stocks », le reste sort quand même du dépôt choisi et la
+   * vente renvoie les lignes vendues sans stock, que la prochaine réception régularise.
+   */
+  private planStock(
+    storeId: string,
+    sources: { id: string; name: string }[],
+    lines: { articleId: string; label: string; qty: Milli }[],
+  ): { parts: { warehouseId: string; qty: Milli }[][]; short: { label: string; qty: Milli; stock: Milli }[]; complement: { article: string; from: string; qty: Milli }[] } {
     const ignore = this.admin.getStore(storeId).ignore_stock === 1;
-    const short: { label: string; qty: Milli; stock: Milli }[] = [];
-    const wanted = new Map<string, { label: string; qty: Milli }>();
-    for (const l of lines) {
-      if (l.articleId === DELIVERY_FEE_ARTICLE_ID) continue;
-      const w = wanted.get(l.articleId);
-      wanted.set(l.articleId, { label: l.label, qty: (w?.qty ?? 0) + l.qty });
-    }
-    const get = this.db.prepare('SELECT a.unit, a.unit_name, COALESCE(s.qty, 0) AS qty FROM articles a LEFT JOIN stock s ON s.article_id = a.id AND s.warehouse_id = ? WHERE a.id = ?');
-    for (const [articleId, w] of wanted) {
-      const a = get.get(warehouse.id, articleId) as { unit: string; unit_name: string | null; qty: Milli };
-      if (w.qty <= a.qty) continue;
-      if (ignore) {
-        short.push({ label: w.label, qty: w.qty, stock: a.qty });
-        continue;
+    const chosen = sources[0]!;
+    const get = this.db.prepare('SELECT a.unit, a.unit_name, a.is_service, COALESCE(s.qty, 0) AS qty FROM articles a LEFT JOIN stock s ON s.article_id = a.id AND s.warehouse_id = ? WHERE a.id = ?');
+    const left = new Map<string, Milli>();
+    const short = new Map<string, { label: string; qty: Milli; stock: Milli }>();
+    const complement: { article: string; from: string; qty: Milli }[] = [];
+    const parts = lines.map((l) => {
+      const head = get.get(chosen.id, l.articleId) as { unit: string; unit_name: string | null; is_service: number; qty: Milli } | undefined;
+      if (l.articleId === DELIVERY_FEE_ARTICLE_ID || !head || head.is_service === 1) return [{ warehouseId: chosen.id, qty: l.qty }];
+      const out: { warehouseId: string; qty: Milli }[] = [];
+      let need = l.qty;
+      for (const w of sources) {
+        const key = `${l.articleId}|${w.id}`;
+        if (!left.has(key)) left.set(key, (get.get(w.id, l.articleId) as { qty: Milli }).qty);
+        const take = Math.min(need, Math.max(0, left.get(key)!));
+        if (take <= 0) continue;
+        left.set(key, left.get(key)! - take);
+        out.push({ warehouseId: w.id, qty: take });
+        if (w.id !== chosen.id) complement.push({ article: l.label, from: w.name, qty: take });
+        need -= take;
+        if (need === 0) break;
       }
-      const unit = a.unit === 'piece' ? (a.unit_name ?? 'pièce').toLowerCase() : a.unit === 'kg' ? 'kg' : 'L';
-      const left = a.qty <= 0 ? 'épuisé' : `il reste ${String(a.qty / 1000).replace('.', ',')} ${unit}`;
-      throw new AppError(`Stock insuffisant pour ${w.label} : ${left}`, 'OUT_OF_STOCK');
-    }
-    return short;
+      if (need > 0) {
+        const total = sources.reduce((t, w) => t + Math.max(0, (get.get(w.id, l.articleId) as { qty: Milli }).qty), 0);
+        if (!ignore) {
+          const unit = head.unit === 'piece' ? (head.unit_name ?? 'pièce').toLowerCase() : head.unit === 'kg' ? 'kg' : 'L';
+          const rest = total <= 0 ? 'épuisé' : `il reste ${String(total / 1000).replace('.', ',')} ${unit}`;
+          throw new AppError(`Stock insuffisant pour ${l.label} : ${rest}`, 'OUT_OF_STOCK');
+        }
+        const s = short.get(l.articleId);
+        short.set(l.articleId, { label: l.label, qty: (s?.qty ?? 0) + l.qty, stock: total });
+        const own = out.find((p) => p.warehouseId === chosen.id);
+        if (own) own.qty += need;
+        else out.unshift({ warehouseId: chosen.id, qty: need });
+      }
+      return out;
+    });
+    return { parts, short: [...short.values()], complement };
   }
 
   completeSale(ctx: Context, input: SaleInput): Sale {
@@ -733,7 +772,8 @@ export class PosService extends Base {
         throw new AppError(`Référence de transaction obligatoire pour ${PAYMENT_METHODS[p.method]}`, 'REFERENCE_REQUIRED');
       }
     }
-    const withoutStock = this.assertInStock(ctx.storeId, lines, warehouse.id);
+    const plan = this.planStock(ctx.storeId, this.saleSources(ctx.storeId, ctx.userId, warehouse), lines);
+    const withoutStock = plan.short;
     // Chaque paiement va à la journée de la caisse de son type (espèces, électronique, banque).
     const paymentSessions = input.payments.map((p) => this.sessionFor(ctx, p.method, session.id));
     const settlement = settle(totals.totalTtc, input.payments);
@@ -786,14 +826,13 @@ export class PosService extends Base {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       lines.forEach((line, i) => {
-        const { unitCost } = this.stock.issue(ctx, {
-          type: 'SALE',
-          articleId: line.articleId,
-          warehouseId: warehouse.id,
-          qty: line.qty,
-          refType: 'sale',
-          refId: saleId,
-        });
+        // Une ligne complétée dans un autre dépôt sort de chacun : son coût est la moyenne pondérée.
+        let cost = 0;
+        for (const part of plan.parts[i]!) {
+          const { unitCost } = this.stock.issue(ctx, { type: 'SALE', articleId: line.articleId, warehouseId: part.warehouseId, qty: part.qty, refType: 'sale', refId: saleId });
+          cost += unitCost * part.qty;
+        }
+        const unitCost = line.qty > 0 ? Math.round(cost / line.qty) : 0;
         insertLine.run(newId(), saleId, i + 1, line.articleId, line.label, line.barcode, line.qty, line.unitPrice, line.discount, line.vatRate, lineTotal(line), unitCost, line.promo, line.promotionId,
           line.packName, line.packUnits ?? null, line.packPrice ?? null,
         );
@@ -811,6 +850,7 @@ export class PosService extends Base {
         });
       }
       if (withoutStock.length) this.audit(ctx.userId, 'sale.without_stock', 'sale', saleId, { number, lines: withoutStock });
+      if (plan.complement.length) this.audit(ctx.userId, 'sale.complement', 'sale', saleId, { number, warehouse: warehouse.name, lines: plan.complement });
       if (input.quoteId) this.quotes.markAccepted(ctx, input.quoteId, saleId);
       if (level !== (customer?.price_level ?? 'retail') || !warehouse.is_sales_default) {
         this.audit(ctx.userId, 'sale.options', 'sale', saleId, { number, level, warehouse: warehouse.name });

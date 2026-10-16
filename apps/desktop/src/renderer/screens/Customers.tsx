@@ -62,7 +62,7 @@ function CustomerList({ user }: { user: User }) {
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Inactifs
         </label>
         {has(user, 'customer_create') && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
             Nouveau client
           </button>
         )}

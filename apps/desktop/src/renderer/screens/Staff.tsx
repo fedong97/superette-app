@@ -57,7 +57,7 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
     <>
       <div className="toolbar">
         {canEdit && (
-          <button className="primary" onClick={() => setEdit('new')}>
+          <button data-new title="Ctrl+J" className="primary" onClick={() => setEdit('new')}>
             Nouveau collaborateur…
           </button>
         )}

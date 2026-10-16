@@ -53,7 +53,7 @@ function SupplierList({ user }: { user: User }) {
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Inactifs
         </label>
         {canEdit && (
-          <button className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
+          <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen('new')}>
             Nouveau fournisseur
           </button>
         )}

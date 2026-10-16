@@ -186,6 +186,7 @@ const LOCAL_SETTINGS = [
   'printer.listing',
   'printer.labels',
   'backup.autoTime',
+  'backup.every',
 ];
 
 /**
@@ -406,12 +407,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.admin.listUsers().map((u) => ({ ...u, locked: locked.has(u.id), privileges: privileged[u.id] ?? null }));
     },
     // Seul l'administrateur crée un administrateur ou touche à son compte.
-    'admin.createUser': (input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null }) => {
+    'admin.createUser': (input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null }) => {
       const u = requireUser(['users_manage']);
       if (input.role === 'admin' && u.role !== 'admin') throw new AppError("Seul l'administrateur crée un administrateur", 'FORBIDDEN');
       return s.admin.createUser(u.id, input);
     },
-    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string }) => {
+    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null }) => {
       const u = requireUser(['users_manage']);
       if (u.role !== 'admin' && (patch.role === 'admin' || s.admin.getUser(id).role === 'admin')) throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
       return s.admin.updateUser(u.id, id, patch);
@@ -434,6 +435,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           if (v && !(v in POS_LAYOUTS)) throw new AppError("Présentation de l'écran de caisse inconnue", 'INVALID');
         }
         if (k === 'backup.autoTime') s.backups.configure(user!.id, { autoTime: v || null });
+        else if (k === 'backup.every') s.backups.configure(user!.id, { everyMinutes: Number(v) || 0 });
         else s.admin.setSetting(k, v);
       }
     },
@@ -549,7 +551,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'stock.transfer': (input: { fromWarehouseId: string; toWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) =>
       s.stock.transfer(ctx(['transfer_direct']), input),
     // --- Bons de transfert entre dépôts --------------------------------------------
-    'transfers.list': (status?: TransferStatus | null) => s.transfers.list(ctx(TRANSFERS).storeId, { status }),
+    'transfers.list': (status?: TransferStatus | null, filters?: { from?: string | null; to?: string | null; warehouseId?: string | null }) =>
+      s.transfers.list(ctx(TRANSFERS).storeId, { status, ...filters }),
     'transfers.get': (id: string) => (requireUser(TRANSFERS), s.transfers.get(id)),
     'transfers.create': (input: TransferInput) => s.transfers.create(ctx(['transfer_create']), input),
     'transfers.update': (id: string, input: TransferInput) => s.transfers.update(ctx(['transfer_create']), id, input),
@@ -563,6 +566,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.transfers.receive(c, id, input);
     },
     'transfers.cancel': (id: string) => s.transfers.cancel(ctx(['transfer_cancel']), id),
+    /** Brouillon effacé ; expédié ou réceptionné : annulé, la marchandise revient au départ. */
+    'transfers.remove': (id: string) => s.transfers.remove(ctx(['transfer_cancel']), id),
+    /** Modifier un transfert expédié ou réceptionné : annulé puis repris en brouillon. */
+    'transfers.reopen': (id: string) => {
+      const c = ctx(['transfer_cancel']);
+      requireUser(['transfer_create']);
+      return s.transfers.reopen(c, id);
+    },
     'transfers.movements': (id: string) => (requireUser(TRANSFERS), s.transfers.movements(id)),
     // --- Fabrication -------------------------------------------------------------
     'production.recipes': (includeInactive?: boolean) => (requireUser(PRODUCTION), s.production.recipes({ includeInactive })),
@@ -705,7 +716,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
-      s.pos.searchForSale(ctx().storeId, query, opts ?? {}),
+      s.pos.searchForSale(ctx().storeId, query, { ...opts, userId: user?.id ?? null }),
+    /** Dépôts où l'utilisateur vend sans code du gérant ; la vente s'y complète. */
+    'pos.saleWarehouses': () => s.admin.saleWarehousesFor(ctx().storeId, ctx().userId).map((w) => w.id),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
@@ -732,8 +745,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
       const otherLevel = Boolean(input.priceLevel) && input.priceLevel !== usual;
-      const otherWarehouse = Boolean(input.warehouseId) && s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1;
-      if ((otherLevel && !can(user!, ['sale_tariff'])) || (otherWarehouse && !can(user!, ['sale_warehouse']))) {
+      const otherWarehouse =
+        Boolean(input.warehouseId) &&
+        s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1 &&
+        !s.admin.saleWarehousesFor(c.storeId, c.userId).some((w) => w.id === input.warehouseId);
+      if ((otherLevel && !can(user!, ['sale_tariff'])) || otherWarehouse) {
         if (!input.optionsPin) throw new AppError('Tarif ou dépôt soumis à validation du gérant', 'OPTIONS_SUPERVISOR');
         supervisor(input.optionsPin);
       }
@@ -1343,6 +1359,23 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.accounting.saveAccount(requireUser(['chart_accounts']).id, input),
     'accounting.entries': (opts: { from?: string; to?: string; journal?: JournalCode }) => s.accounting.entries(ctx(ACCOUNTING).storeId, opts),
     'accounting.addEntry': (input: Parameters<Services['accounting']['addManualEntry']>[1]) => s.accounting.addManualEntry(ctx(['journal_entry']), input),
+    /** Droit « Modifier, supprimer ou corriger une écriture comptable ». */
+    'accounting.updateEntry': (id: string, input: Parameters<Services['accounting']['updateManualEntry']>[2]) => s.accounting.updateManualEntry(ctx(['journal_edit']), id, input),
+    'accounting.deleteEntry': (id: string) => s.accounting.deleteManualEntry(ctx(['journal_edit']), id),
+    'accounting.correctEntry': (key: string, input: Parameters<Services['accounting']['correctEntry']>[2]) => s.accounting.correctEntry(ctx(['journal_edit']), key, input),
+    // --- Exercices comptables --------------------------------------------------
+    'fiscal.list': () => {
+      const storeId = ctx([...ACCOUNTING, 'fiscal_years']).storeId;
+      return s.fiscal.list(storeId).map((f) => ({ ...f, stale: f.status === 'closed' && s.fiscal.stale(storeId, f.id) }));
+    },
+    /** Exercice en cours : période proposée par défaut dans les journaux, la balance et le grand livre. */
+    'fiscal.current': () => s.fiscal.at(ctx().storeId),
+    'fiscal.open': (input: { start: string; end: string }) => s.fiscal.open(ctx(['fiscal_years']), input),
+    'fiscal.openNext': () => s.fiscal.openNext(ctx(['fiscal_years'])),
+    'fiscal.setDates': (id: string, input: { start: string; end: string }) => s.fiscal.setDates(ctx(['fiscal_years']), id, input),
+    'fiscal.close': (id: string) => s.fiscal.close(ctx(['fiscal_years']), id),
+    'fiscal.reopen': (id: string) => s.fiscal.reopen(ctx(['fiscal_years']), id),
+    'fiscal.remove': (id: string) => s.fiscal.remove(ctx(['fiscal_years']), id),
     'accounting.ledger': (opts: { account: string; aux?: string; from?: string; to?: string }) => s.accounting.ledger(ctx(ACCOUNTING).storeId, opts),
     'accounting.trialBalance': (opts: { from?: string; to?: string }) => s.accounting.trialBalance(ctx(ACCOUNTING).storeId, opts),
     'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),
@@ -1391,7 +1424,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return dir ? s.backups.backup(u.id, { dir, kind: 'manual' }) : null;
     },
     'backup.chooseFolder': (title: string) => (requireAdmin(), system.chooseFolder(title)),
-    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number; autoTime?: string | null }) => s.backups.configure(requireAdmin().id, input),
+    'backup.configure': (input: { dir?: string | null; copyDir?: string | null; keep?: number; autoTime?: string | null; everyMinutes?: number }) => s.backups.configure(requireAdmin().id, input),
     'backup.list': (dir?: string | null) => (requireUser(['backups']), s.backups.list(dir)),
     'backup.chooseFile': async () => {
       requireAdmin();
@@ -1421,6 +1454,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'controls.creditControl': () => s.controls.creditControl(ctx(['receivables']).storeId),
     'charges.plans': (includeInactive?: boolean) => s.charges.listPlans(ctx(['charge_plans']).storeId, includeInactive),
     'charges.savePlan': (input: ChargePlanInput, id?: string | null) => s.charges.savePlan(ctx(['charge_plans']), input, id),
+    'charges.deletePlan': (id: string) => s.charges.deletePlan(ctx(['charge_plans']), id),
     'charges.schedule': (from: string, to: string) => s.charges.schedule(ctx(['charge_plans']).storeId, from, to),
     'charges.late': () => (user && can(user, ['charge_plans']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
 

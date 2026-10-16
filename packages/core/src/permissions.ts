@@ -195,6 +195,8 @@ export const PERMISSIONS = {
   // --- Comptabilité ------------------------------------------------------------
   accounting: { label: 'Comptabilité : journaux, grand livre, balance', group: 'Comptabilité', type: 'Menu', roles: ACCOUNTING },
   journal_entry: { label: 'Passer une écriture manuelle', group: 'Comptabilité', type: 'Bouton', parent: 'accounting' },
+  journal_edit: { label: 'Modifier, supprimer ou corriger une écriture comptable', group: 'Comptabilité', type: 'Bouton', roles: MANAGE },
+  fiscal_years: { label: 'Ouvrir, clôturer et rouvrir un exercice comptable', group: 'Comptabilité', type: 'Fonction', roles: MANAGE },
   chart_accounts: { label: 'Modifier le plan comptable', group: 'Comptabilité', type: 'Bouton', parent: 'accounting' },
   bank_reconciliation: { label: 'Rapprochement bancaire', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   statements: { label: 'États financiers (bilan, compte de résultat, flux)', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },

@@ -1,4 +1,4 @@
-import { BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_STORE_SETTINGS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -703,6 +703,19 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
             <select disabled={!canEdit} value={v('display.size', 'normal')} onChange={set('display.size')}>
               <option value="normal">Normale</option>
               <option value="large">Grande</option>
+            </select>
+          ),
+        },
+        {
+          label: 'Fréquence de la sauvegarde automatique',
+          hint: 'Dans le dossier des sauvegardes (Administration › Sauvegardes), avec la copie vers le second dossier s’il est choisi.',
+          render: () => (
+            <select disabled={!canEdit} value={v('backup.every', '0')} onChange={set('backup.every')}>
+              {BACKUP_FREQUENCIES.map(([m, label]) => (
+                <option key={m} value={String(m)}>
+                  {label}
+                </option>
+              ))}
             </select>
           ),
         },

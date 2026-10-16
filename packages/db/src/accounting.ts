@@ -65,6 +65,24 @@ export interface Entry {
   label: string;
   source: 'auto' | 'manual';
   lines: EntryLine[];
+  /** Écriture saisie : son identifiant (pour la modifier ou la supprimer). */
+  id?: string;
+  /** À-nouveaux générés par la clôture d'un exercice : ni modifiables ni supprimables à la main. */
+  closing?: boolean;
+  /** Écriture de correction : clé de l'écriture automatique corrigée. */
+  corrects?: string | null;
+  /** Écriture automatique : corrigée par ces écritures (numéros). */
+  corrected_by?: string[];
+}
+
+/** Clé d'une écriture automatique : journal, date et pièce (« VE|2026-10-05|Z12 »). */
+export const entryKey = (e: Pick<Entry, 'journal' | 'date' | 'ref'>) => `${e.journal}|${e.date}|${e.ref}`;
+
+export interface ManualEntryInput {
+  journal: JournalCode;
+  date: string;
+  label: string;
+  lines: { account: string; aux?: string | null; label?: string | null; debit: Fcfa; credit: Fcfa }[];
 }
 
 const METHOD_ROLE: Record<string, AccountRole> = {
@@ -145,7 +163,25 @@ export class AccountingService extends Base {
 
   // --- Écritures --------------------------------------------------------------
 
-  entries(storeId: string, opts: { from?: string; to?: string; journal?: JournalCode } = {}): Entry[] {
+  /**
+   * Écritures de la période. Une fois un exercice clôturé, ses à-nouveaux
+   * (datés du premier jour de l'exercice suivant) remplacent les écritures
+   * antérieures : elles ne sont plus reprises au-delà, sauf quand la période
+   * demandée (`since`, sinon `from`) commence avant la clôture ; les à-nouveaux
+   * sont alors laissés de côté pour ne rien compter deux fois.
+   */
+  entries(storeId: string, opts: { from?: string; to?: string; journal?: JournalCode; since?: string } = {}): Entry[] {
+    const since = opts.since ?? opts.from;
+    let floor = '';
+    const skipClosing = new Set<string>();
+    for (const start of this.db
+      .prepare('SELECT DISTINCT entry_date FROM manual_entries WHERE store_id = ? AND closing_of IS NOT NULL ORDER BY entry_date')
+      .pluck()
+      .all(storeId) as string[]) {
+      if (opts.to && start > opts.to) continue;
+      if (since && since < start) skipClosing.add(start);
+      else floor = start;
+    }
     const r = this.roles();
     const all = [
       ...this.salesEntries(storeId, r, opts),
@@ -160,7 +196,18 @@ export class AccountingService extends Base {
       ...this.staffSalaryEntries(storeId, opts),
       ...this.treasuryPieceEntries(storeId, r, opts),
       ...this.manualEntries(storeId, opts),
-    ].filter((e) => (!opts.journal || e.journal === opts.journal) && inRange(e.date, opts.from, opts.to) && e.lines.length > 0);
+    ].filter(
+      (e) =>
+        (!opts.journal || e.journal === opts.journal) &&
+        inRange(e.date, opts.from, opts.to) &&
+        e.lines.length > 0 &&
+        e.date >= floor &&
+        !(e.closing && skipClosing.has(e.date)),
+    );
+    // Écritures automatiques corrigées : les numéros des écritures de correction.
+    const corrections = new Map<string, string[]>();
+    for (const e of all) if (e.corrects) corrections.set(e.corrects, [...(corrections.get(e.corrects) ?? []), e.ref]);
+    if (corrections.size) for (const e of all) if (e.source === 'auto' && corrections.has(entryKey(e))) e.corrected_by = corrections.get(entryKey(e));
     return all.sort((a, b) => a.date.localeCompare(b.date) || a.journal.localeCompare(b.journal) || a.ref.localeCompare(b.ref));
   }
 
@@ -534,10 +581,18 @@ export class AccountingService extends Base {
   private manualEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
     const heads = this.db
       .prepare(
-        `SELECT id, number, journal, entry_date, label FROM manual_entries
+        `SELECT id, number, journal, entry_date, label, closing_of, corrects FROM manual_entries
          WHERE store_id = @storeId AND (@from IS NULL OR entry_date >= @from) AND (@to IS NULL OR entry_date <= @to)`,
       )
-      .all({ storeId, from: opts.from ?? null, to: opts.to ?? null }) as { id: string; number: string; journal: JournalCode; entry_date: string; label: string }[];
+      .all({ storeId, from: opts.from ?? null, to: opts.to ?? null }) as {
+      id: string;
+      number: string;
+      journal: JournalCode;
+      entry_date: string;
+      label: string;
+      closing_of: string | null;
+      corrects: string | null;
+    }[];
     const lines = this.db.prepare('SELECT account_id, aux, label, debit, credit FROM manual_entry_lines WHERE entry_id = ? ORDER BY line_no');
     return heads.map((h) => ({
       journal: h.journal,
@@ -545,6 +600,9 @@ export class AccountingService extends Base {
       ref: h.number,
       label: h.label,
       source: 'manual' as const,
+      id: h.id,
+      closing: Boolean(h.closing_of),
+      corrects: h.corrects,
       lines: (lines.all(h.id) as { account_id: string; aux: string | null; label: string | null; debit: number; credit: number }[]).map((l) => ({
         account: l.account_id,
         aux: l.aux,
@@ -556,14 +614,12 @@ export class AccountingService extends Base {
     }));
   }
 
-  /** Écriture manuelle (à-nouveaux, frais bancaires, dépôt d'espèces à la banque…). Elle doit être équilibrée. */
-  addManualEntry(
-    ctx: Context,
-    input: { journal: JournalCode; date: string; label: string; lines: { account: string; aux?: string | null; label?: string | null; debit: Fcfa; credit: Fcfa }[] },
-  ): Entry {
+  /** Contrôle d'une écriture saisie : journal permis, date, libellé, comptes connus, équilibre. */
+  private checkManual(storeId: string, input: ManualEntryInput): ManualEntryInput['lines'] {
     if (!['AN', 'OD', 'BQ', 'CA', 'MM'].includes(input.journal)) throw new AppError('Journal non autorisé pour une saisie manuelle', 'INVALID');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new AppError('Date invalide', 'INVALID');
     if (!input.label.trim()) throw new AppError("Le libellé de l'écriture est obligatoire", 'INVALID');
+    this.assertPeriodOpen(storeId, input.date);
     const lines = input.lines.filter((l) => l.debit || l.credit);
     if (lines.length < 2) throw new AppError('Une écriture a au moins deux lignes', 'INVALID');
     const known = new Set(this.listAccounts(true).map((a) => a.id));
@@ -576,20 +632,105 @@ export class AccountingService extends Base {
     const debit = lines.reduce((t, l) => t + l.debit, 0);
     const credit = lines.reduce((t, l) => t + l.credit, 0);
     if (debit !== credit) throw new AppError(`Écriture déséquilibrée : débit ${debit} ≠ crédit ${credit}`, 'UNBALANCED');
+    return lines;
+  }
+
+  private writeManualLines(entryId: string, lines: ManualEntryInput['lines']): void {
+    this.db.prepare('DELETE FROM manual_entry_lines WHERE entry_id = ?').run(entryId);
+    const insert = this.db.prepare(
+      'INSERT INTO manual_entry_lines (id, entry_id, line_no, account_id, aux, label, debit, credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    lines.forEach((l, i) => insert.run(newId(), entryId, i + 1, l.account, l.aux?.trim() || null, l.label?.trim() || null, l.debit, l.credit));
+  }
+
+  private manualById(storeId: string, id: string): Entry {
+    const date = this.db.prepare('SELECT entry_date FROM manual_entries WHERE id = ? AND store_id = ?').pluck().get(id, storeId) as string | undefined;
+    const entry = date ? this.manualEntries(storeId, { from: date, to: date }).find((e) => e.id === id) : undefined;
+    if (!entry) throw new AppError('Écriture introuvable', 'NOT_FOUND');
+    return entry;
+  }
+
+  /** Écriture manuelle (à-nouveaux, frais bancaires, dépôt d'espèces à la banque…). Elle doit être équilibrée. */
+  addManualEntry(ctx: Context, input: ManualEntryInput, opts: { corrects?: string | null; closingOf?: string | null } = {}): Entry {
+    const lines = opts.closingOf ? input.lines : this.checkManual(ctx.storeId, input);
     return this.tx(() => {
       const id = newId();
       const number = `OD-${this.stationPrefix()}-${String(this.nextCounter('manual_entry')).padStart(5, '0')}`;
       this.db
-        .prepare('INSERT INTO manual_entries (id, number, store_id, journal, entry_date, label, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, number, ctx.storeId, input.journal, input.date, input.label.trim(), ctx.userId, this.now());
-      const insert = this.db.prepare(
-        'INSERT INTO manual_entry_lines (id, entry_id, line_no, account_id, aux, label, debit, credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      lines.forEach((l, i) => insert.run(newId(), id, i + 1, l.account, l.aux?.trim() || null, l.label?.trim() || null, l.debit, l.credit));
+        .prepare(
+          'INSERT INTO manual_entries (id, number, store_id, journal, entry_date, label, user_id, created_at, closing_of, corrects, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(id, number, ctx.storeId, input.journal, input.date, input.label.trim(), ctx.userId, this.now(), opts.closingOf ?? null, opts.corrects ?? null, this.now());
+      this.writeManualLines(id, lines);
       this.enqueue(ctx, 'manual_entry', id, 'upsert', {});
-      this.audit(ctx.userId, 'accounting.manual_entry', 'manual_entry', id, { number, debit });
-      return this.manualEntries(ctx.storeId, { from: input.date, to: input.date }).find((e) => e.ref === number)!;
+      this.audit(ctx.userId, 'accounting.manual_entry', 'manual_entry', id, { number, debit: lines.reduce((t, l) => t + l.debit, 0), corrects: opts.corrects ?? undefined });
+      return this.manualById(ctx.storeId, id);
     });
+  }
+
+  /** Modifie une écriture saisie à la main ; l'ancienne version reste dans le journal d'audit. */
+  updateManualEntry(ctx: Context, id: string, input: ManualEntryInput): Entry {
+    const before = this.manualById(ctx.storeId, id);
+    if (before.closing) throw new AppError("Les à-nouveaux d'une clôture se refont en rouvrant puis en clôturant l'exercice", 'INVALID');
+    this.assertPeriodOpen(ctx.storeId, before.date);
+    const lines = this.checkManual(ctx.storeId, input);
+    return this.tx(() => {
+      this.db.prepare('UPDATE manual_entries SET journal = ?, entry_date = ?, label = ?, updated_at = ? WHERE id = ?').run(input.journal, input.date, input.label.trim(), this.now(), id);
+      this.writeManualLines(id, lines);
+      this.enqueue(ctx, 'manual_entry', id, 'upsert', {});
+      this.audit(ctx.userId, 'accounting.manual_entry_update', 'manual_entry', id, {
+        number: before.ref,
+        before: { journal: before.journal, date: before.date, label: before.label, lines: before.lines.map(({ account, aux, label, debit, credit }) => ({ account, aux, label, debit, credit })) },
+        after: { journal: input.journal, date: input.date, label: input.label, lines },
+      });
+      return this.manualById(ctx.storeId, id);
+    });
+  }
+
+  /** Supprime une écriture saisie à la main (gardée dans le journal d'audit). */
+  deleteManualEntry(ctx: Context, id: string): void {
+    const before = this.manualById(ctx.storeId, id);
+    if (before.closing) throw new AppError("Les à-nouveaux d'une clôture disparaissent en rouvrant l'exercice", 'INVALID');
+    this.assertPeriodOpen(ctx.storeId, before.date);
+    this.tx(() => {
+      this.db.prepare('DELETE FROM manual_entry_lines WHERE entry_id = ?').run(id);
+      this.db.prepare('DELETE FROM manual_entries WHERE id = ?').run(id);
+      this.enqueue(ctx, 'manual_entry', id, 'delete', {});
+      this.audit(ctx.userId, 'accounting.manual_entry_delete', 'manual_entry', id, {
+        number: before.ref,
+        before: { journal: before.journal, date: before.date, label: before.label, lines: before.lines.map(({ account, aux, label, debit, credit }) => ({ account, aux, label, debit, credit })) },
+      });
+    });
+  }
+
+  /**
+   * Corrige une écriture automatique (vente, achat, dépense…). Elle se recalcule
+   * à partir de sa pièce : on ne la réécrit pas. On enregistre l'écart entre
+   * l'écriture voulue et l'écriture actuelle, au journal OD, à la même date,
+   * rattachée à l'écriture corrigée ; balance et états en tiennent compte.
+   */
+  correctEntry(ctx: Context, key: string, input: { label?: string | null; lines: ManualEntryInput['lines'] }): Entry {
+    const [journal, date] = key.split('|');
+    if (!journal || !date) throw new AppError('Écriture à corriger introuvable', 'NOT_FOUND');
+    const original = this.entries(ctx.storeId, { from: date, to: date }).find((e) => e.source === 'auto' && entryKey(e) === key);
+    if (!original) throw new AppError('Écriture à corriger introuvable', 'NOT_FOUND');
+    // Écart par compte et par tiers : ce qu'il faut ajouter à l'écriture actuelle (et à ses corrections déjà passées).
+    const gap = new Map<string, { account: string; aux: string | null; amount: number }>();
+    const add = (account: string, aux: string | null, amount: number) => {
+      const k = `${account}|${aux ?? ''}`;
+      const g = gap.get(k) ?? { account, aux, amount: 0 };
+      g.amount += amount;
+      gap.set(k, g);
+    };
+    const previous = this.manualEntries(ctx.storeId, { from: date, to: date }).filter((e) => e.corrects === key);
+    for (const e of [original, ...previous]) for (const l of e.lines) add(l.account, l.aux, -(l.debit - l.credit));
+    for (const l of input.lines) add(l.account.trim(), l.aux?.trim() || null, l.debit - l.credit);
+    const lines = [...gap.values()]
+      .filter((g) => g.amount)
+      .map((g) => ({ account: g.account, aux: g.aux, label: null, debit: g.amount > 0 ? g.amount : 0, credit: g.amount < 0 ? -g.amount : 0 }));
+    if (!lines.length) throw new AppError("Aucun changement par rapport à l'écriture actuelle", 'INVALID');
+    const label = input.label?.trim() || `Correction de ${original.journal} ${original.ref} du ${date.split('-').reverse().join('/')}`;
+    return this.addManualEntry(ctx, { journal: 'OD', date, label, lines }, { corrects: key });
   }
 
   // --- États ------------------------------------------------------------------
@@ -600,9 +741,9 @@ export class AccountingService extends Base {
     let opening = 0;
     let balance = 0;
     const rows: { date: string; journal: JournalCode; ref: string; label: string; account: string; aux: string | null; debit: Fcfa; credit: Fcfa; balance: Fcfa }[] = [];
-    for (const e of this.entries(storeId, { to: opts.to })) {
+    for (const e of this.entries(storeId, { to: opts.to, since: opts.from })) {
       for (const l of e.lines.filter(match)) {
-        if (opts.from && e.date < opts.from) {
+        if (opts.from && (e.date < opts.from || (e.closing && e.date === opts.from))) {
           opening += l.debit - l.credit;
           balance = opening;
           continue;
@@ -618,10 +759,11 @@ export class AccountingService extends Base {
   trialBalance(storeId: string, opts: { from?: string; to?: string } = {}) {
     const labels = new Map(this.listAccounts(true).map((a) => [a.id, a.label]));
     const acc = new Map<string, { opening: number; debit: number; credit: number }>();
-    for (const e of this.entries(storeId, { to: opts.to })) {
+    for (const e of this.entries(storeId, { to: opts.to, since: opts.from })) {
       for (const l of e.lines) {
         const a = acc.get(l.account) ?? { opening: 0, debit: 0, credit: 0 };
-        if (opts.from && e.date < opts.from) a.opening += l.debit - l.credit;
+        // Les à-nouveaux de clôture, au premier jour de la période, sont des soldes d'ouverture.
+        if (opts.from && (e.date < opts.from || (e.closing && e.date === opts.from))) a.opening += l.debit - l.credit;
         else {
           a.debit += l.debit;
           a.credit += l.credit;

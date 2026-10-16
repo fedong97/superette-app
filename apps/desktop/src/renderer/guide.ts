@@ -117,6 +117,29 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     ],
   },
   {
+    version: '0.43.1',
+    items: [
+      'Barre verte : tous les menus y sont (Fichier, Fabrication, Fournisseurs, Charges, Transferts, Comptabilité, Fiscal en plus). Si l’écran est petit, la barre défile à la molette.',
+      '« ✎ Personnaliser » en bas de la barre (ou Fichier › Personnaliser la barre latérale) : cochez les menus à afficher et rangez-les avec ↑ ↓. Le choix vaut pour chaque utilisateur ; « Rétablir » revient à tous les menus.',
+    ],
+  },
+  {
+    version: '0.43.0',
+    items: [
+      'Bouton ⟳ dans la barre de chaque fenêtre (ou F5) : la page se recharge sans la fermer. À la caisse, F5 ouvre toujours le tiroir.',
+      'Exercices comptables (Comptabilité › Exercices, ou Administration) : ouvrir un exercice, changer ses dates, le clôturer et le rouvrir. La clôture reporte les soldes en à-nouveaux sur l’exercice suivant, avec le résultat au 121 ou au 129 ; aucune écriture ne se passe plus sur un exercice clôturé.',
+      'Plan comptable SYSCOHADA complet (classes 1 à 8). Bouton 📖 « Plan comptable » en créant une catégorie de dépense ou une écriture : recherche par numéro ou intitulé, et création d’un sous-compte sans quitter la saisie.',
+      'Sauvegarde automatique à fréquence choisie (toutes les 15 min, 1 h, 2 h… jusqu’à 12 h) dans le dossier choisi : Administration › Sauvegardes.',
+      'Menu Transfert : « Nouveau transfert » et « Liste des transferts » (par période, dépôt et état), avec Modifier et Supprimer. Un transfert reçu supprimé ou modifié remet la marchandise dans le dépôt de départ.',
+      'Écritures comptables : modifier ou supprimer une écriture saisie, et corriger une écriture automatique par une écriture liée. Nouveau droit « Modifier, supprimer ou corriger une écriture comptable » à donner selon le profil.',
+      'Caisse : sur une fiche vide, Listing (F7) réimprime la dernière facture en listing, comme Ticket (F2) réimprime le dernier ticket.',
+      'Charges fixes : bouton « Supprimer ». Une charge déjà payée est arrêtée et garde son historique ; « Afficher les charges arrêtées » la montre.',
+      'Facturation : le stock de chaque dépôt du vendeur s’affiche dans la recherche et à la saisie de la quantité. Si le dépôt choisi n’a pas assez, la vente se complète avec le stock des autres dépôts. Les dépôts de chaque utilisateur se cochent dans Administration › Utilisateurs.',
+      'État du stock « Tous les dépôts » : une colonne par dépôt et le total ; un clic sur un article montre son stock par dépôt et par lot. Export Excel.',
+      'Ctrl+J : « Nouveau » sur la page ouverte (article, client, fournisseur, collaborateur, dépense, charge fixe, devis, bon de commande, transfert, compte, utilisateur…). Dans le formulaire, Ctrl+J enregistre et en ouvre un nouveau ; un champ obligatoire vide est signalé et rien n’est enregistré.',
+    ],
+  },
+  {
     version: '0.42.0',
     items: [
       'Fenêtres : chaque écran s’ouvre dans sa fenêtre, à l’intérieur du logiciel. On la déplace par sa barre verte, on l’agrandit par le coin, ▢ (ou double-clic sur la barre) la met en plein écran et ✕ la ferme. La caisse s’ouvre en plein écran ; chaque fenêtre se rouvre là où vous l’avez laissée.',

@@ -94,6 +94,8 @@ const METHOD_ROLE: Record<string, AccountRole> = {
   CHEQUE: 'bank',
   VOUCHER: 'voucher',
   CUSTOMER_CREDIT: 'customers',
+  // Points fidélité : une remise accordée au client.
+  LOYALTY: 'rebates',
 };
 const METHOD_JOURNAL = (method: string): JournalCode =>
   method === 'CASH' ? 'CA' : method === 'MTN_MOMO' || method === 'ORANGE_MONEY' ? 'MM' : 'BQ';

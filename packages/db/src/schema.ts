@@ -1491,4 +1491,25 @@ ALTER TABLE sales ADD COLUMN replaces_id TEXT REFERENCES sales(id);
 ALTER TABLE sales ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 35,
+    name: 'carte de fidélité',
+    sql: `
+-- Points de fidélité : chaque mouvement est gardé (gagnés, dépensés, annulés, corrigés) ;
+-- le solde d'un client est leur somme. Communs à tous les magasins, comme les clients.
+CREATE TABLE loyalty_moves (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  store_id TEXT NOT NULL,
+  sale_id TEXT,
+  kind TEXT NOT NULL CHECK (kind IN ('earn', 'redeem', 'cancel', 'return', 'adjust')),
+  points INTEGER NOT NULL,
+  reason TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX loyalty_moves_customer ON loyalty_moves(customer_id, created_at);
+CREATE INDEX loyalty_moves_sale ON loyalty_moves(sale_id);
+`,
+  },
 ];

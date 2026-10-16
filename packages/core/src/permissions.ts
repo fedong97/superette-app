@@ -106,6 +106,7 @@ export const PERMISSIONS = {
   customer_price_level: { label: "Fixer la grille tarifaire d'un client (gros, super gros)", group: 'Fichier des clients', type: 'Fonction', parent: 'receivables' },
   customer_payment: { label: 'Encaisser un règlement client', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   customer_statement: { label: "Consulter et imprimer l'extrait de compte d'un client", group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
+  loyalty_adjust: { label: 'Corriger les points de fidélité d’un client (avec motif)', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
   rebates: { label: 'Ristournes et bonus clients : réglages, constater, accorder et régulariser', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
 
   // --- Fichier des fournisseurs -----------------------------------------------

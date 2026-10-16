@@ -51,6 +51,8 @@ function CustomerList({ user }: { user: User }) {
   const [debtors, setDebtors] = useState(false);
   const list = useLoad(() => call('customers.list', { search: search || undefined, includeInactive: inactive, withBalance: debtors }), [search, inactive, debtors]);
   const [open, setOpen] = useState<Customer | 'new' | null>(null);
+  const loyaltyOn = useStoreSettings().loyaltyEnabled;
+  const points = useLoad(() => (loyaltyOn ? call('loyalty.balances') : Promise.resolve({} as Record<string, number>)), [loyaltyOn, list.data]);
   return (
     <>
       <div className="filters">
@@ -80,6 +82,7 @@ function CustomerList({ user }: { user: User }) {
               <th className="r">Plafond</th>
               <th className="r">Doit</th>
               <th className="r">En retard</th>
+              {loyaltyOn && <th className="r">Points</th>}
               <th>Dernier achat</th>
             </tr>
           </thead>
@@ -93,6 +96,7 @@ function CustomerList({ user }: { user: User }) {
                 <td className="r">{c.credit_limit ? fcfa(c.credit_limit) : '—'}</td>
                 <td className={`r ${c.balance > c.credit_limit ? 'neg' : ''}`}>{c.balance ? fcfa(c.balance) : ''}</td>
                 <td className="r neg">{c.overdue ? fcfa(c.overdue) : ''}</td>
+                {loyaltyOn && <td className="r">{points.data?.[c.id] || ''}</td>}
                 <td>{c.last_sale ? dateTime(c.last_sale) : ''}</td>
               </tr>
             ))}
@@ -118,8 +122,9 @@ function CustomerList({ user }: { user: User }) {
 }
 
 function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; customer: Customer | null; onClose: () => void; onSaved: (c: Customer) => void }) {
-  const [tab, setTab] = useState<'card' | 'account' | 'statement' | 'sales'>(customer ? 'account' : 'card');
+  const [tab, setTab] = useState<'card' | 'account' | 'statement' | 'sales' | 'points'>(customer ? 'account' : 'card');
   const statement = has(user, 'customer_statement') || has(user, 'receivables');
+  const loyaltyOn = useStoreSettings().loyaltyEnabled;
   return (
     <Modal title={customer ? `${customer.code} · ${customer.name}` : 'Nouveau client'} onClose={onClose} wide>
       {customer && (
@@ -130,6 +135,7 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
             ['account', 'Compte'],
             ...(statement ? ([['statement', 'Relevé']] as ['statement', string][]) : []),
             ['sales', 'Achats'],
+            ...(loyaltyOn ? ([['points', 'Fidélité']] as ['points', string][]) : []),
             ['card', 'Fiche'],
           ]}
         />
@@ -138,7 +144,104 @@ function CustomerDialog({ user, customer, onClose, onSaved }: { user: User; cust
       {tab === 'account' && customer && <Account customer={customer} />}
       {tab === 'statement' && customer && statement && <Statement customer={customer} />}
       {tab === 'sales' && customer && <CustomerSales customer={customer} />}
+      {tab === 'points' && customer && <LoyaltyCard user={user} customer={customer} />}
     </Modal>
+  );
+}
+
+const LOYALTY_KINDS: Record<string, string> = { earn: 'Gagnés', redeem: 'Dépensés', cancel: 'Vente annulée', return: 'Retour', adjust: 'Correction' };
+
+/** Carte de fidélité du client : solde, mouvements, correction et impression de la carte. */
+function LoyaltyCard({ user, customer }: { user: User; customer: Customer }) {
+  const toast = useToast();
+  const status = useLoad(() => call('loyalty.status', customer.id), [customer.id]);
+  const history = useLoad(() => call('loyalty.history', customer.id), [customer.id]);
+  const [points, setPoints] = useState('');
+  const [reason, setReason] = useState('');
+  const st = status.data;
+  if (!st) return null;
+  return (
+    <div>
+      <div className="kpis">
+        <div>
+          <span>Points</span>
+          <strong>{st.balance}</strong>
+        </div>
+        <div>
+          <span>Valeur en remise</span>
+          <strong>{fcfa(st.value)}</strong>
+        </div>
+      </div>
+      <p className="muted">
+        1 point pour {fcfa(st.rules.spendPerPoint)} d'achat ; 1 point vaut {fcfa(st.rules.pointValue)} ; il faut {st.rules.minRedeem} points pour payer avec. À la caisse, scannez la
+        carte ou tapez le téléphone du client pour le choisir.
+      </p>
+      <div className="actions">
+        <button onClick={() => call('loyalty.printCard', customer.id).catch((e) => toast.error(e))}>Imprimer sa carte</button>
+      </div>
+      {has(user, 'loyalty_adjust') && (
+        <form
+          className="filters"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              const n = await call('loyalty.adjust', customer.id, Math.trunc(Number(points)), reason);
+              toast.ok(`Nouveau solde : ${n} points`);
+              setPoints('');
+              setReason('');
+              status.reload();
+              history.reload();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          <Field label="Corriger (+ ou −)">
+            <input inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value)} placeholder="ex. 50 ou -20" style={{ width: 110 }} />
+          </Field>
+          <Field label="Motif">
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Carte perdue, geste commercial…" />
+          </Field>
+          <button type="submit" disabled={!points || !reason.trim()}>
+            Enregistrer la correction
+          </button>
+        </form>
+      )}
+      {(history.data ?? []).length === 0 ? (
+        <Empty>Aucun point pour l'instant : le client en gagne à chaque achat.</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Mouvement</th>
+              <th>Pièce</th>
+              <th>Magasin</th>
+              <th>Par</th>
+              <th className="r">Points</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.data!.map((m) => (
+              <tr key={m.id}>
+                <td>{dateTime(m.created_at)}</td>
+                <td>
+                  {LOYALTY_KINDS[m.kind]}
+                  {m.reason && <small className="muted"> · {m.reason}</small>}
+                </td>
+                <td>{m.sale_number ?? ''}</td>
+                <td>{m.store_name ?? ''}</td>
+                <td>{m.user_name ?? ''}</td>
+                <td className={`r ${m.points < 0 ? 'neg' : 'pos'}`}>
+                  {m.points > 0 ? '+' : ''}
+                  {m.points}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

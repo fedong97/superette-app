@@ -143,6 +143,22 @@ export class CustomerService extends Base {
     return row;
   }
 
+  /**
+   * Client d'une carte scannée : son code (CLI-DLA11-00001), ou son numéro de
+   * téléphone (8 chiffres au moins, espaces et indicatif 237 ignorés). Null sinon.
+   */
+  findByCard(code: string): Customer | null {
+    const c = code.trim();
+    if (!c) return null;
+    const byCode = this.db.prepare('SELECT * FROM customers WHERE code = ? AND active = 1').get(c.toUpperCase()) as Customer | undefined;
+    if (byCode) return byCode;
+    const digits = c.replace(/\D/g, '').replace(/^237(?=\d{9}$)/, '');
+    if (!/^[\d\s.+-]+$/.test(c) || digits.length < 8) return null;
+    const rows = this.db.prepare("SELECT * FROM customers WHERE active = 1 AND phone IS NOT NULL AND phone <> ''").all() as Customer[];
+    const found = rows.filter((r) => (r.phone ?? '').replace(/\D/g, '').replace(/^237(?=\d{9}$)/, '') === digits);
+    return found.length === 1 ? found[0]! : null;
+  }
+
   saveCustomer(userId: string, input: CustomerInput, id?: string): Customer {
     const name = input.name.trim();
     if (!name) throw new AppError('Le nom du client est obligatoire', 'INVALID');

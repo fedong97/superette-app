@@ -505,6 +505,16 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       ],
     ],
     [
+      'Carte de fidélité',
+      'Les clients enregistrés gagnent des points à chaque achat et paient avec à la caisse (« Points fidélité »). Les points valent dans tous les magasins.',
+      [
+        { label: 'Activer la carte de fidélité', render: () => yes('loyaltyEnabled') },
+        { label: 'Montant d’achat pour 1 point', hint: '1 000 FCFA : un achat de 25 900 FCFA donne 25 points', render: () => num('loyaltySpendPerPoint', 'FCFA') },
+        { label: 'Valeur d’un point', hint: '10 FCFA : 100 points font 1 000 FCFA de remise', render: () => num('loyaltyPointValue', 'FCFA') },
+        { label: 'Points minimum pour payer avec', render: () => num('loyaltyMinRedeem', 'points') },
+      ],
+    ],
+    [
       'Stock',
       '',
       [

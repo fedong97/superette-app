@@ -188,6 +188,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const feeVat = useLoad(() => call('deliveries.feeVat'), []);
   const couriers = useLoad(() => call('deliveries.couriers'), []);
   const account = useLoad(() => (customer ? call('customers.account', customer.id) : Promise.resolve(null)), [customer?.id]);
+  // Carte de fidélité du client choisi (rechargée après chaque vente).
+  const fidelity = useLoad(() => (customer ? call('loyalty.status', customer.id) : Promise.resolve(null)), [customer?.id, lastSale?.id]);
   // Tickets en attente sur cette caisse : leur nombre s'affiche sur le bouton « Ouvrir ».
   const held = useLoad(() => call('pos.held'), []);
   // Clients existants proposés pendant la frappe du nom (évite les doublons).
@@ -317,6 +319,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           addArticle(hit.article, mult ?? 1000);
         }
         return;
+      }
+      // Carte de fidélité ou numéro de téléphone d'un client : il devient le client de la fiche.
+      if (!m && !customer) {
+        const c = await call('loyalty.findCustomer', code);
+        if (c) {
+          setCustomer(c);
+          toast.ok(`Client : ${c.name}`);
+          return;
+        }
       }
       // Pas un code-barres : une seule ligne en stock → quantité, sinon la recherche complète.
       const rows = /^[\d\s]+$/.test(code) ? [] : await call('pos.search', code, { customerId: customer?.id ?? null, ...saleOpts });
@@ -811,6 +822,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         needsSupervisor={discountNeedsCode}
         cashRounding={settings.cashRounding}
         allowCredit={Boolean(customer)}
+        loyalty={fidelity.data?.enabled ? fidelity.data : null}
         onClose={() => setDialog(null)}
         onPaid={async (payments, supervisorPin) => {
           setDialog(null);
@@ -1059,6 +1071,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       Solde : {account.data.balance > 0 ? '−' : account.data.balance < 0 ? '+' : ''}
       {amount(Math.abs(account.data.balance))} FCFA
       <small>{account.data.balance > 0 ? ' (doit)' : account.data.balance < 0 ? ' (avoir)' : ''}</small>
+      {fidelity.data?.enabled && (
+        <small className="points" title={`Carte de fidélité : ${fidelity.data.balance} points, soit ${amount(fidelity.data.value)} FCFA`}>
+          {' '}· ★ {fidelity.data.balance} pts
+        </small>
+      )}
     </span>
   );
   const keyStrip = (

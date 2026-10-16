@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.50.0',
+    items: [
+      'Carte de fidélité (Administration › Paramètres › Carte de fidélité) : le client enregistré gagne 1 point par tranche d’achat (1 000 FCFA par défaut) et paie avec ses points à l’encaissement (« Points fidélité »).',
+      'À la caisse, scanner la carte du client ou taper son téléphone le choisit tout de suite ; ses points s’affichent à côté de son solde et s’impriment sur le ticket.',
+      'Fiche client › Fidélité : solde, mouvements, impression de la carte à code-barres, correction avec motif (droit « Corriger les points de fidélité »).',
+      'Les points valent dans tous les magasins. Mettez à jour FEDONIX 360 Serveur avant les PC.',
+    ],
+  },
+  {
     version: '0.49.0',
     items: [
       'Mises à jour automatiques : déposez le nouvel installateur dans FEDONIX 360 Serveur (onglet « Mises à jour ») et chaque PC relié le télécharge tout seul, puis l’installe à sa fermeture.',

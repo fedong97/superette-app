@@ -4,6 +4,7 @@ import {
   type BarcodeLabelOptions,
   type LabelFormatId,
   barcodeLabelsHtml,
+  loyaltyCardHtml,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -154,6 +155,8 @@ export interface Printer {
   labels(html: string, format: LabelFormatId): Promise<boolean>;
   /** Étiquettes produit : directement sur l'imprimante d'étiquettes du poste pour un rouleau, sinon fenêtre d'impression. */
   barcodeLabels(html: string, format: BarcodeLabelFormatId): Promise<boolean>;
+  /** Page A4 (cartes de fidélité…) : la fenêtre d'impression Windows s'ouvre. */
+  a4(body: string): Promise<void>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
   /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
   inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
@@ -1299,6 +1302,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.customers.saveCustomer(u.id, { ...input, creditLimit: input.creditLimit ?? credit, paymentTermsDays: input.paymentTermsDays ?? terms }, id);
     },
     'customers.account': (id: string) => s.customers.account(ctx().storeId, id),
+    'loyalty.status': (customerId: string) => (requireUser(), s.loyalty.status(ctx().storeId, customerId)),
+    'loyalty.history': (customerId: string) => (requireUser(['customers']), s.loyalty.history(customerId)),
+    'loyalty.balances': () => (requireUser(['customers']), Object.fromEntries(s.loyalty.balances())),
+    'loyalty.adjust': (customerId: string, points: number, reason: string) => {
+      const u = requireUser(['loyalty_adjust']);
+      return s.loyalty.adjust({ storeId: ctx().storeId, userId: u.id }, customerId, points, reason);
+    },
+    'loyalty.printCard': (customerId: string, copies?: number) => {
+      const storeId = ctx(['customers']).storeId;
+      const c = s.customers.getCustomer(customerId);
+      return printer.a4(loyaltyCardHtml({ store: s.admin.getStore(storeId).name, customer: c.name, code: c.code, phone: c.phone, logo: settings().logo || null }, copies));
+    },
+    /** Carte scannée à la caisse : code du client ou numéro de téléphone. */
+    'loyalty.findCustomer': (code: string) => (requireUser(), s.customers.findByCard(code)),
     'customers.statement': (id: string, from?: string | null, to?: string | null) =>
       s.customers.statement(ctx(['customer_statement', 'receivables']).storeId, id, { from: from ?? undefined, to: to ?? undefined }),
     'customers.sales': (id: string) => s.pos.listSales({ storeId: ctx().storeId, customerId: id, limit: 100 }),

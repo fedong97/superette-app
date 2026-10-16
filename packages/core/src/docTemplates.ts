@@ -362,6 +362,8 @@ export interface DocData {
   } | null;
   /** « Client » (par défaut) ou « Fournisseur ». */
   partyLabel?: string;
+  /** Carte de fidélité du client : points de ce ticket et solde. */
+  loyalty?: { earned: number; redeemed: number; balance: number } | null;
   doc: {
     kind: 'sale' | 'return' | 'quote' | 'purchase';
     number: string;
@@ -935,6 +937,11 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change), bold: true });
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
   if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
+  if (t.customer.show && d.loyalty) {
+    if (d.loyalty.redeemed) r.push({ t: 'row', left: 'Points utilisés', right: `-${d.loyalty.redeemed}` });
+    if (d.loyalty.earned) r.push({ t: 'row', left: 'Points gagnés', right: `${d.loyalty.earned > 0 ? '+' : ''}${d.loyalty.earned}` });
+    r.push({ t: 'row', left: 'Vos points fidélité', right: String(d.loyalty.balance), bold: true });
+  }
   if (t.info.dueDate && d.doc.dueDate) r.push({ t: 'text', text: `À régler avant le ${dayFr(d.doc.dueDate)}` });
   if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: `Arrêté à la somme de ${numberToWordsFr(tot.ttc)} francs CFA`, align: t.align?.words });
   (parts.payments = r), (r = []);

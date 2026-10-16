@@ -87,6 +87,15 @@ export interface StoreSettings {
   /** Après une réception d'achat, proposer les étiquettes des articles à code interne. */
   labelAfterReception: boolean;
 
+  /** Carte de fidélité : les clients enregistrés gagnent des points et paient avec. */
+  loyaltyEnabled: boolean;
+  /** Montant d'achat qui donne 1 point. */
+  loyaltySpendPerPoint: number;
+  /** Valeur d'un point en FCFA quand le client paie avec ses points. */
+  loyaltyPointValue: number;
+  /** Points à avoir au minimum pour payer avec. */
+  loyaltyMinRedeem: number;
+
   /** Modèles d'impression modifiés ou ajoutés (ceux du logiciel servent pour le reste). */
   printTemplates: DocTemplate[];
   /** Modèle choisi par emplacement (« invoice.a4.credit ») : identifiant de modèle. */
@@ -136,6 +145,10 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   labelPrice: true,
   labelStore: false,
   labelAfterReception: true,
+  loyaltyEnabled: false,
+  loyaltySpendPerPoint: 1000,
+  loyaltyPointValue: 10,
+  loyaltyMinRedeem: 100,
   printTemplates: [],
   printDefaults: {},
 };
@@ -157,6 +170,9 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   idleMinutes: [0, 480],
   pinMinLength: [4, 8],
   maxLoginAttempts: [0, 20],
+  loyaltySpendPerPoint: [1, 1e7],
+  loyaltyPointValue: [1, 1e6],
+  loyaltyMinRedeem: [0, 1e7],
 };
 const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder'];

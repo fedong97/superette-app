@@ -357,6 +357,7 @@ export function createPrinter(s: Services): Printer {
   return {
     labels: printLabelsHtml,
     barcodeLabels: printBarcodeLabelsHtml,
+    a4: printA4,
 
     async countSheet(storeId, warehouseId, departmentId) {
       const store = s.admin.getStore(storeId);

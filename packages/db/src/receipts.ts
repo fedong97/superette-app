@@ -302,6 +302,17 @@ export class ReceiptService extends Base {
     const register = this.db.prepare('SELECT name FROM registers WHERE id = ?').pluck().get(sale.register_id) as string | undefined;
     const c = sale.customer_id ? this.customers.getCustomer(sale.customer_id) : null;
     const balance = c ? this.customers.account(sale.store_id, c.id).balance : null;
+    // Carte de fidélité : points de cette vente (gagnés moins dépensés) et solde du client.
+    const loyalty = c
+      ? (this.db
+          .prepare(
+            `SELECT COALESCE((SELECT SUM(points) FROM loyalty_moves WHERE sale_id = @sale AND kind IN ('earn', 'return')), 0) AS earned,
+                    COALESCE((SELECT -SUM(points) FROM loyalty_moves WHERE sale_id = @sale AND kind = 'redeem'), 0) AS redeemed,
+                    COALESCE((SELECT SUM(points) FROM loyalty_moves WHERE customer_id = @customer), 0) AS balance,
+                    EXISTS (SELECT 1 FROM loyalty_moves WHERE customer_id = @customer) AS any`,
+          )
+          .get({ sale: sale.id, customer: c.id }) as { earned: number; redeemed: number; balance: number; any: number })
+      : null;
     const unitNames = new Map(
       sale.lines.length
         ? (
@@ -326,6 +337,7 @@ export class ReceiptService extends Base {
         : sale.customer_name
           ? { name: sale.customer_name, code: null, address: null, phone: null, niu: null, balance: null, counter: true }
           : null,
+      loyalty: loyalty?.any ? { earned: loyalty.earned, redeemed: loyalty.redeemed, balance: loyalty.balance } : null,
       doc: {
         kind: sale.kind,
         number: sale.number,

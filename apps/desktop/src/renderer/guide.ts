@@ -109,6 +109,10 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.59.1',
+    items: ['Administration : les onglets passent sur deux lignes au lieu de déborder, et la page s’affiche en entier.'],
+  },
+  {
     version: '0.59.0',
     items: [
       'Modèles de boutique, comme les fichiers modèles de Sage : à la création, choisissez le métier (superette, quincaillerie, pharmacie, boulangerie, habillement) et la boutique part avec ses rayons, familles et réglages. Administration › Modèles de boutique enregistre la vôtre comme modèle (catalogue compris si vous voulez), à réutiliser chez le client suivant.',

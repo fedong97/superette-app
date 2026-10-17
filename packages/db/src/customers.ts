@@ -89,7 +89,7 @@ export interface CustomerAccount {
 
 export interface StatementLine {
   date: string;
-  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund';
+  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening';
   ref_id: string;
   number: string;
   label: string;
@@ -234,6 +234,13 @@ export class CustomerService extends Base {
          GROUP BY s.id ORDER BY s.created_at, s.number`,
       )
       .all(storeId, customerId) as { id: string; number: string; created_at: string; due_date: string | null; amount: number }[];
+    // Soldes repris à la mise en service : une créance comme une vente à crédit, un avoir comme un règlement.
+    const opening = this.db
+      .prepare('SELECT id, number, doc_date AS created_at, due_date, amount FROM opening_balances WHERE store_id = ? AND customer_id = ? ORDER BY doc_date, number')
+      .all(storeId, customerId) as { id: string; number: string; created_at: string; due_date: string; amount: number }[];
+    debits.unshift(...opening.filter((o) => o.amount > 0));
+    debits.sort((a, b) => a.created_at.slice(0, 10).localeCompare(b.created_at.slice(0, 10)));
+    const openingCredit = -opening.filter((o) => o.amount < 0).reduce((t, o) => t + o.amount, 0);
     const returned = this.db
       .prepare(
         `SELECT COALESCE(-SUM(p.amount), 0) FROM sales s JOIN sale_payments p ON p.sale_id = s.id
@@ -251,13 +258,13 @@ export class CustomerService extends Base {
       .get({ s: storeId, c: customerId }) as number;
     const total = debits.reduce((t, d) => t + d.amount, 0);
     const today = this.today();
-    const openItems = allocateOldestFirst(debits, returned + paid)
+    const openItems = allocateOldestFirst(debits, returned + paid + openingCredit)
       .filter((d) => d.remaining > 0)
       .map((d) => {
         const due = d.due_date ?? d.created_at.slice(0, 10);
         return { ...d, due_date: due, days_late: daysLate(due, today), bucket: agingBucket(due, today) };
       });
-    return { balance: total - returned - paid, openItems };
+    return { balance: total - returned - paid - openingCredit, openItems };
   }
 
   account(storeId: string, customerId: string): CustomerAccount {
@@ -316,6 +323,8 @@ export class CustomerService extends Base {
          WHERE s.store_id = @storeId AND s.customer_id = @customerId AND s.status = 'completed' AND p.method = 'CUSTOMER_CREDIT'
          GROUP BY s.id
          UNION ALL
+         SELECT doc_date, 'opening', id, number, amount FROM opening_balances WHERE store_id = @storeId AND customer_id = @customerId
+         UNION ALL
          SELECT paid_at, 'payment', id, number, -amount FROM customer_payments WHERE store_id = @storeId AND customer_id = @customerId
          UNION ALL
          SELECT at, 'rebate', id, number, -amount FROM rebate_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'credit'
@@ -330,6 +339,9 @@ export class CustomerService extends Base {
         (p) => [p.id, p],
       ),
     );
+    const openingRefs = new Map(
+      (this.db.prepare('SELECT id, doc_ref FROM opening_balances WHERE customer_id = ?').all(customerId) as { id: string; doc_ref: string | null }[]).map((o) => [o.id, o.doc_ref]),
+    );
     let opening = 0;
     let running = 0;
     const lines: StatementLine[] = [];
@@ -343,7 +355,9 @@ export class CustomerService extends Base {
       running += r.amount;
       const pay = methods.get(r.ref_id);
       const label =
-        r.kind === 'sale'
+        r.kind === 'opening'
+          ? `Solde repris${openingRefs.get(r.ref_id) ? ` (pièce ${openingRefs.get(r.ref_id)})` : ''}`
+          : r.kind === 'sale'
           ? 'Vente à crédit'
           : r.kind === 'return'
             ? 'Retour de marchandise'
@@ -449,10 +463,11 @@ export class CustomerService extends Base {
     const ids = this.db
       .prepare(
         `SELECT DISTINCT customer_id FROM sales WHERE store_id = ? AND customer_id IS NOT NULL
-         UNION SELECT customer_id FROM customer_payments WHERE store_id = ?`,
+         UNION SELECT customer_id FROM customer_payments WHERE store_id = ?
+         UNION SELECT customer_id FROM opening_balances WHERE store_id = ?`,
       )
       .pluck()
-      .all(storeId, storeId) as string[];
+      .all(storeId, storeId, storeId) as string[];
     const empty = (): Record<AgingBucket, Fcfa> => ({ current: 0, d30: 0, d60: 0, d90: 0, older: 0 });
     const totals = { ...empty(), balance: 0 };
     const reminders = this.lastReminders(storeId);

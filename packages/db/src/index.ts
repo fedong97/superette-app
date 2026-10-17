@@ -41,6 +41,8 @@ import { DigestService } from './digest';
 import { RebateService } from './rebates';
 import { SyncService } from './sync';
 import { TreasuryService } from './treasury';
+import { OpeningService } from './opening';
+import { AssetService } from './assets';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -87,6 +89,8 @@ export * from './syncClient';
 export * from './loyalty';
 export * from './mobilePay';
 export * from './treasury';
+export * from './opening';
+export * from './assets';
 export { AppError, type Clock, type Context } from './util';
 
 export interface Services {
@@ -133,6 +137,8 @@ export interface Services {
   repair: RepairService;
   relay: RelayService;
   templates: TemplateService;
+  opening: OpeningService;
+  assets: AssetService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -178,7 +184,9 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const repair = new RepairService(db, clock, backups);
   const relay = new RelayService(db, clock, sync);
   const templates = new TemplateService(db, clock, admin, catalogue);
-  return { db, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const opening = new OpeningService(db, clock, catalogue, customers, purchases, stock);
+  const assets = new AssetService(db, clock);
+  return { db, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

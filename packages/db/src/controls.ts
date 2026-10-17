@@ -311,7 +311,7 @@ export class ControlService extends Base {
                 group_concat(DISTINCT sp.name) AS suppliers
          FROM reception_lines l JOIN receptions r ON r.id = l.reception_id JOIN articles a ON a.id = l.article_id
          LEFT JOIN suppliers sp ON sp.id = r.supplier_id
-         WHERE r.store_id = @storeId AND date(r.received_at, 'localtime') BETWEEN @from AND @to
+         WHERE r.store_id = @storeId AND r.opening = 0 AND date(r.received_at, 'localtime') BETWEEN @from AND @to
            AND (@supplier IS NULL OR r.supplier_id = @supplier)
          GROUP BY a.id ORDER BY amount_ht DESC`,
       )
@@ -686,6 +686,8 @@ export class ControlService extends Base {
            GROUP BY s.id
            UNION ALL
            SELECT customer_id, paid_at, -amount FROM customer_payments WHERE store_id = @storeId AND date(paid_at, 'localtime') >= @since
+           UNION ALL
+           SELECT customer_id, doc_date, amount FROM opening_balances WHERE store_id = @storeId AND doc_date >= @since
          ) GROUP BY customer_id`,
       )
       .all({ storeId, since }) as { id: string; movements: number; last_at: string; change: number }[];

@@ -1609,4 +1609,57 @@ CREATE TABLE relay_log (
 );
 `,
   },
+  {
+    version: 41,
+    name: "reprise des données d'un magasin existant",
+    sql: `
+-- Ce que doivent les clients le jour de la reprise (négatif : avoir du client), pièce par pièce
+-- pour garder les échéances. Le compte du client et la balance âgée les reprennent comme des ventes à crédit.
+CREATE TABLE opening_balances (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  amount INTEGER NOT NULL,
+  doc_ref TEXT,
+  doc_date TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  user_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX opening_balances_customer ON opening_balances(store_id, customer_id);
+-- Dettes fournisseurs reprises (facture d'origine) et stock de départ : passés en à-nouveaux, pas en achats.
+ALTER TABLE supplier_invoices ADD COLUMN opening INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE receptions ADD COLUMN opening INTEGER NOT NULL DEFAULT 0;
+INSERT OR IGNORE INTO accounts (id, label, role) VALUES ('4711', 'Débiteurs et créditeurs divers (compte d''attente)', NULL);
+`,
+  },
+  {
+    version: 42,
+    name: 'registre des immobilisations',
+    sql: `
+-- Une fiche par bien amortissable : les écritures (acquisition, dotations, sortie) se calculent à partir d'elle.
+CREATE TABLE fixed_assets (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  label TEXT NOT NULL,
+  account TEXT NOT NULL,
+  in_service_on TEXT NOT NULL,
+  recorded_on TEXT NOT NULL,
+  cost INTEGER NOT NULL,
+  duration_months INTEGER NOT NULL,
+  funding TEXT NOT NULL CHECK (funding IN ('supplier', 'bank', 'opening', 'none')),
+  supplier TEXT,
+  notes TEXT,
+  disposed_on TEXT,
+  disposal_kind TEXT CHECK (disposal_kind IN ('sale', 'scrap')),
+  disposal_price INTEGER,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX fixed_assets_store ON fixed_assets(store_id, account);
+`,
+  },
 ];

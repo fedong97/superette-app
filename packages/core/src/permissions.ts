@@ -202,6 +202,8 @@ export const PERMISSIONS = {
   bank_reconciliation: { label: 'Rapprochement bancaire', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   statements: { label: 'États financiers (bilan, compte de résultat, flux)', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   accounting_export: { label: 'Exporter la comptabilité et les ventes (CSV)', group: 'Comptabilité', type: 'Bouton', parent: 'accounting' },
+  fixed_assets: { label: 'Registre des immobilisations et plans d’amortissement', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  fixed_asset_edit: { label: 'Ajouter, modifier, sortir ou supprimer une immobilisation', group: 'Comptabilité', type: 'Bouton', parent: 'journal_entry' },
 
   // --- Divers ------------------------------------------------------------------
   dashboard: { label: "Tableau de bord et points d'attention", group: 'Divers', type: 'Menu', roles: MANAGE },
@@ -215,6 +217,7 @@ export const PERMISSIONS = {
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   print_templates: { label: "Modifier les modèles d'impression (factures, tickets)", group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   backups: { label: 'Faire une sauvegarde et consulter les sauvegardes', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
+  data_takeover: { label: 'Reprendre les données d’un magasin existant (clients, fournisseurs, stock de départ)', group: 'Paramétrage du système', type: 'Fonction', roles: MANAGE },
   audit: { label: "Consulter le journal d'audit", group: 'Paramétrage du système', type: 'Menu', parent: 'admin' },
 } satisfies Record<string, PermissionDef>;
 

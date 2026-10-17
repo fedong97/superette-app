@@ -26,3 +26,4 @@ export * from './payroll';
 export * from './reminder';
 export * from './formats';
 export * from './takeover';
+export * from './assets';

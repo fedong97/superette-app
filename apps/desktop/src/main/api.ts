@@ -32,9 +32,11 @@ import {
   type FileFormat,
   type ImportFormat,
   formatEntries,
+  type TakeoverKind,
 } from '@superette/core';
 import {
   AppError,
+  type AssetInput,
   ficheBanner,
   type FicheKind,
   inspectDossier,
@@ -174,6 +176,8 @@ export interface Printer {
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
+  /** Registre des immobilisations à une date, puis le plan d'amortissement de chaque bien. */
+  assets(storeId: string, at: string, id?: string | null): Promise<void>;
   statements(storeId: string, from: string, to: string): Promise<void>;
   reconciliation(storeId: string, accountId: string, date: string, statementBalance: number | null): Promise<void>;
   taxAssessment(storeId: string, year: number): Promise<void>;
@@ -625,6 +629,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       mkdirSync(templatesDir(), { recursive: true });
       await system.openFolder(templatesDir());
     },
+
+    // --- Reprise des données d'un magasin existant ----------------------------
+    'takeover.summary': () => (requireUser(['data_takeover']), s.opening.summary(ctx().storeId)),
+    /** Le fichier arrive en cellules texte (CSV ou Excel lu par l'écran) ; `preview` ne fait que montrer ce qui serait repris. */
+    'takeover.run': (kind: TakeoverKind, cells: string[][], opts: { preview: boolean; warehouseId?: string | null }) =>
+      s.opening.run(ctx(['data_takeover']), kind, cells, opts),
+
+    // --- Registre des immobilisations -----------------------------------------
+    'assets.list': (opts: { at?: string; includeDisposed?: boolean } = {}) => (requireUser(['fixed_assets']), s.assets.list(ctx().storeId, opts)),
+    'assets.schedule': (id: string) => (requireUser(['fixed_assets']), s.assets.schedule(id)),
+    'assets.save': (input: AssetInput, id?: string) => s.assets.save(ctx(['fixed_asset_edit']), input, id),
+    'assets.dispose': (id: string, input: Parameters<Services['assets']['dispose']>[2]) => s.assets.dispose(ctx(['fixed_asset_edit']), id, input),
+    'assets.remove': (id: string) => s.assets.remove(ctx(['fixed_asset_edit']), id),
+    'assets.print': (at: string, id?: string | null) => (requireUser(['fixed_assets']), printer.assets(ctx().storeId, at, id)),
 
     // --- Formats d'import et d'export paramétrables ---------------------------
     'formats.list': () => (requireUser(), allFormats()),

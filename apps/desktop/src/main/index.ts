@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { AppError, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
+import { AppError, defaultBackupDir, inspectBackup, installFiche, latestGoodBackup, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
 import { createDigestMailer } from './digest';
+import { createDossiers } from './dossiers';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 import { createUpdater } from './updater';
@@ -52,15 +53,75 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+/**
+ * La base ne s'ouvre plus (disque, coupure de courant) : propose de la remplacer par
+ * la dernière bonne sauvegarde. La base abîmée est gardée à côté, jamais effacée.
+ */
+function recoverFromBackup(dbFile: string, error: unknown): boolean {
+  const found = latestGoodBackup(defaultBackupDir(dbFile));
+  const when = found ? new Date(found.created_at).toLocaleString('fr-FR') : null;
+  const choice = dialog.showMessageBoxSync({
+    type: 'error',
+    title: 'Base de données abîmée',
+    message: 'La base de cette boutique ne peut pas être ouverte.',
+    detail: `${dbFile}\n\n${String(error)}\n\n${found ? `Dernière bonne sauvegarde : ${when} (${found.sales} ventes). Les ventes faites depuis seront à ressaisir ; si le PC est relié au serveur central, il les retrouve.` : 'Aucune sauvegarde trouvée dans le dossier « sauvegardes » : choisissez-en une (clé USB, OneDrive…).'}\n\nLa base abîmée est gardée à côté (.abimee) pour le support.`,
+    buttons: [...(found ? [`Restaurer la sauvegarde du ${when}`] : []), 'Choisir une sauvegarde…', 'Quitter'],
+    defaultId: 0,
+    cancelId: found ? 2 : 1,
+    noLink: true,
+  });
+  let file: string | null = null;
+  if (found && choice === 0) file = found.file;
+  else if (choice === (found ? 1 : 0)) {
+    file =
+      dialog.showOpenDialogSync({ title: 'Choisir la sauvegarde à restaurer', filters: [{ name: 'Sauvegarde FEDONIX 360', extensions: ['db'] }], properties: ['openFile'] })?.[0] ?? null;
+  }
+  if (!file) return false;
+  const info = inspectBackup(file);
+  if (!info.ok) {
+    dialog.showErrorBox('Sauvegarde inutilisable', `${file}\n\n${info.error}`);
+    return false;
+  }
+  try {
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+    restoreDatabase(dbFile, file, `${dbFile}.${stamp}.abimee`);
+    return true;
+  } catch (e) {
+    dialog.showErrorBox('Restauration impossible', String(e));
+    return false;
+  }
+}
+
 void app.whenReady().then(() => {
-  const dbFile = process.env['SUPERETTE_DB'] ?? join(app.getPath('userData'), 'superette.db');
+  // Boutique ouverte : la dernière choisie dans « Ouvrir une boutique », sinon la base du PC.
+  const dossiers = createDossiers(app.getPath('userData'), app.getPath('documents'));
+  const dbFile = dossiers.startupFile(process.env['SUPERETTE_DB']);
   let services;
   try {
     services = openServices(dbFile);
   } catch (e) {
-    dialog.showErrorBox('Base de données inaccessible', `${dbFile}\n\n${String(e)}`);
+    // Une boutique illisible (clé retirée, fichier abîmé) ne doit pas empêcher le PC de démarrer sur la sienne.
+    if (dbFile !== dossiers.mainFile && !process.env['SUPERETTE_DB']) {
+      dialog.showErrorBox('Boutique inaccessible', `${dbFile}\n\n${String(e)}\n\nFEDONIX 360 ouvre la boutique principale de ce PC.`);
+      dossiers.remember(dossiers.mainFile);
+      app.relaunch();
+      app.exit(0);
+      return;
+    }
+    // Base abîmée : on propose la dernière bonne sauvegarde au lieu de laisser le PC sans caisse.
+    if (existsSync(dbFile) && recoverFromBackup(dbFile, e)) {
+      app.relaunch();
+      app.exit(0);
+      return;
+    }
     app.quit();
     return;
+  }
+  // Une nouvelle boutique sur ce PC reprend son essai là où il en est, sans le faire recommencer.
+  const ownTrial = services.admin.getSetting('license.trialStart');
+  const trial = dossiers.shareTrial(ownTrial);
+  if (trial && trial !== ownTrial) {
+    services.db.prepare("INSERT INTO settings (key, value) VALUES ('license.trialStart', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(trial);
   }
   // Restauration faite juste avant ce démarrage : on la trace dans la base restaurée.
   const marker = `${dbFile}.restauration.json`;
@@ -78,11 +139,31 @@ void app.whenReady().then(() => {
   const updater = createUpdater(services);
 
   // Sauvegarde automatique : peu après le démarrage, puis selon la fréquence réglée.
-  const autoBackup = () => void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
+  const autoBackup = () => {
+    void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
+    // Copie du comptable dans le dossier partagé, à la fréquence réglée.
+    void services.fiches.autoShare(app.getVersion()).catch((e) => console.warn('[partage]', e));
+  };
   const backupStart = setTimeout(autoBackup, 60_000);
   // Chaque minute : la sauvegarde du jour, celle de la fréquence réglée (toutes les heures…) et celle de l'heure fixe.
   const backupTimer = setInterval(autoBackup, 60_000);
   const digest = createDigestMailer(services);
+  /** Ferme proprement la boutique ouverte (changement de boutique, restauration, installation). */
+  const shutdown = () => {
+    sync.stop();
+    digest.stop();
+    updater.stop();
+    clearTimeout(backupStart);
+    clearInterval(backupTimer);
+    services.db.close();
+  };
+  /** Rouvre FEDONIX 360 sur la boutique retenue, après la réponse à l'écran. */
+  const relaunch = () =>
+    setTimeout(() => {
+      shutdown();
+      app.relaunch();
+      app.exit(0);
+    }, 500);
 
   const system: SystemHooks = {
     chooseFolder: async (title) => {
@@ -109,11 +190,7 @@ void app.whenReady().then(() => {
       const keep = services.backups.localSettings();
       // Laisse partir la réponse à l'écran avant de fermer la base.
       setTimeout(() => {
-        sync.stop();
-        digest.stop();
-        clearTimeout(backupStart);
-        clearInterval(backupTimer);
-        services.db.close();
+        shutdown();
         try {
           restoreDatabase(dbFile, file, safetyFile, keep);
           writeFileSync(marker, JSON.stringify({ userId, file, safetyFile, at: new Date().toISOString() }));
@@ -123,6 +200,46 @@ void app.whenReady().then(() => {
         app.relaunch();
         app.exit(0);
       }, 500);
+    },
+    dossiers: {
+      file: dbFile,
+      dir: dossiers.dir,
+      list: () => dossiers.list(dbFile),
+      open: (file) => {
+        dossiers.remember(file);
+        relaunch();
+      },
+      create: (name) => {
+        const file = dossiers.newFile(name);
+        dossiers.remember(file);
+        relaunch();
+        return file;
+      },
+      forget: (file) => dossiers.forget(file, dbFile),
+      importFile: (file) => dossiers.importFile(file),
+      chooseFile: async (title) => {
+        const r = await dialog.showOpenDialog({
+          title,
+          filters: [
+            { name: 'Fiche FEDONIX 360', extensions: ['fedonix', 'fedonixz'] },
+            { name: 'Base FEDONIX 360', extensions: ['db'] },
+          ],
+          properties: ['openFile'],
+        });
+        return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+      install: (file) => {
+        setTimeout(() => {
+          shutdown();
+          try {
+            installFiche(dbFile, file);
+          } catch (e) {
+            dialog.showErrorBox('Installation impossible', `${String(e)}\n\nRien n'a été modifié sur ce PC.`);
+          }
+          app.relaunch();
+          app.exit(0);
+        }, 500);
+      },
     },
   };
   const api = createApi(services, createPrinter(services), sync, app.getVersion(), system);
@@ -142,12 +259,7 @@ void app.whenReady().then(() => {
   createWindow();
 
   app.on('before-quit', () => {
-    clearTimeout(backupStart);
-    clearInterval(backupTimer);
-    sync.stop();
-    digest.stop();
-    updater.stop();
-    services.db.close();
+    if (services.db.open) shutdown();
   });
 });
 

@@ -20,6 +20,7 @@ import { Quotes } from './screens/Quotes';
 import { Purchases, type PurchasesTab } from './screens/Purchases';
 import { EDIT_SALE_EVENT, SaleDetail, Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
+import { DossierPicker, FicheBanner, saveFicheCopy } from './screens/Dossiers';
 import { Staff, type StaffTab } from './screens/Staff';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
@@ -79,7 +80,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
+  action?: 'logout' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
   /** Trait de séparation entre deux groupes, comme dans KONTROL. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -157,6 +158,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Personnaliser les onglets rapides', action: 'tabs' },
       { label: 'Personnaliser la barre latérale', action: 'rail' },
       { label: "Changer d'utilisateur", action: 'logout' },
+      { label: 'Ouvrir une boutique…', action: 'dossiers', adminOnly: true },
       { label: 'Quitter', action: 'quit' },
     ],
   ],
@@ -375,6 +377,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Exercices comptables', open: ['admin', 'fiscal'], perm: ['accounting', 'fiscal_years'] },
       { label: "Modèles d'impression", open: ['admin', 'templates'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
+      { label: 'Fiches boutique', open: ['admin', 'fiches'] },
+      { label: 'Réparation', open: ['admin', 'repair'], adminOnly: true },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: 'Licence', open: ['admin', 'license'] },
       { label: 'Résumé du jour', open: ['admin', 'digest'], perm: 'dashboard' },
@@ -440,7 +444,7 @@ export function App() {
       {!state.initialized ? (
         <Setup onDone={refresh} />
       ) : !state.user ? (
-        <Login station={state.station} onDone={refresh} />
+        <Login station={state.station} fiche={state.dossier.fiche} onDone={refresh} />
       ) : (
         <Workspace key={state.user.id} state={state} user={state.user} refresh={refresh} />
       )}
@@ -459,6 +463,8 @@ function licenseLabel(l: AppState['license']): string {
       return `Licence à renouveler${days}`;
     case 'grace':
       return `Licence expirée : ventes arrêtées dans ${l.daysLeft} j`;
+    case 'fiche':
+      return 'Fiche emportée : pas de vente';
     default:
       return 'Licence : ventes bloquées';
   }
@@ -487,12 +493,19 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Place du menu ouvert depuis la barre verte (elle défile : le menu s'affiche par-dessus). */
   const [menuAt, setMenuAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const [finding, setFinding] = useState(false);
+  const [dossiers, setDossiers] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
   // Menu du clic droit : sur un onglet rapide (le déplacer, le retirer) ou sur un écran d'un menu (l'épingler).
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; tab?: number; pin?: QuickTab } | null>(null);
   const [prefs, setPrefs] = useState<Record<string, unknown>>(state.prefs ?? {});
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
+  // Fiches déposées dans le dossier partagé : regardé moins souvent (dossier réseau ou cloud).
+  const fichesWaiting = useLoad(() => (user.role === 'admin' ? call('fiche.pendingCount') : Promise.resolve(0)), []);
+  useEffect(() => {
+    const t = setInterval(() => fichesWaiting.reload(), 120_000);
+    return () => clearInterval(t);
+  }, []);
   const chargesLate = useLoad(() => call('charges.late'), []);
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
   const update = useLoad(() => call('update.state'), []);
@@ -677,6 +690,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.soon) return;
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
+    if (item.action === 'dossiers') return setDossiers(true);
     if (item.action === 'quit') return window.close();
     if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail') return setHelp(item.action);
     if (item.action === 'help') return setHelp('page');
@@ -863,6 +877,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           ?
         </button>
       </header>
+      {state.dossier.fiche && <FicheBanner fiche={state.dossier.fiche} onSaveCopy={() => void saveFicheCopy(toast)} />}
       <main className="windows" ref={areaRef}>
         {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
         <section className={`home ${showHome ? 'front' : ''}`}>
@@ -950,7 +965,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
-            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
+            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload(), fichesWaiting.reload())} initialTab={w.tab as AdminTab | undefined} />}
             </RefreshCtx.Provider>
           </MdiWindow>
         ))}
@@ -969,6 +984,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           {user.name} ({ROLE_LABELS[user.role]})
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
+        {Boolean(fichesWaiting.data) && canWin('admin') && (
+          <button className="warn soft" onClick={() => open('admin', 'fiches', 'Administration › Fiches boutique')} title="Fiches déposées dans le dossier partagé">
+            {fichesWaiting.data === 1 ? '1 fiche à rapporter' : `${fichesWaiting.data} fiches à rapporter`}
+          </button>
+        )}
         {backupLate.data && canWin('admin') && (
           <button className="warn" onClick={() => open('admin', 'backups', 'Administration › Sauvegardes')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
@@ -1175,6 +1195,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           </table>
         </Modal>
       )}
+      {dossiers && <DossierPicker onClose={() => setDossiers(false)} />}
       {finding && (
         <OpenInvoice
           onClose={() => setFinding(false)}

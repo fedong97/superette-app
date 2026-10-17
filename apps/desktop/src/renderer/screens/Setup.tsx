@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { call } from '../api';
 import logo from '../assets/logo.png';
-import { Field, useToast } from '../ui';
+import { Field, askConfirm, useToast } from '../ui';
+import { DossierPicker } from './Dossiers';
 
 /** Premier démarrage : création du premier magasin et du compte administrateur. */
 export function Setup({ onDone }: { onDone: () => void }) {
@@ -58,8 +59,24 @@ function Join({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   );
 }
 
+/** PC du client : la boutique préparée au bureau (Administration › Fiches boutique) s'installe telle quelle. */
+async function installPrepared(toast: ReturnType<typeof useToast>) {
+  try {
+    const info = await call('dossier.chooseFile');
+    if (!info) return;
+    if (!info.ok) return toast.error(info.error ?? 'Fichier illisible');
+    if (info.fiche?.kind !== 'installation') return toast.error("Ce fichier n'est pas une installation préparée : au bureau, faites Administration › Fiches boutique › Préparer l'installation");
+    if (!(await askConfirm(`Installer sur ce PC la boutique « ${info.store_name} » (${info.articles} articles) ? FEDONIX 360 redémarre dessus ; connectez-vous avec les utilisateurs créés au bureau.`))) return;
+    await call('setup.installFiche', info.file);
+    toast.ok('Installation… FEDONIX 360 redémarre');
+  } catch (err) {
+    toast.error(err);
+  }
+}
+
 function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }) {
   const toast = useToast();
+  const [dossiers, setDossiers] = useState(false);
   const [f, setF] = useState({ storeCode: '', storeName: '', address: '', phone: '', taxpayerNumber: '', adminName: '', adminLogin: '', adminPin: '', pin2: '' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   /** Beaucoup de superettes sont au régime simplifié : pas de TVA tant qu'on ne la coche pas. */
@@ -84,6 +101,10 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
           Bienvenue dans FEDONIX 360
         </h1>
         <p>Première installation : renseignez votre magasin et le compte administrateur. Vous pourrez ajouter d'autres magasins et caisses ensuite.</p>
+        <p className="muted">
+          Boutique préparée au bureau ? <button type="button" className="link" onClick={() => void installPrepared(toast)}>Installer une boutique préparée…</button> · Fiche apportée par le technicien ou le
+          comptable ? <button type="button" className="link" onClick={() => setDossiers(true)}>Ouvrir une boutique…</button>
+        </p>
         <h3>Magasin</h3>
         <div className="grid2">
           <Field label="Code magasin" hint="2 à 6 caractères, ex. DLA1">
@@ -134,6 +155,7 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
           </button>
         </div>
       </form>
+      {dossiers && <DossierPicker onClose={() => setDossiers(false)} />}
     </div>
   );
 }

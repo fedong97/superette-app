@@ -118,7 +118,12 @@ export function restoreDatabase(dbFile: string, backupFile: string, safetyFile: 
   mkdirSync(dirname(safetyFile), { recursive: true });
   if (existsSync(dbFile)) {
     copyFileSync(dbFile, safetyFile);
-    standalone(safetyFile);
+    if (existsSync(`${dbFile}-wal`)) copyFileSync(`${dbFile}-wal`, `${safetyFile}-wal`);
+    try {
+      standalone(safetyFile);
+    } catch {
+      // Base abîmée gardée telle quelle (avec son journal) pour le support.
+    }
   }
   const tmp = `${dbFile}.restore`;
   copyFileSync(backupFile, tmp);
@@ -305,6 +310,8 @@ export class BackupService extends Base {
 
   /** Sauvegarde automatique, n'échoue jamais (l'erreur est gardée pour l'afficher). */
   async runAutomatic(force = false): Promise<BackupInfo | null> {
+    // Une fiche emportée est déjà une copie : pas de sauvegardes automatiques à côté d'elle.
+    if (this.db.prepare("SELECT 1 FROM settings WHERE key = 'fiche.meta'").get()) return null;
     if (!force && !this.autoDue()) return null;
     if (!this.status().dir) return null;
     try {

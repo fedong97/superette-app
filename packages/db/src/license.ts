@@ -3,6 +3,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import type { Db } from './database';
+import { ficheBanner, readFicheMeta } from './fiches';
 import { AppError, Base, type Clock } from './util';
 
 /**
@@ -50,7 +51,7 @@ export interface LicensePayload {
   contact?: string;
 }
 
-export type LicenseState = 'trial' | 'trial_over' | 'valid' | 'grace' | 'expired' | 'invalid' | 'other_machine' | 'clock';
+export type LicenseState = 'trial' | 'trial_over' | 'valid' | 'grace' | 'expired' | 'invalid' | 'other_machine' | 'clock' | 'fiche';
 
 export interface LicenseStatus {
   state: LicenseState;
@@ -207,6 +208,9 @@ export class LicenseService extends Base {
   status(): LicenseStatus {
     const machineCode = this.machineCode();
     const base = { machineCode, license: null as LicensePayload | null, daysLeft: null as number | null };
+    // Fiche emportée (technicien, comptable) : on y travaille sans licence, mais on n'y vend jamais.
+    const fiche = readFicheMeta(this.db);
+    if (fiche && fiche.kind !== 'installation') return { ...base, state: 'fiche', canSell: false, warn: true, message: ficheBanner(fiche) };
     // Date reculée : on refuse de vendre plutôt que de prolonger une licence.
     const now = this.clock().getTime();
     const lastSeen = Date.parse(this.get('license.lastSeen') ?? '');

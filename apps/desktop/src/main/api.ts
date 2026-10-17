@@ -33,6 +33,9 @@ import {
   type ImportFormat,
   formatEntries,
   type TakeoverKind,
+  type CustomerDisplayMode,
+  type CustomerDisplayState,
+  CUSTOMER_DISPLAY_MODES,
 } from '@superette/core';
 import {
   AppError,
@@ -105,6 +108,7 @@ import {
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { CustomerDisplay } from './customerDisplay';
 import type { DossierEntry } from './dossiers';
 import type { SyncRunner } from './sync';
 import type { Updater } from './updater';
@@ -135,6 +139,8 @@ export interface SystemHooks {
     /** Ferme la base vide de ce PC, la remplace par l'installation préparée et relance. */
     install(file: string): void;
   };
+  /** Afficheur client branché au PC de caisse (absent dans les tests). */
+  customerDisplay?: CustomerDisplay;
   /** Fenêtre de choix d'un fichier d'un type donné (modèle de boutique, fichier de journée). */
   chooseOpenFile?(title: string, name: string, extensions: string[]): Promise<string | null>;
 }
@@ -237,6 +243,12 @@ const LOCAL_SETTINGS = [
   'drawer.mode',
   'ticket.footer',
   'display.size',
+  'display.customer',
+  'display.customerScreen',
+  'display.customerPort',
+  'display.customerBaud',
+  'display.customerColumns',
+  'display.customerMessage',
   'pos.layout',
   'printer.listing',
   'printer.labels',
@@ -790,6 +802,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         else s.admin.setSetting(k, v);
       }
     },
+    /** Afficheur client : l'écran de caisse envoie le ticket en cours, ce PC le dessine. Jamais d'erreur pour la vente. */
+    'display.show': (state: CustomerDisplayState) => {
+      const station = s.admin.station();
+      if (!system.customerDisplay || !user || !station) return;
+      const mode = (s.admin.getSetting('display.customer') ?? 'off') as CustomerDisplayMode;
+      if (!(mode in CUSTOMER_DISPLAY_MODES)) return;
+      const storeId = station.store.id;
+      system.customerDisplay.show(state, {
+        mode,
+        screen: Number(s.admin.getSetting('display.customerScreen')) || 2,
+        port: (s.admin.getSetting('display.customerPort') ?? '').trim(),
+        baud: Number(s.admin.getSetting('display.customerBaud')) || 9600,
+        columns: Number(s.admin.getSetting('display.customerColumns')) || 20,
+        welcome: s.admin.getSetting('display.customerMessage') ?? '',
+        storeName: s.admin.getStore(storeId).name,
+        logo: mode === 'screen' ? s.admin.storeSettings(storeId).logo || null : null,
+      });
+    },
+    /** Écrans branchés à ce PC, pour choisir celui qui fait face au client. */
+    'display.screens': () => (requireUser(), system.customerDisplay?.screens() ?? []),
     /** Nom, adresse, téléphone et NIU du magasin de ce poste. */
     'admin.updateStoreIdentity': (patch: { name?: string; address?: string | null; phone?: string | null; taxpayer_number?: string | null }) => {
       const c = ctx(['settings_edit']);

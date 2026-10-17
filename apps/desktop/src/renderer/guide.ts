@@ -109,6 +109,24 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.62.0',
+    items: [
+      'Afficheur client : le client voit l’article scanné, le total à payer puis la monnaie rendue, sur un deuxième écran (avec votre logo) ou sur un petit afficheur à deux lignes. Réglage dans Administration › Paramètres, section « Afficheur client ».',
+    ],
+  },
+  {
+    version: '0.61.0',
+    items: [
+      'Comptabilité › Immobilisations : enregistrez congélateurs, PC, véhicules et travaux du magasin. Le plan d’amortissement se calcule seul et s’imprime ; la dotation est passée à chaque fin d’exercice, et la vente ou la mise au rebut d’un bien passe ses écritures.',
+    ],
+  },
+  {
+    version: '0.60.0',
+    items: [
+      'Administration › Reprise des données : pour un magasin qui arrive de KONTROL, Sage, Excel ou d’un cahier, importez ses clients avec ce qu’ils doivent, ses fournisseurs avec ce que vous leur devez, et son stock de départ. Chaque fichier se vérifie d’abord en aperçu ; les écritures d’à-nouveaux se passent seules.',
+    ],
+  },
+  {
     version: '0.59.1',
     items: ['Administration : les onglets passent sur deux lignes au lieu de déborder, et la page s’affiche en entier.'],
   },

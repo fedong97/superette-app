@@ -27,3 +27,4 @@ export * from './reminder';
 export * from './formats';
 export * from './takeover';
 export * from './assets';
+export * from './customerDisplay';

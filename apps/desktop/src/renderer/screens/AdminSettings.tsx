@@ -1,4 +1,4 @@
-import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, CUSTOMER_DISPLAY_MODES, type CustomerDisplayMode, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -78,6 +78,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   const local = useLoad(() => call('admin.settings'));
   const store = useLoad(() => call('admin.storeSettings'));
   const printers = useLoad(() => call('admin.printers'));
+  const screens = useLoad(() => call('display.screens'));
   const barcodeInfo = useLoad(() => call('barcode.info'));
   const emoney = useLoad(() => call('emoney.registers'));
   const templates = useLoad(() => call('docs.templates'));
@@ -157,6 +158,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
     }
   };
   const mode = v('printer.mode', 'driver');
+  const displayMode = v('display.customer', 'off') as CustomerDisplayMode;
   const logo = sv('logo');
 
   const sections: [string, string, Item[]][] = [
@@ -762,6 +764,71 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
             </span>
           ),
         },
+      ],
+    ],
+    [
+      'Afficheur client (ce PC de caisse)',
+      'Le client voit l’article scanné, le total à payer puis la monnaie rendue. Une panne de l’afficheur ne bloque jamais la vente.',
+      [
+        {
+          label: 'Afficheur',
+          render: () => (
+            <select disabled={!canEdit} value={displayMode} onChange={set('display.customer')}>
+              {(Object.keys(CUSTOMER_DISPLAY_MODES) as CustomerDisplayMode[]).map((m) => (
+                <option key={m} value={m}>
+                  {CUSTOMER_DISPLAY_MODES[m]}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+        ...(displayMode === 'screen'
+          ? [
+              {
+                label: 'Écran du client',
+                hint: 'Le deuxième écran ou la télévision branchée au PC, en mode « Étendre » dans Windows. Le logo vient de Paramètres › Magasin.',
+                render: () => (
+                  <select disabled={!canEdit} value={v('display.customerScreen', '2')} onChange={set('display.customerScreen')}>
+                    {(screens.data?.length ? screens.data : [{ index: 2, label: 'Écran 2', primary: false }]).map((d) => (
+                      <option key={d.index} value={String(d.index)}>
+                        {d.label}
+                        {d.primary ? ' : écran principal' : ''}
+                      </option>
+                    ))}
+                  </select>
+                ),
+              },
+            ]
+          : []),
+        ...(displayMode === 'vfd'
+          ? [
+              { label: 'Port série', hint: 'Gestionnaire de périphériques › Ports (COM et LPT)', render: () => <input disabled={!canEdit} value={v('display.customerPort')} placeholder="COM3" onChange={set('display.customerPort')} /> },
+              {
+                label: 'Vitesse',
+                render: () => (
+                  <select disabled={!canEdit} value={v('display.customerBaud', '9600')} onChange={set('display.customerBaud')}>
+                    {['2400', '4800', '9600', '19200', '38400'].map((b) => (
+                      <option key={b} value={b}>
+                        {b} bauds
+                      </option>
+                    ))}
+                  </select>
+                ),
+              },
+              {
+                label: 'Caractères par ligne',
+                render: () => (
+                  <select disabled={!canEdit} value={v('display.customerColumns', '20')} onChange={set('display.customerColumns')}>
+                    <option value="16">16</option>
+                    <option value="20">20</option>
+                  </select>
+                ),
+              },
+            ]
+          : []),
+        ...(displayMode !== 'off'
+          ? [{ label: 'Message d’accueil', hint: 'Entre deux clients', render: () => <input disabled={!canEdit} value={v('display.customerMessage')} placeholder="Bienvenue" onChange={set('display.customerMessage')} /> }]
+          : []),
       ],
     ],
     [

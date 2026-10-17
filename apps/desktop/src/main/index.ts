@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { AppError, defaultBackupDir, inspectBackup, installFiche, latestGoodBackup, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
+import { createCustomerDisplay } from './customerDisplay';
 import { createDigestMailer } from './digest';
 import { createDossiers } from './dossiers';
 import { createPrinter } from './print';
@@ -17,6 +18,9 @@ app.setPath('userData', join(app.getPath('appData'), 'Superette Gestion'));
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
+
+/** Fenêtre de l'application (l'afficheur client est une autre fenêtre). */
+let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -148,8 +152,10 @@ void app.whenReady().then(() => {
   // Chaque minute : la sauvegarde du jour, celle de la fréquence réglée (toutes les heures…) et celle de l'heure fixe.
   const backupTimer = setInterval(autoBackup, 60_000);
   const digest = createDigestMailer(services);
+  const customerDisplay = createCustomerDisplay();
   /** Ferme proprement la boutique ouverte (changement de boutique, restauration, installation). */
   const shutdown = () => {
+    customerDisplay.close();
     sync.stop();
     digest.stop();
     updater.stop();
@@ -189,6 +195,7 @@ void app.whenReady().then(() => {
     },
     digest: { seal: digest.seal, sendNow: digest.sendNow },
     updater,
+    customerDisplay,
     restore: (file, userId) => {
       const safetyFile = services.backups.safetyFile();
       const keep = services.backups.localSettings();
@@ -260,7 +267,12 @@ void app.whenReady().then(() => {
     }
   });
 
-  createWindow();
+  mainWindow = createWindow();
+  // L'afficheur client ne garde pas l'application ouverte quand la caisse se ferme.
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    customerDisplay.close();
+  });
 
   app.on('before-quit', () => {
     if (services.db.open) shutdown();
@@ -268,7 +280,7 @@ void app.whenReady().then(() => {
 });
 
 app.on('second-instance', () => {
-  const win = BrowserWindow.getAllWindows()[0];
+  const win = mainWindow;
   if (win) {
     if (win.isMinimized()) win.restore();
     win.focus();

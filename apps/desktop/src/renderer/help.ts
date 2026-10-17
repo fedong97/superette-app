@@ -174,6 +174,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Le gérant crée l’inventaire (global ou par rayons) ; la liste des produits s’affiche.',
           'Tapez les quantités comptées, Entrée passe à la ligne suivante. Les ventes faites pendant le comptage sont déduites.',
+          'Sur téléphone : les compteurs installent FEDONIX 360 Inventaire (Android). Le gérant ouvre FEDONIX 360 Gérant › Inventaire, affiche le QR code et le téléphone le scanne. Les quantités comptées arrivent ici toutes seules.',
           'Le gérant clôture : le stock est corrigé et la fiche d’écarts s’imprime.',
         ],
       },

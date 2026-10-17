@@ -90,6 +90,36 @@ const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> =
 };
 
 /**
+ * Données qu'un serveur doit avoir pour que les autres PC et les téléphones
+ * voient le magasin, dans l'ordre des dépendances. Un serveur réinstallé, ou
+ * une base restaurée depuis une sauvegarde, peut ne pas les avoir alors que la
+ * file d'envoi du PC est vide : elles sont renvoyées (voir `resendTargets`).
+ */
+const RESEND: { entity: string; ids: string; store?: boolean }[] = [
+  { entity: 'vat_rate', ids: 'SELECT id FROM vat_rates' },
+  { entity: 'store', ids: 'SELECT id FROM stores' },
+  { entity: 'warehouse', ids: 'SELECT id FROM warehouses' },
+  { entity: 'register', ids: 'SELECT id FROM registers' },
+  { entity: 'user', ids: 'SELECT id FROM users' },
+  { entity: 'role_rights', ids: 'SELECT id FROM role_rights' },
+  { entity: 'user_rights', ids: 'SELECT id FROM user_rights' },
+  { entity: 'department', ids: 'SELECT id FROM departments' },
+  { entity: 'family', ids: 'SELECT id FROM families' },
+  { entity: 'article', ids: 'SELECT id FROM articles' },
+  { entity: 'store_price', ids: "SELECT article_id || ':' || store_id FROM store_prices" },
+  { entity: 'supplier', ids: 'SELECT id FROM suppliers' },
+  { entity: 'supplier_article', ids: 'SELECT id FROM supplier_articles' },
+  { entity: 'customer', ids: 'SELECT id FROM customers' },
+  { entity: 'account', ids: 'SELECT id FROM accounts' },
+  { entity: 'expense_category', ids: 'SELECT id FROM expense_categories' },
+  { entity: 'promotion', ids: 'SELECT id FROM promotions' },
+  { entity: 'rebate_rules', ids: "SELECT DISTINCT COALESCE(customer_id, 'base') FROM rebate_rules" },
+  { entity: 'recipe', ids: 'SELECT id FROM recipes' },
+  { entity: 'stock_level', ids: "SELECT s.warehouse_id || ':' || s.article_id FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ?", store: true },
+  { entity: 'inventory', ids: 'SELECT id FROM inventories WHERE store_id = ?', store: true },
+];
+
+/**
  * Synchronisation avec le serveur central, côté poste.
  *
  * - Envoi : chaque ligne de la file `outbox` part avec l'état actuel de
@@ -207,6 +237,36 @@ export class SyncService extends Base {
         payload,
       };
     });
+  }
+
+  /** Ce PC a-t-il déjà vérifié que ce serveur a toutes ses données de référence ? */
+  resendChecked(): boolean {
+    const deviceId = this.get('sync.deviceId');
+    return Boolean(deviceId) && this.get('sync.resendChecked') === deviceId;
+  }
+
+  markResendChecked(): void {
+    const deviceId = this.get('sync.deviceId');
+    if (deviceId) this.set('sync.resendChecked', deviceId);
+  }
+
+  /** Identifiants de chaque donnée de référence de ce PC (le stock et les inventaires : seulement ceux du magasin). */
+  resendTargets(storeId: string | null): { entity: string; ids: string[]; storeId: string | null }[] {
+    return RESEND.filter((r) => !r.store || storeId).map((r) => ({
+      entity: r.entity,
+      ids: (r.store ? this.db.prepare(r.ids).pluck().all(storeId) : this.db.prepare(r.ids).pluck().all()) as string[],
+      // Le stock part comme celui de `publishStock` : visible de tous les magasins.
+      storeId: r.entity === 'inventory' ? storeId : null,
+    }));
+  }
+
+  /** Remet des données dans la file d'envoi (sauf celles qui y attendent déjà). */
+  requeue(entity: string, ids: string[], storeId: string | null): number {
+    if (ids.length === 0) return 0;
+    const pending = new Set(this.db.prepare('SELECT entity_id FROM outbox WHERE sent_at IS NULL AND entity = ?').pluck().all(entity) as string[]);
+    const fresh = ids.filter((id) => !pending.has(id));
+    this.tx(() => fresh.forEach((id) => this.enqueue(storeId ? { storeId, registerId: null } : null, entity, id, 'upsert', {})));
+    return fresh.length;
   }
 
   markSent(ids: string[]): void {

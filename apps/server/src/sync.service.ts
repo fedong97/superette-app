@@ -102,7 +102,7 @@ export class SyncService {
   private async checkStations() {
     const license = await this.currentLicense();
     if (!license) return;
-    const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL');
+    const { rows } = await this.pg.query<{ n: string }>("SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL AND kind = 'pc'");
     if (Number(rows[0]!.n) >= license.stations) {
       throw new ForbiddenException(`La licence permet ${license.stations} PC : demandez une licence pour plus de postes.`);
     }
@@ -158,7 +158,7 @@ export class SyncService {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     if (!token) throw new UnauthorizedException('Jeton manquant');
     const { rows } = await this.pg.query<Device>(
-      'UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id, name, store_id, register_id',
+      "UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id, name, store_id, register_id",
       [hashToken(token), /^\d+\.\d+\.\d+$/.test(appVersion ?? '') ? appVersion : null],
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');
@@ -183,6 +183,20 @@ export class SyncService {
       }
     });
     return { accepted: events.map((e) => e.id) };
+  }
+
+  /**
+   * Identifiants que le serveur a pour une entité (partagée, ou du magasin du
+   * poste) : le PC renvoie ce qui manque après une réinstallation du serveur.
+   */
+  async known(device: Device, entity: string): Promise<{ ids: string[] }> {
+    if (!KNOWN_ENTITIES.has(entity)) throw new BadRequestException(`Entité inconnue : ${String(entity).slice(0, 50)}`);
+    const global = GLOBAL_ENTITIES.includes(entity);
+    const { rows } = await this.pg.query<{ entity_id: string }>(
+      `SELECT DISTINCT entity_id FROM events WHERE entity = $1 ${global ? '' : 'AND (store_id = $2 OR store_id IS NULL)'}`,
+      global ? [entity] : [entity, device.store_id],
+    );
+    return { ids: rows.map((r) => r.entity_id) };
   }
 
   /** Opérations des autres postes : données partagées + celles du magasin du poste. */

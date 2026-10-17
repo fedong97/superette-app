@@ -515,6 +515,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'sync.state': () => (requireUser(), s.sync.state()),
     'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
+    'sync.resend': () => (requireAdmin(), sync.resend()),
     'sync.conflicts': () => (requireUser(ADMIN), s.sync.conflicts()),
     'sync.disconnect': () => {
       requireAdmin();

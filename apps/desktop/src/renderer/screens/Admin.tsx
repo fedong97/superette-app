@@ -864,6 +864,26 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 Délier ce PC
               </button>
             )}
+            {isAdmin && (
+              <button
+                disabled={busy}
+                title="Produits, rayons, dépôts, utilisateurs, stock et inventaires que le serveur n'a pas (serveur réinstallé, sauvegarde restaurée)"
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const r = await call('sync.resend');
+                    toast.ok(r.queued ? `${r.queued} donnée(s) renvoyée(s) au serveur` : 'Le serveur avait déjà toutes les données de ce PC');
+                  } catch (err) {
+                    toast.error(err);
+                  } finally {
+                    setBusy(false);
+                    state.reload();
+                  }
+                }}
+              >
+                Renvoyer au serveur ce qui lui manque
+              </button>
+            )}
             <button className="primary" disabled={busy} onClick={() => act(() => call('sync.now'))}>
               Synchroniser maintenant
             </button>

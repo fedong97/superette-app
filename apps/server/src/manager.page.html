@@ -21,6 +21,7 @@
   header { position: sticky; top: 0; z-index: 5; background: var(--vert); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
   header .haut { display: flex; align-items: center; gap: 10px; }
   header h1 { font-size: 17px; margin: 0; font-weight: 600; flex: 1; }
+  header .lien { color: #fff; border: 1px solid rgba(255,255,255,.55); padding: 6px 10px; border-radius: 999px; text-decoration: none; font-size: 14px; }
   header button { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.55); padding: 6px 10px; }
   .jours { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; }
   .jours button, .magasins button { white-space: nowrap; }
@@ -203,6 +204,7 @@
       <header>
         <div class="haut"><h1>${shown ? esc(shown.name) : 'FEDONIX 360 Gérant'}</h1>
           ${installPrompt ? '<button id="installer2">Installer</button>' : ''}
+          <a href="/gerant/inventaire" class="lien">Inventaire</a>
           <button id="actualiser" title="Actualiser">⟳</button></div>
         <div class="jours">
           <button data-jour="${auj()}" class="${day === auj() ? 'actif' : ''}">Aujourd’hui</button>

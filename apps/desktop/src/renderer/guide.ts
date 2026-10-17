@@ -109,6 +109,33 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.57.0',
+    items: [
+      'Serveur central : le PC vérifie que le serveur a bien tous ses produits, rayons, dépôts, utilisateurs, stocks et inventaires, et lui renvoie seul ce qui manque (serveur réinstallé, sauvegarde restaurée). Le téléphone d’inventaire retrouve ainsi le catalogue.',
+      'Administration › Serveur central › « Renvoyer au serveur ce qui lui manque » fait cette vérification à la demande. Rien n’est effacé ni envoyé en double.',
+    ],
+  },
+  {
+    version: '0.56.0',
+    items: [
+      'Inventaire sur téléphone : les codes-barres et les noms sont retrouvés même sur un gros catalogue. Les photos ne sont plus téléchargées avec le catalogue (une fiche affiche la sienne à l’ouverture), et un code ou un nom introuvable sur le téléphone est cherché sur le serveur.',
+      'Mode fichier, sans serveur ni Wi-Fi : le téléphone ouvre la fiche à remplir du PC (Excel ou CSV) ou un fichier texte « code;nom (conditionnement);quantité », on compte, puis « Exporter la fiche remplie » l’envoie par WhatsApp ou e-mail ; le PC la reprend avec le bouton Importer de l’inventaire.',
+      'Onglet Produits : tous les produits de l’inventaire à toucher pour les compter, avec « 120 / 450 comptés » et les filtres À compter, Comptés, Tous et par rayon.',
+      'Menu ☰ de l’inventaire : remettre à 0 un endroit ou tout l’inventaire (après confirmation), et mon récapitulatif par endroit à partager en fichier.',
+      'Inventaires En cours et Clôturés : quand le gérant clôture sur le PC, mes comptages restent consultables sur le téléphone.',
+      'Aides sans compte (famille, intérimaires) : sur FEDONIX 360 Gérant › Inventaire, « Ajouter un aide » donne un QR code et un code à 6 chiffres. L’aide compte tout de suite, sans identifiant, seulement cet inventaire, sans prix ni stock attendu ; l’accès s’arrête à la clôture ou après 24 h, et « Couper » l’arrête aussitôt. Sur le PC ses comptages sont signés au nom du responsable choisi, le gérant voit son nom.',
+    ],
+  },
+  {
+    version: '0.55.0',
+    items: [
+      'Application Android FEDONIX 360 Inventaire : le compteur scanne les codes-barres avec l’appareil photo (ou une douchette Bluetooth), tape la quantité en cartons et unités, et compte même sans réseau ; tout part au serveur dès que le Wi-Fi revient.',
+      'Le téléphone se relie au magasin avec le QR code de FEDONIX 360 Gérant › Inventaire ; chaque compteur se connecte avec son identifiant et son code (droit « Saisir le stock physique »).',
+      'Un même produit compté au rayon et en réserve s’additionne. Mode rafale : chaque scan ajoute 1. Code inconnu : photo et nom envoyés au gérant.',
+      'Le gérant suit l’avancement par rayon et par compteur (produits par heure), confie des rayons à chacun, et fait recompter par un collègue les gros écarts. La clôture reste sur le PC.',
+    ],
+  },
+  {
     version: '0.54.0',
     items: [
       'Paiement Mobile Money automatique : à l’encaissement, MTN MoMo ou Orange Money › « Demander le paiement » envoie la demande au téléphone du client ; il confirme avec son code et la référence s’ajoute toute seule.',

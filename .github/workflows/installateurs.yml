@@ -1,6 +1,7 @@
 # Installateurs Windows : FEDONIX 360 (caisse) et FEDONIX 360 Serveur, construits sur Windows
 # à chaque demande de fusion ou à la demande (Actions › Installateurs › Run workflow).
-# Les deux fichiers .exe se téléchargent dans l'onglet « Summary » de l'exécution (Artifacts).
+# L'application Android FEDONIX 360 Inventaire (.apk) est construite sur Linux.
+# Les fichiers .exe et .apk se téléchargent dans l'onglet « Summary » de l'exécution (Artifacts).
 name: Installateurs
 
 on:
@@ -36,5 +37,52 @@ jobs:
             apps/desktop/release/*.exe
             apps/desktop/release/latest.yml
             apps/server-app/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    name: Application Android d'inventaire
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Pages de l'application
+        working-directory: apps/inventory
+        run: npx vite build && npx cap sync android
+      # Clé de signature gardée dans les secrets du dépôt, si elle y est ; sinon celle du dépôt.
+      - name: Clé de signature
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/fedonix.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/fedonix.jks" >> "$GITHUB_ENV"
+          fi
+      - name: APK
+        working-directory: apps/inventory/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          version=$(node -p "require('../../../package.json').version")
+          mkdir -p ../release
+          cp app/build/outputs/apk/release/app-release.apk "../release/Fedonix360-Inventaire-$version.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FEDONIX-360-Inventaire-android
+          path: apps/inventory/release/*.apk
           if-no-files-found: error
           retention-days: 30

@@ -1590,4 +1590,23 @@ CREATE TABLE fiche_log (
 );
 `,
   },
+  {
+    version: 40,
+    name: 'remontées des postes distants',
+    sql: `
+-- Fichiers de journée échangés avec un poste distant (dépôt sans réseau) : remontée du poste vers la
+-- boutique, mise à jour de la boutique vers le poste. Un fichier n'est intégré qu'une fois.
+CREATE TABLE relay_log (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('remontee', 'miseajour')),
+  direction TEXT NOT NULL CHECK (direction IN ('out', 'in')),
+  store_id TEXT NOT NULL,
+  file TEXT NOT NULL,
+  events INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  user_id TEXT,
+  summary TEXT
+);
+`,
+  },
 ];

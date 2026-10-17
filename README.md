@@ -191,6 +191,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Dossier partagé (dossier réseau, OneDrive, Google Drive ; réglage du PC `share.*`) : copie du comptable déposée dans `Comptable` à la fréquence choisie (une seule, remplacée), fiches déposées dans `Retours` listées à rapporter puis rangées dans `Retours\Rapportées`. Plusieurs PC n'ouvrent jamais le même fichier SQLite à travers le réseau (risque de base abîmée) : chaque boutique garde sa base et les échanges passent par des fiches.
 - Réparation (Administration › Réparation, administrateur) : `quick_check`, liens entre données, stock et lots comparés aux mouvements ; « Réparer » fait une sauvegarde puis recalcule par paquets de 200 sans bloquer la caisse. Au démarrage, une base qui ne s'ouvre plus propose la dernière bonne sauvegarde du dossier « sauvegardes » (la base abîmée est gardée en `.abimee`).
 
+**Reprises de Sage (0.59.0)**
+- Modèles de boutique (`.fedonix-modele`, JSON) : cinq métiers livrés (rayons, familles, réglages) et modèles enregistrés dans `Documents\FEDONIX 360\Modèles` (rayons, réglages sans logo ni en-tête ni RCCM, droits des rôles, catalogue au choix). Choix à la création de la boutique ou Administration › Modèles de boutique ; appliquer n'efface rien.
+- Formats paramétrables (réglage `formats`) : import du catalogue par numéro de colonne (séparateur, lignes à sauter, virgule décimale) et export des écritures (Sage 100 : journal, date JJMMAA, pièce, compte, tiers, libellé, sens, montant ; Ciel et EBP en débit et crédit ; formats maison).
+- Postes distants (`.fedonix-journee`, gzip, table `relay_log`) : l'installation d'un poste distant est une installation préparée sur la caisse du dépôt ; la remontée porte les opérations de son outbox depuis la précédente et s'intègre comme une synchronisation (la plus récente l'emporte) ; la mise à jour renvoie les opérations de la boutique sauf celles des autres magasins. Un fichier ne s'intègre qu'une fois.
+- Contrôle avant clôture : exercice terminé, exercices précédents et pièces équilibrées bloquent ; journées de caisse ouvertes, fiches d'intervention pas rapportées, stock et lots à recalculer, opérations pas envoyées au serveur sont signalés sans bloquer.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

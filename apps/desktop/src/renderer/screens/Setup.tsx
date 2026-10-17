@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { call } from '../api';
+import { useEffect, useState } from 'react';
+import { call, type Result } from '../api';
 import logo from '../assets/logo.png';
 import { Field, askConfirm, useToast } from '../ui';
 import { DossierPicker } from './Dossiers';
@@ -81,12 +81,29 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   /** Beaucoup de superettes sont au régime simplifié : pas de TVA tant qu'on ne la coche pas. */
   const [vatEnabled, setVatEnabled] = useState(false);
+  /** Métier de départ : rayons, familles et réglages déjà prêts (comme les fichiers modèles de Sage). */
+  const [templates, setTemplates] = useState<Result<'template.list'>>([]);
+  const [template, setTemplate] = useState('');
+  useEffect(() => {
+    call('template.list').then(setTemplates, () => undefined);
+  }, []);
+  const chooseTemplate = async () => {
+    try {
+      const t = await call('template.choose');
+      if (!t) return;
+      setTemplates((l) => [...l.filter((x) => x.id !== t.id), t]);
+      setTemplate(t.id);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const picked = templates.find((t) => t.id === template);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (f.adminPin !== f.pin2) return toast.error('Les deux codes ne correspondent pas');
     try {
       const { pin2: _, ...input } = f;
-      await call('setup.bootstrap', { ...input, vatEnabled });
+      await call('setup.bootstrap', { ...input, vatEnabled, template: template || null });
       toast.ok('Magasin créé');
       onDone();
     } catch (err) {
@@ -131,6 +148,27 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
             ? 'Les prix sont TTC : la TVA (19,25 %) est calculée et imprimée sur les tickets et les factures.'
             : 'Régime simplifié : aucune TVA sur les ventes, les achats ni les dépenses. Les tickets portent « TVA non applicable ». Un administrateur pourra l’activer plus tard.'}
         </p>
+        <Field label="Métier" hint="Rayons, familles et réglages de départ, modifiables ensuite">
+          <div className="row">
+            <select value={template} onChange={(e) => setTemplate(e.target.value)}>
+              <option value="">Aucun : je crée mes rayons moi-même</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                  {t.builtin ? '' : ' (fichier)'}
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={() => void chooseTemplate()}>
+              Modèle sur clé…
+            </button>
+          </div>
+        </Field>
+        {picked && (
+          <p className="muted">
+            {picked.description} {picked.departments} rayons, {picked.families} familles{picked.articles ? `, ${picked.articles} articles` : ''}.
+          </p>
+        )}
         <h3>Administrateur</h3>
         <div className="grid2">
           <Field label="Nom complet">

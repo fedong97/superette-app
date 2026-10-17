@@ -15,7 +15,9 @@ import { DeliveryService } from './deliveries';
 import { BackupService } from './backup';
 import { FiscalYearService } from './fiscal';
 import { FicheService } from './fiches';
+import { RelayService } from './relay';
 import { RepairService } from './repair';
+import { TemplateService } from './templates';
 import { CashDeskService } from './cashdesk';
 import { StaffService } from './staff';
 import { LabelService } from './labels';
@@ -56,7 +58,9 @@ export * from './deliveries';
 export * from './backup';
 export * from './fiscal';
 export * from './fiches';
+export * from './relay';
 export * from './repair';
+export * from './templates';
 export * from './cashdesk';
 export * from './staff';
 export * from './labels';
@@ -127,6 +131,8 @@ export interface Services {
   license: LicenseService;
   fiches: FicheService;
   repair: RepairService;
+  relay: RelayService;
+  templates: TemplateService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -170,7 +176,9 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const license = new LicenseService(db, clock, () => sync.credentials() !== null, machineId);
   const fiches = new FicheService(db, clock, sync);
   const repair = new RepairService(db, clock, backups);
-  return { db, fiches, repair, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const relay = new RelayService(db, clock, sync);
+  const templates = new TemplateService(db, clock, admin, catalogue);
+  return { db, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

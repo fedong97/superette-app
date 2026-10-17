@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { type StatementLine, parseStatementCsv } from '@superette/core';
+import { type DateFormat, EXPORT_FIELDS, type ExportField, type ExportFormat, type Separator, type StatementLine, parseStatementCsv } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, askConfirm, dateFr, dateTime, downloadText, fcfa, parseAmount, readTextFile, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
@@ -126,6 +126,171 @@ function Period({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: 
   );
 }
 
+/**
+ * Export des écritures pour le logiciel du cabinet comptable, dans son format :
+ * Sage 100, Ciel, EBP, ou un format décrit une fois (comme les formats paramétrables de Sage).
+ */
+function EntriesExport({ from, to }: { from: string; to: string }) {
+  const toast = useToast();
+  const formats = useLoad(() => call('formats.list').then((l) => l.filter((f): f is ExportFormat => f.kind === 'ecritures')));
+  const [formatId, setFormatId] = useState(() => {
+    try {
+      return localStorage.getItem('export.format') ?? 'fedonix';
+    } catch {
+      return 'fedonix';
+    }
+  });
+  const [editing, setEditing] = useState(false);
+  const choose = (id: string) => {
+    if (id === 'new') return setEditing(true);
+    setFormatId(id);
+    try {
+      localStorage.setItem('export.format', id);
+    } catch {
+      // Préférence de confort seulement.
+    }
+  };
+  const current = formats.data?.find((f) => f.id === formatId) ?? formats.data?.[0];
+  const run = async () => {
+    if (!current) return;
+    try {
+      const content = await call('accounting.exportFormatted', { from: from || undefined, to: to || undefined }, current.id);
+      downloadText(`ecritures_${current.id}_${from}_${to}.${current.separator === '\t' ? 'txt' : 'csv'}`, current.id === 'fedonix' ? `\uFEFF${content}` : content);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const remove = async () => {
+    if (!current || current.builtin || !(await askConfirm(`Supprimer le format « ${current.name} » ?`))) return;
+    try {
+      await call('formats.delete', current.id);
+      choose('fedonix');
+      formats.reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  return (
+    <span className="inline">
+      <select value={current?.id ?? ''} onChange={(e) => choose(e.target.value)} title="Format du logiciel du cabinet comptable" style={{ maxWidth: 260 }}>
+        {(formats.data ?? []).map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.name}
+          </option>
+        ))}
+        <option value="new">Nouveau format…</option>
+      </select>{' '}
+      {current && !current.builtin && <button onClick={() => void remove()}>Supprimer</button>}{' '}
+      <button onClick={() => void run()}>Exporter (cabinet comptable)</button>
+      {editing && (
+        <ExportFormatEditor
+          onClose={() => setEditing(false)}
+          onSaved={(f) => {
+            setEditing(false);
+            formats.reload();
+            choose(f.id);
+          }}
+        />
+      )}
+    </span>
+  );
+}
+
+const DATE_FORMATS: [DateFormat, string][] = [
+  ['dd/mm/yyyy', '31/12/2026'],
+  ['ddmmyy', '311226'],
+  ['ddmmyyyy', '31122026'],
+  ['yyyy-mm-dd', '2026-12-31'],
+];
+
+function ExportFormatEditor({ onClose, onSaved }: { onClose: () => void; onSaved: (f: ExportFormat) => void }) {
+  const toast = useToast();
+  const [f, setF] = useState<ExportFormat>({ id: '', name: '', kind: 'ecritures', separator: ';', dateFormat: 'dd/mm/yyyy', header: true, columns: ['journal', 'date', 'piece', 'account', 'label', 'debit', 'credit'], debitMark: 'D', creditMark: 'C' });
+  const toggle = (c: ExportField) => setF({ ...f, columns: f.columns.includes(c) ? f.columns.filter((x) => x !== c) : [...f.columns, c] });
+  const move = (i: number, d: -1 | 1) => {
+    const cols = [...f.columns];
+    const j = i + d;
+    if (j < 0 || j >= cols.length) return;
+    [cols[i], cols[j]] = [cols[j]!, cols[i]!];
+    setF({ ...f, columns: cols });
+  };
+  const save = async () => {
+    try {
+      onSaved((await call('formats.save', f)) as ExportFormat);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  return (
+    <Modal title="Nouveau format d'export" onClose={onClose}>
+      <p className="muted">Reprenez l'ordre des colonnes demandé par le logiciel du cabinet (dans Sage 100 : Fichier › Format import/export).</p>
+      <div className="grid2">
+        <Field label="Nom du format">
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus />
+        </Field>
+        <Field label="Séparateur">
+          <select value={f.separator} onChange={(e) => setF({ ...f, separator: e.target.value as Separator })}>
+            <option value=";">Point-virgule</option>
+            <option value=",">Virgule</option>
+            <option value={'\t'}>Tabulation</option>
+          </select>
+        </Field>
+        <Field label="Date">
+          <select value={f.dateFormat} onChange={(e) => setF({ ...f, dateFormat: e.target.value as DateFormat })}>
+            {DATE_FORMATS.map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Sens débit / crédit" hint="Si la colonne Sens est choisie">
+          <span className="inline">
+            <input value={f.debitMark} onChange={(e) => setF({ ...f, debitMark: e.target.value })} style={{ width: 50 }} /> /{' '}
+            <input value={f.creditMark} onChange={(e) => setF({ ...f, creditMark: e.target.value })} style={{ width: 50 }} />
+          </span>
+        </Field>
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={f.header} onChange={(e) => setF({ ...f, header: e.target.checked })} /> Première ligne avec les noms des colonnes
+      </label>
+      <h4>Colonnes, dans l'ordre</h4>
+      <ol>
+        {f.columns.map((c, i) => (
+          <li key={c}>
+            {EXPORT_FIELDS[c]}{' '}
+            <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title="Monter">
+              ↑
+            </button>
+            <button type="button" onClick={() => move(i, 1)} disabled={i === f.columns.length - 1} title="Descendre">
+              ↓
+            </button>
+            <button type="button" onClick={() => toggle(c)} title="Retirer">
+              ×
+            </button>
+          </li>
+        ))}
+      </ol>
+      <p>
+        Ajouter :{' '}
+        {(Object.keys(EXPORT_FIELDS) as ExportField[])
+          .filter((c) => !f.columns.includes(c))
+          .map((c) => (
+            <button type="button" key={c} onClick={() => toggle(c)} style={{ marginRight: 4 }}>
+              {EXPORT_FIELDS[c]}
+            </button>
+          ))}
+      </p>
+      <div className="actions">
+        <button onClick={onClose}>Annuler</button>
+        <button className="primary" disabled={!f.name.trim() || !f.columns.length} onClick={() => void save()}>
+          Enregistrer le format
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function Journals() {
   const toast = useToast();
   const can = useCan();
@@ -164,18 +329,7 @@ function Journals() {
         <button style={{ marginLeft: 'auto' }} onClick={() => call('accounting.printJournal', from, to, journal || null).catch(toast.error)}>
           Imprimer
         </button>
-        <button
-          disabled={!can('accounting_export')}
-          onClick={async () => {
-            try {
-              downloadText(`ecritures_${from}_${to}.csv`, `﻿${await call('accounting.exportCsv', { from: from || undefined, to: to || undefined })}`);
-            } catch (err) {
-              toast.error(err);
-            }
-          }}
-        >
-          Export CSV (cabinet comptable)
-        </button>
+        {can('accounting_export') && <EntriesExport from={from} to={to} />}
         {can('journal_entry') && (
           <button className="primary" onClick={() => setAdding(true)}>
             Saisir une écriture
@@ -1742,13 +1896,17 @@ export function FiscalYears() {
       setBusy(false);
     }
   };
+  /** Contrôle avant clôture (comme celui de Sage) : la clôture se fait depuis sa fenêtre. */
+  const [checking, setChecking] = useState<{ fy: FiscalYear; checks: Result<'fiscal.checkClose'> } | null>(null);
   const close = async (f: FiscalYear) => {
-    if (
-      !(await askConfirm(
-        `Clôturer l'exercice du ${dateFr(f.start_date)} au ${dateFr(f.end_date)} ?\n\nLes à-nouveaux (comptes de bilan, stock, clients, fournisseurs et résultat en report à nouveau) sont générés au ${dateFr(nextDay(f.end_date))}. Ensuite, plus aucune écriture ne peut être datée dans cet exercice, sauf à le rouvrir.\n\nPensez à passer l'impôt sur le résultat avant de clôturer.`,
-      ))
-    )
-      return;
+    try {
+      setChecking({ fy: f, checks: await call('fiscal.checkClose', f.id) });
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const confirmClose = async (f: FiscalYear) => {
+    setChecking(null);
     await run(() => call('fiscal.close', f.id), 'Exercice clôturé');
   };
   const reopen = async (f: FiscalYear) => {
@@ -1871,7 +2029,49 @@ export function FiscalYears() {
           </form>
         </Modal>
       )}
+      {checking && <CloseCheck fy={checking.fy} checks={checking.checks} onClose={() => setChecking(null)} onConfirm={() => void confirmClose(checking.fy)} />}
     </>
+  );
+}
+
+const CHECK_MARKS = { ok: '✓', warning: '!', blocking: '✗' } as const;
+
+function CloseCheck({ fy, checks, onClose, onConfirm }: { fy: FiscalYear; checks: Result<'fiscal.checkClose'>; onClose: () => void; onConfirm: () => void }) {
+  const blocking = checks.filter((c) => c.status === 'blocking');
+  const warnings = checks.filter((c) => c.status === 'warning');
+  return (
+    <Modal title={`Contrôle avant clôture : exercice du ${dateFr(fy.start_date)} au ${dateFr(fy.end_date)}`} onClose={onClose} wide>
+      <table className="list">
+        <tbody>
+          {checks.map((c) => (
+            <tr key={c.key}>
+              <td className={c.status === 'ok' ? 'ok' : c.status === 'warning' ? 'warn' : 'error'} style={{ width: 24, fontWeight: 700 }}>
+                {CHECK_MARKS[c.status]}
+              </td>
+              <td>
+                <strong>{c.label}</strong>
+                <div className="muted">{c.detail}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {blocking.length ? (
+        <p className="error">Corrigez d'abord ce qui est marqué ✗ : la clôture est impossible tant qu'il reste {blocking.length > 1 ? 'ces points' : 'ce point'}.</p>
+      ) : (
+        <p>
+          Les à-nouveaux (comptes de bilan, stock, clients, fournisseurs et résultat en report à nouveau) seront générés au {dateFr(nextDay(fy.end_date))}. Ensuite, plus aucune écriture ne peut être datée
+          dans cet exercice, sauf à le rouvrir. Pensez à passer l'impôt sur le résultat avant de clôturer.
+          {warnings.length > 0 && ' Les points marqués ! ne bloquent pas : vérifiez-les si besoin.'}
+        </p>
+      )}
+      <div className="actions">
+        <button onClick={onClose}>Annuler</button>
+        <button className="primary" disabled={blocking.length > 0} onClick={onConfirm}>
+          Clôturer l'exercice
+        </button>
+      </div>
+    </Modal>
   );
 }
 

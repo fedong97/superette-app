@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { AppError, installFiche, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
+import { AppError, defaultBackupDir, inspectBackup, installFiche, latestGoodBackup, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
 import { createDigestMailer } from './digest';
 import { createDossiers } from './dossiers';
@@ -53,6 +53,45 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+/**
+ * La base ne s'ouvre plus (disque, coupure de courant) : propose de la remplacer par
+ * la dernière bonne sauvegarde. La base abîmée est gardée à côté, jamais effacée.
+ */
+function recoverFromBackup(dbFile: string, error: unknown): boolean {
+  const found = latestGoodBackup(defaultBackupDir(dbFile));
+  const when = found ? new Date(found.created_at).toLocaleString('fr-FR') : null;
+  const choice = dialog.showMessageBoxSync({
+    type: 'error',
+    title: 'Base de données abîmée',
+    message: 'La base de cette boutique ne peut pas être ouverte.',
+    detail: `${dbFile}\n\n${String(error)}\n\n${found ? `Dernière bonne sauvegarde : ${when} (${found.sales} ventes). Les ventes faites depuis seront à ressaisir ; si le PC est relié au serveur central, il les retrouve.` : 'Aucune sauvegarde trouvée dans le dossier « sauvegardes » : choisissez-en une (clé USB, OneDrive…).'}\n\nLa base abîmée est gardée à côté (.abimee) pour le support.`,
+    buttons: [...(found ? [`Restaurer la sauvegarde du ${when}`] : []), 'Choisir une sauvegarde…', 'Quitter'],
+    defaultId: 0,
+    cancelId: found ? 2 : 1,
+    noLink: true,
+  });
+  let file: string | null = null;
+  if (found && choice === 0) file = found.file;
+  else if (choice === (found ? 1 : 0)) {
+    file =
+      dialog.showOpenDialogSync({ title: 'Choisir la sauvegarde à restaurer', filters: [{ name: 'Sauvegarde FEDONIX 360', extensions: ['db'] }], properties: ['openFile'] })?.[0] ?? null;
+  }
+  if (!file) return false;
+  const info = inspectBackup(file);
+  if (!info.ok) {
+    dialog.showErrorBox('Sauvegarde inutilisable', `${file}\n\n${info.error}`);
+    return false;
+  }
+  try {
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+    restoreDatabase(dbFile, file, `${dbFile}.${stamp}.abimee`);
+    return true;
+  } catch (e) {
+    dialog.showErrorBox('Restauration impossible', String(e));
+    return false;
+  }
+}
+
 void app.whenReady().then(() => {
   // Boutique ouverte : la dernière choisie dans « Ouvrir une boutique », sinon la base du PC.
   const dossiers = createDossiers(app.getPath('userData'), app.getPath('documents'));
@@ -69,7 +108,12 @@ void app.whenReady().then(() => {
       app.exit(0);
       return;
     }
-    dialog.showErrorBox('Base de données inaccessible', `${dbFile}\n\n${String(e)}`);
+    // Base abîmée : on propose la dernière bonne sauvegarde au lieu de laisser le PC sans caisse.
+    if (existsSync(dbFile) && recoverFromBackup(dbFile, e)) {
+      app.relaunch();
+      app.exit(0);
+      return;
+    }
     app.quit();
     return;
   }
@@ -95,7 +139,11 @@ void app.whenReady().then(() => {
   const updater = createUpdater(services);
 
   // Sauvegarde automatique : peu après le démarrage, puis selon la fréquence réglée.
-  const autoBackup = () => void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
+  const autoBackup = () => {
+    void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
+    // Copie du comptable dans le dossier partagé, à la fréquence réglée.
+    void services.fiches.autoShare(app.getVersion()).catch((e) => console.warn('[partage]', e));
+  };
   const backupStart = setTimeout(autoBackup, 60_000);
   // Chaque minute : la sauvegarde du jour, celle de la fréquence réglée (toutes les heures…) et celle de l'heure fixe.
   const backupTimer = setInterval(autoBackup, 60_000);
@@ -173,7 +221,7 @@ void app.whenReady().then(() => {
         const r = await dialog.showOpenDialog({
           title,
           filters: [
-            { name: 'Fiche FEDONIX 360', extensions: ['fedonix'] },
+            { name: 'Fiche FEDONIX 360', extensions: ['fedonix', 'fedonixz'] },
             { name: 'Base FEDONIX 360', extensions: ['db'] },
           ],
           properties: ['openFile'],

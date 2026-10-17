@@ -116,6 +116,9 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Copie pour le comptable : il fait ses états chez lui pendant que la boutique tourne, et prend une nouvelle copie à sa prochaine visite.',
       'Installation préparée : paramétrez la boutique du client au bureau (magasin, utilisateurs, articles) dans une nouvelle boutique, puis « Préparer l’installation ». Sur le PC du client, au premier démarrage : « Installer une boutique préparée ».',
       'Un PC peut tenir plusieurs boutiques : l’écran de connexion propose « Changer de boutique », et chaque boutique garde ses utilisateurs, sa licence et ses réglages de PC.',
+      'Envoyer une fiche sans clé USB : « Envoyer… » la compresse (5 à 10 fois plus petite) et ouvre son dossier, prête à joindre à un e-mail ou un message WhatsApp. Le technicien la renvoie de la même façon.',
+      'Dossier partagé (réseau, OneDrive, Google Drive) : la copie du comptable s’y dépose seule (toutes les heures, chaque jour…), et le technicien y dépose sa fiche dans « Retours » ; la barre d’état annonce « 1 fiche à rapporter ».',
+      'Administration › Réparation : vérifie le fichier de la boutique et recalcule le stock et les lots à partir des mouvements, après une sauvegarde, sans arrêter la caisse. Si la base ne s’ouvre plus au démarrage, FEDONIX 360 propose de restaurer la dernière bonne sauvegarde.',
     ],
   },
   {

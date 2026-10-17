@@ -34,6 +34,9 @@ import {
   type FicheKind,
   inspectDossier,
   installFiche,
+  isPackedFiche,
+  packFiche,
+  unpackFiche,
   isPayout,
   COMMITMENT_KINDS,
   SECURITY_KINDS,
@@ -87,6 +90,8 @@ import {
   type OrangeConfig,
 } from '@superette/db';
 
+import { copyFileSync, mkdtempSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import type { DossierEntry } from './dossiers';
 import type { SyncRunner } from './sync';
 import type { Updater } from './updater';
@@ -330,6 +335,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!system.dossiers) throw new AppError('Indisponible sur ce poste', 'UNAVAILABLE');
     return system.dossiers;
   };
+  /** Fiche compressée (reçue par e-mail, WhatsApp) : décompressée à part, le fichier reçu n'est pas modifié. */
+  const unpacked = new Map<string, string>();
+  const local = async (file: string) => {
+    if (!isPackedFiche(file)) return file;
+    const done = unpacked.get(file);
+    if (done) return done;
+    const out = await unpackFiche(file, mkdtempSync(`${tmpdir()}/fedonix-recue-`));
+    unpacked.set(file, out);
+    return out;
+  };
+  /** Compresse la fiche pour l'envoyer et montre son dossier, prêt à glisser dans l'e-mail ou WhatsApp. */
+  const send = async <T extends { file: string; size: number }>(info: T, dir: string): Promise<T> => {
+    const file = await packFiche(info.file);
+    await system.openFolder(dir).catch(() => undefined);
+    return { ...info, file, size: statSync(file).size };
+  };
   /** Une fiche emportée ne se relie jamais au serveur : ses modifications reviennent par la fiche. */
   const notInFiche = () => {
     if (s.fiches.current()) throw new AppError("Une fiche emportée ne se relie pas au serveur : rapportez-la à la boutique, qui fera suivre ses modifications", 'FICHE');
@@ -416,7 +437,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'dossier.dir': () => dossiers().dir,
     'dossier.chooseFile': async () => {
       const file = await dossiers().chooseFile('Choisir la fiche ou la boutique à ouvrir');
-      return file ? inspectDossier(file) : null;
+      return file ? inspectDossier(await local(file)) : null;
     },
     'dossier.open': (file: string) => {
       const info = inspectDossier(file);
@@ -436,7 +457,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (d.list().some((x) => x.ok && x.fiche && info.fiche && x.fiche.id === info.fiche.id && x.file !== file)) {
         throw new AppError('Cette fiche est déjà dans la liste : ouvrez-la depuis la liste', 'INVALID');
       }
-      const target = d.importFile(file);
+      // Nouvelle copie du comptable : elle remplace la précédente de la même boutique au lieu de s'empiler.
+      const previous =
+        info.fiche?.kind === 'comptable'
+          ? d.list().find((x) => !x.current && x.fiche?.kind === 'comptable' && x.fiche.storeId === info.fiche!.storeId)
+          : undefined;
+      let target: string;
+      if (previous) {
+        copyFileSync(file, previous.file);
+        target = previous.file;
+      } else target = d.importFile(file);
       if (info.fiche?.kind === 'installation') installFiche(target, target);
       d.open(target);
       return inspectDossier(target);
@@ -449,25 +479,60 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
     // --- Fiches boutique (emporter, rapporter) --------------------------------
     /** Fiche emportée sur une clé : intervention et installation pour l'administrateur, copie comptable pour qui exporte la comptabilité. */
-    'fiche.export': async (kind: FicheKind) => {
+    'fiche.export': async (kind: FicheKind, opts: { send?: boolean } = {}) => {
       const u = kind === 'comptable' ? requireUser(['accounting_export']) : requireAdmin();
-      const dir = await system.chooseFolder('Choisir la clé USB ou le dossier où mettre la fiche');
-      return dir ? s.fiches.export(u, kind, dir, appVersion) : null;
+      const dir = await system.chooseFolder(opts.send ? 'Choisir le dossier où mettre la fiche à envoyer' : 'Choisir la clé USB ou le dossier où mettre la fiche');
+      if (!dir) return null;
+      const info = await s.fiches.export(u, kind, dir, appVersion);
+      return opts.send ? send(info, dir) : info;
     },
     'fiche.history': () => (requireUser(['accounting_export', 'backups']), s.fiches.history()),
     'fiche.chooseReturn': async () => {
       requireAdmin();
       const file = await dossiers().chooseFile('Choisir la fiche à rapporter');
-      return file ? s.fiches.check(file) : null;
+      return file ? s.fiches.check(await local(file)) : null;
     },
-    'fiche.bringBack': (file: string) => s.fiches.bringBack(requireAdmin().id, file),
+    'fiche.check': async (file: string) => (requireAdmin(), s.fiches.check(await local(file))),
+    'fiche.bringBack': async (file: string) => {
+      const u = requireAdmin();
+      const back = s.fiches.bringBack(u.id, await local(file));
+      s.fiches.archiveShared(file);
+      return back;
+    },
+    // Dossier partagé (réseau, OneDrive, Google Drive) : copie du comptable déposée seule, fiches déposées par le technicien.
+    'fiche.share': () => (requireAdmin(), s.fiches.shareStatus()),
+    'fiche.shareConfigure': (input: { dir?: string | null; every?: number }) => s.fiches.configureShare(requireAdmin().id, input),
+    'fiche.shareChooseDir': async () => {
+      const u = requireAdmin();
+      const dir = await system.chooseFolder('Choisir le dossier partagé (réseau, OneDrive, Google Drive)');
+      return dir ? s.fiches.configureShare(u.id, { dir }) : null;
+    },
+    'fiche.shareNow': async () => {
+      requireAdmin();
+      const info = await s.fiches.autoShare(appVersion, true);
+      if (!info) throw new AppError(s.fiches.shareStatus().last_error ?? 'Choisissez d’abord le dossier partagé', 'INVALID');
+      return info;
+    },
+    /** Fiches déposées dans le dossier partagé et pas encore rapportées (barre d'état de l'administrateur). */
+    'fiche.pendingCount': () => {
+      const u = requireUser();
+      return u.role === 'admin' && !s.fiches.current() ? s.fiches.shareStatus().pending.length : 0;
+    },
     /** Chez le technicien : remet la fiche sur la clé pour la rapporter. */
-    'fiche.saveCopy': async () => {
+    'fiche.saveCopy': async (opts: { send?: boolean } = {}) => {
       requireUser();
       if (!s.fiches.current()) throw new AppError("Cette boutique n'est pas une fiche emportée", 'INVALID');
-      const dir = await system.chooseFolder('Choisir la clé USB où remettre la fiche');
-      return dir ? s.fiches.saveCopy(dir) : null;
+      const dir = await system.chooseFolder(
+        opts.send ? 'Choisir le dossier où mettre la fiche à renvoyer' : 'Choisir la clé USB, ou le dossier « Retours » du dossier partagé',
+      );
+      if (!dir) return null;
+      const info = await s.fiches.saveCopy(dir);
+      return opts.send ? send(info, dir) : info;
     },
+
+    // --- Réparation (comme la Maintenance de Sage) ---------------------------
+    'repair.check': () => (requireAdmin(), s.repair.check()),
+    'repair.run': () => s.repair.repair(requireAdmin().id),
     'auth.login': (login: string, pin: string) => {
       chosenRegisterId = null;
       return (user = s.admin.login(login, pin));

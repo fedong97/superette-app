@@ -378,6 +378,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: "Modèles d'impression", open: ['admin', 'templates'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Fiches boutique', open: ['admin', 'fiches'] },
+      { label: 'Réparation', open: ['admin', 'repair'], adminOnly: true },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: 'Licence', open: ['admin', 'license'] },
       { label: 'Résumé du jour', open: ['admin', 'digest'], perm: 'dashboard' },
@@ -499,6 +500,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [prefs, setPrefs] = useState<Record<string, unknown>>(state.prefs ?? {});
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
+  // Fiches déposées dans le dossier partagé : regardé moins souvent (dossier réseau ou cloud).
+  const fichesWaiting = useLoad(() => (user.role === 'admin' ? call('fiche.pendingCount') : Promise.resolve(0)), []);
+  useEffect(() => {
+    const t = setInterval(() => fichesWaiting.reload(), 120_000);
+    return () => clearInterval(t);
+  }, []);
   const chargesLate = useLoad(() => call('charges.late'), []);
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
   const update = useLoad(() => call('update.state'), []);
@@ -958,7 +965,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
-            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload())} initialTab={w.tab as AdminTab | undefined} />}
+            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload(), fichesWaiting.reload())} initialTab={w.tab as AdminTab | undefined} />}
             </RefreshCtx.Provider>
           </MdiWindow>
         ))}
@@ -977,6 +984,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           {user.name} ({ROLE_LABELS[user.role]})
         </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
+        {Boolean(fichesWaiting.data) && canWin('admin') && (
+          <button className="warn soft" onClick={() => open('admin', 'fiches', 'Administration › Fiches boutique')} title="Fiches déposées dans le dossier partagé">
+            {fichesWaiting.data === 1 ? '1 fiche à rapporter' : `${fichesWaiting.data} fiches à rapporter`}
+          </button>
+        )}
         {backupLate.data && canWin('admin') && (
           <button className="warn" onClick={() => open('admin', 'backups', 'Administration › Sauvegardes')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard

@@ -15,6 +15,7 @@ import { DeliveryService } from './deliveries';
 import { BackupService } from './backup';
 import { FiscalYearService } from './fiscal';
 import { FicheService } from './fiches';
+import { RepairService } from './repair';
 import { CashDeskService } from './cashdesk';
 import { StaffService } from './staff';
 import { LabelService } from './labels';
@@ -55,6 +56,7 @@ export * from './deliveries';
 export * from './backup';
 export * from './fiscal';
 export * from './fiches';
+export * from './repair';
 export * from './cashdesk';
 export * from './staff';
 export * from './labels';
@@ -124,6 +126,7 @@ export interface Services {
   sync: SyncService;
   license: LicenseService;
   fiches: FicheService;
+  repair: RepairService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -166,7 +169,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const sync = new SyncService(db, clock, stock);
   const license = new LicenseService(db, clock, () => sync.credentials() !== null, machineId);
   const fiches = new FicheService(db, clock, sync);
-  return { db, fiches, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const repair = new RepairService(db, clock, backups);
+  return { db, fiches, repair, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

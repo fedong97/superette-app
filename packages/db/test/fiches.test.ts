@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { inspectDossier, installFiche, openServices } from '../src';
+import { inspectDossier, installFiche, openServices, packFiche, unpackFiche } from '../src';
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'fedonix-fiche-'));
@@ -121,5 +121,48 @@ describe('fiches boutique', () => {
     const { root, s, admin, sell } = setup();
     sell();
     await expect(s.fiches.export(admin, 'installation', join(root, 'usb'), '0.58.0')).rejects.toThrow(/déjà des ventes/);
+  });
+});
+
+describe('fiches envoyées et dossier partagé', () => {
+  it('compresse une fiche pour l’envoyer et la rapporte après décompression', async () => {
+    const { root, s, ctx, admin, tva, savon, clock, setNow } = setup();
+    const info = await s.fiches.export(admin, 'intervention', join(root, 'envoi'), '0.59.0');
+    const packed = await packFiche(info.file);
+    expect(packed).toMatch(/\.fedonixz$/);
+    expect(existsSync(info.file)).toBe(false);
+    expect(statSync(packed).size).toBeLessThan(info.size / 3);
+    const file = await unpackFiche(packed, join(root, 'recu'));
+    const t = openServices(file, clock);
+    setNow('2026-10-17T10:00:00');
+    t.catalogue.saveArticle(admin.id, { name: 'Savon envoyé', unit: 'piece', vatRateId: tva, purchasePrice: 0, salePrice: 400 }, savon.id);
+    t.db.close();
+    s.fiches.bringBack(ctx.userId, file);
+    expect(s.catalogue.getArticle(savon.id, ctx.storeId).name).toBe('Savon envoyé');
+    await expect(unpackFiche(join(root, 'recu', basename(file)), join(root, 'x'))).rejects.toThrow(/compressée illisible/);
+  });
+
+  it('dépose la copie du comptable dans le dossier partagé et y trouve les fiches à rapporter', async () => {
+    const { root, s, ctx, admin, tva, savon, clock, setNow } = setup();
+    const share = join(root, 'partage');
+    s.fiches.configureShare(admin.id, { dir: share, every: 60 });
+    const first = await s.fiches.autoShare('0.59.0');
+    expect(first?.file).toBe(join(share, 'Comptable', 'Superette-Akwa-comptable.fedonix'));
+    expect(await s.fiches.autoShare('0.59.0')).toBeNull(); // pas avant une heure
+    setNow('2026-10-17T09:05:00');
+    expect((await s.fiches.autoShare('0.59.0'))?.file).toBe(first?.file); // remplacée, pas empilée
+    expect(s.fiches.history()).toHaveLength(0);
+
+    // Le technicien dépose sa fiche dans « Retours ».
+    const fiche = await s.fiches.export(admin, 'intervention', join(share, 'Retours'), '0.59.0');
+    const t = openServices(fiche.file, clock);
+    setNow('2026-10-17T10:00:00');
+    t.catalogue.saveArticle(admin.id, { name: 'Savon partagé', unit: 'piece', vatRateId: tva, purchasePrice: 0, salePrice: 400 }, savon.id);
+    t.db.close();
+    expect(s.fiches.shareStatus().pending).toMatchObject([{ kind: 'intervention', by_name: 'Steve', store_name: 'Superette Akwa' }]);
+    s.fiches.bringBack(ctx.userId, fiche.file);
+    s.fiches.archiveShared(fiche.file);
+    expect(s.fiches.shareStatus().pending).toHaveLength(0);
+    expect(existsSync(join(share, 'Retours', 'Rapportées', basename(fiche.file)))).toBe(true);
   });
 });

@@ -1,6 +1,8 @@
-import { copyFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { createGunzip, createGzip } from 'node:zlib';
 import Database from 'better-sqlite3';
 import { type Db, openDatabase } from './database';
 import { MIGRATIONS } from './schema';
@@ -23,6 +25,61 @@ import { AppError, Base, type Clock, newId } from './util';
 export type FicheKind = 'intervention' | 'comptable' | 'installation';
 
 export const FICHE_EXTENSION = 'fedonix';
+/** Fiche compressée pour l'envoyer par e-mail ou WhatsApp (5 à 10 fois plus petite). */
+export const PACKED_EXTENSION = 'fedonixz';
+
+export const isPackedFiche = (file: string) => file.toLowerCase().endsWith(`.${PACKED_EXTENSION}`);
+
+/** Compresse une fiche à côté d'elle (« X.fedonixz ») et efface la fiche non compressée. */
+export async function packFiche(file: string): Promise<string> {
+  const target = file.replace(/\.[^.\\/]+$/, '') + `.${PACKED_EXTENSION}`;
+  const tmp = `${target}.part`;
+  try {
+    await pipeline(createReadStream(file), createGzip({ level: 9 }), createWriteStream(tmp));
+    renameSync(tmp, target);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw new AppError(`Compression impossible : ${e instanceof Error ? e.message : String(e)}`, 'FICHE_FAILED');
+  }
+  rmSync(file, { force: true });
+  return target;
+}
+
+/** Décompresse une fiche reçue dans `dir` (« X.fedonix ») ; renvoie le chemin de la fiche. */
+export async function unpackFiche(file: string, dir: string): Promise<string> {
+  mkdirSync(dir, { recursive: true });
+  const target = join(dir, basename(file).replace(/\.[^.]+$/, '') + `.${FICHE_EXTENSION}`);
+  const tmp = `${target}.part`;
+  try {
+    await pipeline(createReadStream(file), createGunzip(), createWriteStream(tmp));
+    renameSync(tmp, target);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw new AppError(`Fiche compressée illisible (fichier incomplet ?) : ${e instanceof Error ? e.message : String(e)}`, 'INVALID');
+  }
+  return target;
+}
+
+/** Dossier partagé (réseau, OneDrive, Google Drive) : copies du comptable et fiches à rapporter. */
+export interface ShareStatus {
+  dir: string | null;
+  /** Copie pour le comptable déposée toutes les N minutes (0 : jamais). */
+  every: number;
+  last_at: string | null;
+  last_error: string | null;
+  /** Fiches déposées dans « Retours », pas encore rapportées. */
+  pending: { file: string; name: string; packed: boolean; store_name: string | null; kind: FicheKind | null; at: string | null; by_name: string | null; error: string | null }[];
+}
+
+export const SHARE_FREQUENCIES: [number, string][] = [
+  [0, 'Jamais'],
+  [60, 'Toutes les heures'],
+  [240, 'Toutes les 4 heures'],
+  [1440, 'Chaque jour'],
+];
+export const SHARE_COMPTABLE = 'Comptable';
+export const SHARE_RETURNS = 'Retours';
+const SHARE_DONE = 'Rapportées';
 
 export const FICHE_KIND_LABELS: Record<FicheKind, string> = {
   intervention: "Fiche d'intervention",
@@ -91,7 +148,7 @@ export interface FicheLogRow {
 }
 
 /** Réglages propres à un PC : ils ne partent pas dans une fiche et ne reviennent jamais avec elle. */
-const POSTE_PREFIXES = ['license.', 'sync.', 'station.', 'backup.', 'printer.', 'drawer.', 'digest.', 'barcode.node', 'mobilepay.', 'display.', 'pos.layout', 'fiche.'];
+const POSTE_PREFIXES = ['license.', 'sync.', 'station.', 'backup.', 'printer.', 'drawer.', 'digest.', 'barcode.node', 'mobilepay.', 'display.', 'pos.layout', 'fiche.', 'share.'];
 /** Le magasin et la caisse restent dans la fiche (elle s'ouvre sur la bonne boutique), sans jamais revenir. */
 const KEPT_IN_FICHE = new Set(['station.storeId', 'station.registerId']);
 
@@ -244,7 +301,14 @@ export class FicheService extends Base {
    * Sort une fiche de la boutique dans `dir` (clé USB…), sans l'arrêter : copie à
    * chaud, vérifiée, sans les réglages du PC (licence, serveur, imprimantes, clés).
    */
-  async export(user: { id: string; name: string } | null, kind: FicheKind, dir: string, appVersion: string): Promise<DossierInfo> {
+  async export(
+    user: { id: string; name: string } | null,
+    kind: FicheKind,
+    dir: string,
+    appVersion: string,
+    /** name : nom de fichier fixe (une copie précédente est remplacée) ; log : false pour les copies automatiques. */
+    opts: { name?: string; log?: boolean } = {},
+  ): Promise<DossierInfo> {
     if (!(kind in FICHE_KIND_LABELS)) throw new AppError('Sorte de fiche inconnue', 'INVALID');
     const open = this.current();
     if (open) throw new AppError(`Cette boutique est déjà une ${FICHE_KIND_LABELS[open.kind].toLowerCase()} : sortez la fiche depuis la boutique elle-même`, 'FICHE');
@@ -268,7 +332,7 @@ export class FicheService extends Base {
       throw new AppError(`Dossier inaccessible : ${dir} (${e instanceof Error ? e.message : String(e)})`, 'INVALID');
     }
     const now = this.clock();
-    const file = join(dir, fileName(store.name, kind, now));
+    const file = join(dir, opts.name ?? fileName(store.name, kind, now));
     const tmp = `${file}.part`;
     const meta: FicheMeta = {
       v: 1,
@@ -312,11 +376,103 @@ export class FicheService extends Base {
     }
     const info = inspectDossier(file);
     if (!info.ok) throw new AppError(`La fiche relue est invalide : ${info.error}`, 'FICHE_FAILED');
+    if (opts.log === false) return info;
     this.db
       .prepare('INSERT INTO fiche_log (id, kind, file, base_seq, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(meta.id, kind, file, meta.baseSeq, user?.id ?? null, meta.at);
     this.audit(user?.id ?? null, 'fiche.export', 'fiche', meta.id, { kind, file });
     return info;
+  }
+
+  private setting(key: string): string | null {
+    return (this.db.prepare('SELECT value FROM settings WHERE key = ?').pluck().get(key) as string | undefined) ?? null;
+  }
+
+  private setSetting(key: string, value: string | null): void {
+    if (value === null) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+    else this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  /** Dossier partagé de ce PC et fiches qui y attendent d'être rapportées. */
+  shareStatus(): ShareStatus {
+    const dir = this.setting('share.dir');
+    const pending: ShareStatus['pending'] = [];
+    if (dir) {
+      const returns = join(dir, SHARE_RETURNS);
+      let names: string[] = [];
+      try {
+        names = readdirSync(returns).filter((f) => /\.(fedonix|fedonixz)$/i.test(f));
+      } catch {
+        // Dossier absent ou réseau coupé : rien à rapporter pour l'instant.
+      }
+      for (const name of names) {
+        const file = join(returns, name);
+        if (isPackedFiche(file)) {
+          pending.push({ file, name, packed: true, store_name: null, kind: null, at: null, by_name: null, error: null });
+          continue;
+        }
+        const info = this.check(file);
+        if (info.returned_at || info.fiche?.kind === 'installation') continue;
+        if (info.fiche && !this.db.prepare('SELECT 1 FROM stores WHERE id = ?').get(info.fiche.storeId)) continue;
+        pending.push({ file, name, packed: false, store_name: info.store_name, kind: info.fiche?.kind ?? null, at: info.fiche?.at ?? null, by_name: info.fiche?.byName ?? null, error: info.ok ? (info.fiche ? null : "Ce fichier n'est pas une fiche") : info.error });
+      }
+    }
+    return { dir, every: Number(this.setting('share.every')) || 0, last_at: this.setting('share.lastAt'), last_error: this.setting('share.lastError'), pending };
+  }
+
+  configureShare(userId: string, input: { dir?: string | null; every?: number }): ShareStatus {
+    if (input.dir !== undefined) {
+      if (input.dir) {
+        try {
+          mkdirSync(join(input.dir, SHARE_COMPTABLE), { recursive: true });
+          mkdirSync(join(input.dir, SHARE_RETURNS), { recursive: true });
+        } catch (e) {
+          throw new AppError(`Dossier inaccessible : ${input.dir} (${e instanceof Error ? e.message : String(e)})`, 'INVALID');
+        }
+      }
+      this.setSetting('share.dir', input.dir || null);
+    }
+    if (input.every !== undefined) {
+      if (!SHARE_FREQUENCIES.some(([m]) => m === input.every)) throw new AppError('Fréquence inconnue', 'INVALID');
+      this.setSetting('share.every', String(input.every));
+    }
+    this.audit(userId, 'fiche.share', undefined, undefined, input);
+    return this.shareStatus();
+  }
+
+  /**
+   * Copie pour le comptable déposée dans le dossier partagé, à la fréquence réglée
+   * (une seule copie, remplacée à chaque fois). N'échoue jamais : l'erreur est gardée.
+   */
+  async autoShare(appVersion: string, force = false): Promise<DossierInfo | null> {
+    if (this.current()) return null;
+    const { dir, every, last_at } = this.shareStatus();
+    if (!dir || (!force && (!every || (last_at && this.clock().getTime() - new Date(last_at).getTime() < every * 60_000)))) return null;
+    const store = this.db.prepare("SELECT s.name FROM settings k JOIN stores s ON s.id = k.value WHERE k.key = 'station.storeId'").pluck().get() as string | undefined;
+    if (!store) return null;
+    try {
+      const name = fileName(store, 'comptable', this.clock()).replace(/-\d{4}-\d{2}-\d{2}-\d{4}(?=\.)/, '');
+      const info = await this.export(null, 'comptable', join(dir, SHARE_COMPTABLE), appVersion, { name, log: false });
+      this.setSetting('share.lastAt', this.now());
+      this.setSetting('share.lastError', null);
+      return info;
+    } catch (e) {
+      this.setSetting('share.lastAt', this.now());
+      this.setSetting('share.lastError', e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  }
+
+  /** Range une fiche du dossier partagé une fois rapportée (« Retours › Rapportées »). */
+  archiveShared(file: string): void {
+    const dir = this.setting('share.dir');
+    if (!dir || resolve(join(file, '..')) !== resolve(join(dir, SHARE_RETURNS)) || !existsSync(file)) return;
+    try {
+      mkdirSync(join(dir, SHARE_RETURNS, SHARE_DONE), { recursive: true });
+      renameSync(file, join(dir, SHARE_RETURNS, SHARE_DONE, basename(file)));
+    } catch {
+      // Le fichier reste en place ; il ne peut pas être rapporté deux fois.
+    }
   }
 
   /** Décrit une fiche avant de la rapporter : à quelle boutique elle appartient, quand elle est sortie. */

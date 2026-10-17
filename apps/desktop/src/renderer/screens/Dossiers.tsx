@@ -131,15 +131,27 @@ export function FicheBanner({ fiche, onSaveCopy }: { fiche: NonNullable<Result<'
   );
 }
 
-/** Remet la fiche ouverte sur une clé USB pour la rapporter à la boutique. */
-export async function saveFicheCopy(toast: ReturnType<typeof useToast>) {
+/** Remet la fiche ouverte sur une clé USB (ou la compresse pour la renvoyer) pour la rapporter à la boutique. */
+export async function saveFicheCopy(toast: ReturnType<typeof useToast>, send = false) {
   try {
-    const info = await call('fiche.saveCopy');
-    if (info) toast.ok(`Fiche copiée : ${info.file}. Rapportez-la dans la boutique (Administration › Fiches boutique › Rapporter une fiche).`);
+    const info = await call('fiche.saveCopy', { send });
+    if (!info) return;
+    toast.ok(
+      send
+        ? `Fiche compressée : ${info.file} (${size(info.size)}). Joignez ce fichier à un e-mail ou un message WhatsApp pour la boutique.`
+        : `Fiche copiée : ${info.file}. Rapportez-la dans la boutique (Administration › Fiches boutique › Rapporter une fiche).`,
+    );
   } catch (err) {
     toast.error(err);
   }
 }
+
+const SHARE_FREQUENCIES: [number, string][] = [
+  [0, 'Jamais'],
+  [60, 'Toutes les heures'],
+  [240, 'Toutes les 4 heures'],
+  [1440, 'Chaque jour'],
+];
 
 /** Administration › Fiches boutique : emporter une fiche, la rapporter, préparer une installation. */
 export function Fiches({ user, onChanged }: { user: AppUser; onChanged: () => void }) {
@@ -152,16 +164,31 @@ export function Fiches({ user, onChanged }: { user: AppUser; onChanged: () => vo
   const [busy, setBusy] = useState(false);
   const [back, setBack] = useState<FicheInfo | null>(null);
   const [picker, setPicker] = useState(false);
-  const exportFiche = async (kind: FicheKind) => {
+  const exportFiche = async (kind: FicheKind, send = false) => {
     setBusy(true);
     try {
-      const info = await call('fiche.export', kind);
-      if (info) toast.ok(`${FICHE_LABELS[kind]} enregistrée : ${info.file} (${size(info.size)})`);
+      const info = await call('fiche.export', kind, { send });
+      if (info)
+        toast.ok(
+          send
+            ? `${FICHE_LABELS[kind]} compressée : ${info.file} (${size(info.size)}). Joignez ce fichier à un e-mail ou un message WhatsApp.`
+            : `${FICHE_LABELS[kind]} enregistrée : ${info.file} (${size(info.size)})`,
+        );
     } catch (err) {
       toast.error(err);
     } finally {
       setBusy(false);
       history.reload();
+    }
+  };
+  const share = useLoad(() => (isAdmin && !fiche ? call('fiche.share') : Promise.resolve(null)), [isAdmin, Boolean(fiche)]);
+  const openPending = async (file: string) => {
+    try {
+      const info = await call('fiche.check', file);
+      if (!info.ok) return toast.error(info.error ?? 'Fiche illisible');
+      setBack({ ...info, file });
+    } catch (err) {
+      toast.error(err);
     }
   };
   const chooseReturn = async () => {
@@ -192,6 +219,7 @@ export function Fiches({ user, onChanged }: { user: AppUser; onChanged: () => vo
               <button className="primary" onClick={() => void saveFicheCopy(toast)}>
                 Remettre la fiche sur la clé USB
               </button>
+              <button onClick={() => void saveFicheCopy(toast, true)}>Compresser pour l'envoyer…</button>
               <button onClick={() => setPicker(true)}>Ouvrir une autre boutique</button>
             </div>
           </>
@@ -223,18 +251,28 @@ export function Fiches({ user, onChanged }: { user: AppUser; onChanged: () => vo
           <section className="card">
             <h3>Fiche d'intervention</h3>
             <p className="muted">Le technicien l'emporte, l'ouvre sur son PC (Ouvrir une boutique › Ouvrir une fiche), y travaille puis la rapporte. La caisse ne vend pas dans la fiche.</p>
-            <button className="primary" disabled={busy} onClick={() => void exportFiche('intervention')}>
-              Emporter une fiche d'intervention…
-            </button>
+            <span>
+              <button className="primary" disabled={busy} onClick={() => void exportFiche('intervention')}>
+                Emporter une fiche d'intervention…
+              </button>{' '}
+              <button disabled={busy} onClick={() => void exportFiche('intervention', true)} title="Fiche compressée à joindre à un e-mail ou un message WhatsApp">
+                Envoyer…
+              </button>
+            </span>
           </section>
         )}
         {canAccounting && (
           <section className="card">
             <h3>Copie pour le comptable</h3>
             <p className="muted">Le comptable fait ses états chez lui. À sa prochaine visite, il prend simplement une nouvelle copie.</p>
-            <button disabled={busy} onClick={() => void exportFiche('comptable')}>
-              Copie pour le comptable…
-            </button>
+            <span>
+              <button disabled={busy} onClick={() => void exportFiche('comptable')}>
+                Copie pour le comptable…
+              </button>{' '}
+              <button disabled={busy} onClick={() => void exportFiche('comptable', true)} title="Copie compressée à joindre à un e-mail ou un message WhatsApp">
+                Envoyer…
+              </button>
+            </span>
           </section>
         )}
         {isAdmin && (
@@ -258,6 +296,13 @@ export function Fiches({ user, onChanged }: { user: AppUser; onChanged: () => vo
           </section>
         )}
       </div>
+      {isAdmin && share.data !== undefined && share.data !== null && (
+        <SharedFolder
+          status={share.data}
+          onChanged={share.reload}
+          onBringBack={(file) => void openPending(file)}
+        />
+      )}
       <h3>Fiches sorties</h3>
       {history.data && history.data.length === 0 ? (
         <Empty>Aucune fiche sortie de cette boutique.</Empty>
@@ -301,6 +346,7 @@ export function Fiches({ user, onChanged }: { user: AppUser; onChanged: () => vo
           onDone={() => {
             setBack(null);
             history.reload();
+            share.reload();
             onChanged();
           }}
         />
@@ -378,5 +424,168 @@ function BringBack({ info, onClose, onDone }: { info: FicheInfo; onClose: () => 
         </button>
       </div>
     </Modal>
+  );
+}
+
+type ShareStatus = NonNullable<Result<'fiche.share'>>;
+
+/**
+ * Dossier partagé (dossier réseau, OneDrive, Google Drive) : la copie du comptable
+ * s'y dépose seule, et le technicien y dépose sa fiche (« Retours ») au lieu de venir avec la clé.
+ */
+function SharedFolder({ status, onChanged, onBringBack }: { status: ShareStatus; onChanged: () => void; onBringBack: (file: string) => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const configure = (input: { dir?: string | null; every?: number }) => call('fiche.shareConfigure', input).then(onChanged, toast.error);
+  const chooseDir = () => call('fiche.shareChooseDir').then((r) => r && onChanged(), toast.error);
+  const now = async () => {
+    setBusy(true);
+    try {
+      const info = await call('fiche.shareNow');
+      toast.ok(`Copie du comptable déposée : ${info.file}`);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+  return (
+    <section className="card" style={{ marginBottom: 22 }}>
+      <h3>Dossier partagé</h3>
+      <p className="muted">
+        Un dossier du réseau, de OneDrive ou de Google Drive, ouvert aussi chez le comptable et le technicien. La copie du comptable y est déposée seule dans « Comptable » ; le technicien dépose sa
+        fiche dans « Retours » et elle apparaît ici, à rapporter. Plusieurs PC n'écrivent jamais dans le même fichier : chaque boutique garde sa base.
+      </p>
+      <table className="list narrow">
+        <tbody>
+          <tr>
+            <th>Dossier</th>
+            <td>
+              {status.dir ? <code>{status.dir}</code> : <span className="muted">aucun</span>}{' '}
+              <button onClick={() => void chooseDir()}>{status.dir ? 'Changer' : 'Choisir'}</button>{' '}
+              {status.dir && <button onClick={() => void configure({ dir: null })}>Retirer</button>}
+            </td>
+          </tr>
+          {status.dir && (
+            <tr>
+              <th>Copie du comptable</th>
+              <td>
+                <select value={status.every} onChange={(e) => void configure({ every: Number(e.target.value) })}>
+                  {SHARE_FREQUENCIES.map(([m, label]) => (
+                    <option key={m} value={m}>
+                      {label}
+                    </option>
+                  ))}
+                </select>{' '}
+                <button disabled={busy} onClick={() => void now()}>
+                  Déposer maintenant
+                </button>{' '}
+                {status.last_at && <span className="muted">dernière : {dateTime(status.last_at)}</span>}
+                {status.last_error && <div className="danger-text">{status.last_error}</div>}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {status.dir && status.pending.length > 0 && (
+        <>
+          <h4>Fiches déposées à rapporter</h4>
+          <table className="list">
+            <tbody>
+              {status.pending.map((p) => (
+                <tr key={p.file}>
+                  <td>
+                    <strong>{p.kind ? FICHE_LABELS[p.kind] : p.packed ? 'Fiche compressée' : p.name}</strong>
+                    {p.at && (
+                      <span className="muted">
+                        {' '}
+                        du {dateTime(p.at)}
+                        {p.by_name ? `, ${p.by_name}` : ''}
+                      </span>
+                    )}
+                    {p.error && <div className="danger-text">{p.error}</div>}
+                  </td>
+                  <td>
+                    <code>{p.name}</code>
+                  </td>
+                  <td>
+                    <button className="primary" disabled={Boolean(p.error)} onClick={() => onBringBack(p.file)}>
+                      Rapporter…
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </section>
+  );
+}
+
+type RepairReport = Result<'repair.check'>;
+const REPAIR_TAGS: Record<RepairReport['checks'][number]['status'], [string, string]> = {
+  ok: ['OK', 'tag'],
+  fixed: ['Réparé', 'tag'],
+  problem: ['À réparer', 'tag rupture'],
+  info: ['Info', 'tag'],
+};
+
+/** Administration › Réparation : vérifie la base et recalcule ce qui doit l'être, sans arrêter la caisse. */
+export function Repair({ onBackups }: { onBackups: () => void }) {
+  const toast = useToast();
+  const [report, setReport] = useState<RepairReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (repair: boolean) => {
+    if (repair && !(await askConfirm('Réparer la base ? Une sauvegarde est faite d’abord ; la caisse peut continuer de vendre.'))) return;
+    setBusy(true);
+    try {
+      const r = repair ? await call('repair.run') : await call('repair.check');
+      setReport(r);
+      if (repair) toast.ok(r.ok ? 'Base réparée' : 'Réparation faite : il reste des points à voir');
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useLoad(() => run(false), []);
+  return (
+    <div>
+      <p>
+        Vérifie le fichier de la boutique et recalcule le stock et les lots à partir des mouvements, sans toucher la base à la main. La caisse continue de vendre pendant la vérification et la réparation.
+      </p>
+      {report && (
+        <table className="list">
+          <tbody>
+            {report.checks.map((c) => (
+              <tr key={c.key}>
+                <th>{c.label}</th>
+                <td>
+                  <span className={REPAIR_TAGS[c.status][1]}>{REPAIR_TAGS[c.status][0]}</span>
+                </td>
+                <td>{c.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {report?.backup && <p className="muted">Sauvegarde d'avant réparation : {report.backup}</p>}
+      <div className="actions" style={{ justifyContent: 'flex-start' }}>
+        <button disabled={busy} onClick={() => void run(false)}>
+          {busy ? 'Vérification…' : 'Vérifier à nouveau'}
+        </button>
+        {report?.damaged ? (
+          <button className="primary" onClick={onBackups}>
+            Restaurer une sauvegarde…
+          </button>
+        ) : (
+          <button className="primary" disabled={busy || !report || report.ok} onClick={() => void run(true)}>
+            Réparer
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

@@ -95,7 +95,7 @@ describe('fiches boutique dans l’application', () => {
     shopPc.answers.file = copy.file;
     const check = (await shop.api['fiche.chooseReturn']!()) as { fiche: { kind: string }; returned_at: string | null };
     expect(check).toMatchObject({ fiche: { kind: 'intervention' }, returned_at: null });
-    expect(shop.api['fiche.bringBack']!(copy.file)).toMatchObject({ conflicts: 0 });
+    expect(await shop.api['fiche.bringBack']!(copy.file)).toMatchObject({ conflicts: 0 });
     expect(shop.s.catalogue.getArticle(riz.id, store.id)).toMatchObject({ name: 'Riz parfumé 5 kg', sale_price: 5_500 });
     expect(shop.api['fiche.history']!()).toMatchObject([{ kind: 'intervention', returned_by: admin.id }]);
     expect(() => shop.api['setup.installFiche']!(copy.file)).toThrow(/déjà une boutique/);
@@ -143,5 +143,41 @@ describe('fiches boutique dans l’application', () => {
     expect(dossiers.shareTrial(null)).toBe('2026-10-01');
     expect(dossiers.shareTrial('2026-10-17')).toBe('2026-10-01');
     expect(dossiers.shareTrial('2026-09-20')).toBe('2026-09-20');
+  });
+
+  it('envoie une fiche compressée, le technicien la renvoie compressée et la boutique la rapporte', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fedonix-api-envoi-'));
+    let now = new Date('2026-10-17T08:00:00');
+    const clock = () => now;
+    const shopPc = pc(root, 'boutique');
+    const shop = shopPc.start(clock);
+    const { admin } = shop.s.admin.bootstrap({ storeCode: 'DLA1', storeName: 'Superette Akwa', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' });
+    const tva = shop.s.admin.listVatRates()[0]!.id;
+    const riz = shop.s.catalogue.saveArticle(admin.id, { name: 'Riz 5 kg', unit: 'piece', vatRateId: tva, purchasePrice: 3_000, salePrice: 5_000 });
+    shop.api['auth.login']!('steve', '1234');
+    shopPc.answers.folder = join(root, 'whatsapp');
+    const sent = (await shop.api['fiche.export']!('intervention', { send: true })) as { file: string };
+    expect(sent.file).toMatch(/\.fedonixz$/);
+
+    const techPc = pc(root, 'technicien');
+    const tech0 = techPc.start(clock);
+    techPc.answers.file = sent.file;
+    const chosen = (await tech0.api['dossier.chooseFile']!()) as { file: string; fiche: { kind: string } };
+    expect(chosen.fiche.kind).toBe('intervention');
+    tech0.api['dossier.importFiche']!(chosen.file);
+    tech0.s.db.close();
+    const tech = techPc.start(clock);
+    tech.api['auth.login']!('steve', '1234');
+    now = new Date('2026-10-17T10:00:00');
+    tech.s.catalogue.saveArticle(admin.id, { name: 'Riz envoyé', unit: 'piece', vatRateId: tva, purchasePrice: 3_000, salePrice: 5_000 }, riz.id);
+    techPc.answers.folder = join(root, 'retour');
+    const back = (await tech.api['fiche.saveCopy']!({ send: true })) as { file: string };
+    expect(back.file).toMatch(/\.fedonixz$/);
+    tech.s.db.close();
+
+    expect(await shop.api['fiche.check']!(back.file)).toMatchObject({ fiche: { kind: 'intervention' }, returned_at: null });
+    expect(await shop.api['fiche.bringBack']!(back.file)).toMatchObject({ conflicts: 0 });
+    expect(shop.s.catalogue.getArticle(riz.id, shop.s.admin.station()!.store.id).name).toBe('Riz envoyé');
+    expect(shop.api['repair.check']!()).toMatchObject({ ok: true });
   });
 });

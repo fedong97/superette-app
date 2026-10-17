@@ -118,7 +118,12 @@ export function restoreDatabase(dbFile: string, backupFile: string, safetyFile: 
   mkdirSync(dirname(safetyFile), { recursive: true });
   if (existsSync(dbFile)) {
     copyFileSync(dbFile, safetyFile);
-    standalone(safetyFile);
+    if (existsSync(`${dbFile}-wal`)) copyFileSync(`${dbFile}-wal`, `${safetyFile}-wal`);
+    try {
+      standalone(safetyFile);
+    } catch {
+      // Base abîmée gardée telle quelle (avec son journal) pour le support.
+    }
   }
   const tmp = `${dbFile}.restore`;
   copyFileSync(backupFile, tmp);

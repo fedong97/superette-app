@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { AppError, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
+import { AppError, installFiche, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
 import { createDigestMailer } from './digest';
+import { createDossiers } from './dossiers';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 import { createUpdater } from './updater';
@@ -53,14 +54,30 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
-  const dbFile = process.env['SUPERETTE_DB'] ?? join(app.getPath('userData'), 'superette.db');
+  // Boutique ouverte : la dernière choisie dans « Ouvrir une boutique », sinon la base du PC.
+  const dossiers = createDossiers(app.getPath('userData'), app.getPath('documents'));
+  const dbFile = dossiers.startupFile(process.env['SUPERETTE_DB']);
   let services;
   try {
     services = openServices(dbFile);
   } catch (e) {
+    // Une boutique illisible (clé retirée, fichier abîmé) ne doit pas empêcher le PC de démarrer sur la sienne.
+    if (dbFile !== dossiers.mainFile && !process.env['SUPERETTE_DB']) {
+      dialog.showErrorBox('Boutique inaccessible', `${dbFile}\n\n${String(e)}\n\nFEDONIX 360 ouvre la boutique principale de ce PC.`);
+      dossiers.remember(dossiers.mainFile);
+      app.relaunch();
+      app.exit(0);
+      return;
+    }
     dialog.showErrorBox('Base de données inaccessible', `${dbFile}\n\n${String(e)}`);
     app.quit();
     return;
+  }
+  // Une nouvelle boutique sur ce PC reprend son essai là où il en est, sans le faire recommencer.
+  const ownTrial = services.admin.getSetting('license.trialStart');
+  const trial = dossiers.shareTrial(ownTrial);
+  if (trial && trial !== ownTrial) {
+    services.db.prepare("INSERT INTO settings (key, value) VALUES ('license.trialStart', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(trial);
   }
   // Restauration faite juste avant ce démarrage : on la trace dans la base restaurée.
   const marker = `${dbFile}.restauration.json`;
@@ -83,6 +100,22 @@ void app.whenReady().then(() => {
   // Chaque minute : la sauvegarde du jour, celle de la fréquence réglée (toutes les heures…) et celle de l'heure fixe.
   const backupTimer = setInterval(autoBackup, 60_000);
   const digest = createDigestMailer(services);
+  /** Ferme proprement la boutique ouverte (changement de boutique, restauration, installation). */
+  const shutdown = () => {
+    sync.stop();
+    digest.stop();
+    updater.stop();
+    clearTimeout(backupStart);
+    clearInterval(backupTimer);
+    services.db.close();
+  };
+  /** Rouvre FEDONIX 360 sur la boutique retenue, après la réponse à l'écran. */
+  const relaunch = () =>
+    setTimeout(() => {
+      shutdown();
+      app.relaunch();
+      app.exit(0);
+    }, 500);
 
   const system: SystemHooks = {
     chooseFolder: async (title) => {
@@ -109,11 +142,7 @@ void app.whenReady().then(() => {
       const keep = services.backups.localSettings();
       // Laisse partir la réponse à l'écran avant de fermer la base.
       setTimeout(() => {
-        sync.stop();
-        digest.stop();
-        clearTimeout(backupStart);
-        clearInterval(backupTimer);
-        services.db.close();
+        shutdown();
         try {
           restoreDatabase(dbFile, file, safetyFile, keep);
           writeFileSync(marker, JSON.stringify({ userId, file, safetyFile, at: new Date().toISOString() }));
@@ -123,6 +152,46 @@ void app.whenReady().then(() => {
         app.relaunch();
         app.exit(0);
       }, 500);
+    },
+    dossiers: {
+      file: dbFile,
+      dir: dossiers.dir,
+      list: () => dossiers.list(dbFile),
+      open: (file) => {
+        dossiers.remember(file);
+        relaunch();
+      },
+      create: (name) => {
+        const file = dossiers.newFile(name);
+        dossiers.remember(file);
+        relaunch();
+        return file;
+      },
+      forget: (file) => dossiers.forget(file, dbFile),
+      importFile: (file) => dossiers.importFile(file),
+      chooseFile: async (title) => {
+        const r = await dialog.showOpenDialog({
+          title,
+          filters: [
+            { name: 'Fiche FEDONIX 360', extensions: ['fedonix'] },
+            { name: 'Base FEDONIX 360', extensions: ['db'] },
+          ],
+          properties: ['openFile'],
+        });
+        return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+      install: (file) => {
+        setTimeout(() => {
+          shutdown();
+          try {
+            installFiche(dbFile, file);
+          } catch (e) {
+            dialog.showErrorBox('Installation impossible', `${String(e)}\n\nRien n'a été modifié sur ce PC.`);
+          }
+          app.relaunch();
+          app.exit(0);
+        }, 500);
+      },
     },
   };
   const api = createApi(services, createPrinter(services), sync, app.getVersion(), system);
@@ -142,12 +211,7 @@ void app.whenReady().then(() => {
   createWindow();
 
   app.on('before-quit', () => {
-    clearTimeout(backupStart);
-    clearInterval(backupTimer);
-    sync.stop();
-    digest.stop();
-    updater.stop();
-    services.db.close();
+    if (services.db.open) shutdown();
   });
 });
 

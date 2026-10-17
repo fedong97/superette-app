@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { type Result, call } from '../api';
 import logo from '../assets/logo.png';
 import { Field, useToast } from '../ui';
+import { DossierPicker } from './Dossiers';
 
-export function Login({ station, onDone }: { station: Result<'app.state'>['station']; onDone: () => void }) {
+export function Login({ station, fiche, onDone }: { station: Result<'app.state'>['station']; fiche: Result<'app.state'>['dossier']['fiche']; onDone: () => void }) {
+  const [dossiers, setDossiers] = useState(false);
   const toast = useToast();
   const [login, setLogin] = useState('');
   const [pin, setPin] = useState('');
@@ -30,6 +32,7 @@ export function Login({ station, onDone }: { station: Result<'app.state'>['stati
         </div>
         <h1>{station?.store.name ?? 'FEDONIX 360'}</h1>
         <p className="muted">{station?.register?.name ?? 'Poste de gestion'}</p>
+        {fiche && fiche.kind !== 'installation' && <p className="warn-text">{fiche.banner}</p>}
         <Field label="Identifiant">
           <input ref={loginRef} value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />
         </Field>
@@ -39,7 +42,11 @@ export function Login({ station, onDone }: { station: Result<'app.state'>['stati
         <button className="primary big" type="submit" disabled={!login || pin.length < 4}>
           Se connecter
         </button>
+        <button type="button" className="link" onClick={() => setDossiers(true)}>
+          Changer de boutique
+        </button>
       </form>
+      {dossiers && <DossierPicker onClose={() => setDossiers(false)} />}
     </div>
   );
 }

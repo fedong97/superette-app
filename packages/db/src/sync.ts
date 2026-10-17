@@ -275,6 +275,55 @@ export class SyncService extends Base {
     this.tx(() => ids.forEach((id) => stmt.run(now, id)));
   }
 
+  /** Dernier numéro de la file d'envoi : les opérations faites ensuite sont celles d'une fiche sortie. */
+  lastSeq(): number {
+    return (this.db.prepare('SELECT MAX(seq) FROM outbox').pluck().get() as number | null) ?? 0;
+  }
+
+  /**
+   * Opérations faites après `seq`, envoyées ou non, avec l'état actuel de chaque
+   * entité : une entité modifiée dix fois ne part qu'une fois, à la place de sa
+   * première modification (un article avant son lot, un lot avant ses mouvements).
+   */
+  eventsSince(seq: number): SyncEvent[] {
+    const rows = this.db
+      .prepare('SELECT id, entity, entity_id, op, store_id, register_id, created_at FROM outbox WHERE seq > ? ORDER BY seq')
+      .all(seq) as { id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[];
+    const seen = new Set<string>();
+    const events: SyncEvent[] = [];
+    for (const r of rows) {
+      // Le stock se recalcule à partir des mouvements.
+      if (r.entity === 'stock_level') continue;
+      const key = `${r.entity}|${r.entity_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const payload = this.serialize(r.entity, r.entity_id);
+      events.push({
+        id: r.id,
+        entity: r.entity,
+        entityId: r.entity_id,
+        op: payload === null ? 'delete' : 'upsert',
+        storeId: r.store_id,
+        registerId: r.register_id,
+        createdAt: r.created_at,
+        payload,
+      });
+    }
+    return events;
+  }
+
+  /**
+   * Applique des opérations venues d'une fiche rapportée, puis les remet dans la
+   * file d'envoi : les autres PC du magasin les reçoivent par le serveur.
+   */
+  adopt(events: SyncEvent[]): { applied: number; conflicts: number } {
+    const result = this.applyRemote(events);
+    this.tx(() => {
+      for (const e of events) this.enqueue(e.storeId ? { storeId: e.storeId, registerId: e.registerId } : null, e.entity, e.entityId, e.op, {});
+    });
+    return result;
+  }
+
   /** État complet et actuel d'une entité, prêt à être appliqué sur un autre poste. */
   serialize(entity: string, entityId: string): Record<string, unknown> | null {
     const table = TABLES[entity];

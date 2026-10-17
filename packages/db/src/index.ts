@@ -14,6 +14,7 @@ import { PosService } from './pos';
 import { DeliveryService } from './deliveries';
 import { BackupService } from './backup';
 import { FiscalYearService } from './fiscal';
+import { FicheService } from './fiches';
 import { CashDeskService } from './cashdesk';
 import { StaffService } from './staff';
 import { LabelService } from './labels';
@@ -53,6 +54,7 @@ export * from './pos';
 export * from './deliveries';
 export * from './backup';
 export * from './fiscal';
+export * from './fiches';
 export * from './cashdesk';
 export * from './staff';
 export * from './labels';
@@ -121,6 +123,7 @@ export interface Services {
   disclosures: DisclosureService;
   sync: SyncService;
   license: LicenseService;
+  fiches: FicheService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -162,7 +165,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const digest = new DigestService(db, clock, admin, reports, attention);
   const sync = new SyncService(db, clock, stock);
   const license = new LicenseService(db, clock, () => sync.credentials() !== null, machineId);
-  return { db, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const fiches = new FicheService(db, clock, sync);
+  return { db, fiches, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

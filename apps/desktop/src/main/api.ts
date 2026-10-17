@@ -30,6 +30,10 @@ import {
 } from '@superette/core';
 import {
   AppError,
+  ficheBanner,
+  type FicheKind,
+  inspectDossier,
+  installFiche,
   isPayout,
   COMMITMENT_KINDS,
   SECURITY_KINDS,
@@ -83,6 +87,7 @@ import {
   type OrangeConfig,
 } from '@superette/db';
 
+import type { DossierEntry } from './dossiers';
 import type { SyncRunner } from './sync';
 import type { Updater } from './updater';
 
@@ -97,6 +102,21 @@ export interface SystemHooks {
   digest?: { seal(password: string): string; sendNow(): Promise<string> };
   /** Mise à jour automatique du logiciel (absente dans les tests). */
   updater?: Updater;
+  /** Boutiques de ce PC (« Ouvrir une boutique ») ; changer de boutique relance l'application. */
+  dossiers?: {
+    /** Fichier de la boutique ouverte. */
+    file: string;
+    /** Dossier où vont les nouvelles boutiques et les fiches copiées depuis une clé. */
+    dir: string;
+    list(): DossierEntry[];
+    open(file: string): void;
+    create(name: string): string;
+    forget(file: string): void;
+    importFile(file: string): string;
+    chooseFile(title: string): Promise<string | null>;
+    /** Ferme la base vide de ce PC, la remplace par l'installation préparée et relance. */
+    install(file: string): void;
+  };
 }
 
 export interface InvoicePrintOptions {
@@ -306,6 +326,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     return { ...c, registerId: se.register_id };
   };
   const CUSTOMERS: Permission[] = ['customers', 'receivables'];
+  const dossiers = () => {
+    if (!system.dossiers) throw new AppError('Indisponible sur ce poste', 'UNAVAILABLE');
+    return system.dossiers;
+  };
+  /** Une fiche emportée ne se relie jamais au serveur : ses modifications reviennent par la fiche. */
+  const notInFiche = () => {
+    if (s.fiches.current()) throw new AppError("Une fiche emportée ne se relie pas au serveur : rapportez-la à la boutique, qui fera suivre ses modifications", 'FICHE');
+  };
   /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
   const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
 
@@ -345,6 +373,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         const { license, ...rest } = s.license.status();
         return { ...rest, client: license?.client ?? null };
       })(),
+      /** Boutique ouverte : son fichier et, si c'est une fiche emportée, ce qu'elle est (bandeau). */
+      dossier: (() => {
+        const fiche = s.fiches.current();
+        return {
+          file: system.dossiers?.file ?? null,
+          fiche: fiche ? { kind: fiche.kind, storeName: fiche.storeName, at: fiche.at, byName: fiche.byName, banner: ficheBanner(fiche) } : null,
+        };
+      })(),
       /** Taille du texte réglée sur ce PC (Paramètres › Affichage). */
       display: s.admin.getSetting('display.size') === 'large' ? 'large' : 'normal',
       /** Présentation de l'écran de caisse : celle de ce PC s'il a une exception, sinon celle du magasin. */
@@ -363,7 +399,75 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
     /** Nouveau PC : rejoint un magasin existant via le serveur central (avant toute connexion). */
-    'setup.join': (url: string, activationCode: string) => sync.join(url, activationCode),
+    'setup.join': (url: string, activationCode: string) => (notInFiche(), sync.join(url, activationCode)),
+    /** PC du client : installe la boutique préparée au bureau (fiche d'installation) à la place de la base vide. */
+    'setup.installFiche': (file: string) => {
+      if (s.admin.isInitialized()) throw new AppError('Ce PC a déjà une boutique : ouvrez la fiche depuis « Ouvrir une boutique »', 'INVALID');
+      const info = inspectDossier(file);
+      if (!info.ok) throw new AppError(info.error ?? 'Fiche invalide', 'INVALID');
+      if (info.fiche?.kind !== 'installation') throw new AppError("Ce fichier n'est pas une installation préparée au bureau", 'INVALID');
+      dossiers().install(file);
+      return info;
+    },
+
+    // --- Boutiques de ce PC (comme les fichiers de Sage) ----------------------
+    // Ouvrir une boutique se fait aussi avant la connexion : chaque boutique a ses propres utilisateurs.
+    'dossier.list': () => dossiers().list(),
+    'dossier.dir': () => dossiers().dir,
+    'dossier.chooseFile': async () => {
+      const file = await dossiers().chooseFile('Choisir la fiche ou la boutique à ouvrir');
+      return file ? inspectDossier(file) : null;
+    },
+    'dossier.open': (file: string) => {
+      const info = inspectDossier(file);
+      if (!info.ok) throw new AppError(info.error ?? 'Boutique illisible', 'INVALID');
+      if (info.fiche?.kind === 'installation') throw new AppError('Une installation préparée se copie sur ce PC avant de s’ouvrir : utilisez « Ouvrir une fiche »', 'INVALID');
+      dossiers().open(file);
+      return info;
+    },
+    /**
+     * Fiche apportée sur une clé USB : copiée sur ce PC puis ouverte. Une installation
+     * préparée devient une boutique ordinaire de ce PC (PC du technicien qui en suit plusieurs).
+     */
+    'dossier.importFiche': (file: string) => {
+      const info = inspectDossier(file);
+      if (!info.ok) throw new AppError(info.error ?? 'Fiche illisible', 'INVALID');
+      const d = dossiers();
+      if (d.list().some((x) => x.ok && x.fiche && info.fiche && x.fiche.id === info.fiche.id && x.file !== file)) {
+        throw new AppError('Cette fiche est déjà dans la liste : ouvrez-la depuis la liste', 'INVALID');
+      }
+      const target = d.importFile(file);
+      if (info.fiche?.kind === 'installation') installFiche(target, target);
+      d.open(target);
+      return inspectDossier(target);
+    },
+    'dossier.create': (name: string) => {
+      if (!name.trim()) throw new AppError('Donnez un nom à la nouvelle boutique', 'INVALID');
+      return dossiers().create(name.trim());
+    },
+    'dossier.forget': (file: string) => dossiers().forget(file),
+
+    // --- Fiches boutique (emporter, rapporter) --------------------------------
+    /** Fiche emportée sur une clé : intervention et installation pour l'administrateur, copie comptable pour qui exporte la comptabilité. */
+    'fiche.export': async (kind: FicheKind) => {
+      const u = kind === 'comptable' ? requireUser(['accounting_export']) : requireAdmin();
+      const dir = await system.chooseFolder('Choisir la clé USB ou le dossier où mettre la fiche');
+      return dir ? s.fiches.export(u, kind, dir, appVersion) : null;
+    },
+    'fiche.history': () => (requireUser(['accounting_export', 'backups']), s.fiches.history()),
+    'fiche.chooseReturn': async () => {
+      requireAdmin();
+      const file = await dossiers().chooseFile('Choisir la fiche à rapporter');
+      return file ? s.fiches.check(file) : null;
+    },
+    'fiche.bringBack': (file: string) => s.fiches.bringBack(requireAdmin().id, file),
+    /** Chez le technicien : remet la fiche sur la clé pour la rapporter. */
+    'fiche.saveCopy': async () => {
+      requireUser();
+      if (!s.fiches.current()) throw new AppError("Cette boutique n'est pas une fiche emportée", 'INVALID');
+      const dir = await system.chooseFolder('Choisir la clé USB où remettre la fiche');
+      return dir ? s.fiches.saveCopy(dir) : null;
+    },
     'auth.login': (login: string, pin: string) => {
       chosenRegisterId = null;
       return (user = s.admin.login(login, pin));
@@ -513,7 +617,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       }
     },
     'sync.state': () => (requireUser(), s.sync.state()),
-    'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), sync.connect(url, enrollmentKey)),
+    'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), notInFiche(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
     'sync.resend': () => (requireAdmin(), sync.resend()),
     'sync.conflicts': () => (requireUser(ADMIN), s.sync.conflicts()),

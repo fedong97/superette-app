@@ -1571,4 +1571,23 @@ CREATE TABLE mobile_payments (
 CREATE INDEX mobile_payments_store ON mobile_payments(store_id, created_at);
 `,
   },
+  {
+    version: 39,
+    name: 'fiches boutique',
+    sql: `
+-- Fiches sorties de ce PC : intervention du technicien, copie du comptable, installation préparée au bureau.
+-- Au retour d'une fiche, ses modifications sont fusionnées une seule fois (returned_at).
+CREATE TABLE fiche_log (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('intervention', 'comptable', 'installation')),
+  file TEXT NOT NULL,
+  base_seq INTEGER NOT NULL,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  returned_at TEXT,
+  returned_by TEXT,
+  summary TEXT
+);
+`,
+  },
 ];

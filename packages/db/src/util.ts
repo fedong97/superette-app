@@ -126,7 +126,10 @@ export class Base {
          WHERE k.key = 'station.registerId'`,
       )
       .get() as { code: string; number: number } | undefined;
-    return row ? `${row.code}${row.number}` : 'A';
+    if (!row) return 'A';
+    // Fiche d'intervention ou copie comptable : ses numéros ne croisent jamais ceux que la boutique crée pendant ce temps.
+    const fiche = this.db.prepare("SELECT 1 FROM settings WHERE key = 'fiche.meta' AND json_extract(value, '$.kind') <> 'installation'").get();
+    return `${row.code}${row.number}${fiche ? 'T' : ''}`;
   }
 
   protected tx<T>(fn: () => T): T {

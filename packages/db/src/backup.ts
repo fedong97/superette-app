@@ -305,6 +305,8 @@ export class BackupService extends Base {
 
   /** Sauvegarde automatique, n'échoue jamais (l'erreur est gardée pour l'afficher). */
   async runAutomatic(force = false): Promise<BackupInfo | null> {
+    // Une fiche emportée est déjà une copie : pas de sauvegardes automatiques à côté d'elle.
+    if (this.db.prepare("SELECT 1 FROM settings WHERE key = 'fiche.meta'").get()) return null;
     if (!force && !this.autoDue()) return null;
     if (!this.status().dir) return null;
     try {

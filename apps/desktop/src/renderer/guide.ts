@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.58.0',
+    items: [
+      'Fiches boutique, comme les fichiers de Sage : Administration › Fiches boutique sort une copie de la boutique sur une clé USB pendant que la caisse vend. La boutique n’est jamais arrêtée.',
+      'Fiche d’intervention : le technicien l’ouvre sur son PC (Fichier › Ouvrir une boutique › Ouvrir une fiche), sans réinstaller ni toucher à la base, y travaille puis la rapporte. « Rapporter une fiche » ajoute ses modifications à la boutique sans rien effacer de ce qu’elle a vendu entre-temps ; si un même élément a changé des deux côtés, la modification la plus récente est gardée.',
+      'Copie pour le comptable : il fait ses états chez lui pendant que la boutique tourne, et prend une nouvelle copie à sa prochaine visite.',
+      'Installation préparée : paramétrez la boutique du client au bureau (magasin, utilisateurs, articles) dans une nouvelle boutique, puis « Préparer l’installation ». Sur le PC du client, au premier démarrage : « Installer une boutique préparée ».',
+      'Un PC peut tenir plusieurs boutiques : l’écran de connexion propose « Changer de boutique », et chaque boutique garde ses utilisateurs, sa licence et ses réglages de PC.',
+    ],
+  },
+  {
     version: '0.57.0',
     items: [
       'Serveur central : le PC vérifie que le serveur a bien tous ses produits, rayons, dépôts, utilisateurs, stocks et inventaires, et lui renvoie seul ce qui manque (serveur réinstallé, sauvegarde restaurée). Le téléphone d’inventaire retrouve ainsi le catalogue.',

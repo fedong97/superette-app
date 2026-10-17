@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.59.0',
+    items: [
+      'Modèles de boutique, comme les fichiers modèles de Sage : à la création, choisissez le métier (superette, quincaillerie, pharmacie, boulangerie, habillement) et la boutique part avec ses rayons, familles et réglages. Administration › Modèles de boutique enregistre la vôtre comme modèle (catalogue compris si vous voulez), à réutiliser chez le client suivant.',
+      'Import du catalogue d’un fournisseur dans son propre format : « Nouveau format… » montre les premières lignes du fichier, vous dites quelle colonne est la désignation, le prix, le code-barres…, et le format se réutilise en un clic.',
+      'Export des écritures pour le cabinet comptable au format Sage 100, Ciel ou EBP, ou dans un format décrit une fois (ordre des colonnes, date, séparateur).',
+      'Postes distants : un dépôt sans réseau ni serveur vend sur son propre PC. Administration › Postes distants prépare son installation sur une clé ; chaque soir le dépôt fait sa remontée (clé USB, e-mail ou WhatsApp) que la boutique intègre, et la boutique lui renvoie prix et catalogue.',
+      'Contrôle avant clôture d’exercice : écritures déséquilibrées, journées de caisse restées ouvertes, fiches pas rapportées, stock à recalculer et opérations pas encore envoyées au serveur sont listés avant de clôturer.',
+    ],
+  },
+  {
     version: '0.58.0',
     items: [
       'Fiches boutique, comme les fichiers de Sage : Administration › Fiches boutique sort une copie de la boutique sur une clé USB pendant que la caisse vend. La boutique n’est jamais arrêtée.',

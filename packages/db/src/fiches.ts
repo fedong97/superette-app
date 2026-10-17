@@ -148,7 +148,7 @@ export interface FicheLogRow {
 }
 
 /** Réglages propres à un PC : ils ne partent pas dans une fiche et ne reviennent jamais avec elle. */
-const POSTE_PREFIXES = ['license.', 'sync.', 'station.', 'backup.', 'printer.', 'drawer.', 'digest.', 'barcode.node', 'mobilepay.', 'display.', 'pos.layout', 'fiche.', 'share.'];
+const POSTE_PREFIXES = ['license.', 'sync.', 'station.', 'backup.', 'printer.', 'drawer.', 'digest.', 'barcode.node', 'mobilepay.', 'display.', 'pos.layout', 'fiche.', 'share.', 'relay.'];
 /** Le magasin et la caisse restent dans la fiche (elle s'ouvre sur la bonne boutique), sans jamais revenir. */
 const KEPT_IN_FICHE = new Set(['station.storeId', 'station.registerId']);
 
@@ -307,7 +307,12 @@ export class FicheService extends Base {
     dir: string,
     appVersion: string,
     /** name : nom de fichier fixe (une copie précédente est remplacée) ; log : false pour les copies automatiques. */
-    opts: { name?: string; log?: boolean } = {},
+    opts: {
+      name?: string;
+      log?: boolean;
+      /** Poste distant (dépôt sans réseau) : installation sur une autre caisse, qui fera ses remontées par fichier. */
+      remote?: { registerId: string };
+    } = {},
   ): Promise<DossierInfo> {
     if (!(kind in FICHE_KIND_LABELS)) throw new AppError('Sorte de fiche inconnue', 'INVALID');
     const open = this.current();
@@ -316,7 +321,13 @@ export class FicheService extends Base {
       .prepare("SELECT s.id, s.code, s.name FROM settings k JOIN stores s ON s.id = k.value WHERE k.key = 'station.storeId'")
       .get() as { id: string; code: string; name: string } | undefined;
     if (!store) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
-    if (kind === 'installation') {
+    const remote = opts.remote
+      ? (this.db.prepare("SELECT r.id, r.store_id, s.name AS store_name, s.code AS store_code FROM registers r JOIN stores s ON s.id = r.store_id WHERE r.id = ? AND r.kind = 'cash' AND r.active = 1").get(opts.remote.registerId) as
+          | { id: string; store_id: string; store_name: string; store_code: string }
+          | undefined)
+      : undefined;
+    if (opts.remote && (kind !== 'installation' || !remote)) throw new AppError('Choisissez une caisse espèces active pour le poste distant', 'INVALID');
+    if (kind === 'installation' && !remote) {
       const sales = this.db.prepare('SELECT COUNT(*) FROM sales').pluck().get() as number;
       const sessions = this.db.prepare('SELECT COUNT(*) FROM cash_sessions').pluck().get() as number;
       if (sales > 0 || sessions > 0) {
@@ -332,15 +343,15 @@ export class FicheService extends Base {
       throw new AppError(`Dossier inaccessible : ${dir} (${e instanceof Error ? e.message : String(e)})`, 'INVALID');
     }
     const now = this.clock();
-    const file = join(dir, opts.name ?? fileName(store.name, kind, now));
+    const file = join(dir, opts.name ?? fileName(remote?.store_name ?? store.name, kind, now));
     const tmp = `${file}.part`;
     const meta: FicheMeta = {
       v: 1,
       id: newId(),
       kind,
-      storeId: store.id,
-      storeCode: store.code,
-      storeName: store.name,
+      storeId: remote?.store_id ?? store.id,
+      storeCode: remote?.store_code ?? store.code,
+      storeName: remote?.store_name ?? store.name,
       at: now.toISOString(),
       byId: user?.id ?? null,
       byName: user?.name ?? null,
@@ -364,6 +375,15 @@ export class FicheService extends Base {
           }
           for (const c of copy.prepare('SELECT name, value FROM counters').all() as { name: string; value: number }[]) meta.counters[c.name] = c.value;
           copy.prepare('DELETE FROM sync_conflicts').run();
+          if (remote) {
+            // Le poste distant ouvre sur sa caisse et ne remontera que ce qu'il fera lui-même.
+            const set = copy.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+            set.run('station.storeId', remote.store_id);
+            set.run('station.registerId', remote.id);
+            set.run('relay.role', 'distant');
+            set.run('relay.lastSeq', String(meta.baseSeq));
+            copy.prepare('UPDATE registers SET activated_at = ? WHERE id = ?').run(meta.at, remote.id);
+          }
           copy.prepare("INSERT INTO settings (key, value) VALUES ('fiche.meta', ?)").run(JSON.stringify(meta));
         })();
       } finally {
@@ -376,6 +396,8 @@ export class FicheService extends Base {
     }
     const info = inspectDossier(file);
     if (!info.ok) throw new AppError(`La fiche relue est invalide : ${info.error}`, 'FICHE_FAILED');
+    // La boutique enverra au poste distant ce qu'elle fera à partir de maintenant.
+    if (remote) this.setSetting(`relay.out.${remote.store_id}`, String(meta.baseSeq));
     if (opts.log === false) return info;
     this.db
       .prepare('INSERT INTO fiche_log (id, kind, file, base_seq, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')

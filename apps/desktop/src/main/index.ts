@@ -183,6 +183,10 @@ void app.whenReady().then(() => {
       const error = await shell.openPath(path);
       if (error) throw new AppError(error);
     },
+    chooseOpenFile: async (title, name, extensions) => {
+      const r = await dialog.showOpenDialog({ title, filters: [{ name, extensions }], properties: ['openFile'] });
+      return r.canceled ? null : (r.filePaths[0] ?? null);
+    },
     digest: { seal: digest.seal, sendNow: digest.sendNow },
     updater,
     restore: (file, userId) => {

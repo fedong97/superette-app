@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { splitTtc } from '@superette/core';
+import { IMPORT_FIELDS, type ImportField, type ImportFormat, type Separator, guessSeparator, parseArticlesWith, splitDelimited, splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, readTextFile, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
 import { Shelving } from './Controls';
@@ -551,31 +551,109 @@ function parseCsv(text: string) {
   });
 }
 
+const SEPARATORS: [Separator, string][] = [
+  [';', 'Point-virgule'],
+  [',', 'Virgule'],
+  ['\t', 'Tabulation'],
+];
+
+/**
+ * Import du catalogue : au format FEDONIX (en-têtes reconnus) ou selon un format
+ * enregistré, comme les formats paramétrables de Sage. Le catalogue d'un fournisseur
+ * se décrit une fois (quelle colonne est le prix, le code-barres…) et se réimporte en un clic.
+ */
 function ImportDialog({ onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const [rows, setRows] = useState<ReturnType<typeof parseCsv>>([]);
+  const formats = useLoad(() => call('formats.list').then((l) => l.filter((f): f is ImportFormat => f.kind === 'articles')));
+  const [formatId, setFormatId] = useState('');
+  const [text, setText] = useState('');
+  const [draft, setDraft] = useState<ImportFormat | null>(null);
   const [result, setResult] = useState<Result<'catalogue.import'> | null>(null);
+  const format = draft ?? formats.data?.find((f) => f.id === formatId) ?? null;
+  const rows = (() => {
+    if (!text) return [];
+    try {
+      return format ? parseArticlesWith(text, format) : parseCsv(text);
+    } catch {
+      return [];
+    }
+  })();
+  const newFormat = () => {
+    setFormatId('');
+    setDraft({ id: '', name: '', kind: 'articles', separator: text ? guessSeparator(text) : ';', skipRows: 1, decimal: ',', columns: {} });
+  };
+  const saveDraft = async () => {
+    if (!draft) return;
+    try {
+      const saved = (await call('formats.save', draft)) as ImportFormat;
+      formats.reload();
+      setDraft(null);
+      setFormatId(saved.id);
+      toast.ok(`Format « ${saved.name} » enregistré`);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const removeFormat = async () => {
+    try {
+      await call('formats.delete', formatId);
+      setFormatId('');
+      formats.reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   return (
     <Modal title="Importer le catalogue" onClose={onClose} wide>
-      <p>Depuis Excel : Fichier, Enregistrer sous, CSV (séparateur point-virgule).</p>
-      <pre className="help">{IMPORT_HELP}</pre>
+      <div className="row">
+        <Field label="Format du fichier">
+          <select
+            value={draft ? 'new' : formatId}
+            onChange={(e) => {
+              if (e.target.value === 'new') return newFormat();
+              setDraft(null);
+              setFormatId(e.target.value);
+            }}
+          >
+            <option value="">FEDONIX 360 (en-têtes de colonnes)</option>
+            {(formats.data ?? []).map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+            <option value="new">Nouveau format (catalogue d'un fournisseur)…</option>
+          </select>
+        </Field>
+        {formatId && !draft && <button onClick={() => void removeFormat()}>Supprimer ce format</button>}
+      </div>
+      {!format && (
+        <>
+          <p>Depuis Excel : Fichier, Enregistrer sous, CSV (séparateur point-virgule).</p>
+          <pre className="help">{IMPORT_HELP}</pre>
+        </>
+      )}
       <input
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,.txt,text/csv,text/plain"
         onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
           try {
-            setRows(parseCsv(await readTextFile(file)));
+            const content = await readTextFile(file);
+            setText(content);
+            if (draft && !draft.columns.name) setDraft({ ...draft, separator: guessSeparator(content) });
             setResult(null);
           } catch (err) {
             toast.error(err);
           }
         }}
       />
+      {draft && <FormatEditor draft={draft} text={text} onChange={setDraft} onSave={() => void saveDraft()} onCancel={() => setDraft(null)} />}
       {rows.length > 0 && !result && (
         <div className="actions">
-          <span>{rows.length} ligne(s) lue(s)</span>
+          <span>
+            {rows.length} ligne(s) lue(s){rows[0] ? ` ; première : ${rows[0].name}, ${fcfa(rows[0].salePrice || 0)}` : ''}
+          </span>
           <button
             className="primary"
             onClick={async () => {
@@ -607,5 +685,84 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Description d'un fichier fournisseur : à chaque colonne sa donnée, vue sur les premières lignes du fichier. */
+function FormatEditor({ draft, text, onChange, onSave, onCancel }: { draft: ImportFormat; text: string; onChange: (f: ImportFormat) => void; onSave: () => void; onCancel: () => void }) {
+  const sample = text ? splitDelimited(text, draft.separator).slice(0, draft.skipRows + 3) : [];
+  const width = Math.max(0, ...sample.map((r) => r.length));
+  const fieldAt = (i: number) => (Object.entries(draft.columns).find(([, c]) => c === i)?.[0] ?? '') as ImportField | '';
+  const setColumn = (i: number, field: ImportField | '') => {
+    const columns = Object.fromEntries(Object.entries(draft.columns).filter(([k, c]) => c !== i && k !== field)) as ImportFormat['columns'];
+    if (field) columns[field] = i;
+    onChange({ ...draft, columns });
+  };
+  return (
+    <section className="card">
+      <h3>Nouveau format</h3>
+      <div className="grid2">
+        <Field label="Nom du format" hint="Ex. Catalogue Brasseries">
+          <input value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} />
+        </Field>
+        <Field label="Séparateur">
+          <select value={draft.separator} onChange={(e) => onChange({ ...draft, separator: e.target.value as Separator })}>
+            {SEPARATORS.map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Lignes à sauter" hint="En-têtes, titre du fournisseur">
+          <input type="number" min={0} value={draft.skipRows} onChange={(e) => onChange({ ...draft, skipRows: Math.max(0, Number(e.target.value) || 0) })} />
+        </Field>
+        <Field label="Virgule des prix">
+          <select value={draft.decimal} onChange={(e) => onChange({ ...draft, decimal: e.target.value as ',' | '.' })}>
+            <option value=",">1 250,50</option>
+            <option value=".">1,250.50</option>
+          </select>
+        </Field>
+      </div>
+      {!text ? (
+        <p className="muted">Choisissez un fichier du fournisseur pour indiquer ce que contient chaque colonne.</p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table className="list">
+            <thead>
+              <tr>
+                {Array.from({ length: width }, (_, i) => (
+                  <th key={i}>
+                    <select value={fieldAt(i)} onChange={(e) => setColumn(i, e.target.value as ImportField | '')}>
+                      <option value="">Colonne {i + 1} : ignorée</option>
+                      {(Object.keys(IMPORT_FIELDS) as ImportField[]).map((k) => (
+                        <option key={k} value={k}>
+                          {IMPORT_FIELDS[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sample.map((r, ri) => (
+                <tr key={ri} className={ri < draft.skipRows ? 'muted' : undefined}>
+                  {Array.from({ length: width }, (_, i) => (
+                    <td key={i}>{r[i] ?? ''}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="actions">
+        <button onClick={onCancel}>Annuler</button>
+        <button className="primary" disabled={!draft.name.trim() || draft.columns.name === undefined || draft.columns.salePrice === undefined} onClick={onSave}>
+          Enregistrer le format
+        </button>
+      </div>
+    </section>
   );
 }

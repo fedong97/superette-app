@@ -10,13 +10,15 @@ import { Settings } from './AdminSettings';
 import { PrintTemplates } from './PrintTemplates';
 import { FiscalYears } from './Accounting';
 import { Fiches, Repair } from './Dossiers';
+import { RemoteTills } from './RemoteTills';
+import { ShopTemplates } from './ShopTemplates';
 import contract from '../../../build/contrat-licence.txt?raw';
 import serverLogo from '../assets/logo-serveur.png';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -37,6 +39,8 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
     ...(user.role === 'admin' || can('accounting_export') ? ([['fiches', 'Fiches boutique']] as [Tab, string][]) : []),
+    ...(user.role === 'admin' ? ([['shopTemplates', 'Modèles de boutique']] as [Tab, string][]) : []),
+    ...(user.role === 'admin' || can('cash') ? ([['relay', 'Postes distants']] as [Tab, string][]) : []),
     ...(user.role === 'admin' ? ([['repair', 'Réparation']] as [Tab, string][]) : []),
     ...(can('settings_edit') ? ([['mobilepay', 'Paiement mobile']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
@@ -80,6 +84,8 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'fiches' && (user.role === 'admin' || can('accounting_export')) && <Fiches user={user} onChanged={onChanged} />}
+      {tab === 'shopTemplates' && user.role === 'admin' && <ShopTemplates />}
+      {tab === 'relay' && (user.role === 'admin' || can('cash')) && <RemoteTills isAdmin={user.role === 'admin'} />}
       {tab === 'repair' && user.role === 'admin' && <Repair onBackups={() => setTab('backups')} />}
       {tab === 'mobilepay' && can('settings_edit') && <MobilePay />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}

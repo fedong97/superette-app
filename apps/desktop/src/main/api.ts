@@ -27,6 +27,11 @@ import {
   type DocVariant,
   effectiveTemplates,
   sampleDocData,
+  BUILTIN_EXPORT_FORMATS,
+  type ExportFormat,
+  type FileFormat,
+  type ImportFormat,
+  formatEntries,
 } from '@superette/core';
 import {
   AppError,
@@ -38,6 +43,11 @@ import {
   packFiche,
   unpackFiche,
   isPayout,
+  BUILTIN_TEMPLATES,
+  parseTemplate,
+  RELAY_EXTENSION,
+  type ShopTemplate,
+  TEMPLATE_EXTENSION,
   COMMITMENT_KINDS,
   SECURITY_KINDS,
   inspectBackup,
@@ -90,8 +100,9 @@ import {
   type OrangeConfig,
 } from '@superette/db';
 
-import { copyFileSync, mkdtempSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { DossierEntry } from './dossiers';
 import type { SyncRunner } from './sync';
 import type { Updater } from './updater';
@@ -122,6 +133,8 @@ export interface SystemHooks {
     /** Ferme la base vide de ce PC, la remplace par l'installation préparée et relance. */
     install(file: string): void;
   };
+  /** Fenêtre de choix d'un fichier d'un type donné (modèle de boutique, fichier de journée). */
+  chooseOpenFile?(title: string, name: string, extensions: string[]): Promise<string | null>;
 }
 
 export interface InvoicePrintOptions {
@@ -355,6 +368,52 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const notInFiche = () => {
     if (s.fiches.current()) throw new AppError("Une fiche emportée ne se relie pas au serveur : rapportez-la à la boutique, qui fera suivre ses modifications", 'FICHE');
   };
+  /** Modèles de boutique enregistrés sur ce PC (Documents › FEDONIX 360 › Modèles). */
+  const templatesDir = () => join(dirname(dossiers().dir), 'Modèles');
+  const templateFiles = (): (ShopTemplate & { file: string })[] => {
+    const dir = system.dossiers ? templatesDir() : null;
+    if (!dir || !existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(`.${TEMPLATE_EXTENSION}`))
+      .flatMap((f) => {
+        try {
+          return [{ ...parseTemplate(readFileSync(join(dir, f), 'utf8')), file: join(dir, f) }];
+        } catch {
+          return [];
+        }
+      });
+  };
+  const findTemplate = (idOrFile: string): ShopTemplate => {
+    const builtin = BUILTIN_TEMPLATES.find((t) => t.id === idOrFile);
+    if (builtin) return builtin;
+    const saved = templateFiles().find((t) => t.file === idOrFile || t.id === idOrFile);
+    if (saved) return saved;
+    if (existsSync(idOrFile)) return parseTemplate(readFileSync(idOrFile, 'utf8'));
+    throw new AppError('Modèle introuvable', 'NOT_FOUND');
+  };
+  const templateSummary = (t: ShopTemplate & { file?: string }) => ({
+    id: t.file ?? t.id,
+    name: t.name,
+    description: t.description,
+    builtin: !t.file,
+    departments: t.departments.length,
+    families: t.departments.reduce((n, d) => n + (d.families?.length ?? 0), 0),
+    articles: t.articles?.length ?? 0,
+  });
+  /** Formats d'import et d'export de ce PC, après ceux livrés avec le logiciel. */
+  const userFormats = (): FileFormat[] => {
+    try {
+      const v = JSON.parse(s.admin.getSetting('formats') ?? '[]') as FileFormat[];
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  };
+  const allFormats = (): FileFormat[] => [...BUILTIN_EXPORT_FORMATS, ...userFormats()];
+  const chooseOpenFile = async (title: string, name: string, extensions: string[]) => {
+    if (!system.chooseOpenFile) throw new AppError('Indisponible sur ce poste', 'UNAVAILABLE');
+    return system.chooseOpenFile(title, name, extensions);
+  };
   /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
   const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
 
@@ -413,9 +472,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
     }),
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
-    'setup.bootstrap': (input: BootstrapInput) => {
-      const result = s.admin.bootstrap(input);
+    /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */
+    'setup.bootstrap': (input: BootstrapInput & { template?: string | null }) => {
+      const { template, ...rest } = input;
+      const t = template ? findTemplate(template) : null;
+      const result = s.admin.bootstrap(rest);
       user = result.admin;
+      if (t) s.templates.apply(result.admin.id, result.store.id, t);
       return result;
     },
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
@@ -533,6 +596,94 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Réparation (comme la Maintenance de Sage) ---------------------------
     'repair.check': () => (requireAdmin(), s.repair.check()),
     'repair.run': () => s.repair.repair(requireAdmin().id),
+
+    // --- Modèles de boutique (comme les fichiers modèles de Sage) ------------
+    // La liste se lit aussi avant la création de la boutique (premier démarrage).
+    'template.list': () => [...BUILTIN_TEMPLATES, ...templateFiles()].map(templateSummary),
+    'template.apply': (idOrFile: string) => {
+      const u = requireAdmin();
+      return s.templates.apply(u.id, ctx().storeId, findTemplate(idOrFile));
+    },
+    'template.choose': async () => {
+      const file = await chooseOpenFile('Choisir le modèle de boutique', 'Modèle FEDONIX 360', [TEMPLATE_EXTENSION]);
+      return file ? templateSummary({ ...parseTemplate(readFileSync(file, 'utf8')), file }) : null;
+    },
+    /** Fait un modèle de la boutique ouverte, rangé avec les modèles de ce PC (et copiable sur une clé). */
+    'template.save': (input: { name: string; description?: string; articles?: boolean }) => {
+      requireAdmin();
+      const t = s.templates.capture(ctx().storeId, input);
+      const dir = templatesDir();
+      mkdirSync(dir, { recursive: true });
+      const base = t.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'modele';
+      let file = join(dir, `${base}.${TEMPLATE_EXTENSION}`);
+      for (let i = 2; existsSync(file); i++) file = join(dir, `${base}-${i}.${TEMPLATE_EXTENSION}`);
+      writeFileSync(file, JSON.stringify(t, null, 1));
+      return { file, ...templateSummary({ ...t, file }) };
+    },
+    'template.openFolder': async () => {
+      requireAdmin();
+      mkdirSync(templatesDir(), { recursive: true });
+      await system.openFolder(templatesDir());
+    },
+
+    // --- Formats d'import et d'export paramétrables ---------------------------
+    'formats.list': () => (requireUser(), allFormats()),
+    'formats.save': (f: ImportFormat | ExportFormat) => {
+      requireUser(f.kind === 'articles' ? ['import'] : ['accounting_export']);
+      if (!f.name?.trim()) throw new AppError('Donnez un nom au format', 'INVALID');
+      if (f.kind === 'articles' && (f.columns.name === undefined || f.columns.salePrice === undefined)) {
+        throw new AppError('Indiquez au moins les colonnes de la désignation et du prix de vente', 'INVALID');
+      }
+      if (f.kind === 'ecritures' && !f.columns.length) throw new AppError('Choisissez les colonnes du fichier', 'INVALID');
+      if (BUILTIN_EXPORT_FORMATS.some((b) => b.id === f.id)) throw new AppError('Les formats livrés ne se modifient pas : enregistrez-en une copie', 'INVALID');
+      const saved = { ...f, name: f.name.trim(), id: f.id || `format-${Date.now()}`, builtin: undefined };
+      const list = userFormats().filter((x) => x.id !== saved.id);
+      s.admin.setSetting('formats', JSON.stringify([...list, saved]));
+      return saved;
+    },
+    'formats.delete': (id: string) => {
+      const f = userFormats().find((x) => x.id === id);
+      if (!f) throw new AppError('Format introuvable', 'NOT_FOUND');
+      requireUser(f.kind === 'articles' ? ['import'] : ['accounting_export']);
+      s.admin.setSetting('formats', JSON.stringify(userFormats().filter((x) => x.id !== id)));
+    },
+
+    // --- Postes distants (remontée par fichier, sans réseau) -----------------
+    'relay.status': () => (requireUser(), s.relay.status()),
+    /** Boutique : prépare sur une clé l'installation du PC d'un dépôt, sur une de ses caisses. */
+    'relay.installRemote': async (registerId: string) => {
+      const u = requireAdmin();
+      const dir = await system.chooseFolder("Choisir la clé USB ou le dossier où mettre l'installation du poste distant");
+      if (!dir) return null;
+      return s.fiches.export(u, 'installation', dir, appVersion, { remote: { registerId } });
+    },
+    /** Poste distant : fichier des opérations du jour à porter ou envoyer à la boutique. */
+    'relay.exportRemontee': async (opts: { send?: boolean } = {}) => {
+      const u = requireUser(['cash', 'admin']);
+      const dir = await system.chooseFolder(opts.send ? 'Choisir le dossier où mettre le fichier à envoyer' : 'Choisir la clé USB ou le dossier où mettre la remontée');
+      if (!dir) return null;
+      const out = s.relay.exportRemontee(u, dir);
+      if (opts.send) await system.openFolder(dir).catch(() => undefined);
+      return out;
+    },
+    /** Boutique : catalogue, prix et utilisateurs à renvoyer au poste distant. */
+    'relay.exportUpdate': async (storeId: string, opts: { send?: boolean } = {}) => {
+      const u = requireAdmin();
+      const dir = await system.chooseFolder(opts.send ? 'Choisir le dossier où mettre le fichier à envoyer' : 'Choisir la clé USB ou le dossier où mettre la mise à jour');
+      if (!dir) return null;
+      const out = s.relay.exportUpdate(u, storeId, dir);
+      if (opts.send) await system.openFolder(dir).catch(() => undefined);
+      return out;
+    },
+    'relay.choose': async () => {
+      requireUser(['cash', 'admin']);
+      const file = await chooseOpenFile('Choisir le fichier de journée à intégrer', 'Journée FEDONIX 360', [RELAY_EXTENSION]);
+      return file ? { file, ...s.relay.read(file) } : null;
+    },
+    'relay.integrate': (file: string) => {
+      const u = s.relay.isRemote() ? requireUser(['cash', 'admin']) : requireAdmin();
+      return s.relay.integrate(u.id, file);
+    },
     'auth.login': (login: string, pin: string) => {
       chosenRegisterId = null;
       return (user = s.admin.login(login, pin));
@@ -1623,6 +1774,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'fiscal.open': (input: { start: string; end: string }) => s.fiscal.open(ctx(['fiscal_years']), input),
     'fiscal.openNext': () => s.fiscal.openNext(ctx(['fiscal_years'])),
     'fiscal.setDates': (id: string, input: { start: string; end: string }) => s.fiscal.setDates(ctx(['fiscal_years']), id, input),
+    /** Contrôle avant clôture : ce qui bloque, ce qui mérite d'être vu (stock compris). */
+    'fiscal.checkClose': (id: string) => {
+      const c = ctx(['fiscal_years']);
+      const checks = s.fiscal.checkClose(c.storeId, id);
+      for (const r of s.repair.check().checks.filter((x) => x.key === 'stock' || x.key === 'lots')) {
+        checks.push({ key: r.key, label: r.label, status: r.status === 'problem' ? 'warning' : 'ok', detail: r.status === 'problem' ? `${r.detail} (Administration › Réparation)` : r.detail });
+      }
+      return checks;
+    },
     'fiscal.close': (id: string) => s.fiscal.close(ctx(['fiscal_years']), id),
     'fiscal.reopen': (id: string) => s.fiscal.reopen(ctx(['fiscal_years']), id),
     'fiscal.remove': (id: string) => s.fiscal.remove(ctx(['fiscal_years']), id),
@@ -1631,6 +1791,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),
     'accounting.vatReturn': (month: string) => s.accounting.vatReturn(ctx(['vat_return']).storeId, month),
     'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(['accounting_export']).storeId, opts),
+    /** Écritures dans le format du logiciel du cabinet (Sage 100, Ciel, EBP ou format enregistré). */
+    'accounting.exportFormatted': (opts: { from?: string; to?: string }, formatId: string) => {
+      const storeId = ctx(['accounting_export']).storeId;
+      const f = allFormats().find((x) => x.id === formatId);
+      if (!f || f.kind !== 'ecritures') throw new AppError("Format d'export introuvable", 'NOT_FOUND');
+      const lines = s.accounting.entries(storeId, opts).flatMap((e) =>
+        e.lines.map((l) => ({ journal: e.journal, date: e.date, piece: e.ref, account: l.account, aux: l.aux, label: l.label, debit: l.debit, credit: l.credit })),
+      );
+      return formatEntries(lines, f);
+    },
     'tax.assessment': (year: number) => s.tax.assessment(ctx(['tax', 'tax_settings']).storeId, year),
     'tax.instalment': (month: string) => s.tax.instalment(ctx(['tax', 'tax_settings']).storeId, month),
     'tax.saveSettings': (year: number, input: Parameters<typeof s.tax.saveSettings>[2]) => s.tax.saveSettings(ctx(['tax_settings']), year, input),

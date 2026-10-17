@@ -33,6 +33,13 @@ const yearEnd = (start: string) => shiftDay(`${Number(start.slice(0, 4)) + 1}${s
  * tiers, résultat en report à nouveau) au premier jour de l'exercice suivant,
  * puis interdit toute écriture datée dedans tant qu'il n'est pas rouvert.
  */
+export interface CloseCheck {
+  key: string;
+  label: string;
+  status: 'ok' | 'warning' | 'blocking';
+  detail: string;
+}
+
 export class FiscalYearService extends Base {
   constructor(
     db: Db,
@@ -134,10 +141,47 @@ export class FiscalYearService extends Base {
   }
 
   /**
+   * Contrôle avant clôture, comme la Maintenance de Sage : ce qui bloque la clôture
+   * (pièces déséquilibrées, journées de caisse ouvertes…) et ce qui mérite d'être vu
+   * (fiches d'intervention pas rapportées, opérations pas encore envoyées au serveur).
+   */
+  checkClose(storeId: string, id: string): CloseCheck[] {
+    const fy = this.get(id);
+    const checks: CloseCheck[] = [];
+    const add = (key: string, label: string, ok: boolean, blocking: boolean, detail: string) => checks.push({ key, label, status: ok ? 'ok' : blocking ? 'blocking' : 'warning', detail });
+    add('ended', "Fin de l'exercice", this.today() > fy.end_date, true, this.today() > fy.end_date ? `Terminé le ${fr(fy.end_date)}.` : `L'exercice se termine le ${fr(fy.end_date)}.`);
+    const before = this.list(storeId).find((f) => f.start_date < fy.start_date && f.status === 'open');
+    add('previous', 'Exercices précédents', !before, true, before ? `Clôturez d'abord l'exercice du ${fr(before.start_date)} au ${fr(before.end_date)}.` : 'Tous clôturés.');
+    const tb = this.accounting.trialBalance(storeId, { from: fy.start_date, to: fy.end_date });
+    add('balance', 'Balance', tb.totals.debit === tb.totals.credit, true, tb.totals.debit === tb.totals.credit ? 'Débit et crédit égaux.' : `Débit ${tb.totals.debit} ≠ crédit ${tb.totals.credit}.`);
+    const bad = this.accounting
+      .entries(storeId, { from: fy.start_date, to: fy.end_date })
+      .filter((e) => e.lines.reduce((t, l) => t + (l.debit || 0) - (l.credit || 0), 0) !== 0);
+    add('entries', 'Pièces', bad.length === 0, true, bad.length ? `${bad.length} pièce(s) déséquilibrée(s) : ${bad.slice(0, 5).map((e) => `${e.journal} ${e.ref}`).join(', ')}${bad.length > 5 ? '…' : ''}.` : 'Chaque pièce est équilibrée.');
+    const open = this.db
+      .prepare("SELECT COUNT(*) FROM cash_sessions WHERE store_id = ? AND status = 'open' AND date(opened_at, 'localtime') <= ?")
+      .pluck()
+      .get(storeId, fy.end_date) as number;
+    // Les ventes sont comptées au jour le jour ; seul l'écart de caisse attend le Z.
+    add('cash', 'Journées de caisse', open === 0, false, open ? `${open} journée(s) de caisse ouverte(s) avant la fin de l'exercice : leur écart de caisse ne sera compté qu'au Z.` : 'Toutes clôturées.');
+    const fiches = this.db.prepare("SELECT COUNT(*) FROM fiche_log WHERE kind = 'intervention' AND returned_at IS NULL AND created_at <= ?").pluck().get(`${fy.end_date}T23:59:59`) as number;
+    add('fiches', "Fiches d'intervention", fiches === 0, false, fiches ? `${fiches} fiche(s) d'intervention sortie(s) et pas encore rapportée(s) : leurs écritures manqueraient.` : 'Toutes rapportées.');
+    const linked = this.db.prepare("SELECT 1 FROM settings WHERE key = 'sync.token'").get();
+    if (linked) {
+      const pending = this.db.prepare('SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL').pluck().get() as number;
+      const conflicts = this.db.prepare('SELECT COUNT(*) FROM sync_conflicts').pluck().get() as number;
+      add('sync', 'Serveur central', pending === 0 && conflicts === 0, false, pending || conflicts ? `${pending} opération(s) pas encore envoyée(s), ${conflicts} conflit(s) : synchronisez avant de clôturer.` : 'Tout est envoyé.');
+    }
+    return checks;
+  }
+
+  /**
    * Clôture : l'exercice doit être terminé, les précédents clôturés et les
    * écritures équilibrées. L'exercice suivant est ouvert s'il n'existe pas.
    */
   close(ctx: Context, id: string): FiscalYear {
+    const blocking = this.checkClose(ctx.storeId, id).filter((c) => c.status === 'blocking' && c.key === 'entries');
+    if (blocking.length) throw new AppError(`Clôture impossible : ${blocking.map((c) => c.detail).join(' ')}`, 'CLOSE_CHECK');
     const fy = this.get(id);
     if (fy.store_id !== ctx.storeId) throw new AppError('Cet exercice appartient à un autre magasin', 'INVALID');
     if (fy.status === 'closed') throw new AppError('Cet exercice est déjà clôturé', 'INVALID');

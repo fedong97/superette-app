@@ -81,7 +81,7 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   /** Beaucoup de superettes sont au régime simplifié : pas de TVA tant qu'on ne la coche pas. */
   const [vatEnabled, setVatEnabled] = useState(false);
-  /** Métier de départ : rayons, familles et réglages déjà prêts (comme les fichiers modèles de Sage). */
+  /** Métier de départ : rayons, familles et réglages déjà prêts. */
   const [templates, setTemplates] = useState<Result<'template.list'>>([]);
   const [template, setTemplate] = useState('');
   useEffect(() => {

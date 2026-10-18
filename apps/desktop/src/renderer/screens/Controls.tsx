@@ -6,7 +6,7 @@ import { SaleDetail } from './Sales';
 import { tx } from '../tax';
 
 /**
- * Registres et contrôles rangés comme les menus de KONTROL : registre des
+ * Registres et contrôles : registre des
  * ventes, alertes, opérations de caisse, achats par produit, marchandises non
  * reçues, articles par dépôt, comptes fournisseurs et clients.
  */

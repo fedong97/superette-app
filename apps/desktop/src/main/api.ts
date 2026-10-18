@@ -79,6 +79,8 @@ import {
   type SalesRegisterFilter,
   type QuoteInput,
   type QuoteState,
+  type OrderInput,
+  type OrderStatus,
   type AccountRole,
   type JournalCode,
   type LabelItem,
@@ -527,7 +529,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return info;
     },
 
-    // --- Boutiques de ce PC (comme les fichiers de Sage) ----------------------
+    // --- Boutiques de ce PC ----------------------
     // Ouvrir une boutique se fait aussi avant la connexion : chaque boutique a ses propres utilisateurs.
     'dossier.list': () => dossiers().list(),
     'dossier.dir': () => dossiers().dir,
@@ -626,11 +628,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return opts.send ? send(info, dir) : info;
     },
 
-    // --- Réparation (comme la Maintenance de Sage) ---------------------------
+    // --- Réparation ---------------------------
     'repair.check': () => (requireAdmin(), s.repair.check()),
     'repair.run': () => s.repair.repair(requireAdmin().id),
 
-    // --- Modèles de boutique (comme les fichiers modèles de Sage) ------------
+    // --- Modèles de boutique ------------
     // La liste se lit aussi avant la création de la boutique (premier démarrage).
     'template.list': () => [...BUILTIN_TEMPLATES, ...templateFiles()].map(templateSummary),
     'template.apply': (idOrFile: string) => {
@@ -1202,6 +1204,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       customerId?: string | null;
       creditPin?: string;
       quoteId?: string | null;
+      orderId?: string | null;
       clientName?: string | null;
       priceLevel?: PriceLevel | null;
       warehouseId?: string | null;
@@ -1233,6 +1236,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         customerId: input.customerId ?? null,
         creditAuthorizedBy: creditBy,
         quoteId: input.quoteId ?? null,
+        orderId: input.orderId ?? null,
         clientName: input.clientName ?? null,
         priceLevel: input.priceLevel ?? null,
         warehouseId: input.warehouseId ?? null,
@@ -1844,6 +1848,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     /** Lignes à charger dans la fiche de facturation, aux prix garantis par le devis. */
     'quotes.saleLines': (id: string) => s.quotes.saleLines(ctx(POS).storeId, id),
+    'orders.list': (opts?: { status?: OrderStatus | 'open'; search?: string; date?: string }) => s.orders.list(ctx(['customer_orders', ...POS]).storeId, opts),
+    'orders.get': (id: string) => (requireUser(), s.orders.get(id)),
+    'orders.save': (input: OrderInput, id?: string | null) => s.orders.save(ctx(['customer_orders']), input, id ?? undefined),
+    'orders.prepare': (id: string) => s.orders.prepare(ctx(['customer_orders']), id),
+    'orders.unprepare': (id: string) => s.orders.unprepare(ctx(['customer_orders']), id),
+    'orders.cancel': (id: string, reason: string) => s.orders.cancel(ctx(['customer_order_cancel']), id, reason),
+    'orders.saleLines': (id: string) => s.orders.saleLines(ctx(POS).storeId, id),
+    'orders.reserved': () => Object.fromEntries(s.orders.reserved(ctx().storeId)),
+    'orders.confirmation': (id: string) => {
+      const c = ctx(['customer_orders']);
+      return s.orders.confirmationText(id, s.admin.getStore(c.storeId).name);
+    },
 
     // --- Dépenses -------------------------------------------------------------
     'expenses.categories': (includeInactive?: boolean) => (requireUser(), s.expenses.listCategories(includeInactive)),
@@ -1907,7 +1923,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),
     'accounting.vatReturn': (month: string) => s.accounting.vatReturn(ctx(['vat_return']).storeId, month),
     'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(['accounting_export']).storeId, opts),
-    /** Écritures dans le format du logiciel du cabinet (Sage 100, Ciel, EBP ou format enregistré). */
+    /** Écritures dans le format du logiciel du cabinet. */
     'accounting.exportFormatted': (opts: { from?: string; to?: string }, formatId: string) => {
       const storeId = ctx(['accounting_export']).storeId;
       const f = allFormats().find((x) => x.id === formatId);
@@ -1977,7 +1993,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Rapports -----------------------------------------------------------
-    // --- Registres et contrôles (menus KONTROL) ------------------------------------
+    // --- Registres et contrôles ------------------------------------
     'controls.salesRegister': (f: SalesRegisterFilter) => s.controls.salesRegister(ctx(SALES).storeId, f),
     'controls.salesAlerts': (p: Period & { discountRate?: number }) => s.controls.salesAlerts(ctx(['sales_alerts']).storeId, p, p),
     'controls.purchasesByProduct': (p: Period & { supplierId?: string | null }) => s.controls.purchasesByProduct(ctx(SUPPLIERS).storeId, p),

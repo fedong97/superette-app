@@ -41,7 +41,7 @@ const isDefault = (data: Templates, t: DocTemplate) => {
 
 /**
  * Modèles d'impression (Administration › Modèles d'impression), comme le
- * « Paramétrage des variantes des états » de Sage ou KONTROL : une ligne par
+ * « Paramétrage des variantes des états » : une ligne par
  * modèle, un éditeur champ par champ avec l'aperçu à côté.
  */
 export function PrintTemplates({ user, initialEdit }: { user: User; initialEdit?: string | null }) {

@@ -171,7 +171,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
 }
 
 /**
- * Fiche article (« Ajouter/Paramétrer une marchandise » de KONTROL). Depuis la
+ * Fiche article (« Ajouter/Paramétrer une marchandise »). Depuis la
  * caisse, `addLevel` ouvre la fiche avec un conditionnement à compléter :
  * plus grand (nouveau conditionnement d'achat) ou plus petit.
  */

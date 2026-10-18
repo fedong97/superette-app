@@ -112,7 +112,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.63.0',
     items: [
       'Produits : boutons « Exporter Excel » et « Exporter CSV » avec plusieurs modèles (catalogue complet, tarifs, codes-barres, comptage, terminal d’inventaire, valeur du stock) et vos propres modèles de colonnes.',
-      'Import des produits complet : prix de gros et super gros, quantités mini et maxi, 3 conditionnements avec prix et codes-barres, vérification avant import, et le fichier article de Sage 100 accepté tel quel.',
+      'Import des produits complet : prix de gros et super gros, quantités mini et maxi, 3 conditionnements avec prix et codes-barres, vérification avant import, et les fichiers articles des autres logiciels de gestion acceptés tels quels.',
       'Dépôts : modifiez le nom et le type d’un dépôt, désactivez-le ou réactivez-le.',
       'Mise à jour des prix en masse, produit remplaçant proposé en caisse, emplacements par dépôt, codification des produits par famille, palmarès ABC et liste des produits sans vente.',
     ],
@@ -132,7 +132,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.60.0',
     items: [
-      'Administration › Reprise des données : pour un magasin qui arrive de KONTROL, Sage, Excel ou d’un cahier, importez ses clients avec ce qu’ils doivent, ses fournisseurs avec ce que vous leur devez, et son stock de départ. Chaque fichier se vérifie d’abord en aperçu ; les écritures d’à-nouveaux se passent seules.',
+      'Administration › Reprise des données : pour un magasin qui arrive d’un autre logiciel, d’Excel ou d’un cahier, importez ses clients avec ce qu’ils doivent, ses fournisseurs avec ce que vous leur devez, et son stock de départ. Chaque fichier se vérifie d’abord en aperçu ; les écritures d’à-nouveaux se passent seules.',
     ],
   },
   {
@@ -142,9 +142,9 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.59.0',
     items: [
-      'Modèles de boutique, comme les fichiers modèles de Sage : à la création, choisissez le métier (superette, quincaillerie, pharmacie, boulangerie, habillement) et la boutique part avec ses rayons, familles et réglages. Administration › Modèles de boutique enregistre la vôtre comme modèle (catalogue compris si vous voulez), à réutiliser chez le client suivant.',
+      'Modèles de boutique : à la création, choisissez le métier (superette, quincaillerie, pharmacie, boulangerie, habillement) et la boutique part avec ses rayons, familles et réglages. Administration › Modèles de boutique enregistre la vôtre comme modèle (catalogue compris si vous voulez), à réutiliser chez le client suivant.',
       'Import du catalogue d’un fournisseur dans son propre format : « Nouveau format… » montre les premières lignes du fichier, vous dites quelle colonne est la désignation, le prix, le code-barres…, et le format se réutilise en un clic.',
-      'Export des écritures pour le cabinet comptable au format Sage 100, Ciel ou EBP, ou dans un format décrit une fois (ordre des colonnes, date, séparateur).',
+      'Export des écritures pour le cabinet comptable dans le format du logiciel du cabinet, ou dans un format décrit une fois (ordre des colonnes, date, séparateur).',
       'Postes distants : un dépôt sans réseau ni serveur vend sur son propre PC. Administration › Postes distants prépare son installation sur une clé ; chaque soir le dépôt fait sa remontée (clé USB, e-mail ou WhatsApp) que la boutique intègre, et la boutique lui renvoie prix et catalogue.',
       'Contrôle avant clôture d’exercice : écritures déséquilibrées, journées de caisse restées ouvertes, fiches pas rapportées, stock à recalculer et opérations pas encore envoyées au serveur sont listés avant de clôturer.',
     ],
@@ -152,7 +152,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.58.0',
     items: [
-      'Fiches boutique, comme les fichiers de Sage : Administration › Fiches boutique sort une copie de la boutique sur une clé USB pendant que la caisse vend. La boutique n’est jamais arrêtée.',
+      'Fiches boutique : Administration › Fiches boutique sort une copie de la boutique sur une clé USB pendant que la caisse vend. La boutique n’est jamais arrêtée.',
       'Fiche d’intervention : le technicien l’ouvre sur son PC (Fichier › Ouvrir une boutique › Ouvrir une fiche), sans réinstaller ni toucher à la base, y travaille puis la rapporte. « Rapporter une fiche » ajoute ses modifications à la boutique sans rien effacer de ce qu’elle a vendu entre-temps ; si un même élément a changé des deux côtés, la modification la plus récente est gardée.',
       'Copie pour le comptable : il fait ses états chez lui pendant que la boutique tourne, et prend une nouvelle copie à sa prochaine visite.',
       'Installation préparée : paramétrez la boutique du client au bureau (magasin, utilisateurs, articles) dans une nouvelle boutique, puis « Préparer l’installation ». Sur le PC du client, au premier démarrage : « Installer une boutique préparée ».',
@@ -366,7 +366,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.34.0',
     items: [
-      'Opérations de trésorerie : boutons « Encaisser » et « Décaisser » sur chaque volet, comme dans KONTROL, avec le type (client, fournisseur, personnel, charge, reversement, autre), le n° de pièce et le motif.',
+      'Opérations de trésorerie : boutons « Encaisser » et « Décaisser » sur chaque volet, avec le type (client, fournisseur, personnel, charge, reversement, autre), le n° de pièce et le motif.',
       'Bouton « Action » : imprimer le reçu (ticket ou A4), décharge à faire signer, antidater, convertir une sortie en règlement fournisseur ou en remboursement client, supprimer.',
       '« Totaux par nature d’entrée / sortie » sous les volets de la journée.',
       'Charge › Collaborateurs : fiche de chaque employé, avec ses sous-comptes 4211… (salaires dus) et 4251… (avances) créés en comptabilité.',

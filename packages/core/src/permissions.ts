@@ -1,5 +1,5 @@
 /**
- * Droits d'utilisateur, rangés par groupe comme dans KONTROL. Chaque rôle
+ * Droits d'utilisateur, rangés par groupe. Chaque rôle
  * reçoit une liste de droits que l'administrateur règle dans Administration ›
  * Droits par rôle ; un utilisateur peut en plus recevoir ou perdre des droits
  * à titre personnel (Administration › Privilèges par utilisateur).
@@ -65,6 +65,8 @@ export const PERMISSIONS = {
   quotes: { label: 'Devis et proformas', group: 'Facturation', type: 'Menu', roles: COUNTER },
   quote_save: { label: 'Créer ou modifier un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },
   quote_cancel: { label: 'Annuler un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },
+  customer_orders: { label: 'Commandes clients (téléphone, WhatsApp) : prendre, préparer', group: 'Facturation', type: 'Menu', roles: COUNTER },
+  customer_order_cancel: { label: 'Annuler une commande client', group: 'Facturation', type: 'Bouton', parent: 'customer_orders' },
   price: { label: 'Appliquer un prix négocié à la saisie (jamais sous le revient)', group: 'Facturation', type: 'Fonction', roles: POS },
   discount: { label: 'Accorder une remise sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   sale_hold: { label: 'Mettre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },

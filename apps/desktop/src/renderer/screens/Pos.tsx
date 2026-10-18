@@ -5,6 +5,7 @@ import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, p
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
+import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
@@ -80,7 +81,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote';
+type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
 type PrintChoice = 'none' | 'ticket' | 'listing';
@@ -178,6 +179,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const [clientName, setClientName] = useState('');
   /** Devis ou proforma chargé : ses prix garantis valent accord de remise. */
   const [quote, setQuote] = useState<{ id: string; number: string; validUntil: string } | null>(null);
+  /** Commande client chargée : sa marchandise réservée lui revient, elle passe « facturée » à la validation. */
+  const [order, setOrder] = useState<{ id: string; number: string } | null>(null);
   /** Tarif et dépôt choisis pour cette fiche (null : ceux du client et du magasin). */
   const [levelChoice, setLevelChoice] = useState<PriceLevel | null>(null);
   const [warehouseChoice, setWarehouseChoice] = useState<string | null>(null);
@@ -379,6 +382,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   };
   const clear = () => {
     setQuote(null);
+    setOrder(null);
     setReplacing(null);
     setClientName('');
     setLines([]);
@@ -426,6 +430,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     setCustomer(null);
     setClientName('');
     setQuote(null);
+    setOrder(null);
     setReplacing(null);
     const delivered = delivery.on;
     resetOptions();
@@ -462,6 +467,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           customerId: customer?.id ?? null,
           clientName: customer ? null : clientName.trim() || null,
           quoteId: quote?.id ?? null,
+          orderId: order?.id ?? null,
           priceLevel: levelChoice,
           warehouseId: warehouseChoice,
           optionsPin,
@@ -551,6 +557,39 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       setLastSale(null);
       setDialog(null);
       toast.ok(`${q.number} chargé${q.customer_id ? '' : ` (client : ${q.customer_name})`}`);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+
+  /** Charge une commande client : ses articles au prix du jour, son client et sa livraison. */
+  const loadOrder = async (id: string) => {
+    if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+    try {
+      const o = await call('orders.get', id);
+      const load = await call('orders.saleLines', id);
+      setLines(await reload(load.lines));
+      setCustomer(load.customerId ? await call('customers.get', load.customerId) : null);
+      setClientName(load.customerId ? '' : load.clientName);
+      setDelivery(
+        load.delivery
+          ? {
+              on: true,
+              address: load.delivery.address,
+              phone: load.delivery.phone ?? '',
+              courier: load.delivery.courier ?? '',
+              slot: load.delivery.slot ?? NO_DELIVERY.slot,
+              date: load.delivery.plannedDate > dayPlus(0) ? load.delivery.plannedDate : '',
+              fee: load.delivery.fee ? String(load.delivery.fee) : '',
+              note: load.delivery.note ?? '',
+            }
+          : NO_DELIVERY,
+      );
+      setQuote(null);
+      setOrder({ id: o.id, number: o.number });
+      setLastSale(null);
+      setDialog(null);
+      toast.ok(`Commande ${o.number} chargée${o.status === 'new' ? " (elle n'était pas encore préparée)" : ''}`);
     } catch (err) {
       toast.error(err);
     }
@@ -829,6 +868,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     <option value="return">Retour client</option>
     <option value="custPay">Règlement client (crédit)</option>
     <option value="quote">Facturer un devis / proforma</option>
+    <option value="order">Charger une commande client</option>
     <option value="expense">Dépense payée en caisse</option>
     <option value="close">Clôture de caisse (Trésorerie)</option>
   </select>
@@ -887,6 +927,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         }}
       />
     )}
+    {dialog === 'order' && <OrderPickDialog onClose={() => setDialog(null)} onPick={(id) => void loadOrder(id)} />}
     {dialog === 'quote' && <QuotePickDialog onClose={() => setDialog(null)} onPick={(id) => void loadQuote(id)} />}
     {dialog === 'expense' && (
       <ExpenseDialog
@@ -1053,7 +1094,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
   const heldCount = held.data?.length ?? 0;
-  const ficheNumber = replacing ? `Modif. ${replacing.number}` : quote && lines.length ? `Devis ${quote.number}` : 'Nouveau';
+  const ficheNumber = replacing ? `Modif. ${replacing.number}` : quote && lines.length ? `Devis ${quote.number}` : order && lines.length ? `Commande ${order.number}` : 'Nouveau';
   const tariffSelect = (
     <select value={level} onChange={(e) => pickLevel(e.target.value as PriceLevel)} title="Tarif de cette fiche ; par défaut celui du client">
       {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (

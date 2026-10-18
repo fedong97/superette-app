@@ -72,7 +72,7 @@ export interface InventoryInput {
 const value = (qty: Milli, cost: Fcfa) => Math.round((qty * cost) / 1000);
 
 /**
- * Inventaires enregistrés, comme dans KONTROL : à l'ouverture la liste des
+ * Inventaires enregistrés : à l'ouverture la liste des
  * produits s'affiche avec leur stock, on saisit les quantités comptées (le
  * magasin reste ouvert : chaque comptage est horodaté), puis la clôture
  * corrige le stock et passe l'écart en variation de stock.
@@ -354,7 +354,7 @@ export class InventoryService extends Base {
     return { imported, unknown };
   }
 
-  /** Historique des saisies : par personne et par minute, comme dans KONTROL. */
+  /** Historique des saisies : par personne et par minute. */
   history(id: string): { user_name: string; count: number; at: string }[] {
     return this.db
       .prepare(

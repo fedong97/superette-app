@@ -116,7 +116,7 @@ export function Reports({ view }: { view?: string }) {
     });
   }, [r, sort]);
   const maxTtc = Math.max(1, ...rows.map((x) => Math.abs(x.revenueTtc)));
-  // Palmarès (comme Sage) : rang au chiffre d'affaires et classe ABC (A : 80 % du CA, B : 15 %, C : le reste).
+  // Palmarès : rang au chiffre d'affaires et classe ABC (A : 80 % du CA, B : 15 %, C : le reste).
   const ranked = RANKED.has(dimension);
   const abc = useMemo(() => {
     const out = new Map<string, { rank: number; cls: 'A' | 'B' | 'C' }>();

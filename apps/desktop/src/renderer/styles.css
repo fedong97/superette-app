@@ -238,7 +238,7 @@ details.note .paragraph p { margin: 0 0 6px; white-space: pre-line; }
 /* Promotions */
 .tag.promo { margin-left: 8px; font-weight: 700; }
 
-/* Conditionnements (fiche article, sur le modèle de KONTROL) */
+/* Conditionnements (fiche article) */
 .levels td { vertical-align: middle; }
 .levels tr.buy { background: var(--brand-soft); }
 .levels tr.off td:not(.n) { opacity: 0.5; }
@@ -278,14 +278,14 @@ table.report td.share span { position: relative; }
 table.report tfoot td { font-weight: 800; border-top: 2px solid var(--line); }
 @media (max-width: 1200px) { .kpis.kpis-6 { grid-template-columns: repeat(3, 1fr); } }
 
-/* Menus façon KONTROL : groupes séparés par un trait. */
+/* Menus : groupes séparés par un trait. */
 .kpis.kpis-5 { grid-template-columns: repeat(5, 1fr); }
 .kpis > div.selected { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
 .share-bar.over { background: var(--danger-soft); }
 .share-bar.near { background: var(--warn-soft); }
 tr.group-start td { border-top: 2px solid var(--line); }
 
-/* Recherche en caisse : une ligne par conditionnement (KONTROL) */
+/* Recherche en caisse : une ligne par conditionnement */
 .sale-rows { min-width: 720px; }
 .sale-rows button { grid-template-columns: 80px minmax(0, 1fr) 120px 70px 90px; align-items: center; }
 .sale-rows .cond, .sale-search .cond, .qty-prompt-head .cond { font-weight: 700; color: #1d3f72; }
@@ -359,7 +359,7 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; 
 .register-choice button { padding: 14px; font-size: 15px; }
 .tre-day p .link { margin-left: 8px; }
 
-/* Inventaires enregistrés (fiche de saisie à la KONTROL). */
+/* Inventaires enregistrés (fiche de saisie). */
 .inv-head { display: grid; grid-template-columns: 80px 120px 1fr 1.4fr 110px 1.4fr; gap: 10px; margin-bottom: 6px; }
 .inv-head input[readonly] { background: var(--bg); }
 .inv-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 12px; }
@@ -446,7 +446,7 @@ table.list tr.clickable:hover { background: #d9efe9 !important; }
 .radio-list label:has(input:checked) { background: #e6f2ef; box-shadow: inset 3px 0 0 var(--brand); }
 .radio-list input { width: auto; margin-top: 3px; }
 .radio-list small { display: block; color: var(--muted); }
-/* Bon de transfert (fiche KONTROL « Détails du transfert de marchandises ») */
+/* Bon de transfert (« Détails du transfert de marchandises ») */
 .transfer-body { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 10px; }
 .transfer-main { background: var(--panel); border: 1px solid #bcdcd3; border-radius: 10px; padding: 12px 14px; }
 .transfer-head { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 14px; }
@@ -556,7 +556,7 @@ table.rebate-rules select { min-width: 240px; }
 .home-links { display: flex; justify-content: center; gap: 18px; margin-top: 16px !important; }
 .empty-action { margin-top: 12px; }
 
-/* 0.32.0 : droits par rôle et privilèges par utilisateur, comme la fenêtre des privilèges de KONTROL */
+/* 0.32.0 : droits par rôle et privilèges par utilisateur */
 .rights-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
 .rights-groups { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
 .rights-search { width: 100%; }

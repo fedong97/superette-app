@@ -213,7 +213,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       [
         {
           label: 'Codifier les articles par famille',
-          hint: 'Code d’un nouvel article laissé vide : trois lettres de sa famille devant le numéro (BOI-DLA11-0012 pour une boisson), comme la codification de Sage. Sinon : DLA11-00012.',
+          hint: 'Code d’un nouvel article laissé vide : trois lettres de sa famille devant le numéro (BOI-DLA11-0012 pour une boisson). Sinon : DLA11-00012.',
           render: () => yes('articleCodeByFamily'),
         },
         {
@@ -643,6 +643,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         { label: 'Préfixe des avoirs (retours clients)', hint: 'Vide par défaut', render: () => text('prefixReturn', 'AV') },
         { label: 'Préfixe des devis', render: () => text('prefixQuote', DEFAULT_STORE_SETTINGS.prefixQuote) },
         { label: 'Préfixe des factures proforma', render: () => text('prefixProforma', DEFAULT_STORE_SETTINGS.prefixProforma) },
+        { label: 'Préfixe des commandes clients', render: () => text('prefixCustomerOrder', DEFAULT_STORE_SETTINGS.prefixCustomerOrder) },
         { label: 'Préfixe des bons de commande', render: () => text('prefixOrder', DEFAULT_STORE_SETTINGS.prefixOrder) },
       ],
     ],

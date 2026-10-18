@@ -7,7 +7,7 @@ import type { Db } from './database';
 import { AppError, Base, type Clock } from './util';
 
 /**
- * Outil de réparation, comme la Maintenance de Sage : vérifie la base et répare
+ * Outil de réparation : vérifie la base et répare
  * ce qui se recalcule (stock, lots), sans jamais toucher la base à la main.
  * Il travaille par petits paquets : la caisse continue de vendre pendant ce temps.
  */

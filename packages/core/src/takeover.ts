@@ -1,5 +1,5 @@
 /**
- * Reprise des données d'un magasin existant (KONTROL, Sage, cahier, Excel) :
+ * Reprise des données d'un magasin existant :
  * lecture des fichiers clients, fournisseurs et stock de départ, une ligne par
  * fiche. Les en-têtes sont reconnus sans accents ni majuscules, dans l'ordre
  * qu'on veut ; une ligne illisible est signalée avec son numéro, sans bloquer

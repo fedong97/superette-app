@@ -5,7 +5,7 @@ import type { Db } from './database';
 import { AppError, Base, type Clock } from './util';
 
 /**
- * Modèle de boutique, comme les fichiers modèles de Sage (G_MODEL, C_MODEL) :
+ * Modèle de boutique (G_MODEL, C_MODEL) :
  * une nouvelle boutique part d'un métier déjà paramétré (rayons et familles,
  * réglages, droits des rôles, et au besoin un catalogue d'articles).
  */

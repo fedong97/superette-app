@@ -16,7 +16,7 @@ export const FICHE_LABELS: Record<FicheKind, string> = {
 const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(bytes / 1024))} Ko`);
 
 /**
- * « Ouvrir une boutique » : les boutiques de ce PC, comme les fichiers de Sage.
+ * « Ouvrir une boutique » : les boutiques de ce PC.
  * Ouvrir une autre boutique relance FEDONIX 360 dessus ; on s'y connecte avec ses propres utilisateurs.
  */
 export function DossierPicker({ onClose }: { onClose: () => void }) {

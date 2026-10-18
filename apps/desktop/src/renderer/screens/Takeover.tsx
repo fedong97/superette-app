@@ -89,7 +89,7 @@ export function Takeover() {
   return (
     <div>
       <p>
-        Pour un magasin qui tenait ses comptes dans KONTROL, Sage, Excel ou un cahier : reprenez ses clients et ce qu’ils doivent, ses fournisseurs et ce que vous leur devez, et son stock
+        Pour un magasin qui tenait ses comptes dans un autre logiciel, dans Excel ou dans un cahier : reprenez ses clients et ce qu’ils doivent, ses fournisseurs et ce que vous leur devez, et son stock
         de départ. Chaque fichier se vérifie d’abord : rien n’est enregistré tant que vous n’avez pas cliqué « Importer ». S’il reste une ligne en erreur, rien n’est importé.
       </p>
       {done && (

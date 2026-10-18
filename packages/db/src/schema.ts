@@ -857,9 +857,9 @@ CREATE INDEX expenses_plan ON expenses(plan_id, plan_period);
   },
   {
     version: 15,
-    name: 'fiche KONTROL',
+    name: 'fiche article à conditionnements',
     sql: `
--- Fiche article à la KONTROL : le conditionnement d'achat vient en tête (le plus
+-- Fiche article : le conditionnement d'achat vient en tête (le plus
 -- grand), avec son prix d'achat et son prix de revient exacts ; ceux des
 -- conditionnements de vente s'en déduisent par le diviseur.
 ALTER TABLE articles ADD COLUMN other_ref TEXT;
@@ -1666,7 +1666,7 @@ CREATE INDEX fixed_assets_store ON fixed_assets(store_id, account);
     version: 43,
     name: 'dépôts modifiables, article de remplacement, emplacements',
     sql: `
--- Fiche du dépôt (comme Sage) : responsable, téléphone, adresse.
+-- Fiche du dépôt : responsable, téléphone, adresse.
 ALTER TABLE warehouses ADD COLUMN manager TEXT;
 ALTER TABLE warehouses ADD COLUMN phone TEXT;
 ALTER TABLE warehouses ADD COLUMN address TEXT;
@@ -1674,6 +1674,49 @@ ALTER TABLE warehouses ADD COLUMN address TEXT;
 ALTER TABLE articles ADD COLUMN substitute_id TEXT;
 -- Emplacement dans chaque dépôt (allée, étagère) : {"<dépôt>": "A3-2"}.
 ALTER TABLE articles ADD COLUMN locations TEXT;
+`,
+  },
+  {
+    version: 44,
+    name: 'commandes clients',
+    sql: `
+-- Commande prise par téléphone ou WhatsApp avant la vente : préparée (stock réservé), puis chargée à la caisse.
+CREATE TABLE customer_orders (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT,
+  customer_name TEXT NOT NULL,
+  phone TEXT,
+  address TEXT,
+  channel TEXT NOT NULL DEFAULT 'phone' CHECK (channel IN ('phone', 'whatsapp', 'shop')),
+  planned_date TEXT NOT NULL,
+  slot TEXT,
+  delivery_fee INTEGER NOT NULL DEFAULT 0,
+  courier TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'prepared', 'invoiced', 'cancelled')),
+  cancel_reason TEXT,
+  sale_id TEXT,
+  total_ttc INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  prepared_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX customer_orders_store ON customer_orders(store_id, status, planned_date);
+-- Sans clé étrangère vers les articles : ils arrivent des autres PC dans n'importe quel ordre.
+CREATE TABLE customer_order_lines (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES customer_orders(id),
+  line_no INTEGER NOT NULL,
+  article_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  unit_price INTEGER NOT NULL,
+  total_ttc INTEGER NOT NULL
+);
+CREATE INDEX customer_order_lines_order ON customer_order_lines(order_id);
 `,
   },
 ];

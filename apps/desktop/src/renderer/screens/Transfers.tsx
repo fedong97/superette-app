@@ -28,7 +28,7 @@ interface Draft {
 
 /**
  * Transferts entre dépôts, sur le modèle de la fiche « Détails du transfert
- * de marchandises » de KONTROL : liste des bons, puis le bon avec ses
+ * de marchandises » : liste des bons, puis le bon avec ses
  * statuts (brouillon, expédié, réceptionné).
  */
 export function Transfers({ startNew = false }: { startNew?: boolean }) {

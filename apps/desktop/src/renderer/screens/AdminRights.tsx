@@ -17,7 +17,7 @@ function visibleRights(group: PermissionGroup, search: string): Permission[] {
   });
 }
 
-/** Liste des groupes à gauche et champ de recherche, comme la fenêtre des privilèges de KONTROL. */
+/** Liste des groupes à gauche et champ de recherche. */
 function GroupPicker({ group, onGroup, search, onSearch, count }: { group: PermissionGroup; onGroup: (g: PermissionGroup) => void; search: string; onSearch: (s: string) => void; count?: (g: PermissionGroup) => number }) {
   return (
     <aside className="rights-groups">

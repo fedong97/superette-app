@@ -29,7 +29,7 @@ import { Base, type Clock, type Context } from './util';
 
 const money = (v: number) => formatFcfa(v, false);
 
-/** Modèles de fiche de comptage (comme dans KONTROL). */
+/** Modèles de fiche de comptage. */
 export const INVENTORY_SHEET_MODELS = {
   blind: 'Modèle classique, sans stock',
   withStock: 'Modèle classique, avec le stock attendu',

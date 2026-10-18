@@ -132,7 +132,7 @@ function Period({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: 
 
 /**
  * Export des écritures pour le logiciel du cabinet comptable, dans son format :
- * Sage 100, Ciel, EBP, ou un format décrit une fois (comme les formats paramétrables de Sage).
+ * format du logiciel du cabinet, ou format décrit une fois.
  */
 function EntriesExport({ from, to }: { from: string; to: string }) {
   const toast = useToast();
@@ -227,7 +227,7 @@ function ExportFormatEditor({ onClose, onSaved }: { onClose: () => void; onSaved
   };
   return (
     <Modal title="Nouveau format d'export" onClose={onClose}>
-      <p className="muted">Reprenez l'ordre des colonnes demandé par le logiciel du cabinet (dans Sage 100 : Fichier › Format import/export).</p>
+      <p className="muted">Reprenez l'ordre des colonnes demandé par le logiciel du cabinet (dans le menu d’import/export de son logiciel).</p>
       <div className="grid2">
         <Field label="Nom du format">
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus />
@@ -1900,7 +1900,7 @@ export function FiscalYears() {
       setBusy(false);
     }
   };
-  /** Contrôle avant clôture (comme celui de Sage) : la clôture se fait depuis sa fenêtre. */
+  /** Contrôle avant clôture : la clôture se fait depuis sa fenêtre. */
   const [checking, setChecking] = useState<{ fy: FiscalYear; checks: Result<'fiscal.checkClose'> } | null>(null);
   const close = async (f: FiscalYear) => {
     try {

@@ -146,7 +146,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Importer des produits (Excel, CSV)',
         perm: 'import',
         steps: [
-          '« Importer (Excel, CSV) » : choisissez le fichier, le format (titres de colonnes, Sage 100 ou un format enregistré) et le mode (créer et mettre à jour, créer seulement, mettre à jour seulement).',
+          '« Importer (Excel, CSV) » : choisissez le fichier, le format (titres de colonnes, format à colonnes fixes ou un format enregistré) et le mode (créer et mettre à jour, créer seulement, mettre à jour seulement).',
           'Le fichier peut porter les prix d’achat, de vente, de gros et de super gros, les quantités mini, alerte et maxi, et jusqu’à 3 conditionnements avec leur nombre, leurs prix et leur code-barres. « Télécharger le modèle » donne un fichier exemple.',
           '« Vérifier » montre ce qui sera créé, mis à jour ou refusé, ligne par ligne, sans rien enregistrer ; puis « Importer ». Une colonne absente ne change rien sur un produit existant.',
         ],
@@ -312,6 +312,33 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Partir 🚚 » quand le livreur s’en va (l’heure est notée), puis « Livrée ✓ » à son retour.',
           '« Bon » réimprime le bon de livraison ; ✕ retire la livraison sans annuler la vente.',
           'Pour une vente à crédit, « À encaisser » montre ce que le livreur doit rapporter : à « Livrée », le logiciel propose d’enregistrer le règlement du client.',
+        ],
+      },
+    ],
+  },
+  orders: {
+    title: 'Commandes clients',
+    intro: 'Les commandes prises par téléphone ou WhatsApp avant la vente : préparées, puis encaissées à la caisse à la livraison ou au retrait.',
+    sections: [
+      {
+        title: 'Prendre une commande',
+        steps: [
+          '« Nouvelle commande » : origine (téléphone, WhatsApp, au magasin), client et téléphone, adresse (vide si le client vient la chercher), jour et créneau, frais de livraison, articles.',
+          '« Confirmer par WhatsApp » ouvre WhatsApp avec le récapitulatif de la commande pour le client.',
+        ],
+      },
+      {
+        title: 'Préparer',
+        steps: [
+          'Mettez la marchandise de côté, puis cliquez sur « Préparée » : ces quantités sont réservées, la caisse refuse de les vendre à un autre client.',
+          'Modifier une commande préparée la remet « à préparer ». « Remettre à préparer » ou « Annuler » (avec un motif) libèrent la réservation.',
+        ],
+      },
+      {
+        title: 'Encaisser',
+        steps: [
+          'À la caisse, Action › Charger une commande client : articles au prix du jour, client et livraison sont repris.',
+          'Validez comme une vente (espèces, Mobile Money ou crédit) : la commande passe « facturée » et la livraison suit dans Vente › Livraisons du jour.',
         ],
       },
     ],

@@ -132,7 +132,7 @@ async function readCells(file: File, separator: Separator | null): Promise<strin
 
 /**
  * Import du catalogue : fichier Excel ou CSV, aux en-têtes de FEDONIX (ceux
- * de l'export), de Sage ou d'EBP, ou selon un format paramétrable. Chaque
+ * de l'export), d'autres logiciels de gestion, ou selon un format paramétrable. Chaque
  * fichier est d'abord vérifié en aperçu (créations, mises à jour, erreurs) ;
  * rien n'est enregistré avant « Importer ».
  */
@@ -210,7 +210,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               if (file) void load(file, next);
             }}
           >
-            <option value="">Excel ou CSV avec en-têtes (FEDONIX, Sage, EBP)</option>
+            <option value="">Excel ou CSV avec en-têtes</option>
             {(formats.data ?? []).map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -255,7 +255,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         <p className="muted small">
           La première ligne porte les en-têtes : Désignation, Code, Code-barres, Rayon, Famille, Prix d'achat, Prix de vente, Prix de gros, TVA, Unité… et jusqu'à trois
           conditionnements (Cond. 1 nom, Cond. 1 contient, Cond. 1 prix, Cond. 1 code-barres…), du plus grand au plus petit. Un catalogue exporté depuis FEDONIX, un export
-          « Ligne 500 » de Sage ou un tableur maison se lisent tels quels. Chaque ligne retrouve sa fiche par le code article, un code-barres ou la désignation exacte ; une
+          d’un autre logiciel de gestion ou un tableur maison se lisent tels quels. Chaque ligne retrouve sa fiche par le code article, un code-barres ou la désignation exacte ; une
           colonne vide garde ce qui est sur la fiche.{' '}
           <button type="button" className="link" onClick={downloadImportTemplate}>
             Télécharger le modèle Excel
@@ -707,7 +707,7 @@ type Plan = Result<'catalogue.pricePlan'>;
 const FIELD_LABEL = { purchase: 'Achat', sale: 'Vente', wholesale: 'Gros', superWholesale: 'Super gros' } as const;
 
 /**
- * Assistant de mise à jour des prix (comme Sage) : sur un rayon, une famille
+ * Assistant de mise à jour des prix : sur un rayon, une famille
  * ou les articles d'un fournisseur, hausse ou baisse en %, montant ajouté, ou
  * prix de vente recalculé par coefficient sur l'achat. Un aperçu montre chaque
  * prix avant et après ; rien ne change avant « Appliquer ».

@@ -217,6 +217,30 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Dépôts : modification (nom, type, responsable, téléphone, adresse), désactivation refusée tant que le dépôt a du stock, un transfert ou un inventaire en cours, ou qu'il est le dépôt des ventes.
 - Mise à jour des prix en masse (pourcentage, montant, coefficient sur l'achat, arrondi) avec aperçu, produit remplaçant proposé en caisse, emplacements par dépôt, codification automatique par famille (paramètre), palmarès avec classes ABC et produits sans vente, en-têtes des logiciels de gestion courants reconnus dans la reprise des clients et fournisseurs.
 
+**Roulette et écrans protégés (0.63.1)**
+- La roulette de la souris fait défiler les menus de la barre verte qui dépassent l'écran, sans les fermer.
+- Un écran en erreur affiche « Cet écran a rencontré un problème » avec « Réessayer », sans emporter le reste du logiciel.
+- Tests automatiques dans le logiciel lancé (`npm run test:ecrans`, Playwright) : chaque menu et chacun de ses écrans s'ouvrent sans erreur, une vente complète au scan, la roulette des menus, et les écrans du caissier en anglais. Ils tournent aussi dans la vérification de chaque PR.
+
+**Commandes clients (0.64.0)**
+- Facturation et Vente › Commandes clients : commande par téléphone ou WhatsApp, numéro `CC-<poste>-00001` (préfixe dans Administration › Paramètres), confirmation par WhatsApp, retrait au magasin ou livraison avec frais.
+- « Préparée » met la marchandise de côté : la caisse refuse de la vendre à un autre client. La caisse charge la commande (Action › Charger une commande client) et l'encaisse ; la commande passe à « Facturée ».
+- Annulation avec motif (droit dédié), synchronisée avec le serveur central.
+
+**Objectifs et commissions des vendeurs (0.65.0)**
+- Charge › Collaborateurs › Objectifs et commissions : objectif du mois et du jour, taux atteint, nombre de tickets, commission au taux général ou par famille d'articles (0 à 50 %).
+- Ventes comptées : ventes validées sous le compte du collaborateur (au comptant et à crédit) moins ses retours, frais de livraison exclus.
+- Salaires du mois : brut proposé = salaire de base + commission, colonne Commission, libellé « commission comprise ».
+
+**Serveur sur internet (0.66.0)**
+- Image Docker du serveur (base intégrée, sauvegardes quotidiennes) et Caddy pour le HTTPS automatique ; `installer.sh` installe Docker, charge l'image, demande le domaine et le mot de passe, crée la clé d'enrôlement.
+- Paquet `FEDONIX-360-serveur-internet-<version>` produit avec les installateurs ; guide pas à pas dans [docs/serveur-internet.md](docs/serveur-internet.md).
+
+**Version anglaise (0.67.0)**
+- Langue choisie par utilisateur (français par défaut), bouton « English / Français » dans la barre d'état et sur l'écran de connexion.
+- Entièrement traduits : connexion, caisse, trésorerie, clients, ventes, commandes et livraisons, avec les messages d'erreur. Écrans du gérant et de la comptabilité : menus et titres.
+- Langue du client (fiche client) pour ses tickets, factures, devis, bons de livraison, reçus et relevés, montant en lettres compris ; bons de caisse et rapport Z dans la langue de l'utilisateur.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

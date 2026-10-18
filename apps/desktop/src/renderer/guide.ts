@@ -109,6 +109,39 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.67.0',
+    items: [
+      'Version anglaise : le bouton « English » en bas de l’écran (et sur l’écran de connexion) passe les écrans en anglais pour l’utilisateur connecté ; « Français » revient au français. La caisse, la trésorerie, les clients, les ventes, les commandes et les livraisons sont entièrement traduits, avec les messages d’erreur ; pour les autres écrans, les menus et les titres.',
+      'Fiche client › « Langue des tickets et factures » : un client en anglais reçoit ses tickets, factures, devis, bons de livraison, reçus de règlement et relevés en anglais, montant en lettres compris. Les bons de caisse et le rapport Z suivent la langue de l’utilisateur.',
+    ],
+  },
+  {
+    version: '0.66.0',
+    items: [
+      'FEDONIX 360 Serveur sur internet : un serveur loué (VPS) et un nom de domaine suffisent. Le paquet « serveur-internet » s’installe avec un seul script, le cadenas HTTPS se met tout seul, la page du gérant marche partout sur son téléphone et la base est sauvegardée chaque jour. Le guide pas à pas est dans le paquet.',
+    ],
+  },
+  {
+    version: '0.65.0',
+    items: [
+      'Charge › Collaborateurs › Objectifs et commissions : un objectif du mois et du jour par vendeur, le taux atteint, et sa commission (taux général et taux par famille d’articles). Les ventes comptées sont celles validées sous son compte, à crédit comprises, moins ses retours.',
+      'Salaires du mois : la commission du mois s’ajoute au brut proposé, dans sa propre colonne.',
+    ],
+  },
+  {
+    version: '0.64.0',
+    items: [
+      'Commandes clients (Facturation et Vente) : le client appelle ou écrit sur WhatsApp, vous saisissez sa commande, l’envoyez en confirmation par WhatsApp, puis la préparez : la marchandise est mise de côté et la caisse ne la vend plus à un autre client. Au moment de la livraison ou du retrait, la caisse charge la commande (Action › Charger une commande client) et l’encaisse.',
+    ],
+  },
+  {
+    version: '0.63.1',
+    items: [
+      'Correction : la roulette de la souris fait défiler les longs menus de la barre verte (Clients, Vente…) sans les fermer.',
+      'Un écran qui rencontre un problème affiche un message avec « Réessayer », sans que le reste du logiciel disparaisse.',
+    ],
+  },
+  {
     version: '0.63.0',
     items: [
       'Produits : boutons « Exporter Excel » et « Exporter CSV » avec plusieurs modèles (catalogue complet, tarifs, codes-barres, comptage, terminal d’inventaire, valeur du stock) et vos propres modèles de colonnes.',

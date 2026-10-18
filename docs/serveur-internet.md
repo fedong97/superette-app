@@ -13,7 +13,7 @@ Avec le serveur central sur internet, les PC de chaque magasin se synchronisent 
 1. Copiez le dossier du paquet sur le serveur, par exemple avec WinSCP ou :
 
    ```bash
-   scp -r FEDONIX-360-serveur-internet-0.64.0 root@ADRESSE_IP:/opt/fedonix
+   scp -r FEDONIX-360-serveur-internet-0.67.0 root@ADRESSE_IP:/opt/fedonix
    ```
 
 2. Connectez-vous au serveur (`ssh root@ADRESSE_IP`, ou PuTTY sous Windows) et lancez :

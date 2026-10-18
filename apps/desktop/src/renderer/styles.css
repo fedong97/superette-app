@@ -1139,3 +1139,9 @@ p.substitute { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; b
 /* Écran tombé en erreur : message dans sa fenêtre, le reste de l'application continue. */
 .screen-error { margin: 40px auto; max-width: 560px; padding: 20px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .screen-error pre { white-space: pre-wrap; background: var(--brand-soft); padding: 8px; border-radius: 8px; font-size: 13px; }
+
+/* Objectifs des vendeurs : barre de progression du mois. */
+.target-bar { display: inline-flex; align-items: center; gap: 6px; min-width: 120px; }
+.target-bar i { display: inline-block; height: 8px; border-radius: 4px; background: var(--warn, #d08a00); max-width: 80px; }
+.target-bar i.ok { background: var(--brand); }
+.target-bar::before { content: ''; }

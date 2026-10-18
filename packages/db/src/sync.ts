@@ -68,6 +68,7 @@ const TABLES: Record<string, string> = {
   customer_reminder: 'customer_reminders',
   opening_balance: 'opening_balances',
   fixed_asset: 'fixed_assets',
+  sales_target: 'sales_targets',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */

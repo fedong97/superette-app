@@ -79,6 +79,8 @@ export interface StaffSalary {
   period: string;
   gross: Fcfa;
   deducted: Fcfa;
+  /** Part du brut venue de la commission sur les ventes du mois. */
+  commission: Fcfa;
   /** CNPS salariale retenue. */
   cnps: Fcfa;
   /** Impôts retenus : IRPP, CAC, CFC, RAV, TDL. */
@@ -417,7 +419,7 @@ export class StaffService extends Base {
   }
 
   /** Constate les salaires du mois : brut, retenues légales et avances retenues, un salaire par collaborateur et par mois. */
-  recordSalaries(ctx: Context, period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa }[]): StaffSalary[] {
+  recordSalaries(ctx: Context, period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa; commission?: Fcfa }[]): StaffSalary[] {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
     if (period > this.today().slice(0, 7)) throw new AppError("On ne constate pas le salaire d'un mois à venir", 'INVALID');
     const todo = lines.filter((l) => l.gross > 0);
@@ -428,6 +430,8 @@ export class StaffService extends Base {
         const s = this.get(l.staffId);
         if (s.store_id !== ctx.storeId) throw new AppError('Collaborateur introuvable', 'NOT_FOUND');
         const deducted = l.deducted ?? 0;
+        const commission = l.commission ?? 0;
+        if (!Number.isSafeInteger(commission) || commission < 0 || commission > l.gross) throw new AppError(`Commission invalide pour ${s.name}`, 'INVALID');
         if (!Number.isSafeInteger(l.gross) || !Number.isSafeInteger(deducted) || deducted < 0) throw new AppError(`Montants invalides pour ${s.name}`, 'INVALID');
         const p = this.payrollFor(s, l.gross);
         const legal = p ? p.employeeCnps + p.employeeTax : 0;
@@ -439,8 +443,8 @@ export class StaffService extends Base {
         const now = this.now();
         this.db
           .prepare(
-            `INSERT INTO staff_salaries (id, number, store_id, staff_id, period, gross, deducted, cnps, tax, employer_social, employer_tax, payroll, label, status, user_id, at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+            `INSERT INTO staff_salaries (id, number, store_id, staff_id, period, gross, deducted, commission, cnps, tax, employer_social, employer_tax, payroll, label, status, user_id, at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
           )
           .run(
             id,
@@ -450,18 +454,19 @@ export class StaffService extends Base {
             period,
             l.gross,
             deducted,
+            commission,
             p?.employeeCnps ?? 0,
             p?.employeeTax ?? 0,
             p?.employerSocial ?? 0,
             p?.employerTax ?? 0,
             p ? JSON.stringify(p) : null,
-            `Salaire de ${periodLabel(period)}`,
+            commission > 0 ? `Salaire de ${periodLabel(period)}, commission comprise` : `Salaire de ${periodLabel(period)}`,
             ctx.userId,
             now,
             now,
           );
         this.enqueue(ctx, 'staff_salary', id, 'upsert', {});
-        this.audit(ctx.userId, 'staff.salary', 'staff', s.id, { period, gross: l.gross, deducted, cnps: p?.employeeCnps ?? 0, tax: p?.employeeTax ?? 0 });
+        this.audit(ctx.userId, 'staff.salary', 'staff', s.id, { period, gross: l.gross, deducted, commission, cnps: p?.employeeCnps ?? 0, tax: p?.employeeTax ?? 0 });
         ids.push(id);
       }
       return ids.map((id) => this.getSalary(id));

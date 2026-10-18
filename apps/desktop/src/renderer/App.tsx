@@ -76,7 +76,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
-  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries'] },
+  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets'] },
 };
 
 interface MenuItem {
@@ -325,6 +325,7 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Collaborateurs (fiches, comptes tiers)', open: ['staff', 'list'] },
       { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
+      { label: 'Objectifs et commissions des vendeurs', open: ['staff', 'targets'], perm: 'staff_targets' },
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],

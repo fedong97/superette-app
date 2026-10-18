@@ -1719,4 +1719,22 @@ CREATE TABLE customer_order_lines (
 CREATE INDEX customer_order_lines_order ON customer_order_lines(order_id);
 `,
   },
+  {
+    version: 45,
+    name: 'objectifs et commissions des vendeurs',
+    sql: `
+-- Un réglage par collaborateur (id = son identifiant), valable tous les mois.
+CREATE TABLE sales_targets (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  month_target INTEGER NOT NULL DEFAULT 0,
+  day_target INTEGER NOT NULL DEFAULT 0,
+  rate_bp INTEGER NOT NULL DEFAULT 0,
+  family_rates TEXT,
+  updated_at TEXT NOT NULL
+);
+-- Part du brut qui vient de la commission sur les ventes du mois.
+ALTER TABLE staff_salaries ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

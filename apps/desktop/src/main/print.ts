@@ -4,6 +4,7 @@ import {
   PAYMENT_METHODS,
   PAYROLL_LABELS,
   type Codepage,
+  type DocLang,
   type Receipt,
   describeInPacks,
   drawerKick,
@@ -23,6 +24,8 @@ import {
   receiptToHtml,
   renderDocHtml,
   splitTtc,
+  translateDocHtml,
+  translateReceipt,
 } from '@superette/core';
 import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, SUPPLIER_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
 import type { Services } from '@superette/db';
@@ -103,7 +106,16 @@ function saveDialog(back: BrowserWindow | null, defaultPath: string) {
  * en ESC/POS direct (USB via le spouleur Windows, ou réseau port 9100), avec
  * ouverture du tiroir-caisse. Les autres documents sont imprimés en A4.
  */
-export function createPrinter(s: Services): Printer {
+export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr'): Printer {
+  /**
+   * Langue du document en cours : celle de l'utilisateur, ou celle du client pour ses
+   * tickets, factures, devis, relevés et reçus. Tout ce qui s'imprime passe par la traduction.
+   */
+  let lang: DocLang = 'fr';
+  const customerLang = (customerId: string | null | undefined): DocLang =>
+    customerId ? ((s.db.prepare('SELECT language FROM customers WHERE id = ?').pluck().get(customerId) as DocLang | undefined) ?? 'fr') : userLang();
+  const tr = (html: string) => translateDocHtml(html, lang);
+
   async function printHtml(body: string, force = false): Promise<void> {
     if (!force && s.admin.getSetting('printer.enabled') === '0') return;
     const deviceName = s.admin.getSetting('printer.name') || undefined;
@@ -126,7 +138,7 @@ export function createPrinter(s: Services): Printer {
     const deviceName = s.admin.getSetting('printer.name') || undefined;
     const win = renderWindow();
     try {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(tr(html))}`);
       await new Promise<void>((resolve, reject) =>
         win.webContents.print({ silent: true, printBackground: true, deviceName, margins: { marginType: 'none' } }, (ok, reason) =>
           ok ? resolve() : reject(new Error(`Impression impossible : ${reason}`)),
@@ -148,7 +160,7 @@ export function createPrinter(s: Services): Printer {
     const { width, height } = pageSize(t);
     const win = renderWindow(back, !height);
     try {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(tr(html))}`);
       // Papier continu (listing) : la page fait la hauteur du document.
       const pageHeight = height || Math.max(60, Math.ceil(((await win.webContents.executeJavaScript('document.querySelector(".sheet").getBoundingClientRect().height')) as number) * (25.4 / 96)) + 2);
       const size = { width: width * 1000, height: pageHeight * 1000 };
@@ -247,7 +259,8 @@ export function createPrinter(s: Services): Printer {
 
   /** `html` : page complète du modèle de ticket, imprimée telle quelle par le pilote Windows. */
   /** Renvoie false si rien n'est sorti (impression automatique coupée sur le poste). */
-  async function printReceipt(receipt: Receipt, kick: boolean, force = false, html?: string): Promise<boolean> {
+  async function printReceipt(original: Receipt, kick: boolean, force = false, html?: string): Promise<boolean> {
+    const receipt = translateReceipt(original, lang);
     const cfg = config();
     const print = cfg.enabled || force;
     if (cfg.mode === 'driver') {
@@ -266,7 +279,7 @@ export function createPrinter(s: Services): Printer {
   async function printA4(body: string): Promise<void> {
     const win = renderWindow();
     try {
-      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${body}</body></html>`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${tr(body)}</body></html>`;
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       await new Promise<void>((resolve, reject) =>
         win.webContents.print({ silent: false, printBackground: true, pageSize: 'A4' }, (ok, reason) =>
@@ -285,7 +298,7 @@ export function createPrinter(s: Services): Printer {
     if (target.canceled || !target.filePath) return (giveFocusBack(back), false);
     const win = renderWindow(back);
     try {
-      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${body}</body></html>`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${tr(body)}</body></html>`;
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       await writeFile(target.filePath, await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true }));
       return true;
@@ -355,7 +368,7 @@ export function createPrinter(s: Services): Printer {
   const periodFr = (from?: string | null, to?: string | null) =>
     `${from ? `Du ${dayFr(from)} ` : 'Depuis le début '}${to ? `au ${dayFr(to)}` : `au ${new Date().toLocaleDateString('fr-FR')}`}`;
 
-  return {
+  const printer: Printer = {
     labels: printLabelsHtml,
     barcodeLabels: printBarcodeLabelsHtml,
     a4: printA4,
@@ -535,6 +548,7 @@ export function createPrinter(s: Services): Printer {
     },
 
     async ticket(saleId, opts) {
+      lang = customerLang(s.pos.getSale(saleId).customer_id);
       const kick = Boolean(opts?.newSale) && saleKick(saleId);
       const t = s.receipts.saleTemplate(saleId, 'ticket', opts?.templateId);
       const ticket = t.format === 'ticket' ? t : s.receipts.saleTemplate(saleId, 'ticket');
@@ -592,7 +606,7 @@ export function createPrinter(s: Services): Printer {
           rows
             .map((r) => `<tr><td>${dateFr(r.at).slice(-5)}</td><td>${esc(r.nature)}</td><td>${esc(r.label)}</td><td>${esc(r.party ?? '')}</td><td>${esc(r.method_label)}</td><td>${esc(r.reference ?? '')}</td><td>${esc(r.user_name ?? '')}</td><td class="r">${money(r.amount)}</td></tr>`)
             .join('');
-        const head = '<thead><tr><th>Heure</th><th>Nature</th><th>Pièce</th><th>Tiers</th><th>Moyen</th><th>Référence</th><th>Par</th><th class="r">Montant</th></tr></thead>';
+        const head = '<thead><tr><th>Heure</th><th>Nature</th><th>N° de pièce</th><th>Tiers</th><th>Moyen</th><th>Référence</th><th>Par</th><th class="r">Montant</th></tr></thead>';
         const j = z.emoneyJournal;
         await printA4(`${a4Head(store)}
           <h1>Bon de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
@@ -606,7 +620,7 @@ export function createPrinter(s: Services): Printer {
               ? `<h3>Entrées (${j.entries.length})</h3><table>${head}<tbody>${journalRows(j.entries)}</tbody></table>
                  <h3>Sorties (${j.exits.length})</h3><table>${head}<tbody>${journalRows(j.exits)}</tbody></table>`
               : `<h3>Paiements reçus (${payments.length})</h3>
-          <table><thead><tr><th>Heure</th><th>Pièce</th><th>Moyen</th><th>Référence</th><th>Caissier</th><th class="r">Montant</th></tr></thead>
+          <table><thead><tr><th>Heure</th><th>N° de pièce</th><th>Moyen</th><th>Référence</th><th>Caissier</th><th class="r">Montant</th></tr></thead>
           <tbody>${payments
             .map((p) => `<tr><td>${dateFr(p.at).slice(-5)}</td><td>${esc(p.number)}</td><td>${esc(p.label)}</td><td>${esc(p.reference ?? '')}</td><td>${esc(p.user_name ?? '')}</td><td class="r">${money(p.amount)}</td></tr>`)
             .join('')}</tbody></table>`
@@ -692,7 +706,7 @@ export function createPrinter(s: Services): Printer {
     previewPurchaseInvoice(invoiceId, opts) {
       const i = s.purchases.getInvoice(invoiceId);
       const t = s.receipts.purchaseTemplate('purchaseInvoice', i.store_id, opts?.format ?? 'a4', opts?.templateId);
-      return { templateId: t.id, html: renderDocHtml(t, s.receipts.purchaseInvoiceDoc(invoiceId)) };
+      return { templateId: t.id, html: tr(renderDocHtml(t, s.receipts.purchaseInvoiceDoc(invoiceId))) };
     },
 
     async purchaseOrder(orderId, opts) {
@@ -704,32 +718,37 @@ export function createPrinter(s: Services): Printer {
     previewPurchaseOrder(orderId, opts) {
       const o = s.purchases.getOrder(orderId);
       const t = s.receipts.purchaseTemplate('purchaseOrder', o.store_id, opts?.format ?? 'a4', opts?.templateId);
-      return { templateId: t.id, html: renderDocHtml(t, s.receipts.purchaseOrderDoc(orderId)) };
+      return { templateId: t.id, html: tr(renderDocHtml(t, s.receipts.purchaseOrderDoc(orderId))) };
     },
 
     async invoice(saleId, opts) {
       const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId, opts?.doc);
       const sale = s.pos.getSale(saleId);
+      lang = customerLang(sale.customer_id);
       const name = t.doc === 'delivery' ? 'bon-de-livraison' : sale.kind === 'return' ? 'avoir' : 'facture';
       return printWithTemplate(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate }), opts?.output, `${name}-${sale.number}.pdf`);
     },
 
     previewInvoice(saleId, opts) {
       const t = s.receipts.saleTemplate(saleId, opts?.format ?? 'a4', opts?.templateId, opts?.doc);
-      return { templateId: t.id, html: renderDocHtml(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate })) };
+      lang = customerLang(s.pos.getSale(saleId).customer_id);
+      return { templateId: t.id, html: tr(renderDocHtml(t, s.receipts.saleDoc(saleId, { duplicate: opts?.duplicate }))) };
     },
 
     async quote(quoteId, opts) {
       const t = s.receipts.quoteTemplate(quoteId, opts?.format ?? 'a4', opts?.templateId);
+      lang = customerLang(s.quotes.get(quoteId).customer_id);
       return printWithTemplate(t, s.receipts.quoteDoc(quoteId), opts?.output, `${t.variant === 'proforma' ? 'proforma' : 'devis'}-${s.quotes.get(quoteId).number}.pdf`);
     },
 
     previewQuote(quoteId, opts) {
       const t = s.receipts.quoteTemplate(quoteId, opts?.format ?? 'a4', opts?.templateId);
-      return { templateId: t.id, html: renderDocHtml(t, s.receipts.quoteDoc(quoteId)) };
+      lang = customerLang(s.quotes.get(quoteId).customer_id);
+      return { templateId: t.id, html: tr(renderDocHtml(t, s.receipts.quoteDoc(quoteId))) };
     },
 
     async statement(storeId, customerId, from, to, output) {
+      lang = customerLang(customerId);
       const store = s.admin.getStore(storeId);
       const c = s.customers.getCustomer(customerId);
       const acc = s.customers.account(storeId, customerId);
@@ -749,10 +768,10 @@ export function createPrinter(s: Services): Printer {
         </div>
         <h1>Relevé de compte</h1>
         <div>${from ? `Du ${dayFr(from)} ` : ''}${to ? `au ${dayFr(to)}` : `au ${new Date().toLocaleDateString('fr-FR')}`}</div>
-        <table><thead><tr><th>Date</th><th>Pièce</th><th>Libellé</th><th class="r">Débit</th><th class="r">Crédit</th><th class="r">Solde</th></tr></thead>
+        <table><thead><tr><th>Date</th><th>N° de pièce</th><th>Libellé</th><th class="r">Débit</th><th class="r">Crédit</th><th class="r">Solde</th></tr></thead>
         <tbody>${from ? `<tr><td colspan="5">Solde au ${dayFr(from)}</td><td class="r">${money(st.opening)}</td></tr>` : ''}${rows}
         <tr class="total"><td colspan="5">Solde dû (FCFA)</td><td class="r">${money(st.closing)}</td></tr></tbody></table>
-        ${open ? `<h3>Factures restant dues</h3><table><thead><tr><th>Pièce</th><th>Date</th><th>Échéance</th><th class="r">Reste dû</th><th></th></tr></thead><tbody>${open}</tbody></table>` : ''}
+        ${open ? `<h3>Factures restant dues</h3><table><thead><tr><th>N° de pièce</th><th>Date</th><th>Échéance</th><th class="r">Reste dû</th><th></th></tr></thead><tbody>${open}</tbody></table>` : ''}
         <p class="muted">Plafond de crédit : ${money(c.credit_limit)} FCFA · Délai de paiement : ${c.payment_terms_days} jours</p>`;
       if (output === 'pdf') {
         const name = `releve-${c.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || c.code}.pdf`;
@@ -763,6 +782,7 @@ export function createPrinter(s: Services): Printer {
     },
 
     async customerReceipt(paymentId) {
+      lang = customerLang(s.customers.getPayment(paymentId).customer_id);
       await printReceipt(s.receipts.customerReceipt(paymentId), false);
     },
 
@@ -858,7 +878,7 @@ export function createPrinter(s: Services): Printer {
           <tr><td>Déjà payé</td><td class="r">${money(x.paid)}</td></tr>
           <tr class="total"><td>Reste à payer</td><td class="r">${money(x.rest)}</td></tr>
         </table>
-        ${pays ? `<h3>Paiements</h3><table><thead><tr><th>Date</th><th>Pièce</th><th>Mode</th><th class="r">Montant</th></tr></thead><tbody>${pays}</tbody></table>` : ''}
+        ${pays ? `<h3>Paiements</h3><table><thead><tr><th>Date</th><th>N° de pièce</th><th>Mode</th><th class="r">Montant</th></tr></thead><tbody>${pays}</tbody></table>` : ''}
         ${employer}
         <p class="muted">Avances restant à rembourser : ${money(Math.max(0, st.advances))} FCFA.${p ? '' : ' Sans retenues légales (paie non activée ou collaborateur non déclaré).'}</p>
         <div style="display:flex;justify-content:space-between;margin-top:16mm"><div>Le collaborateur</div><div>L'employeur</div></div>`);
@@ -896,7 +916,7 @@ export function createPrinter(s: Services): Printer {
       await printA4(`${a4Head(store)}
         <h1>Extrait de compte, ${esc(st.staff.name)}</h1>
         <p>${periodFr(from, to)} · comptes ${esc(st.staff.salary_account)} (rémunérations dues) et ${esc(st.staff.advance_account)} (avances)</p>
-        <table><thead><tr><th>Date</th><th>Pièce</th><th>Libellé</th><th class="r">Salaire</th><th class="r">Dû au collaborateur</th><th class="r">Avance</th><th class="r">Avances à rembourser</th></tr></thead>
+        <table><thead><tr><th>Date</th><th>N° de pièce</th><th>Libellé</th><th class="r">Salaire</th><th class="r">Dû au collaborateur</th><th class="r">Avance</th><th class="r">Avances à rembourser</th></tr></thead>
         <tbody>${from ? `<tr><td colspan="4">Soldes au ${dayFr(from)}</td><td class="r">${money(st.opening.due)}</td><td></td><td class="r">${money(st.opening.advances)}</td></tr>` : ''}${rows}
         <tr class="total"><td colspan="4">Soldes</td><td class="r">${money(st.staff.due)}</td><td></td><td class="r">${money(st.staff.advances)}</td></tr></tbody></table>`);
     },
@@ -1084,7 +1104,7 @@ export function createPrinter(s: Services): Printer {
         <h1>État de rapprochement : ${esc(st.account.id)} ${esc(st.account.label)}</h1><div>Au ${dayFr(st.date)} · montants en FCFA</div>
         <table class="totals"><tbody><tr class="total"><td>Solde du compte en comptabilité</td><td class="r">${signed(st.bookBalance)}</td></tr></tbody></table>
         <h3>Écritures pas encore passées sur le relevé (à retrancher)</h3>
-        <table><thead><tr><th>Date</th><th>Libellé</th><th>Pièce</th><th class="r">Montant</th></tr></thead><tbody>${rows(bookOnly, 'Aucune')}</tbody></table>
+        <table><thead><tr><th>Date</th><th>Libellé</th><th>N° de pièce</th><th class="r">Montant</th></tr></thead><tbody>${rows(bookOnly, 'Aucune')}</tbody></table>
         <h3>Opérations du relevé pas encore comptabilisées (à ajouter)</h3>
         <table><thead><tr><th>Date</th><th>Libellé</th><th>Référence</th><th class="r">Montant</th></tr></thead><tbody>${rows(bankOnly, 'Aucune')}</tbody></table>
         <table class="totals"><tbody>
@@ -1123,4 +1143,8 @@ export function createPrinter(s: Services): Printer {
       return printers.map((p) => ({ name: p.name, isDefault: Boolean((p as { isDefault?: boolean }).isDefault) }));
     },
   };
+  // Chaque impression part dans la langue de l'utilisateur ; un document de client prend ensuite la sienne.
+  return Object.fromEntries(
+    Object.entries(printer).map(([name, fn]) => [name, (...args: unknown[]) => ((lang = userLang()), (fn as (...a: unknown[]) => unknown)(...args))]),
+  ) as unknown as Printer;
 }

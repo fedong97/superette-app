@@ -40,6 +40,7 @@ import {
   type CustomerDisplayMode,
   type CustomerDisplayState,
   CUSTOMER_DISPLAY_MODES,
+  type DocLang,
 } from '@superette/core';
 import {
   AppError,
@@ -508,6 +509,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
     }),
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
+    /** Langue de l'utilisateur connecté : celle de ses bons de caisse et rapports imprimés. */
+    'prefs.lang': (): DocLang => (user && s.admin.prefs(user.id).lang === 'en' ? 'en' : 'fr'),
     /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */
     'setup.bootstrap': (input: BootstrapInput & { template?: string | null }) => {
       const { template, ...rest } = input;

@@ -253,7 +253,8 @@ void app.whenReady().then(() => {
       },
     },
   };
-  const api = createApi(services, createPrinter(services), sync, app.getVersion(), system);
+  // Les bons de caisse et rapports s'impriment dans la langue de l'utilisateur connecté.
+  const api = createApi(services, createPrinter(services, () => api['prefs.lang']()), sync, app.getVersion(), system);
 
   ipcMain.handle('api', async (_event, name: ApiName, args: unknown[]) => {
     const fn = api[name] as ((...a: unknown[]) => unknown) | undefined;

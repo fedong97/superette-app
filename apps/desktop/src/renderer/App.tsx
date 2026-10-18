@@ -32,6 +32,7 @@ import { AskHost, askConfirm, Field, Modal, RefreshCtx, RightsProvider, StoreSet
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
+import { type Lang, currentLang, setLang, storedLang } from './i18n';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -440,6 +441,8 @@ export function App() {
   const refresh = () =>
     call('app.state').then((s) => {
       setVatOn(s.station?.store.vat_enabled !== 0);
+      // Langue de l'utilisateur connecté ; avant la connexion, la dernière choisie sur ce PC.
+      setLang(s.user && s.prefs.lang ? (s.prefs.lang as Lang) : storedLang());
       setState(s);
     });
   useEffect(() => void refresh(), []);
@@ -521,6 +524,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => clearInterval(t);
   }, []);
 
+  const [lang, setLangState] = useState<Lang>(currentLang);
   const savePref = (key: string, value: unknown) => {
     setPrefs((p) => ({ ...p, [key]: value }));
     call('prefs.set', key, value).catch(toast.error);
@@ -1035,6 +1039,19 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {gaps.data!.length === 1 ? '1 écart à justifier' : `${gaps.data!.length} écarts à justifier`}
           </button>
         )}
+        <button
+          className="link"
+          translate="no"
+          title={lang === 'en' ? 'Afficher les écrans en français' : 'Show the screens in English'}
+          onClick={() => {
+            const next: Lang = lang === 'en' ? 'fr' : 'en';
+            setLang(next);
+            setLangState(next);
+            savePref('lang', next);
+          }}
+        >
+          {lang === 'en' ? 'Français' : 'English'}
+        </button>
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
         </button>

@@ -1737,4 +1737,12 @@ CREATE TABLE sales_targets (
 ALTER TABLE staff_salaries ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 46,
+    name: 'langue des documents du client',
+    sql: `
+-- Langue des tickets, factures et relevés du client : fr ou en.
+ALTER TABLE customers ADD COLUMN language TEXT NOT NULL DEFAULT 'fr';
+`,
+  },
 ];

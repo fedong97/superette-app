@@ -777,7 +777,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
           <img src={logo} alt="" />
         </button>
-        <div className="rail-scroll" onWheel={() => menu && setMenu(null)}>
+        {/* Faire défiler la barre ferme le menu ouvert ; la roulette dans le menu lui-même le fait défiler. */}
+        <div className="rail-scroll" onWheel={(e) => menu && !(e.target as HTMLElement).closest('.menu-drop') && setMenu(null)}>
           {railMenus.map(([name, items]) => (
             <div key={name} className="menu">
               <button

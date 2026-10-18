@@ -11,3 +11,4 @@ release/
 # Clé secrète des licences : jamais dans le dépôt
 *.pem
 docs/manuel/*.pdf
+test-results/

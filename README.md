@@ -285,6 +285,14 @@ npm run build:win -w @superette/server-app   # → apps/server-app/release/Fedon
 - L'interface (`http://localhost:3000/`, ou l'adresse du PC depuis un autre PC ou un téléphone, avec un mot de passe) montre l'état des postes, les ventes du jour par magasin, le journal de tout ce que les PC envoient, les ventes des 14 derniers jours, les sauvegardes (télécharger, restaurer) et la clé d'enrôlement, créée au premier démarrage.
 - Le port (3000) se change dans `%APPDATA%\FEDO Serveur\reglages.json`.
 
+### Serveur sur internet (VPS, Docker)
+
+`deploy/` contient l'image Docker du serveur (base intégrée, sauvegardes quotidiennes), Caddy pour le HTTPS automatique et `installer.sh`, qui installe tout sur un serveur Ubuntu ou Debian en posant deux questions (nom de domaine, mot de passe). Le paquet `FEDONIX-360-serveur-internet-<version>` (image comprise) est construit par l'action Installateurs ; le pas-à-pas est dans [docs/serveur-internet.md](docs/serveur-internet.md).
+
+```bash
+docker build -f deploy/Dockerfile -t fedonix360-serveur .
+```
+
 ### Serveur Node.js et PostgreSQL (VPS)
 
 Sur un serveur Linux (VPS) ou un PC toujours allumé, avec Node.js 22 et PostgreSQL 14 ou plus :
@@ -304,6 +312,3 @@ Les tables sont créées au premier démarrage. Sans `DATABASE_URL`, `DATA_DIR=/
 
 La base est dans `%APPDATA%\Superette Gestion\superette.db` (variable `SUPERETTE_DB` pour en utiliser une autre).
 
-## Prochaines étapes
-
-1. Hébergement du serveur central (VPS ou PC toujours allumé) pour les boutiques qui veulent le suivre hors du magasin.

@@ -1,0 +1,25 @@
+# FEDONIX 360 Serveur sur internet : le serveur central et Caddy, qui obtient tout seul
+# le certificat HTTPS de votre nom de domaine (Let's Encrypt). Réglages dans le fichier .env.
+services:
+  fedonix:
+    image: fedonix360-serveur:${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      ENROLLMENT_KEY: ${CLE_ENROLEMENT}
+      ADMIN_PASSWORD: ${MOT_DE_PASSE}
+      TZ: Africa/Douala
+    volumes:
+      - ./donnees:/data
+  caddy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAINE: ${DOMAINE}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy:/data
+    depends_on:
+      - fedonix

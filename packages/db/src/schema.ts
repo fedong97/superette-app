@@ -1662,4 +1662,18 @@ CREATE TABLE fixed_assets (
 CREATE INDEX fixed_assets_store ON fixed_assets(store_id, account);
 `,
   },
+  {
+    version: 43,
+    name: 'dépôts modifiables, article de remplacement, emplacements',
+    sql: `
+-- Fiche du dépôt (comme Sage) : responsable, téléphone, adresse.
+ALTER TABLE warehouses ADD COLUMN manager TEXT;
+ALTER TABLE warehouses ADD COLUMN phone TEXT;
+ALTER TABLE warehouses ADD COLUMN address TEXT;
+-- Article proposé en caisse quand celui-ci est épuisé (sans clé étrangère : les articles arrivent des autres PC dans n'importe quel ordre).
+ALTER TABLE articles ADD COLUMN substitute_id TEXT;
+-- Emplacement dans chaque dépôt (allée, étagère) : {"<dépôt>": "A3-2"}.
+ALTER TABLE articles ADD COLUMN locations TEXT;
+`,
+  },
 ];

@@ -1,5 +1,7 @@
 import { randomInt } from 'node:crypto';
 import {
+  type ArticleImportRow,
+  type ExportArticle,
   type BarcodeKind,
   type Fcfa,
   type Milli,
@@ -14,6 +16,12 @@ import {
 } from '@superette/core';
 import { AppError, Base, newId } from './util';
 import { fold } from './database';
+
+/** Trois lettres de la famille, sans accents (Boissons → BOI), pour la codification par famille. */
+export function familyPrefix(name: string): string {
+  const letters = fold(name).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return (letters.slice(0, 3) || 'ART').padEnd(3, 'X');
+}
 
 export type Unit = 'piece' | 'kg' | 'litre';
 
@@ -52,6 +60,12 @@ export interface Article {
   pack_cost_price: Fcfa | null;
   /** Miniature de la photo (data URL JPEG), null sans photo. */
   photo_thumb: string | null;
+  /** Article proposé en caisse quand celui-ci est épuisé. */
+  substitute_id: string | null;
+  substitute_code: string | null;
+  substitute_name: string | null;
+  /** Emplacement dans chaque dépôt (JSON : {"<dépôt>": "A3-2"}). */
+  locations: string | null;
   barcodes: { code: string; pack_qty: Milli }[];
   /** Conditionnements, du plus grand au plus petit (carton, paquet). */
   packs: ArticlePack[];
@@ -114,6 +128,8 @@ export interface ArticleInput {
   packPurchasePrice?: Fcfa;
   /** Prix de revient du conditionnement d'achat ; absent = garde l'écart avec l'achat. */
   packCostPrice?: Fcfa;
+  /** Article proposé quand celui-ci est épuisé ; absent = inchangé. */
+  substituteId?: string | null;
 }
 
 /** Résultat d'un scan en caisse. */
@@ -131,9 +147,11 @@ export interface ScanResult {
 /** Taux de TVA de l'article ; 0 dans un magasin sans TVA, quel que soit le taux de la fiche. */
 const ARTICLE_SELECT = `
   SELECT a.*, CASE WHEN (SELECT vat_enabled FROM stores WHERE id = @storeId) = 0 THEN 0 ELSE v.rate_bp END AS vat_rate_bp, f.name AS family_name, d.name AS department_name,
-         COALESCE(sp.sale_price, a.sale_price) AS store_price, ph.thumb AS photo_thumb
+         COALESCE(sp.sale_price, a.sale_price) AS store_price, ph.thumb AS photo_thumb,
+         sub.code AS substitute_code, sub.name AS substitute_name
   FROM articles a
   LEFT JOIN article_photos ph ON ph.article_id = a.id
+  LEFT JOIN articles sub ON sub.id = a.substitute_id
   JOIN vat_rates v ON v.id = a.vat_rate_id
   LEFT JOIN families f ON f.id = a.family_id
   LEFT JOIN departments d ON d.id = f.department_id
@@ -256,13 +274,29 @@ export class CatalogueService extends Base {
     return this.withBarcodes(rows);
   }
 
-  private nextArticleCode(): string {
+  /**
+   * Code d'un nouvel article : numéro du poste (DLA11-00012), ou, codification
+   * par famille comme dans Sage, trois lettres de la famille devant (BOI-DLA11-0012).
+   */
+  private nextArticleCode(familyId: string | null = null): string {
+    if (familyId) {
+      const name = this.db.prepare('SELECT name FROM families WHERE id = ?').pluck().get(familyId) as string | undefined;
+      const prefix = familyPrefix(name ?? '');
+      for (;;) {
+        const code = `${prefix}-${this.stationPrefix()}-${String(this.nextCounter(`article.code.${prefix}`)).padStart(4, '0')}`;
+        if (!this.db.prepare('SELECT 1 FROM articles WHERE code = ?').get(code)) return code;
+      }
+    }
     return `${this.stationPrefix()}-${String(this.nextCounter('article.code')).padStart(5, '0')}`;
   }
 
   /** Crée ou modifie une fiche article ; trace l'historique des prix. */
-  saveArticle(userId: string, input: ArticleInput, id?: string, opts: { autoBarcode?: BarcodeKind | null } = {}): Article {
+  saveArticle(userId: string, input: ArticleInput, id?: string, opts: { autoBarcode?: BarcodeKind | null; codeByFamily?: boolean } = {}): Article {
     if (!input.name.trim()) throw new AppError("La désignation de l'article est obligatoire", 'INVALID');
+    if (input.substituteId) {
+      if (input.substituteId === id) throw new AppError('Un article ne peut pas se remplacer lui-même', 'INVALID');
+      if (!this.db.prepare('SELECT 1 FROM articles WHERE id = ?').get(input.substituteId)) throw new AppError('Article de remplacement introuvable', 'NOT_FOUND');
+    }
     for (const [label, v] of [
       ['Prix de vente', input.salePrice],
       ["Prix d'achat", input.purchasePrice],
@@ -327,7 +361,7 @@ export class CatalogueService extends Base {
       const purchasePrice = input.packPurchasePrice !== undefined ? Math.round((packPurchase * 1000) / purchaseUnits) : input.purchasePrice;
       const params = {
         id: articleId,
-        code: input.code?.trim() || existing?.code || this.nextArticleCode(),
+        code: input.code?.trim() || existing?.code || this.nextArticleCode(opts.codeByFamily ? (input.familyId ?? null) : null),
         name: input.name.trim(),
         family_id: input.familyId ?? null,
         brand: input.brand ?? null,
@@ -348,6 +382,7 @@ export class CatalogueService extends Base {
         other_ref: input.otherRef === undefined ? (existing?.other_ref ?? null) : input.otherRef?.trim() || null,
         pack_purchase_price: packPurchase,
         pack_cost_price: packCost,
+        substitute_id: input.substituteId === undefined ? (existing?.substitute_id ?? null) : input.substituteId || null,
         now,
       };
       try {
@@ -359,7 +394,7 @@ export class CatalogueService extends Base {
                  perishable=@perishable, plu=@plu, quick_key=@quick_key, min_qty=@min_qty, alert_qty=@alert_qty,
                  max_qty=@max_qty, active=@active, unit_name=@unit_name, wholesale_price=@wholesale_price,
                  super_wholesale_price=@super_wholesale_price, other_ref=@other_ref, pack_purchase_price=@pack_purchase_price,
-                 pack_cost_price=@pack_cost_price, updated_at=@now WHERE id=@id`,
+                 pack_cost_price=@pack_cost_price, substitute_id=@substitute_id, updated_at=@now WHERE id=@id`,
             )
             .run(params);
         } else {
@@ -367,10 +402,10 @@ export class CatalogueService extends Base {
             .prepare(
               `INSERT INTO articles (id, code, name, family_id, brand, unit, vat_rate_id, purchase_price, sale_price,
                  perishable, plu, quick_key, min_qty, alert_qty, max_qty, active, unit_name, wholesale_price, super_wholesale_price,
-                 other_ref, pack_purchase_price, pack_cost_price, created_at, updated_at)
+                 other_ref, pack_purchase_price, pack_cost_price, substitute_id, created_at, updated_at)
                VALUES (@id, @code, @name, @family_id, @brand, @unit, @vat_rate_id, @purchase_price, @sale_price,
                  @perishable, @plu, @quick_key, @min_qty, @alert_qty, @max_qty, @active, @unit_name, @wholesale_price, @super_wholesale_price,
-                 @other_ref, @pack_purchase_price, @pack_cost_price, @now, @now)`,
+                 @other_ref, @pack_purchase_price, @pack_cost_price, @substitute_id, @now, @now)`,
             )
             .run(params);
         }
@@ -629,64 +664,445 @@ export class CatalogueService extends Base {
    * Import en masse (reprise du catalogue depuis Excel/CSV). Les lignes
    * dont le code-barres existe déjà mettent à jour l'article correspondant.
    */
+  /** Fiche existante reprise telle quelle, pour la réenregistrer avec quelques changements. */
+  private inputOf(a: Article): ArticleInput {
+    const packCodes = new Set(a.packs.map((p) => p.barcode).filter(Boolean));
+    return {
+      code: a.code,
+      name: a.name,
+      familyId: a.family_id,
+      brand: a.brand,
+      unit: a.unit,
+      vatRateId: a.vat_rate_id,
+      purchasePrice: a.purchase_price,
+      salePrice: a.sale_price,
+      perishable: a.perishable === 1,
+      plu: a.plu,
+      quickKey: a.quick_key === 1,
+      minQty: a.min_qty,
+      alertQty: a.alert_qty,
+      maxQty: a.max_qty,
+      active: a.active === 1,
+      barcodes: a.barcodes.filter((b) => !packCodes.has(b.code)).map((b) => ({ code: b.code, packQty: b.pack_qty })),
+    };
+  }
+
+  /** Article d'un code article ou d'un code-barres (unité ou conditionnement). */
+  findByCode(code: string): string | null {
+    const c = code.trim();
+    if (!c) return null;
+    const byCode = this.db.prepare('SELECT id FROM articles WHERE code = ? OR code = ?').pluck().get(c, c.toUpperCase()) as string | undefined;
+    if (byCode) return byCode;
+    return (this.db.prepare('SELECT article_id FROM barcodes WHERE code = ?').pluck().get(normalizeBarcode(c)) as string | undefined) ?? null;
+  }
+
+  /**
+   * Import du catalogue (Excel, CSV, modèle de boutique). Chaque ligne retrouve
+   * sa fiche par le code article, puis un code-barres, puis la désignation
+   * exacte ; sinon elle crée l'article. Ce qui n'est pas dans le fichier reste
+   * tel quel sur la fiche. `preview` fait tout le travail puis l'annule, pour
+   * l'aperçu ; une ligne en erreur n'empêche pas les autres.
+   */
   importArticles(
     userId: string,
-    rows: { name: string; barcode?: string; salePrice: Fcfa; purchasePrice?: Fcfa; vatRateBp?: number; unit?: Unit; department?: string; family?: string }[],
-    opts: { noVat?: boolean } = {},
-  ): { created: number; updated: number; errors: { row: number; message: string }[] } {
+    rows: ArticleImportRow[],
+    opts: { noVat?: boolean; mode?: ImportMode; preview?: boolean; autoBarcode?: BarcodeKind | null; codeByFamily?: boolean } = {},
+  ): ImportResult {
+    const mode = opts.mode ?? 'upsert';
     const rates = this.db.prepare('SELECT id, rate_bp FROM vat_rates WHERE active = 1').all() as { id: string; rate_bp: number }[];
-    const result = { created: 0, updated: 0, errors: [] as { row: number; message: string }[] };
+    const result: ImportResult = { created: 0, updated: 0, skipped: 0, errors: [], lines: [] };
     const familyId = (dep?: string, fam?: string): string | null => {
-      if (!dep) return null;
-      let depId = this.db.prepare('SELECT id FROM departments WHERE name = ?').pluck().get(dep.trim()) as string | undefined;
-      depId ??= this.createDepartment(dep).id;
-      const famName = fam?.trim() || dep.trim();
-      const existing = this.db.prepare('SELECT id FROM families WHERE department_id = ? AND name = ?').pluck().get(depId, famName) as
-        | string
-        | undefined;
+      if (!dep && !fam) return null;
+      if (!dep) {
+        // Famille sans rayon (Sage, EBP) : la famille de ce nom, sinon un rayon du même nom.
+        const known = this.db.prepare('SELECT id FROM families WHERE fold(name) = fold(?) ORDER BY id LIMIT 1').pluck().get(fam!.trim()) as string | undefined;
+        if (known) return known;
+        dep = fam;
+      }
+      let depId = this.db.prepare('SELECT id FROM departments WHERE fold(name) = fold(?)').pluck().get(dep!.trim()) as string | undefined;
+      depId ??= this.createDepartment(dep!).id;
+      const famName = fam?.trim() || dep!.trim();
+      const existing = this.db.prepare('SELECT id FROM families WHERE department_id = ? AND fold(name) = fold(?)').pluck().get(depId, famName) as string | undefined;
       return existing ?? this.createFamily(depId, famName).id;
     };
-    rows.forEach((row, index) => {
-      try {
-        // Magasin sans TVA : tout article importé est exonéré, quelle que soit la colonne TVA.
-        const rate = rates.find((r) => r.rate_bp === (opts.noVat ? 0 : (row.vatRateBp ?? 1925)));
-        if (!rate) throw new AppError(`Taux de TVA inconnu : ${row.vatRateBp}`, 'INVALID');
-        const code = row.barcode ? normalizeBarcode(row.barcode) : null;
-        const existingId = code
-          ? (this.db.prepare('SELECT article_id FROM barcodes WHERE code = ?').pluck().get(code) as string | undefined)
-          : undefined;
-        const existing = existingId ? this.getArticle(existingId) : null;
+    const findExisting = (row: ArticleImportRow): string | null => {
+      if (row.code) {
+        const id = this.db.prepare('SELECT id FROM articles WHERE code = ?').pluck().get(row.code) as string | undefined;
+        if (id) return id;
+      }
+      for (const code of [row.barcode, ...(row.packs ?? []).map((p) => p.barcode)]) {
+        if (!code?.trim()) continue;
+        const id = this.db.prepare('SELECT article_id FROM barcodes WHERE code = ?').pluck().get(normalizeBarcode(code)) as string | undefined;
+        if (id) return id;
+      }
+      if (row.name.trim()) {
+        const ids = this.db.prepare('SELECT id FROM articles WHERE fold(name) = fold(?) AND is_service = 0').pluck().all(row.name.trim()) as string[];
+        if (ids.length === 1) return ids[0]!;
+      }
+      return null;
+    };
+    const substitutes: { articleId: string; code: string; line: number }[] = [];
+    const run = () => {
+      rows.forEach((row, index) => {
+        const line = row.line ?? index + 1;
+        const label = row.name || row.code || `ligne ${line}`;
+        try {
+          if (row.invalid) throw new AppError(row.invalid, 'INVALID');
+          const existingId = findExisting(row);
+          const existing = existingId ? this.getArticle(existingId) : null;
+          if ((existing && mode === 'create') || (!existing && mode === 'update')) {
+            result.skipped++;
+            result.lines.push({ row: line, name: label, action: 'skip' });
+            return;
+          }
+          if (!existing && !row.name.trim()) throw new AppError('Désignation vide', 'INVALID');
+          if (!existing && row.salePrice === undefined) throw new AppError('Prix de vente manquant', 'INVALID');
+          let vatRateId: string;
+          if (opts.noVat) {
+            // Magasin sans TVA : tout article créé est exonéré, un article existant garde son taux.
+            vatRateId = existing?.vat_rate_id ?? rates.find((r) => r.rate_bp === 0)?.id ?? '';
+          } else if (row.vatRateBp !== undefined) {
+            vatRateId = rates.find((r) => r.rate_bp === row.vatRateBp)?.id ?? '';
+            if (!vatRateId) throw new AppError(`Taux de TVA inconnu : ${String(row.vatRateBp / 100).replace('.', ',')} %`, 'INVALID');
+          } else {
+            vatRateId = existing?.vat_rate_id ?? rates.find((r) => r.rate_bp === 1925)?.id ?? rates[0]?.id ?? '';
+          }
+          if (!vatRateId) throw new AppError('Aucun taux de TVA exonéré : créez-le dans Administration', 'INVALID');
+          const base: ArticleInput = existing
+            ? this.inputOf(existing)
+            : { name: row.name, unit: 'piece', vatRateId, purchasePrice: 0, salePrice: 0, barcodes: [] };
+          const code = row.barcode?.trim() ? normalizeBarcode(row.barcode) : null;
+          let barcodes = base.barcodes ?? [];
+          let packs: PackInput[] | undefined;
+          if (row.packs) {
+            // Nouveaux conditionnements : un carton déjà connu garde son code-barres si le fichier n'en donne pas.
+            packs = row.packs.map((p) => ({
+              name: p.name,
+              contains: p.contains,
+              salePrice: p.salePrice,
+              wholesalePrice: p.wholesalePrice ?? null,
+              superWholesalePrice: p.superWholesalePrice ?? null,
+              barcode: p.barcode?.trim() || existing?.packs.find((x) => x.name.toLowerCase() === p.name.toLowerCase())?.barcode || null,
+            }));
+          }
+          if (code && !barcodes.some((b) => b.code === code) && !packs?.some((p) => p.barcode && normalizeBarcode(p.barcode) === code)) {
+            barcodes = [...barcodes, { code, packQty: 1000 }];
+          }
+          const input: ArticleInput = {
+            ...base,
+            code: existing ? existing.code : row.code,
+            name: row.name.trim() || base.name,
+            familyId: row.department || row.family ? familyId(row.department, row.family) : (base.familyId ?? null),
+            brand: row.brand ?? base.brand,
+            unit: row.unit ?? base.unit,
+            vatRateId,
+            purchasePrice: row.purchasePrice ?? base.purchasePrice,
+            salePrice: row.salePrice ?? base.salePrice,
+            perishable: row.perishable ?? base.perishable,
+            plu: row.plu ?? base.plu,
+            minQty: row.minQty ?? base.minQty,
+            alertQty: row.alertQty ?? base.alertQty,
+            maxQty: row.maxQty ?? base.maxQty,
+            active: row.active ?? base.active,
+            barcodes,
+            unitName: row.unitName,
+            wholesalePrice: row.wholesalePrice,
+            superWholesalePrice: row.superWholesalePrice,
+            otherRef: row.otherRef,
+            packs,
+          };
+          // Une ligne à la fois : si elle échoue, rien d'elle ne reste (rayon créé, codes…).
+          const saved = this.tx(() => this.saveArticle(userId, input, existingId ?? undefined, { autoBarcode: opts.autoBarcode, codeByFamily: opts.codeByFamily }));
+          if (row.substitute) substitutes.push({ articleId: saved.id, code: row.substitute, line });
+          if (existing) result.updated++;
+          else result.created++;
+          result.lines.push({ row: line, name: saved.name, action: existing ? 'update' : 'create', code: saved.code });
+        } catch (e) {
+          result.errors.push({ row: line, message: `${label} : ${e instanceof Error ? e.message : String(e)}` });
+        }
+      });
+      // Remplaçants en dernier : l'article remplaçant peut être plus bas dans le fichier.
+      for (const s of substitutes) {
+        const target = this.findByCode(s.code);
+        if (!target || target === s.articleId) {
+          result.errors.push({ row: s.line, message: `Article de remplacement « ${s.code} » introuvable` });
+          continue;
+        }
+        this.setSubstitute(userId, s.articleId, target);
+      }
+    };
+    if (!opts.preview) {
+      this.tx(run);
+      return result;
+    }
+    try {
+      this.tx(() => {
+        run();
+        throw new PreviewDone();
+      });
+    } catch (e) {
+      if (!(e instanceof PreviewDone)) throw e;
+    }
+    return result;
+  }
+
+  /** Article proposé en caisse quand celui-ci est épuisé ; null le retire. */
+  setSubstitute(userId: string, articleId: string, substituteId: string | null): Article {
+    const a = this.getArticle(articleId);
+    return this.saveArticle(userId, { ...this.inputOf(a), substituteId }, articleId);
+  }
+
+  /** Emplacement de l'article dans un dépôt (allée, étagère) ; vide le retire. */
+  setLocation(userId: string, articleId: string, warehouseId: string, location: string): Article {
+    const a = this.getArticle(articleId);
+    const value = location.trim().toUpperCase();
+    if (value.length > 20) throw new AppError('Emplacement trop long (20 caractères au plus)', 'INVALID');
+    const map = parseLocations(a.locations);
+    if (value) map[warehouseId] = value;
+    else delete map[warehouseId];
+    if ((parseLocations(a.locations)[warehouseId] ?? '') === value) return a;
+    return this.tx(() => {
+      this.db.prepare('UPDATE articles SET locations = ?, updated_at = ? WHERE id = ?').run(Object.keys(map).length ? JSON.stringify(map) : null, this.now(), articleId);
+      const next = this.getArticle(articleId);
+      this.enqueue(null, 'article', articleId, 'upsert', next);
+      this.audit(userId, 'article.location', 'article', articleId, { warehouseId, location: value || null });
+      return next;
+    });
+  }
+
+  /**
+   * Articles à exporter, sans limite de nombre : filtre de la liste (recherche,
+   * rayon, famille, actifs ou en sommeil), avec le stock, le coût moyen et
+   * l'emplacement dans chaque dépôt du magasin.
+   */
+  listForExport(storeId: string, filter: ExportFilter = {}): (Article & ExportArticle)[] {
+    const q = filter.query?.trim() ? `%${filter.query.trim().replace(/[%_]/g, '')}%` : null;
+    const rows = this.db
+      .prepare(
+        `${ARTICLE_SELECT}
+         WHERE a.is_service = 0
+           AND (@q IS NULL OR a.name LIKE @q OR a.code LIKE @q OR a.brand LIKE @q OR a.other_ref LIKE @q
+                OR a.id IN (SELECT article_id FROM barcodes WHERE code LIKE @q))
+           AND (@status = 'all' OR (@status = 'active' AND a.active = 1) OR (@status = 'inactive' AND a.active = 0))
+           AND (@familyId IS NULL OR a.family_id = @familyId)
+           AND (@departmentId IS NULL OR f.department_id = @departmentId)
+           AND (@supplierId IS NULL OR a.id IN (SELECT article_id FROM supplier_articles WHERE supplier_id = @supplierId))
+         ORDER BY d.name, f.name, a.name`,
+      )
+      .all({
+        storeId,
+        q,
+        status: filter.status ?? 'all',
+        familyId: filter.familyId ?? null,
+        departmentId: filter.departmentId ?? null,
+        supplierId: filter.supplierId ?? null,
+      }) as Omit<Article, 'barcodes' | 'packs'>[];
+    const articles = this.withBarcodes(rows);
+    const stock = this.db
+      .prepare('SELECT s.article_id, s.warehouse_id, s.qty, s.avg_cost FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ?')
+      .all(storeId) as { article_id: string; warehouse_id: string; qty: Milli; avg_cost: Fcfa }[];
+    const byArticle = new Map<string, typeof stock>();
+    for (const s of stock) byArticle.set(s.article_id, [...(byArticle.get(s.article_id) ?? []), s]);
+    const warehouses = this.db.prepare('SELECT id FROM warehouses WHERE store_id = ?').pluck().all(storeId) as string[];
+    return articles.map((a) => {
+      const locations = parseLocations(a.locations);
+      const own = byArticle.get(a.id) ?? [];
+      return {
+        ...a,
+        stock: warehouses
+          .map((w) => {
+            const s = own.find((x) => x.warehouse_id === w);
+            return { warehouse_id: w, qty: s?.qty ?? 0, avg_cost: s?.avg_cost ?? 0, location: locations[w] ?? null };
+          })
+          .filter((s) => s.qty !== 0 || s.location),
+      };
+    });
+  }
+
+  // --- Mise à jour des prix en masse (assistant de Sage) ------------------------
+
+  private priceTargets(storeId: string, input: PriceUpdateInput): Article[] {
+    if (input.articleIds?.length) return input.articleIds.map((id) => this.getArticle(id, storeId));
+    return this.listForExport(storeId, {
+      status: input.includeInactive ? 'all' : 'active',
+      departmentId: input.departmentId ?? null,
+      familyId: input.familyId ?? null,
+      supplierId: input.supplierId ?? null,
+    });
+  }
+
+  /**
+   * Calcule les nouveaux prix d'une sélection : hausse ou baisse en %, montant
+   * ajouté (par unité de détail), ou prix de vente = prix d'achat × coefficient.
+   * Le prix d'achat peut entraîner le prix de vente (même proportion, marge gardée).
+   */
+  planPriceUpdate(storeId: string, input: PriceUpdateInput): PriceUpdatePlan {
+    if (!Number.isFinite(input.value)) throw new AppError('Valeur de la mise à jour invalide', 'INVALID');
+    if (input.method === 'coefficient' && (input.target !== 'sale' || input.value <= 0)) throw new AppError('Le coefficient (supérieur à 0) calcule le prix de vente à partir du prix d’achat', 'INVALID');
+    if (input.method === 'percent' && input.value <= -100) throw new AppError('Une baisse de 100 % ou plus mettrait les prix à zéro', 'INVALID');
+    const rounding = [1, 5, 10, 25, 50, 100].includes(input.rounding) ? input.rounding : 1;
+    const round = (v: number) => Math.max(rounding, Math.round(v / rounding) * rounding);
+    const plans: PriceUpdatePlan['articles'] = [];
+    for (const a of this.priceTargets(storeId, input)) {
+      const lines: PriceUpdateLine[] = [];
+      const unitName = a.unit === 'piece' ? (a.unit_name ?? 'Pièce') : a.unit === 'kg' ? 'Kg' : 'Litre';
+      const change = (old: number, units: Milli) =>
+        input.method === 'percent' ? old * (1 + input.value / 100) : old + (input.value * units) / 1000;
+      let purchase = a.purchase_price;
+      let ratio = 1;
+      if (input.target === 'purchase') {
+        purchase = Math.round(change(a.purchase_price, 1000));
+        if (purchase < 0) throw new AppError(`${a.name} : le prix d'achat deviendrait négatif`, 'INVALID');
+        if (purchase !== a.purchase_price) lines.push({ level: unitName, field: 'purchase', old: a.purchase_price, next: purchase });
+        ratio = a.purchase_price > 0 ? purchase / a.purchase_price : 1;
+      }
+      const sale = input.target === 'sale' || input.followSale;
+      const nextSale = (old: number, units: Milli): number => {
+        if (input.target === 'purchase') return round(old * ratio);
+        if (input.method === 'coefficient') return round(((a.purchase_price * units) / 1000) * input.value * (1 + a.vat_rate_bp / 10000));
+        return round(change(old, units));
+      };
+      const salePrices = { unit: a.sale_price, store: a.store_price !== a.sale_price ? a.store_price : null, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price, packs: a.packs };
+      const next = { unit: a.sale_price, store: salePrices.store, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price, packs: a.packs.map((p) => ({ ...p })) };
+      if (sale && !(input.method === 'coefficient' && a.purchase_price <= 0)) {
+        next.unit = nextSale(a.sale_price, 1000);
+        if (next.unit !== a.sale_price) lines.push({ level: unitName, field: 'sale', old: a.sale_price, next: next.unit });
+        if (salePrices.store !== null) {
+          next.store = nextSale(salePrices.store, 1000);
+          if (next.store !== salePrices.store) lines.push({ level: `${unitName} (prix magasin)`, field: 'sale', old: salePrices.store, next: next.store });
+        }
+        const tiers = input.tiers && input.method !== 'coefficient';
+        if (tiers && a.wholesale_price !== null) {
+          next.wholesale = nextSale(a.wholesale_price, 1000);
+          if (next.wholesale !== a.wholesale_price) lines.push({ level: unitName, field: 'wholesale', old: a.wholesale_price, next: next.wholesale });
+        }
+        if (tiers && a.super_wholesale_price !== null) {
+          next.superWholesale = nextSale(a.super_wholesale_price, 1000);
+          if (next.superWholesale !== a.super_wholesale_price) lines.push({ level: unitName, field: 'superWholesale', old: a.super_wholesale_price, next: next.superWholesale });
+        }
+        if (input.packs) {
+          next.packs = a.packs.map((p) => {
+            const np = { ...p, sale_price: nextSale(p.sale_price, p.units) };
+            if (np.sale_price !== p.sale_price) lines.push({ level: p.name, field: 'sale', old: p.sale_price, next: np.sale_price });
+            if (tiers && p.wholesale_price !== null) {
+              np.wholesale_price = nextSale(p.wholesale_price, p.units);
+              if (np.wholesale_price !== p.wholesale_price) lines.push({ level: p.name, field: 'wholesale', old: p.wholesale_price, next: np.wholesale_price });
+            }
+            if (tiers && p.super_wholesale_price !== null) {
+              np.super_wholesale_price = nextSale(p.super_wholesale_price, p.units);
+              if (np.super_wholesale_price !== p.super_wholesale_price) lines.push({ level: p.name, field: 'superWholesale', old: p.super_wholesale_price, next: np.super_wholesale_price });
+            }
+            return np;
+          });
+        }
+      }
+      if (lines.length) plans.push({ articleId: a.id, code: a.code, name: a.name, purchase, ...next, lines });
+    }
+    return { articles: plans, lines: plans.reduce((t, p) => t + p.lines.length, 0) };
+  }
+
+  /** Applique la mise à jour calculée par `planPriceUpdate` (historique des prix et audit compris). */
+  applyPriceUpdate(userId: string, storeId: string, input: PriceUpdateInput): { articles: number; lines: number } {
+    const plan = this.planPriceUpdate(storeId, input);
+    return this.tx(() => {
+      for (const p of plan.articles) {
+        const a = this.getArticle(p.articleId, storeId);
         this.saveArticle(
           userId,
           {
-            code: existing?.code,
-            name: row.name,
-            familyId: familyId(row.department, row.family) ?? existing?.family_id ?? null,
-            brand: existing?.brand,
-            unit: row.unit ?? existing?.unit ?? 'piece',
-            vatRateId: rate.id,
-            purchasePrice: row.purchasePrice ?? existing?.purchase_price ?? 0,
-            salePrice: row.salePrice,
-            perishable: existing?.perishable === 1,
-            plu: existing?.plu,
-            quickKey: existing?.quick_key === 1,
-            minQty: existing?.min_qty,
-            alertQty: existing?.alert_qty,
-            maxQty: existing?.max_qty,
-            barcodes: existing
-              ? existing.barcodes.map((b) => ({ code: b.code, packQty: b.pack_qty }))
-              : code
-                ? [{ code }]
-                : [],
+            ...this.inputOf(a),
+            purchasePrice: p.purchase,
+            salePrice: p.unit,
+            wholesalePrice: p.wholesale,
+            superWholesalePrice: p.superWholesale,
+            packs: a.packs.length
+              ? p.packs.map((x) => ({ name: x.name, contains: x.contains, salePrice: x.sale_price, wholesalePrice: x.wholesale_price, superWholesalePrice: x.super_wholesale_price, barcode: x.barcode }))
+              : undefined,
           },
-          existingId,
+          a.id,
         );
-        if (existing) result.updated++;
-        else result.created++;
-      } catch (e) {
-        result.errors.push({ row: index + 1, message: e instanceof Error ? e.message : String(e) });
+        if (p.store !== null && p.store !== (a.store_price !== a.sale_price ? a.store_price : null)) this.setStorePrice(userId, a.id, storeId, p.store);
       }
+      this.audit(userId, 'price.bulk_update', 'article', undefined, { ...input, articleIds: input.articleIds?.length, articles: plan.articles.length });
+      return { articles: plan.articles.length, lines: plan.lines };
     });
-    return result;
+  }
+}
+
+/** Fin d'un aperçu d'import : tout ce qui a été fait est annulé. */
+class PreviewDone extends Error {}
+
+export type ImportMode = 'upsert' | 'create' | 'update';
+
+export interface ImportResult {
+  created: number;
+  updated: number;
+  /** Lignes laissées de côté par le mode d'import (créer seulement, mettre à jour seulement). */
+  skipped: number;
+  /** `row` : ligne du fichier. */
+  errors: { row: number; message: string }[];
+  lines: { row: number; name: string; action: 'create' | 'update' | 'skip'; code?: string }[];
+}
+
+export interface ExportFilter {
+  query?: string | null;
+  departmentId?: string | null;
+  familyId?: string | null;
+  supplierId?: string | null;
+  status?: 'active' | 'inactive' | 'all';
+}
+
+export interface PriceUpdateInput {
+  departmentId?: string | null;
+  familyId?: string | null;
+  supplierId?: string | null;
+  /** Articles choisis un par un ; remplace les filtres. */
+  articleIds?: string[];
+  includeInactive?: boolean;
+  target: 'sale' | 'purchase';
+  /** percent : +10 ou -5 ; amount : FCFA par unité de détail ; coefficient : prix de vente = achat HT × coefficient, TVA comprise. */
+  method: 'percent' | 'amount' | 'coefficient';
+  value: number;
+  /** Changer aussi les prix des conditionnements (carton, pack). */
+  packs: boolean;
+  /** Changer aussi les prix de gros et super gros. */
+  tiers: boolean;
+  /** Prix d'achat changé : le prix de vente suit dans la même proportion. */
+  followSale?: boolean;
+  /** Arrondi des prix de vente (au multiple le plus proche). */
+  rounding: number;
+}
+
+export interface PriceUpdateLine {
+  level: string;
+  field: 'purchase' | 'sale' | 'wholesale' | 'superWholesale';
+  old: Fcfa;
+  next: Fcfa;
+}
+
+export interface PriceUpdatePlan {
+  articles: {
+    articleId: string;
+    code: string;
+    name: string;
+    purchase: Fcfa;
+    unit: Fcfa;
+    store: Fcfa | null;
+    wholesale: Fcfa | null;
+    superWholesale: Fcfa | null;
+    packs: ArticlePack[];
+    lines: PriceUpdateLine[];
+  }[];
+  lines: number;
+}
+
+/** Emplacements d'un article par dépôt, lus sans jamais échouer. */
+export function parseLocations(json: string | null | undefined): Record<string, string> {
+  if (!json) return {};
+  try {
+    const v = JSON.parse(json) as unknown;
+    return v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => typeof x === 'string')) as Record<string, string> : {};
+  } catch {
+    return {};
   }
 }

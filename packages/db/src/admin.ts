@@ -101,7 +101,21 @@ export interface Warehouse {
   name: string;
   kind: 'shop' | 'reserve' | 'cold';
   is_sales_default: number;
+  active: number;
+  manager: string | null;
+  phone: string | null;
+  address: string | null;
 }
+
+export interface WarehouseInput {
+  name: string;
+  kind: Warehouse['kind'];
+  manager?: string | null;
+  phone?: string | null;
+  address?: string | null;
+}
+
+const WAREHOUSE_KINDS: Warehouse['kind'][] = ['shop', 'reserve', 'cold'];
 
 export interface BootstrapInput {
   storeCode: string;
@@ -317,6 +331,8 @@ export class AdminService extends Base {
   // --- Dépôts ---------------------------------------------------------------
 
   createWarehouse(storeId: string, name: string, kind: Warehouse['kind'], salesDefault = false): Warehouse {
+    this.checkWarehouseInput(storeId, { name, kind });
+    name = name.trim();
     const id = newId();
     this.db
       .prepare('INSERT INTO warehouses (id, store_id, name, kind, is_sales_default) VALUES (?, ?, ?, ?, ?)')
@@ -326,10 +342,95 @@ export class AdminService extends Base {
     return wh;
   }
 
-  listWarehouses(storeId: string): Warehouse[] {
+  /** Dépôts du magasin, dépôt des ventes en premier ; les dépôts désactivés seulement sur demande. */
+  listWarehouses(storeId: string, opts: { includeInactive?: boolean } = {}): Warehouse[] {
     return this.db
-      .prepare('SELECT * FROM warehouses WHERE store_id = ? AND active = 1 ORDER BY is_sales_default DESC, name')
+      .prepare(`SELECT * FROM warehouses WHERE store_id = ? ${opts.includeInactive ? '' : 'AND active = 1'} ORDER BY active DESC, is_sales_default DESC, name`)
       .all(storeId) as Warehouse[];
+  }
+
+  getWarehouse(id: string): Warehouse {
+    const wh = this.db.prepare('SELECT * FROM warehouses WHERE id = ?').get(id) as Warehouse | undefined;
+    if (!wh) throw new AppError('Dépôt introuvable', 'NOT_FOUND');
+    return wh;
+  }
+
+  private checkWarehouseInput(storeId: string, input: WarehouseInput, id?: string): void {
+    const name = input.name?.trim() ?? '';
+    if (!name) throw new AppError('Donnez un nom au dépôt', 'INVALID');
+    if (name.length > 60) throw new AppError('Nom du dépôt trop long (60 caractères au plus)', 'INVALID');
+    if (!WAREHOUSE_KINDS.includes(input.kind)) throw new AppError('Type de dépôt inconnu', 'INVALID');
+    // Un ancien doublon de nom garde son nom : seul un nouveau nom doit être libre.
+    if (id && this.getWarehouse(id).name.toLowerCase() === name.toLowerCase()) return;
+    const twin = this.db
+      .prepare('SELECT id FROM warehouses WHERE store_id = ? AND lower(name) = lower(?) AND id <> ?')
+      .pluck()
+      .get(storeId, name, id ?? '') as string | undefined;
+    if (twin) throw new AppError(`Un dépôt s'appelle déjà « ${name} » dans ce magasin`, 'DUPLICATE');
+  }
+
+  /** Nom, type et fiche du dépôt (responsable, téléphone, adresse) : l'historique garde le dépôt, sous son nouveau nom. */
+  updateWarehouse(userId: string, id: string, input: WarehouseInput): Warehouse {
+    const wh = this.getWarehouse(id);
+    this.checkWarehouseInput(wh.store_id, input, id);
+    const text = (v: string | null | undefined, current: string | null) => (v === undefined ? current : v?.trim() || null);
+    return this.tx(() => {
+      this.db
+        .prepare('UPDATE warehouses SET name = ?, kind = ?, manager = ?, phone = ?, address = ? WHERE id = ?')
+        .run(input.name.trim(), input.kind, text(input.manager, wh.manager), text(input.phone, wh.phone), text(input.address, wh.address), id);
+      const next = this.getWarehouse(id);
+      this.enqueue({ storeId: wh.store_id, registerId: null }, 'warehouse', id, 'upsert', next);
+      this.audit(userId, 'warehouse.update', 'warehouse', id, { from: { name: wh.name, kind: wh.kind }, to: { name: next.name, kind: next.kind } });
+      return next;
+    });
+  }
+
+  /**
+   * Désactive ou réactive un dépôt. Il sort alors des listes (ventes, achats,
+   * transferts, inventaires) mais garde tout son historique. On ne désactive
+   * ni le dépôt des ventes, ni un dépôt qui a encore du stock ou un document en cours.
+   */
+  setWarehouseActive(userId: string, id: string, active: boolean): Warehouse {
+    const wh = this.getWarehouse(id);
+    if (active === (wh.active === 1)) return wh;
+    if (!active) {
+      if (wh.is_sales_default) throw new AppError(`« ${wh.name} » est le dépôt des ventes : choisissez d'abord un autre dépôt des ventes`, 'INVALID');
+      const stocked = this.db.prepare('SELECT COUNT(*) FROM stock WHERE warehouse_id = ? AND qty <> 0').pluck().get(id) as number;
+      if (stocked > 0) {
+        throw new AppError(
+          `« ${wh.name} » contient encore ${stocked} article${stocked > 1 ? 's' : ''} en stock : transférez-les vers un autre dépôt (ou passez-les en perte) avant de le désactiver`,
+          'WAREHOUSE_NOT_EMPTY',
+        );
+      }
+      const transfers = this.db
+        .prepare("SELECT COUNT(*) FROM transfers WHERE (from_warehouse_id = ? OR to_warehouse_id = ?) AND status IN ('draft', 'shipped')")
+        .pluck()
+        .get(id, id) as number;
+      if (transfers > 0) throw new AppError(`« ${wh.name} » a ${transfers} transfert${transfers > 1 ? 's' : ''} en cours : réceptionnez-les ou annulez-les d'abord`, 'INVALID');
+      const counts = this.db.prepare("SELECT COUNT(*) FROM inventories WHERE warehouse_id = ? AND status = 'open'").pluck().get(id) as number;
+      if (counts > 0) throw new AppError(`« ${wh.name} » a un inventaire en cours : clôturez-le ou annulez-le d'abord`, 'INVALID');
+    }
+    return this.tx(() => {
+      this.db.prepare('UPDATE warehouses SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
+      const next = this.getWarehouse(id);
+      this.enqueue({ storeId: wh.store_id, registerId: null }, 'warehouse', id, 'upsert', next);
+      this.audit(userId, active ? 'warehouse.enable' : 'warehouse.disable', 'warehouse', id, { name: wh.name });
+      return next;
+    });
+  }
+
+  /** Le dépôt d'où sortent les ventes de la caisse (un seul par magasin). */
+  setSalesWarehouse(userId: string, id: string): Warehouse {
+    const wh = this.getWarehouse(id);
+    if (!wh.active) throw new AppError(`« ${wh.name} » est désactivé : réactivez-le d'abord`, 'INVALID');
+    if (wh.is_sales_default) return wh;
+    return this.tx(() => {
+      const previous = this.db.prepare('SELECT id FROM warehouses WHERE store_id = ? AND is_sales_default = 1').pluck().all(wh.store_id) as string[];
+      this.db.prepare('UPDATE warehouses SET is_sales_default = (id = ?) WHERE store_id = ?').run(id, wh.store_id);
+      for (const w of [...previous, id]) this.enqueue({ storeId: wh.store_id, registerId: null }, 'warehouse', w, 'upsert', this.getWarehouse(w));
+      this.audit(userId, 'warehouse.sales_default', 'warehouse', id, { name: wh.name });
+      return this.getWarehouse(id);
+    });
   }
 
   /**

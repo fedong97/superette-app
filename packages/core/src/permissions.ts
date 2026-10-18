@@ -133,7 +133,10 @@ export const PERMISSIONS = {
   article_deactivate: { label: 'Désactiver ou réactiver un produit', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   article_families: { label: 'Créer les rayons et les familles', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   store_price: { label: 'Prix propre au magasin', group: 'Configuration des produits', type: 'Fonction', roles: MANAGE },
-  import: { label: 'Importer le catalogue (CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  import: { label: 'Importer le catalogue (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  article_export: { label: 'Exporter la liste des produits (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
+  price_update: { label: 'Mettre à jour les prix en masse (hausse en %, coefficient)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  stock_location: { label: 'Noter l’emplacement des produits dans les dépôts', group: 'Configuration des produits', type: 'Fonction', parent: 'article_edit' },
   labels: { label: 'Étiquettes de rayon', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
 
   // --- Gestion des stocks ------------------------------------------------------
@@ -213,7 +216,7 @@ export const PERMISSIONS = {
   // --- Paramétrage du système ----------------------------------------------------
   admin: { label: 'Administration (consulter caisses, dépôts, utilisateurs)', group: 'Paramétrage du système', type: 'Menu', roles: MANAGE },
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
-  warehouses_manage: { label: 'Créer des dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
+  warehouses_manage: { label: 'Créer, modifier et désactiver les dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   print_templates: { label: "Modifier les modèles d'impression (factures, tickets)", group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   backups: { label: 'Faire une sauvegarde et consulter les sauvegardes', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },

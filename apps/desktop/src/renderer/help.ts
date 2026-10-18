@@ -141,6 +141,43 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Photo : « Choisir une image… » à droite de la fiche. Elle est réduite toute seule et s’affiche dans la liste et dans la recherche de la caisse.',
         ],
       },
+      {
+        tab: 'list',
+        title: 'Importer des produits (Excel, CSV)',
+        perm: 'import',
+        steps: [
+          '« Importer (Excel, CSV) » : choisissez le fichier, le format (titres de colonnes, Sage 100 ou un format enregistré) et le mode (créer et mettre à jour, créer seulement, mettre à jour seulement).',
+          'Le fichier peut porter les prix d’achat, de vente, de gros et de super gros, les quantités mini, alerte et maxi, et jusqu’à 3 conditionnements avec leur nombre, leurs prix et leur code-barres. « Télécharger le modèle » donne un fichier exemple.',
+          '« Vérifier » montre ce qui sera créé, mis à jour ou refusé, ligne par ligne, sans rien enregistrer ; puis « Importer ». Une colonne absente ne change rien sur un produit existant.',
+        ],
+      },
+      {
+        tab: 'list',
+        title: 'Exporter la liste',
+        perm: 'article_export',
+        steps: [
+          '« Exporter Excel » ou « Exporter CSV » : choisissez un modèle (catalogue complet ré-importable, tarifs, codes-barres, comptage, terminal d’inventaire, valeur du stock) ou cochez vos colonnes et enregistrez-les comme modèle.',
+          'Limitez aux produits d’un rayon, d’une famille, d’un fournisseur ou à ceux en sommeil, et choisissez le dépôt pour le stock. En CSV, réglez le séparateur et la virgule décimale.',
+        ],
+      },
+      {
+        tab: 'list',
+        title: 'Mettre à jour les prix',
+        perm: 'price_update',
+        steps: [
+          '« Mise à jour des prix… » : choisissez les produits (rayon, famille, fournisseur), le prix à changer et la méthode (pourcentage, montant ou coefficient sur l’achat), l’arrondi et les conditionnements concernés.',
+          'L’aperçu montre l’ancien et le nouveau prix de chaque produit ; « Appliquer » enregistre tout d’un coup.',
+        ],
+      },
+      {
+        tab: 'list',
+        title: 'Produit en sommeil, remplaçant et emplacements',
+        steps: [
+          'Décochez « Actif » pour mettre un produit en sommeil : il reste dans l’historique mais ne se vend plus et ne se commande plus.',
+          '« Remplacé par » : la caisse propose ce produit quand le premier est en rupture ou en sommeil.',
+          '« Emplacement » par dépôt (allée, étagère) : il s’affiche dans l’export de comptage et aide à retrouver le produit.',
+        ],
+      },
       { tab: 'shelving', title: 'Rayonnage', steps: ['Rangez les produits par rayon et famille ; ces rayons servent aux inventaires et aux rapports.'] },
     ],
   },
@@ -306,7 +343,10 @@ export const HELP: Record<WinKind, PageHelp> = {
   reports: {
     title: 'Rapports de ventes',
     intro: 'Le chiffre d’affaires par jour, rayon, article, caissier, client ou moyen de paiement.',
-    sections: [{ title: 'Lire un rapport', steps: ['Choisissez la période (hier, cette semaine, ce mois…) puis le regroupement.', 'Imprimez, ou « Exporter » en CSV pour Excel.'] }],
+    sections: [
+      { title: 'Lire un rapport', steps: ['Choisissez la période (hier, cette semaine, ce mois…) puis le regroupement.', 'Imprimez, ou « Exporter » en CSV pour Excel.'] },
+      { title: 'Palmarès et produits sans vente', steps: ['Par article, rayon ou client, le classement donne le rang et la classe A, B ou C : A fait 80 % du chiffre, C les derniers 5 %.', '« Produits sans vente » liste les produits actifs non vendus sur la période, avec leur stock, et s’exporte en Excel.'] },
+    ],
   },
   accounting: {
     title: 'Comptabilité',
@@ -400,6 +440,15 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Administration',
     intro: 'Magasins, caisses, utilisateurs, droits, paramètres et sauvegardes.',
     sections: [
+      {
+        tab: 'warehouses',
+        title: 'Dépôts',
+        steps: [
+          '« Modifier » change le nom, le type (magasin, réserve, chambre froide…), le responsable, le téléphone et l’adresse du dépôt.',
+          '« Désactiver » retire un dépôt des listes. Il faut d’abord le vider de son stock, finir ses transferts et ses inventaires, et ce ne doit pas être le dépôt des ventes. « Réactiver » le remet en service.',
+          '« Dépôt des ventes » choisit le dépôt d’où sort la marchandise vendue en caisse.',
+        ],
+      },
       { tab: 'registers', title: 'Caisses', steps: ['Choisissez le type (Espèces, Électronique, Banque) puis « Ajouter une caisse ».', 'Le code d’activation d’une caisse espèces rattache un nouveau PC.'] },
       {
         tab: 'users',

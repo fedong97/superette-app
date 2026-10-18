@@ -948,6 +948,18 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           setDialog(null);
           void addRow(picked.row, q, price);
         }}
+        onSubstitute={async (code) => {
+          setDialog(null);
+          try {
+            // Le remplaçant au même conditionnement s'il en a un, sinon à l'unité.
+            const rows = (await call('pos.search', code, { customerId: customer?.id ?? null, ...saleOpts })).filter((r) => r.code === code);
+            const same = rows.find((r) => r.pack_name === picked.row.pack_name) ?? rows.find((r) => r.pack_id === null) ?? rows[0];
+            if (same) askQty(same);
+            else openSearch(code);
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
       />
     )}
     {dialog === 'create' && creating && (

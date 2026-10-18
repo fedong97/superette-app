@@ -211,6 +211,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Deuxième écran : fenêtre plein écran sur l'écran choisi, avec le logo, le dernier article scanné, le total, puis la monnaie rendue.
 - Afficheur VFD à deux lignes (ESC/POS, Epson DM-D, CD5220…) sur un port COM. Une panne de l'afficheur ne bloque jamais la vente.
 
+**Sage Gestion commerciale (0.63.0)**
+- Produits › « Exporter Excel » / « Exporter CSV » : modèles catalogue complet (ré-importable tel quel), tarifs, codes-barres, comptage, terminal d'inventaire (.txt), valeur du stock, et modèles de colonnes enregistrés par magasin. Filtres rayon, famille, fournisseur, état ; choix du dépôt ; séparateur et décimale du CSV.
+- Import des produits : tous les prix (achat, vente, gros, super gros), seuils mini / alerte / maxi, 3 conditionnements avec nombre, prix et code-barres, remplaçant. Modes créer + mettre à jour, créer seulement, mettre à jour seulement ; vérification ligne par ligne avant import ; reconnaissance des en-têtes FEDONIX, Sage et EBP, et format intégré « Sage 100 – articles ».
+- Dépôts : modification (nom, type, responsable, téléphone, adresse), désactivation refusée tant que le dépôt a du stock, un transfert ou un inventaire en cours, ou qu'il est le dépôt des ventes.
+- Mise à jour des prix en masse (pourcentage, montant, coefficient sur l'achat, arrondi) avec aperçu, produit remplaçant proposé en caisse, emplacements par dépôt, codification automatique par famille (paramètre), palmarès avec classes ABC et produits sans vente, en-têtes Sage reconnus dans la reprise des clients et fournisseurs.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

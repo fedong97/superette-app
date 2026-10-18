@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.63.0',
+    items: [
+      'Produits : boutons « Exporter Excel » et « Exporter CSV » avec plusieurs modèles (catalogue complet, tarifs, codes-barres, comptage, terminal d’inventaire, valeur du stock) et vos propres modèles de colonnes.',
+      'Import des produits complet : prix de gros et super gros, quantités mini et maxi, 3 conditionnements avec prix et codes-barres, vérification avant import, et le fichier article de Sage 100 accepté tel quel.',
+      'Dépôts : modifiez le nom et le type d’un dépôt, désactivez-le ou réactivez-le.',
+      'Mise à jour des prix en masse, produit remplaçant proposé en caisse, emplacements par dépôt, codification des produits par famille, palmarès ABC et liste des produits sans vente.',
+    ],
+  },
+  {
     version: '0.62.0',
     items: [
       'Afficheur client : le client voit l’article scanné, le total à payer puis la monnaie rendue, sur un deuxième écran (avec votre logo) ou sur un petit afficheur à deux lignes. Réglage dans Administration › Paramètres, section « Afficheur client ».',

@@ -160,6 +160,8 @@ export interface SaleSearchRow {
   cost: Fcfa;
   /** Stock insuffisant pour en vendre un seul : la ligne est « Épuisé » et ne se vend pas. */
   out_of_stock: boolean;
+  /** Article proposé à la place quand celui-ci est épuisé (fiche article). */
+  substitute: { id: string; code: string; name: string } | null;
 }
 
 export interface SaleInput {
@@ -640,7 +642,8 @@ export class PosService extends Base {
       const stocks = sources.map((w) => ({ warehouse_id: w.id, name: w.name, qty: stock.get(`${a.id}|${w.id}`) ?? 0 }));
       // Seul le stock positif d'un dépôt d'appoint complète la vente.
       const qty = stocks.reduce((t, w, i) => t + (i === 0 ? w.qty : Math.max(0, w.qty)), 0);
-      const base = { article_id: a.id, code: a.code, other_ref: a.other_ref, name: a.name, unit: a.unit, stock: stocks[0]!.qty, warehouse: warehouse.name, stocks, available: qty };
+      const substitute = a.substitute_id && a.substitute_code ? { id: a.substitute_id, code: a.substitute_code, name: a.substitute_name ?? '' } : null;
+      const base = { article_id: a.id, code: a.code, other_ref: a.other_ref, name: a.name, unit: a.unit, stock: stocks[0]!.qty, warehouse: warehouse.name, stocks, available: qty, substitute };
       for (const p of a.packs) {
         rows.push({
           ...base,
@@ -691,12 +694,15 @@ export class PosService extends Base {
   ): { parts: { warehouseId: string; qty: Milli }[][]; short: { label: string; qty: Milli; stock: Milli }[]; complement: { article: string; from: string; qty: Milli }[] } {
     const ignore = this.admin.getStore(storeId).ignore_stock === 1;
     const chosen = sources[0]!;
-    const get = this.db.prepare('SELECT a.unit, a.unit_name, a.is_service, COALESCE(s.qty, 0) AS qty FROM articles a LEFT JOIN stock s ON s.article_id = a.id AND s.warehouse_id = ? WHERE a.id = ?');
+    const get = this.db.prepare(
+      `SELECT a.unit, a.unit_name, a.is_service, COALESCE(s.qty, 0) AS qty, sub.name AS substitute
+       FROM articles a LEFT JOIN stock s ON s.article_id = a.id AND s.warehouse_id = ? LEFT JOIN articles sub ON sub.id = a.substitute_id AND sub.active = 1 WHERE a.id = ?`,
+    );
     const left = new Map<string, Milli>();
     const short = new Map<string, { label: string; qty: Milli; stock: Milli }>();
     const complement: { article: string; from: string; qty: Milli }[] = [];
     const parts = lines.map((l) => {
-      const head = get.get(chosen.id, l.articleId) as { unit: string; unit_name: string | null; is_service: number; qty: Milli } | undefined;
+      const head = get.get(chosen.id, l.articleId) as { unit: string; unit_name: string | null; is_service: number; qty: Milli; substitute: string | null } | undefined;
       if (l.articleId === DELIVERY_FEE_ARTICLE_ID || !head || head.is_service === 1) return [{ warehouseId: chosen.id, qty: l.qty }];
       const out: { warehouseId: string; qty: Milli }[] = [];
       let need = l.qty;
@@ -716,7 +722,7 @@ export class PosService extends Base {
         if (!ignore) {
           const unit = head.unit === 'piece' ? (head.unit_name ?? 'pièce').toLowerCase() : head.unit === 'kg' ? 'kg' : 'L';
           const rest = total <= 0 ? 'épuisé' : `il reste ${String(total / 1000).replace('.', ',')} ${unit}`;
-          throw new AppError(`Stock insuffisant pour ${l.label} : ${rest}`, 'OUT_OF_STOCK');
+          throw new AppError(`Stock insuffisant pour ${l.label} : ${rest}${head.substitute ? `. Proposez à la place : ${head.substitute}` : ''}`, 'OUT_OF_STOCK');
         }
         const s = short.get(l.articleId);
         short.set(l.articleId, { label: l.label, qty: (s?.qty ?? 0) + l.qty, stock: total });

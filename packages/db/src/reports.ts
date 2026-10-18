@@ -252,6 +252,29 @@ export class ReportService extends Base {
     return { from, to, dimension: input.dimension, rows, totals, previous };
   }
 
+  /**
+   * Produits sans vente sur la période (articles actifs, services exclus) : le
+   * stock qui dort, avec sa valeur au coût moyen et la date de la dernière vente.
+   */
+  unsold(storeId: string, from: string, to: string): { id: string; code: string; name: string; department: string | null; unit: string; qty: number; value: Fcfa; last_sale: string | null }[] {
+    if (!DATE.test(from) || !DATE.test(to) || to < from) throw new AppError('Période invalide', 'INVALID');
+    return this.db
+      .prepare(
+        `SELECT a.id, a.code, a.name, d.name AS department, a.unit,
+                COALESCE((SELECT SUM(s.qty) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE s.article_id = a.id AND w.store_id = @storeId), 0) AS qty,
+                COALESCE((SELECT SUM(ROUND(s.qty * s.avg_cost / 1000.0)) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE s.article_id = a.id AND w.store_id = @storeId AND s.qty > 0), 0) AS value,
+                (SELECT MAX(date(x.created_at, 'localtime')) FROM sale_lines l JOIN sales x ON x.id = l.sale_id
+                  WHERE l.article_id = a.id AND x.store_id = @storeId AND x.kind = 'sale' AND x.status = 'completed') AS last_sale
+         FROM articles a LEFT JOIN families f ON f.id = a.family_id LEFT JOIN departments d ON d.id = f.department_id
+         WHERE a.active = 1 AND a.is_service = 0
+           AND NOT EXISTS (SELECT 1 FROM sale_lines l JOIN sales x ON x.id = l.sale_id
+                           WHERE l.article_id = a.id AND x.store_id = @storeId AND x.status = 'completed' AND x.kind = 'sale'
+                             AND date(x.created_at, 'localtime') BETWEEN @from AND @to)
+         ORDER BY value DESC, qty DESC, a.name`,
+      )
+      .all({ storeId, from, to }) as never;
+  }
+
   /** TVA collectée par taux sur la période (base HT, TVA, TTC), retours déduits. */
   vatByRate(storeId: string, from: string, to: string): { rate_bp: number; ht: Fcfa; tva: Fcfa; ttc: Fcfa }[] {
     return (

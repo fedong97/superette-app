@@ -8,7 +8,7 @@ function setup() {
   const tva = s.admin.listVatRates().find((r) => r.rate_bp === 1925)!.id;
   const castel = s.catalogue.saveArticle(admin.id, { name: 'CASTEL 65CL', unit: 'piece', vatRateId: tva, purchasePrice: 450, salePrice: 650, wholesalePrice: 600 });
   const shop = s.admin.salesWarehouse(store.id);
-  const reserve = s.admin.createWarehouse(store.id, 'Réserve', 'reserve');
+  const reserve = s.admin.createWarehouse(store.id, 'Réserve 2', 'reserve');
   s.stock.receive(ctx, { warehouseId: shop.id, lines: [{ articleId: castel.id, qty: 2_000, unitCost: 450 }] });
   s.stock.receive(ctx, { warehouseId: reserve.id, lines: [{ articleId: castel.id, qty: 10_000, unitCost: 450 }] });
   s.pos.openSession(ctx, 0);
@@ -19,7 +19,7 @@ function setup() {
 describe('caisse : tarif et dépôt choisis pour la fiche', () => {
   it('vend au tarif gros et sort la marchandise de la réserve', () => {
     const { s, ctx, castel, shop, reserve, qty } = setup();
-    expect(s.pos.searchForSale(ctx.storeId, 'castel', { priceLevel: 'wholesale', warehouseId: reserve.id }).map((r) => [r.price, r.stock, r.warehouse])).toEqual([[600, 10_000, 'Réserve']]);
+    expect(s.pos.searchForSale(ctx.storeId, 'castel', { priceLevel: 'wholesale', warehouseId: reserve.id }).map((r) => [r.price, r.stock, r.warehouse])).toEqual([[600, 10_000, 'Réserve 2']]);
     // 5 bouteilles : la surface de vente n'en a que 2, la réserve en a 10 ; vendeur limité à la surface de vente.
     s.admin.updateUser(ctx.userId, ctx.userId, { saleWarehouses: [] });
     expect(() => s.pos.completeSale(ctx, { lines: [{ articleId: castel.id, qty: 5_000 }], payments: [{ method: 'CASH', amount: 3_250 }] })).toThrow(/Stock insuffisant/);

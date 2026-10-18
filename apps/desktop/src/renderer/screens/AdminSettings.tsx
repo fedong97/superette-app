@@ -212,6 +212,11 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       'Codes internes pour les articles sans code fabricant, et étiquettes produit à coller sur les articles et les cartons.',
       [
         {
+          label: 'Codifier les articles par famille',
+          hint: 'Code d’un nouvel article laissé vide : trois lettres de sa famille devant le numéro (BOI-DLA11-0012 pour une boisson), comme la codification de Sage. Sinon : DLA11-00012.',
+          render: () => yes('articleCodeByFamily'),
+        },
+        {
           label: 'Créer un code-barres automatiquement',
           hint: "Pour chaque nouvel article sans code fabricant, à l'enregistrement : l'unité, chaque carton et pack.",
           render: () => yes('barcodeAuto'),

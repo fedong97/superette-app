@@ -7,9 +7,42 @@
 
 export type Separator = ';' | ',' | '\t';
 
-export type ImportField = 'name' | 'barcode' | 'salePrice' | 'purchasePrice' | 'vat' | 'unit' | 'department' | 'family';
+export type ImportField =
+  | 'code'
+  | 'name'
+  | 'barcode'
+  | 'salePrice'
+  | 'purchasePrice'
+  | 'vat'
+  | 'unit'
+  | 'department'
+  | 'family'
+  | 'brand'
+  | 'unitName'
+  | 'wholesalePrice'
+  | 'superWholesalePrice'
+  | 'minQty'
+  | 'alertQty'
+  | 'maxQty'
+  | 'perishable'
+  | 'plu'
+  | 'otherRef'
+  | 'active'
+  | 'substitute'
+  | `pack${1 | 2 | 3}${'Name' | 'Contains' | 'Price' | 'Wholesale' | 'SuperWholesale' | 'Barcode'}`;
+
+const PACK_FIELDS = (n: 1 | 2 | 3) =>
+  ({
+    [`pack${n}Name`]: `Conditionnement ${n} : nom`,
+    [`pack${n}Contains`]: `Conditionnement ${n} : contient`,
+    [`pack${n}Price`]: `Conditionnement ${n} : prix de vente`,
+    [`pack${n}Wholesale`]: `Conditionnement ${n} : prix de gros`,
+    [`pack${n}SuperWholesale`]: `Conditionnement ${n} : prix super gros`,
+    [`pack${n}Barcode`]: `Conditionnement ${n} : code-barres`,
+  }) as Record<Extract<ImportField, `pack${number}${string}`>, string>;
 
 export const IMPORT_FIELDS: Record<ImportField, string> = {
+  code: 'Code article',
   name: 'Désignation',
   barcode: 'Code-barres',
   salePrice: 'Prix de vente',
@@ -18,6 +51,21 @@ export const IMPORT_FIELDS: Record<ImportField, string> = {
   unit: 'Unité',
   department: 'Rayon',
   family: 'Famille',
+  brand: 'Marque',
+  unitName: 'Unité de détail (Bouteille, Ampoule)',
+  wholesalePrice: 'Prix de gros',
+  superWholesalePrice: 'Prix super gros',
+  minQty: 'Stock minimum',
+  alertQty: "Seuil d'alerte",
+  maxQty: 'Stock maximum',
+  perishable: 'Périssable (oui/non)',
+  plu: 'Code balance (PLU)',
+  otherRef: 'Autre référence',
+  active: 'Actif (oui/non)',
+  substitute: 'Article de remplacement (code)',
+  ...PACK_FIELDS(1),
+  ...PACK_FIELDS(2),
+  ...PACK_FIELDS(3),
 };
 
 export interface ImportFormat {
@@ -64,6 +112,24 @@ export interface ExportFormat {
 }
 
 export type FileFormat = ImportFormat | ExportFormat;
+
+/**
+ * Formats d'import livrés : le « format paramétrable » des articles de Sage 100
+ * et d'EBP (sans en-têtes : référence, désignation, famille, prix d'achat,
+ * coefficient, prix de vente, unité).
+ */
+export const BUILTIN_IMPORT_FORMATS: ImportFormat[] = [
+  {
+    id: 'sage100-articles',
+    name: "Sage 100 / EBP (référence ; désignation ; famille ; prix d'achat ; coefficient ; prix de vente ; unité)",
+    kind: 'articles',
+    separator: ';',
+    skipRows: 0,
+    decimal: ',',
+    columns: { code: 0, name: 1, family: 2, purchasePrice: 3, salePrice: 5, unit: 6 },
+    builtin: true,
+  },
+];
 
 export const BUILTIN_EXPORT_FORMATS: ExportFormat[] = [
   {
@@ -143,45 +209,11 @@ export function guessSeparator(text: string): Separator {
   return ([';', '\t', ','] as Separator[]).reduce((best, s) => (count(s) > count(best) ? s : best), ';');
 }
 
-const parseNumber = (v: string, decimal: ',' | '.') => {
-  const clean = v.replace(/[\s ]/g, '').replace(/[^\d,.-]/g, '');
+export const parseNumber = (v: string, decimal: ',' | '.') => {
+  const clean = v.replace(/[\s  ]/g, '').replace(/[^\d,.-]/g, '');
   const n = Number(decimal === ',' ? clean.replace(/\./g, '').replace(',', '.') : clean.replace(/,/g, ''));
   return Number.isFinite(n) ? n : NaN;
 };
-
-export interface ArticleImportRow {
-  name: string;
-  barcode?: string;
-  salePrice: number;
-  purchasePrice?: number;
-  vatRateBp?: number;
-  unit?: 'piece' | 'kg' | 'litre';
-  department?: string;
-  family?: string;
-}
-
-/** Lit un catalogue selon un format : une ligne d'article par ligne du fichier. */
-export function parseArticlesWith(text: string, f: ImportFormat): ArticleImportRow[] {
-  const get = (r: string[], k: ImportField) => (f.columns[k] === undefined ? '' : (r[f.columns[k]!] ?? '').trim());
-  return splitDelimited(text, f.separator)
-    .slice(f.skipRows)
-    .map((r): ArticleImportRow => {
-      const unit = get(r, 'unit').toLowerCase();
-      const vat = get(r, 'vat');
-      const purchase = get(r, 'purchasePrice');
-      return {
-        name: get(r, 'name'),
-        barcode: get(r, 'barcode') || undefined,
-        salePrice: Math.round(parseNumber(get(r, 'salePrice'), f.decimal)),
-        purchasePrice: purchase ? Math.round(parseNumber(purchase, f.decimal)) : undefined,
-        vatRateBp: vat ? Math.round(parseNumber(vat.replace('%', ''), f.decimal === ',' ? ',' : '.') * 100) : undefined,
-        unit: unit === 'kg' ? 'kg' : unit.startsWith('l') ? 'litre' : 'piece',
-        department: get(r, 'department') || undefined,
-        family: get(r, 'family') || undefined,
-      };
-    })
-    .filter((r) => r.name);
-}
 
 export interface ExportLine {
   journal: string;

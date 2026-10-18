@@ -82,6 +82,8 @@ export interface StoreSettings {
   barcodeAuto: boolean;
   /** Format des codes internes : EAN-8 (2xxxxxxx), court, ou EAN-13 (20xxxxxxxxxxx). */
   barcodeKind: BarcodeKind;
+  /** Codification des nouveaux articles par famille (BOI-DLA11-0012) au lieu du seul numéro du poste. */
+  articleCodeByFamily: boolean;
   /** Étiquettes produit : format et contenu proposés par défaut. */
   labelFormat: BarcodeLabelFormatId;
   labelName: boolean;
@@ -147,6 +149,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   posLayout: 'modern',
   barcodeAuto: true,
   barcodeKind: 'ean8',
+  articleCodeByFamily: false,
   labelFormat: 'roll_30x20',
   labelName: true,
   labelPrice: true,

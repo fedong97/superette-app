@@ -388,7 +388,8 @@ function InventoryDetail({ id, user, onBack }: { id: string; user: User; onBack:
     const parsed: { code: string; qty: number }[] = [];
     for (const c of rows.slice(headAt + 1)) {
       const code = c[codeAt]?.trim();
-      const units = c[qtyAt]?.trim() ?? '';
+      // Sans en-têtes (application d'inventaire « CODE;NOM (COND);QUANTITÉ ») : la quantité est la dernière colonne.
+      const units = (headAt < 0 ? c[Math.max(1, c.length - 1)] : c[qtyAt])?.trim() ?? '';
       const packs = packAt >= 0 ? (c[packAt]?.trim() ?? '') : '';
       if (!code || (units === '' && packs === '')) continue;
       const line = byCode.get(code);

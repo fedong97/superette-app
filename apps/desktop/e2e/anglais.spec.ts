@@ -114,7 +114,6 @@ test('en anglais, les écrans du caissier et la vente sont traduits', async () =
         if (!(await drop.isVisible())) await rail.nth(m).click();
         const btn = drop.locator('button', { hasText: label }).first();
         if (await btn.isDisabled()) continue;
-        await btn.scrollIntoViewIfNeeded();
         await btn.click();
         await page.waitForTimeout(400);
         await note(`${menu} › ${label}`);

@@ -61,7 +61,6 @@ test('chaque menu de la barre verte s’ouvre et chacun de ses écrans s’affic
         if (!(await drop.isVisible())) await rail.nth(m).click();
         const btn = drop.locator('button', { hasText: label }).first();
         if (await btn.isDisabled()) continue;
-        await btn.scrollIntoViewIfNeeded();
         const before = errors.length;
         await btn.click();
         opened++;

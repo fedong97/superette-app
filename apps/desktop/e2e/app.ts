@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type ElectronApplication, type Page, _electron as electron } from '@playwright/test';
 
-/** Lance FEDONIX 360 sur une base neuve, dans un dossier temporaire. */
+/** Lance FEDONIX 360 sur une base neuve, dans un dossier temporaire (réglages et langue du PC compris). */
 export async function launch(): Promise<{ app: ElectronApplication; page: Page; errors: string[] }> {
   const dir = mkdtempSync(join(tmpdir(), 'fedonix-ecrans-'));
   const app = await electron.launch({
     args: [resolve(__dirname, '..'), '--no-sandbox'],
-    env: { ...process.env, SUPERETTE_DB: join(dir, 'ecrans.db'), APPDATA: dir, HOME: dir },
+    env: { ...process.env, SUPERETTE_DB: join(dir, 'ecrans.db'), APPDATA: dir, HOME: dir, XDG_CONFIG_HOME: dir },
   });
   const page = await app.firstWindow();
   const errors: string[] = [];

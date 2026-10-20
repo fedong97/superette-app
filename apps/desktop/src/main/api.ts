@@ -51,6 +51,8 @@ import {
   AppError,
   approvalStatus,
   requestApproval,
+  shelfCarts,
+  takeShelfCart,
   type AssetInput,
   ficheBanner,
   FICHE_EXTENSION,
@@ -1363,6 +1365,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       delivery?: DeliveryInput | null;
       /** Facture modifiée : elle est annulée et remplacée par celle-ci ; `payments` ne porte que la différence. */
       replacesId?: string | null;
+      /** Vendeur du panier préparé au rayon. */
+      sellerId?: string | null;
     }) => {
       const c = ctx(POS);
       s.license.assertCanSell();
@@ -1391,6 +1395,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         priceLevel: input.priceLevel ?? null,
         warehouseId: input.warehouseId ?? null,
         delivery: input.delivery ?? null,
+        sellerId: input.sellerId ?? null,
       };
       if (input.replacesId) {
         const original = s.pos.getSale(input.replacesId);
@@ -1494,6 +1499,34 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return c.registerId ? s.pos.listHeld(c.registerId) : [];
     },
     'pos.resume': (id: string) => (requireUser(['sale_resume']), s.pos.resumeHeld(id)),
+    /** Paniers préparés au rayon par les vendeurs (téléphone), en attente d'une caisse. */
+    'pos.shelfCarts': async () => {
+      ctx(POS);
+      if (s.fiches.current() || !s.sync.credentials()) return [];
+      const carts = await shelfCarts(s).catch(() => []);
+      return carts.map((c) => ({ id: c.id, number: c.number, label: c.label, sellerName: c.sellerName, at: c.at, lines: c.lines.length }));
+    },
+    /** Prend le panier : ses lignes arrivent sur la fiche, la vente comptera pour le vendeur. */
+    'pos.takeShelfCart': async (id: string) => {
+      const c = ctx(['sale_resume']);
+      const cart = await takeShelfCart(s, id);
+      const known = (articleId: string) => {
+        try {
+          s.catalogue.getArticle(articleId, c.storeId);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const lines: SaleLineInput[] = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null }));
+      let sellerId: string | null = null;
+      try {
+        sellerId = s.admin.getUser(cart.sellerId).id;
+      } catch {
+        sellerId = null;
+      }
+      return { lines, sellerId, sellerName: cart.sellerName, label: cart.label, number: cart.number, missing: cart.lines.length - lines.length };
+    },
     'pos.zReport': (sessionId: string) => (requireAmounts(), requireUser(['cash_z']), s.pos.zReport(sessionId)),
     'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(['cash_history']).storeId)),
     /** Ticket d'une vente qui vient d'être faite (autant d'exemplaires que réglé), ou réimpression avec le droit. */

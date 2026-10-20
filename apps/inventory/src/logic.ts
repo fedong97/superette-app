@@ -16,6 +16,8 @@ export interface Article {
   barcodes: { code: string; packQty: number }[];
   packs: { name: string; units: number; barcode: string | null }[];
   thumb: string | null;
+  /** Prix de vente indicatif (FCFA) pour le panier ; la caisse refait le prix. */
+  price?: number;
 }
 
 export interface Catalog {

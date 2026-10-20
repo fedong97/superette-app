@@ -324,10 +324,28 @@ function MobilePayRequest({ method, amount, phone, onPaid }: { method: 'MTN_MOMO
   );
 }
 
-export function HeldDialog({ onClose, onResume }: { onClose: () => void; onResume: (id: string) => void }) {
+export function HeldDialog({ onClose, onResume, onTakeCart }: { onClose: () => void; onResume: (id: string) => void; onTakeCart?: (id: string) => void }) {
   const held = useLoad(() => call('pos.held'));
+  const carts = useLoad(() => call('pos.shelfCarts'));
   return (
     <Modal title="Tickets en attente" onClose={onClose}>
+      {Boolean(carts.data?.length) && onTakeCart && (
+        <>
+          <h3>Paniers des vendeurs</h3>
+          <div className="pick-list">
+            {carts.data!.map((c) => (
+              <button key={c.id} onClick={() => onTakeCart(c.id)}>
+                <span>
+                  Panier n° {c.number} · {c.sellerName}
+                  {c.label ? ` · ${c.label}` : ''} · {new Date(c.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span>{c.lines} ligne(s)</span>
+              </button>
+            ))}
+          </div>
+          <h3>Tickets mis en attente</h3>
+        </>
+      )}
       {Boolean(held.data?.length) && <p className="muted">Entrée reprend le ticket sélectionné, ↑ ↓ pour changer.</p>}
       {held.data?.length === 0 && <Empty>Aucun ticket en attente. À la caisse, F3 met la fiche en cours en attente pour servir un autre client.</Empty>}
       <div

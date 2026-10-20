@@ -285,6 +285,27 @@ CREATE TABLE push_subscriptions (
 );
 `,
   },
+  {
+    version: 8,
+    sql: `
+-- Panier préparé au rayon par un vendeur sur son téléphone : la caisse du magasin le
+-- charge (une seule fois) et la vente compte pour le vendeur.
+CREATE TABLE shelf_carts (
+  id TEXT PRIMARY KEY,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  store_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  label TEXT,
+  number INT NOT NULL,
+  lines JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  taken_at TIMESTAMPTZ,
+  taken_by UUID
+);
+CREATE INDEX shelf_carts_waiting ON shelf_carts (store_id, created_at) WHERE taken_at IS NULL;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

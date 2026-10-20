@@ -61,6 +61,7 @@ export const PERMISSIONS = {
   // --- Facturation -------------------------------------------------------------
   cash: { label: 'Facturation au comptant (caisse)', group: 'Facturation', type: 'Menu', roles: POS },
   credit: { label: 'Vente à crédit', group: 'Facturation', type: 'Menu', roles: POS },
+  shelf_cart: { label: 'Préparer un panier au rayon sur le téléphone, envoyé à la caisse', group: 'Facturation', type: 'Fonction', roles: POS },
   sales: { label: 'Voir tout le registre des factures (sinon ses 3 dernières factures)', group: 'Facturation', type: 'Menu', roles: ACCOUNTING },
   quotes: { label: 'Devis et proformas', group: 'Facturation', type: 'Menu', roles: COUNTER },
   quote_save: { label: 'Créer ou modifier un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },

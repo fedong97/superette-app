@@ -168,3 +168,28 @@ export async function approvalStatus(s: Services, id: string): Promise<{ status:
   if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
   return request(creds.url, `/api/v1/approvals/${encodeURIComponent(id)}`, { token: creds.token });
 }
+
+/** Panier préparé au rayon par un vendeur, en attente d'une caisse. */
+export interface ShelfCart {
+  id: string;
+  number: number;
+  label: string | null;
+  sellerId: string;
+  sellerName: string;
+  lines: { articleId: string; qty: number; packId: string | null }[];
+  at: string;
+}
+
+/** Paniers des vendeurs du magasin qui attendent une caisse. */
+export async function shelfCarts(s: Services): Promise<ShelfCart[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ carts: ShelfCart[] }>(creds.url, '/api/v1/carts', { token: creds.token })).carts;
+}
+
+/** Prend le panier pour cette caisse (une seule caisse l'obtient). */
+export async function takeShelfCart(s: Services, id: string): Promise<ShelfCart> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
+  return request<ShelfCart>(creds.url, `/api/v1/carts/${encodeURIComponent(id)}/take`, { token: creds.token, body: {} });
+}

@@ -114,7 +114,7 @@ export class CommissionService extends Base {
       `SELECT a.family_id, date(s.created_at, 'localtime') AS day,
               SUM(l.total_ttc) AS amount
        FROM sale_lines l JOIN sales s ON s.id = l.sale_id JOIN articles a ON a.id = l.article_id
-       WHERE s.store_id = @storeId AND s.user_id = @userId AND s.status = 'completed' AND l.article_id <> @fee
+       WHERE s.store_id = @storeId AND COALESCE(s.seller_id, s.user_id) = @userId AND s.status = 'completed' AND l.article_id <> @fee
          AND strftime('%Y-%m', s.created_at, 'localtime') = @period
        GROUP BY a.family_id, day`,
     );
@@ -145,7 +145,7 @@ export class CommissionService extends Base {
         day_sales: daySales,
         tickets: this.db
           .prepare(
-            `SELECT COUNT(*) FROM sales WHERE store_id = ? AND user_id = ? AND kind = 'sale' AND status = 'completed' AND strftime('%Y-%m', created_at, 'localtime') = ?`,
+            `SELECT COUNT(*) FROM sales WHERE store_id = ? AND COALESCE(seller_id, user_id) = ? AND kind = 'sale' AND status = 'completed' AND strftime('%Y-%m', created_at, 'localtime') = ?`,
           )
           .pluck()
           .get(storeId, st.user_id ?? '', period) as number,
@@ -167,7 +167,7 @@ export class CommissionService extends Base {
         `SELECT COALESCE(SUM(CASE WHEN kind = 'sale' THEN total_ttc ELSE 0 END), 0) AS sales,
                 COALESCE(SUM(CASE WHEN kind <> 'sale' THEN -ABS(total_ttc) ELSE 0 END), 0) AS returns,
                 COALESCE(SUM(CASE WHEN kind = 'sale' THEN 1 ELSE 0 END), 0) AS tickets
-         FROM sales WHERE store_id = ? AND user_id = ? AND status = 'completed' AND date(created_at, 'localtime') = ?`,
+         FROM sales WHERE store_id = ? AND COALESCE(seller_id, user_id) = ? AND status = 'completed' AND date(created_at, 'localtime') = ?`,
       )
       .get(storeId, userId, today) as { sales: Fcfa; returns: Fcfa; tickets: number };
     const staffId = this.db.prepare('SELECT id FROM staff WHERE user_id = ? AND active = 1').pluck().get(userId) as string | undefined;

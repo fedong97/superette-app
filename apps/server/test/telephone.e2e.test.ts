@@ -3,7 +3,7 @@ import { createDecipheriv, createECDH, createPublicKey, hkdfSync, randomBytes, v
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { approvalStatus, createServices, enrollStation, openDatabase, requestApproval, syncOnce } from '@superette/db';
+import { approvalStatus, createServices, enrollStation, openDatabase, requestApproval, shelfCarts, syncOnce, takeShelfCart } from '@superette/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/main';
 import { encryptPayload, generateVapidKeys, vapidAuthorization } from '../src/webpush';
@@ -79,6 +79,68 @@ describe('téléphone du gérant : accord à distance et alertes', () => {
     expect(Buffer.from(publicKey, 'base64url')).toHaveLength(65);
     const res = await post('/admin/api/push/subscribe', { subscription: { endpoint: 'https://push.example/abc', keys: { p256dh: 'x', auth: 'y' } }, kinds: ['gap', 'inconnu'], discountPct: 30 });
     expect(await res.json()).toEqual({ ok: true, kinds: ['gap'], discountPct: 30 });
+  });
+});
+
+describe('panier préparé au rayon', () => {
+  let app: INestApplication;
+  let url: string;
+  let cookie = '';
+  const pc = createServices(openDatabase(':memory:'));
+  const { store, register, admin } = pc.admin.bootstrap({ storeCode: 'DLA1', storeName: 'Superette Akwa', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' });
+  const ctx = { storeId: store.id, registerId: register.id, userId: admin.id };
+
+  beforeAll(async () => {
+    app = await createApp({ dataDir: join(mkdtempSync(join(tmpdir(), 'fedo-panier-')), 'donnees'), port: 0, enrollmentKey: 'cle-enrolement-de-test', localAdminToken: LOCAL });
+    await app.listen(0, '127.0.0.1');
+    url = await app.getUrl();
+    cookie = (await fetch(`${url}/?t=${LOCAL}`, { redirect: 'manual' })).headers.get('set-cookie')!.split(';')[0]!;
+    await enrollStation(pc, url, 'cle-enrolement-de-test', 'PC caisse 1');
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  it('le vendeur envoie son panier, la caisse le prend une fois et la vente compte pour lui', async () => {
+    const tva = pc.admin.listVatRates()[0]!.id;
+    const riz = pc.catalogue.saveArticle(admin.id, { name: 'RIZ 1 KG', unit: 'piece', vatRateId: tva, purchasePrice: 700, salePrice: 1_000 }).id;
+    pc.stock.receive(ctx, { warehouseId: pc.admin.salesWarehouse(store.id).id, lines: [{ articleId: riz, qty: 20_000, unitCost: 700 }] });
+    const { user: paul, staff } = pc.staff.hire(ctx, { user: { name: 'Paul', login: 'paul', pin: '1111', role: 'seller', storeId: store.id }, staff: { baseSalary: 50_000, declared: false } });
+    pc.commissions.setTarget(ctx, staff!.id, { monthTarget: 100_000, dayTarget: 10_000, rateBp: 100 });
+    await syncOnce(pc);
+
+    const p = await (await fetch(`${url}/admin/api/mobile/pairing`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ storeId: store.id }) })).json();
+    const device = (await (await fetch(`${url}/api/v1/mobile/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: p.code, name: 'Téléphone Paul' }) })).json()).token;
+    const phone = async (path: string, body?: unknown, session = '') => {
+      const headers: Record<string, string> = { authorization: `Bearer ${device}`, 'x-fedonix-session': session, 'content-type': 'application/json' };
+      return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
+    };
+    const login = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
+    expect(login.can).toEqual({ count: false, cart: true });
+    const catalog = await (await phone('/catalog', undefined, login.session)).json();
+    expect(catalog.articles.find((a: { id: string }) => a.id === riz)).toMatchObject({ price: 1_000 });
+
+    const cart = { id: 'panier-0001-paul', label: 'Dame au foulard rouge', lines: [{ articleId: riz, qty: 3_000 }] };
+    expect(await (await phone('/carts', cart, login.session)).json()).toEqual({ id: cart.id, number: 1 });
+    // Renvoyé après une coupure : pas de doublon.
+    expect(await (await phone('/carts', cart, login.session)).json()).toEqual({ id: cart.id, number: 1 });
+    expect((await phone('/carts', { id: 'panier-vide-0001', lines: [] }, login.session)).status).toBe(400);
+
+    const waiting = await shelfCarts(pc);
+    expect(waiting).toEqual([expect.objectContaining({ id: cart.id, number: 1, label: 'Dame au foulard rouge', sellerId: paul.id, sellerName: 'Paul' })]);
+    const taken = await takeShelfCart(pc, cart.id);
+    expect(taken.lines).toEqual([{ articleId: riz, qty: 3_000, packId: null }]);
+    await expect(takeShelfCart(pc, cart.id)).rejects.toThrow(/déjà été pris/);
+    expect(await shelfCarts(pc)).toEqual([]);
+    expect((await (await phone('/carts', undefined, login.session)).json()).carts[0]).toMatchObject({ number: 1, lines: 1, takenAt: expect.any(String) });
+
+    // Le caissier (ici le gérant) encaisse : la vente compte pour Paul.
+    pc.pos.openSession(ctx, 0);
+    const sale = pc.pos.completeSale(ctx, { lines: taken.lines, payments: [{ method: 'CASH', amount: 3_000 }], sellerId: taken.sellerId });
+    expect(pc.pos.getSale(sale.id).seller_id).toBe(paul.id);
+    expect(pc.commissions.myDay(store.id, paul.id)).toMatchObject({ net: 3_000, tickets: 1 });
+    expect(pc.commissions.myDay(store.id, admin.id)).toMatchObject({ net: 0, tickets: 0 });
   });
 });
 

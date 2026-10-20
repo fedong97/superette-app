@@ -186,6 +186,8 @@ export interface SaleInput {
   warehouseId?: string | null;
   /** Livraison chez le client : ses frais s'ajoutent au ticket. */
   delivery?: DeliveryInput | null;
+  /** Vendeur qui a préparé le panier au rayon : la vente compte pour lui (commission). */
+  sellerId?: string | null;
 }
 
 export interface Sale {
@@ -198,6 +200,8 @@ export interface Sale {
   session_id: string;
   user_id: string;
   user_name: string;
+  /** Vendeur du panier préparé au rayon (sinon null : la vente compte pour le caissier). */
+  seller_id?: string | null;
   total_ttc: Fcfa;
   total_ht: Fcfa;
   total_tva: Fcfa;
@@ -874,6 +878,10 @@ export class PosService extends Base {
           rounding,
           warehouse.is_sales_default ? null : warehouse.id,
         );
+      if (input.sellerId && input.sellerId !== ctx.userId) {
+        this.admin.getUser(input.sellerId);
+        this.db.prepare('UPDATE sales SET seller_id = ? WHERE id = ?').run(input.sellerId, saleId);
+      }
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id,
            pack_name, pack_units, pack_price)
@@ -1174,6 +1182,8 @@ export class PosService extends Base {
            VALUES (?, ?, 'return', ?, ?, ?, ?, 'completed', ?, ?, ?, 0, 0, ?, ?, ?, ?)`,
         )
         .run(id, number, ctx.storeId, ctx.registerId, session.id, ctx.userId, -total, -ht, -(total - ht), original.id, input.reason.trim(), original.customer_id, this.now());
+      // Retour d'un panier de vendeur : il se déduit de ses ventes (commission).
+      this.db.prepare('UPDATE sales SET seller_id = (SELECT seller_id FROM sales WHERE id = ?) WHERE id = ?').run(original.id, id);
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0)`,

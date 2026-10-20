@@ -21,6 +21,24 @@ export interface User {
 export interface Session {
   token: string;
   user: User;
+  /** Ce que la personne peut faire : compter un inventaire, préparer un panier au rayon. */
+  can?: { count: boolean; cart: boolean };
+}
+
+/** Ligne du panier préparé au rayon : quantité en millièmes d'unité. */
+export interface CartLine {
+  articleId: string;
+  qty: number;
+}
+
+/** Panier envoyé à la caisse aujourd'hui. */
+export interface SentCart {
+  id: string;
+  number: number;
+  label: string | null;
+  lines: number;
+  at: string;
+  takenAt: string | null;
 }
 
 /** Inventaire ouvert, tel que le serveur l'envoie. */
@@ -128,6 +146,10 @@ export interface State {
   rapid: boolean;
   /** Dernière erreur du téléchargement du catalogue (affichée à la place des produits introuvables). */
   catalogError: string | null;
+  /** Panier en préparation au rayon (gardé sur le téléphone jusqu'à l'envoi). */
+  cart: CartLine[];
+  cartLabel: string;
+  sentCarts: SentCart[];
 }
 
 const DEFAULT_LOCATIONS = ['Rayon', 'Réserve', 'Chambre froide'];
@@ -154,6 +176,9 @@ let state: State = {
   location: 'Rayon',
   rapid: false,
   catalogError: null,
+  cart: [],
+  cartLabel: '',
+  sentCarts: [],
 };
 
 let outbox: OutCount[] = [];
@@ -213,6 +238,7 @@ export async function init() {
   historyByUser = await load('history', {});
   archivesByUser = await load('archives', {});
   const files = await load<FileInventory[]>('files', []);
+  const cart = await load<{ lines: CartLine[]; label: string }>('cart', { lines: [], label: '' });
   const userId = session?.user.id;
   set({
     ready: true,
@@ -228,6 +254,8 @@ export async function init() {
     locations: prefs.locations?.length ? prefs.locations : DEFAULT_LOCATIONS,
     location: prefs.location || 'Rayon',
     rapid: Boolean(prefs.rapid),
+    cart: cart.lines ?? [],
+    cartLabel: cart.label ?? '',
   });
   setInterval(() => void sync(), 20_000);
   window.addEventListener('online', () => void sync());
@@ -267,7 +295,7 @@ export async function pair(urls: string[], code: string, deviceName: string, gue
   const config: Config = { urls: [...new Set([url, ...urls])], url, token: r.token, storeId: r.storeId, storeName: r.storeName, deviceName };
   await save('config', config);
   set({ config, online: true });
-  if (r.session && r.user) await startSession({ token: r.session, user: r.user });
+  if (r.session && r.user) await startSession({ token: r.session, user: r.user, can: (r as { can?: Session['can'] }).can });
 }
 
 async function startSession(session: Session) {
@@ -293,20 +321,21 @@ export async function loginGuest(code: string) {
 export async function login(loginName: string, pin: string) {
   const config = state.config;
   if (!config) return;
-  const r = await request<{ session: string; user: User; storeName: string }>(config.url, '/api/v1/mobile/login', {
+  type LoginReply = { session: string; user: User; storeName: string; can?: Session['can'] };
+  const r = await request<LoginReply>(config.url, '/api/v1/mobile/login', {
     body: { login: loginName, pin },
     auth: { token: config.token },
   }).catch(async (e) => {
     // Le serveur a peut-être changé d'adresse sur le réseau du magasin.
     if (e instanceof ApiError && e.status === 0 && (await switchServer())) {
-      return request<{ session: string; user: User; storeName: string }>(state.config!.url, '/api/v1/mobile/login', {
+      return request<LoginReply>(state.config!.url, '/api/v1/mobile/login', {
         body: { login: loginName, pin },
         auth: { token: config.token },
       });
     }
     throw e;
   });
-  await startSession({ token: r.session, user: r.user });
+  await startSession({ token: r.session, user: r.user, can: r.can });
 }
 
 /** Changer d'utilisateur : ses saisies pas encore envoyées partent quand même, à son nom. */
@@ -600,9 +629,15 @@ async function pushUnknowns(config: Config) {
 }
 
 async function refresh(config: Config) {
-  const r = await request<{ inventories: ServerInventory[]; catalogVersion: string; showExpected: boolean; user: User }>(config.url, '/api/v1/mobile/inventories', {
+  const r = await request<{ inventories: ServerInventory[]; catalogVersion: string; showExpected: boolean; user: User; can?: Session['can'] }>(config.url, '/api/v1/mobile/inventories', {
     auth: auth(),
   });
+  // Droits changés par le gérant depuis la connexion.
+  if (r.can && state.session && JSON.stringify(r.can) !== JSON.stringify(state.session.can)) {
+    const session = { ...state.session, can: r.can };
+    await save('session', session);
+    set({ session });
+  }
   // Comptages faits par la même personne sur un autre téléphone (ou avant une réinstallation).
   const counts = { ...state.counts };
   let changed = false;
@@ -643,7 +678,9 @@ async function refresh(config: Config) {
   set({ inventories: r.inventories, showExpected: r.showExpected, ...(changed ? { counts } : {}) });
   if (changed) persistCounts();
   await save('inventories', { list: r.inventories, showExpected: r.showExpected });
-  if (r.catalogVersion !== state.catalog?.version || !state.catalog?.articles.length) await refreshCatalog(config).catch(() => undefined);
+  // Catalogue d'une version sans les prix : retéléchargé en entier pour le panier.
+  const noPrice = Boolean(state.catalog?.articles.length && state.catalog.articles[0]!.price === undefined);
+  if (r.catalogVersion !== state.catalog?.version || !state.catalog?.articles.length || noPrice) await refreshCatalog(config, noPrice).catch(() => undefined);
 }
 
 export async function refreshCatalog(config = state.config, full = false) {
@@ -700,4 +737,55 @@ export function thumbOf(articleId: string): Promise<string | null> {
     );
   }
   return thumbs.get(articleId)!;
+}
+
+// ——— Panier préparé au rayon ———
+
+const saveCart = () => save('cart', { lines: state.cart, label: state.cartLabel });
+
+/** Ajoute au panier (un scan ou une quantité tapée), en millièmes d'unité. */
+export function addToCart(articleId: string, qty: number) {
+  if (!(qty > 0)) return;
+  const cur = state.cart.find((l) => l.articleId === articleId);
+  const cart = cur ? state.cart.map((l) => (l.articleId === articleId ? { ...l, qty: l.qty + qty } : l)) : [{ articleId, qty }, ...state.cart];
+  set({ cart });
+  void saveCart();
+}
+
+export function setCartQty(articleId: string, qty: number) {
+  set({ cart: qty > 0 ? state.cart.map((l) => (l.articleId === articleId ? { ...l, qty } : l)) : state.cart.filter((l) => l.articleId !== articleId) });
+  void saveCart();
+}
+
+export function setCartLabel(label: string) {
+  set({ cartLabel: label });
+  void saveCart();
+}
+
+export function clearCart() {
+  set({ cart: [], cartLabel: '' });
+  void saveCart();
+}
+
+/** Envoie le panier à la caisse : il y attend d'être encaissé, au nom du vendeur. */
+export async function sendCart(): Promise<number> {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  if (!state.cart.length) throw new ApiError('Le panier est vide', 400);
+  const id = newId();
+  const r = await request<{ id: string; number: number }>(config.url, '/api/v1/mobile/carts', {
+    body: { id, label: state.cartLabel.trim() || null, lines: [...state.cart].reverse() },
+    auth: auth(),
+  });
+  clearCart();
+  void loadSentCarts();
+  return r.number;
+}
+
+/** Paniers envoyés aujourd'hui et ceux déjà pris en caisse. */
+export async function loadSentCarts() {
+  const config = state.config;
+  if (!config || !state.session) return;
+  const r = await request<{ carts: SentCart[] }>(config.url, '/api/v1/mobile/carts', { auth: auth() }).catch(() => null);
+  if (r) set({ sentCarts: r.carts });
 }

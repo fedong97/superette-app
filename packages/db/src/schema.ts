@@ -1794,4 +1794,12 @@ CREATE TABLE cash_handovers (
 CREATE INDEX cash_handovers_session ON cash_handovers(session_id, at);
 `,
   },
+  {
+    version: 49,
+    name: 'vendeur du panier préparé au rayon',
+    sql: `
+-- Panier préparé au rayon sur le téléphone : le caissier encaisse, la vente compte pour le vendeur.
+ALTER TABLE sales ADD COLUMN seller_id TEXT;
+`,
+  },
 ];

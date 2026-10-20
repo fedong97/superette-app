@@ -1745,4 +1745,29 @@ ALTER TABLE staff_salaries ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE customers ADD COLUMN language TEXT NOT NULL DEFAULT 'fr';
 `,
   },
+  {
+    version: 47,
+    name: 'utilisateurs supprimés, badges et pointage',
+    sql: `
+-- Un utilisateur supprimé qui a déjà travaillé reste pour l'historique (son nom
+-- sur ses tickets), sans pouvoir se connecter ni apparaître dans les listes.
+ALTER TABLE users ADD COLUMN deleted_at TEXT;
+-- Code-barres imprimé sur le badge de l'employé : le scanner remplit l'identifiant.
+ALTER TABLE users ADD COLUMN badge TEXT;
+CREATE UNIQUE INDEX users_badge ON users(badge) WHERE badge IS NOT NULL;
+-- Pointage : une ligne par personne et par jour (id = utilisateur:AAAA-MM-JJ).
+CREATE TABLE attendance (
+  id TEXT PRIMARY KEY,
+  store_id TEXT,
+  user_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  arrived_at TEXT,
+  left_at TEXT,
+  corrected_by TEXT,
+  correction_reason TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX attendance_day ON attendance(day, user_id);
+`,
+  },
 ];

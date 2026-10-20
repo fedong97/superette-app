@@ -193,6 +193,7 @@ export const PERMISSIONS = {
   staff_edit: { label: 'Ajouter ou modifier un collaborateur', group: 'Personnel', type: 'Bouton', parent: 'staff' },
   staff_salaries: { label: 'Constater les salaires du mois et les payer au bureau', group: 'Personnel', type: 'Menu', parent: 'staff' },
   staff_targets: { label: 'Objectifs de vente et commissions des vendeurs', group: 'Personnel', type: 'Menu', parent: 'staff' },
+  staff_attendance: { label: 'Pointage du personnel : état du mois, retards, absences et corrections', group: 'Personnel', type: 'Menu', roles: MANAGE },
 
   // --- Fiscalité ---------------------------------------------------------------
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },

@@ -33,6 +33,7 @@ const TABLES: Record<string, string> = {
   warehouse: 'warehouses',
   register: 'registers',
   user: 'users',
+  attendance: 'attendance',
   department: 'departments',
   family: 'families',
   lot: 'lots',
@@ -721,6 +722,28 @@ export class SyncService extends Base {
         const warehouseId = String(p['warehouse_id']);
         stock.set(`${articleId}|${warehouseId}`, [articleId, warehouseId]);
         if (p['lot_id']) lots.add(String(p['lot_id']));
+        return;
+      }
+      case 'attendance': {
+        // Pointé sur deux PC le même jour : la première arrivée et le dernier départ.
+        // Une correction du gérant (plus récente) remplace tout.
+        const local = this.db.prepare('SELECT * FROM attendance WHERE id = ?').get(event.entityId) as Record<string, string | null> | undefined;
+        if (!local) return this.upsert('attendance', p);
+        const remoteNewer = String(p['updated_at']) > String(local['updated_at']);
+        if (p['corrected_by'] && remoteNewer) return this.upsert('attendance', p);
+        if (local['corrected_by'] && !remoteNewer) return;
+        const pick = (a: unknown, b: unknown, first: boolean) => {
+          const x = (a as string | null) ?? null;
+          const y = (b as string | null) ?? null;
+          if (!x || !y) return x ?? y;
+          return first ? (x < y ? x : y) : x > y ? x : y;
+        };
+        this.upsert('attendance', {
+          ...local,
+          arrived_at: pick(local['arrived_at'], p['arrived_at'], true),
+          left_at: pick(local['left_at'], p['left_at'], false),
+          updated_at: remoteNewer ? p['updated_at'] : local['updated_at'],
+        });
         return;
       }
       case 'sale_delivery': {

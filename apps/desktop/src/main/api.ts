@@ -5,6 +5,7 @@ import {
   type LabelFormatId,
   barcodeLabelsHtml,
   loyaltyCardHtml,
+  staffBadgeHtml,
   reminderMessage,
   whatsappLink,
   labelsHtml,
@@ -90,6 +91,7 @@ import {
   type ReceptionLine,
   type Role,
   type UserRegisters,
+  ROLE_LABELS,
   type SaleLineInput,
   type Services,
   type PromotionInput,
@@ -739,8 +741,30 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'auth.login': (login: string, pin: string) => {
       chosenRegisterId = null;
-      return (user = s.admin.login(login, pin));
+      user = s.admin.login(login, pin);
+      // Pointage : la première connexion du jour note l'arrivée (pas dans une fiche emportée ni en formation).
+      const station = s.admin.station();
+      if (station && !s.fiches.current()) s.attendance.arrive(user.id, station.store.id);
+      return user;
     },
+    /** Badge scanné sur l'écran de connexion : l'identifiant qu'il porte. */
+    'auth.badge': (code: string) => s.admin.loginForBadge(code),
+    /** « Je pars » : départ noté pour le pointage, puis déconnexion. */
+    'attendance.leave': () => {
+      const u = requireUser();
+      const station = s.admin.station();
+      const row = s.fiches.current() ? null : s.attendance.leave(u.id, station?.store.id ?? null);
+      user = null;
+      chosenRegisterId = null;
+      return row;
+    },
+    'attendance.today': () => {
+      const u = requireUser();
+      return s.attendance.get(u.id);
+    },
+    'attendance.month': (period: string) => s.attendance.month(ctx(['staff_attendance']).storeId, period),
+    'attendance.correct': (userId: string, day: string, input: { arrived: string | null; left: string | null; reason: string }) =>
+      s.attendance.correct(requireUser(['staff_attendance']).id, userId, day, input),
     'auth.logout': () => {
       user = null;
       chosenRegisterId = null;
@@ -813,10 +837,42 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (input.role === 'admin' && u.role !== 'admin') throw new AppError("Seul l'administrateur crée un administrateur", 'FORBIDDEN');
       return s.admin.createUser(u.id, input);
     },
-    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null }) => {
+    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; login?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null }) => {
       const u = requireUser(['users_manage']);
       if (u.role !== 'admin' && (patch.role === 'admin' || s.admin.getUser(id).role === 'admin')) throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
       return s.admin.updateUser(u.id, id, patch);
+    },
+    'admin.deleteUser': (id: string) => {
+      const u = requireUser(['users_manage']);
+      if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur supprime un administrateur", 'FORBIDDEN');
+      return s.admin.deleteUser(u.id, id);
+    },
+    'admin.newBadge': (id: string) => {
+      const u = requireUser(['users_manage']);
+      if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
+      return s.admin.newBadge(u.id, id);
+    },
+    'admin.printBadge': (id: string) => {
+      requireUser(['users_manage']);
+      const target = s.admin.getUser(id);
+      if (!target.badge) throw new AppError("Cet utilisateur n'a pas encore de badge", 'INVALID');
+      const station = s.admin.station();
+      const storeName = target.store_id ? s.admin.getStore(target.store_id).name : (station?.store.name ?? '');
+      return printer.a4(staffBadgeHtml({ store: storeName, name: target.name, role: ROLE_LABELS[target.role], code: target.badge, logo: settings().logo || null }));
+    },
+    /** Nouvel employé : utilisateur, fiche collaborateur et badge en une fois. */
+    'admin.hire': (input: {
+      user: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null };
+      staff?: Omit<StaffInput, 'name' | 'userId'> | null;
+      badge?: boolean;
+    }) => {
+      const u = requireUser(['users_manage']);
+      if (input.user.role === 'admin' && u.role !== 'admin') throw new AppError("Seul l'administrateur crée un administrateur", 'FORBIDDEN');
+      if (input.staff && !can(u, ['staff_edit'])) throw new AppError('Vous ne pouvez pas créer de fiche collaborateur', 'FORBIDDEN');
+      const station = s.admin.station();
+      const storeId = input.user.storeId ?? station?.store.id;
+      if (!storeId) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
+      return s.staff.hire({ storeId, registerId: null, userId: u.id }, input);
     },
     'admin.unlockUser': (id: string) => s.admin.unlockUser(requireUser(['users_manage']).id, id),
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
@@ -1495,7 +1551,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireAmounts();
       // Sans code du gérant : un motif saisi par un gérant à la clôture vaut justification, sinon l'écart reste à justifier.
       const approvedBy = can(user!, ['cash_open']) ? user!.id : null;
-      return s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
+      const closed = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
+      if (!s.fiches.current()) s.attendance.leave(c.userId, c.storeId);
+      return closed;
     },
     /**
      * Clôture par le caissier sans le droit des montants : ni Z ni attendu en
@@ -1505,6 +1563,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
       const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft }).session;
+      if (!s.fiches.current()) s.attendance.leave(c.userId, c.storeId);
       const voucher = s.treasury.sessionMovements(se.id).find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
       return { sessionId: se.id, counted: se.counted_cash ?? 0, floatLeft: se.float_left ?? 0, deposit: se.deposit ?? 0, voucherId: voucher?.id ?? null, voucherNumber: voucher?.number ?? null };
     },

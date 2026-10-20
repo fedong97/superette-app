@@ -302,3 +302,13 @@ export function loyaltyCardHtml(card: { store: string; customer: string; code: s
     '.fid-name{margin-top:2.5mm;font-size:4mm;font-weight:bold}.fid-phone{font-size:2.8mm;color:#555}.fid-code{margin-top:auto;text-align:center}</style>';
   return `${style}<div class="fid-grid">${Array.from({ length: Math.max(1, Math.min(10, copies)) }, () => one).join('')}</div>`;
 }
+
+/** Badge d'employé au format carte bancaire : nom, rôle, code-barres scanné à la connexion. */
+export function staffBadgeHtml(card: { store: string; name: string; role: string; code: string; logo?: string | null }): string {
+  const one =
+    `<div class="fid">` +
+    `<div class="fid-head">${card.logo ? `<img src="${esc(card.logo)}" alt="">` : ''}<div><div class="fid-store">${esc(card.store)}</div><div class="fid-title">Badge du personnel</div></div></div>` +
+    `<div class="fid-name">${esc(card.name)}</div><div class="fid-phone">${esc(card.role)}</div>` +
+    `<div class="fid-code">${barcodeWithDigitsSvg(card.code, 70, 14)}</div></div>`;
+  return loyaltyCardHtml({ store: '', customer: '', code: '' }).replace(/<div class="fid-grid">[\s\S]*$/, `<div class="fid-grid">${one}</div>`);
+}

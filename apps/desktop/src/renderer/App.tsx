@@ -77,13 +77,13 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
-  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets'] },
+  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets', 'staff_attendance'] },
 };
 
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
+  action?: 'logout' | 'leave' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -161,6 +161,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Personnaliser les onglets rapides', action: 'tabs' },
       { label: 'Personnaliser la barre latérale', action: 'rail' },
       { label: "Changer d'utilisateur", action: 'logout' },
+      { label: 'Je pars (fin de journée)', action: 'leave' },
       { label: 'Ouvrir une boutique…', action: 'dossiers', adminOnly: true },
       { label: 'Quitter', action: 'quit' },
     ],
@@ -327,6 +328,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Collaborateurs (fiches, comptes tiers)', open: ['staff', 'list'] },
       { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
       { label: 'Objectifs et commissions des vendeurs', open: ['staff', 'targets'], perm: 'staff_targets' },
+      { label: 'Pointage du personnel', open: ['staff', 'attendance'], perm: 'staff_attendance' },
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
@@ -695,12 +697,23 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
   const visibleMenus = MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep));
 
+  const leave = async () => {
+    if (!(await askConfirm('Noter votre départ (pointage) et vous déconnecter ?'))) return;
+    try {
+      const row = await call('attendance.leave');
+      if (row?.left_at) toast.ok(`Départ noté à ${new Date(row.left_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Bonne soirée !`);
+    } catch (e) {
+      toast.error(e);
+    }
+    refresh();
+  };
   const run = async (item: MenuItem, menuName: string) => {
     setMenu(null);
     setAllMenus(false);
     if (item.soon) return;
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
+    if (item.action === 'leave') return leave();
     if (item.action === 'dossiers') return setDossiers(true);
     if (item.action === 'quit') return window.close();
     if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail') return setHelp(item.action);
@@ -1054,6 +1067,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </button>
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
+        </button>
+        <button className="link" title="Note votre départ pour le pointage, puis vous déconnecte" onClick={() => void leave()}>
+          Je pars
         </button>
         <Clock />
       </footer>

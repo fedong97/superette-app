@@ -2,7 +2,7 @@ import { BACKUP_FREQUENCIES, type Permission, type RegisterKind } from '@superet
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
-import { askConfirm, Empty, Field, Modal, Tabs, dateTime, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
 import { MobilePay } from './AdminMobilePay';
@@ -573,7 +573,34 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     /** Dépôts de vente cochés ; null = selon le droit « vendre depuis un autre dépôt ». */
     saleWarehouses: string[] | null;
     active: boolean;
+    badge: string | null;
+    /** Nouvel employé : fiche collaborateur créée en même temps (null : pas de fiche). */
+    staff: { position: string; phone: string; baseSalary: string; hiredOn: string } | null;
+    makeBadge: boolean;
   }>(null);
+  const canStaff = useCan()('staff_edit');
+  const editBadge = async (id: string, renew: boolean) => {
+    if (renew && !(await askConfirm("Refaire le badge ? L'ancien badge ne permettra plus de se connecter."))) return;
+    try {
+      const u = await call('admin.newBadge', id);
+      setForm((f) => (f ? { ...f, badge: u.badge ?? null } : f));
+      users.reload();
+      toast.ok('Badge créé : imprimez-le');
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+  const remove = async (id: string, name: string) => {
+    if (!(await askConfirm(`Supprimer ${name} ? Il ne pourra plus se connecter et disparaîtra des listes. Ses tickets et écritures passés gardent son nom.`))) return;
+    try {
+      const r = await call('admin.deleteUser', id);
+      toast.ok(r.erased ? `${name} est supprimé` : `${name} est supprimé (gardé pour l’historique de ses ventes)`);
+      setForm(null);
+      users.reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
   const sells = (role: Role) => role === 'cashier' || role === 'seller';
   const roles = (Object.keys(ROLE_LABELS) as Role[]).filter((r) => currentRole === 'admin' || r !== 'admin');
   return (
@@ -609,6 +636,9 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   bankRegisterId: u.bank_register_id ?? '',
                   saleWarehouses: u.sale_warehouses ? (JSON.parse(u.sale_warehouses) as string[]) : null,
                   active: u.active === 1,
+                  badge: u.badge ?? null,
+                  staff: null,
+                  makeBadge: false,
                 })
               }
             >
@@ -669,13 +699,30 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
       </table>
       {canManage && (
         <div className="actions">
-          <button data-new title="Ctrl+J" className="primary" onClick={() => setForm({ name: '', login: '', pin: '', role: 'cashier', storeId: '', registerId: '', emoneyRegisterId: '', bankRegisterId: '', saleWarehouses: null, active: true })}>
-            Ajouter un utilisateur
+          <button data-new title="Ctrl+J" className="primary" onClick={() =>
+              setForm({
+                name: '',
+                login: '',
+                pin: '',
+                role: 'cashier',
+                storeId: '',
+                registerId: '',
+                emoneyRegisterId: '',
+                bankRegisterId: '',
+                saleWarehouses: null,
+                active: true,
+                badge: null,
+                staff: canStaff ? { position: '', phone: '', baseSalary: '', hiredOn: today() } : null,
+                makeBadge: true,
+              })
+            }
+          >
+            Ajouter un employé
           </button>
         </div>
       )}
       {form && (
-        <Modal title={form.id ? form.name : 'Nouvel utilisateur'} onClose={() => setForm(null)}>
+        <Modal title={form.id ? form.name : 'Nouvel employé'} onClose={() => setForm(null)} wide={!form.id}>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -683,6 +730,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                 if (form.id) {
                   await call('admin.updateUser', form.id, {
                     name: form.name,
+                    login: form.login,
                     role: form.role,
                     storeId: form.storeId || null,
                     registerId: form.registerId || null,
@@ -693,17 +741,27 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     pin: form.pin || undefined,
                   });
                 } else {
-                  await call('admin.createUser', {
-                    name: form.name,
-                    login: form.login,
-                    pin: form.pin,
-                    role: form.role,
-                    storeId: form.storeId || null,
-                    registerId: form.registerId || null,
-                    emoneyRegisterId: form.emoneyRegisterId || null,
-                    bankRegisterId: form.bankRegisterId || null,
-                    saleWarehouses: form.saleWarehouses,
+                  const salary = form.staff?.baseSalary ? Number(form.staff.baseSalary.replace(/\s/g, '')) : 0;
+                  if (form.staff && (!Number.isSafeInteger(salary) || salary < 0)) throw new Error('Salaire de base : un montant en FCFA');
+                  const r = await call('admin.hire', {
+                    user: {
+                      name: form.name,
+                      login: form.login,
+                      pin: form.pin,
+                      role: form.role,
+                      storeId: form.storeId || null,
+                      registerId: form.registerId || null,
+                      emoneyRegisterId: form.emoneyRegisterId || null,
+                      bankRegisterId: form.bankRegisterId || null,
+                      saleWarehouses: form.saleWarehouses,
+                    },
+                    staff: form.staff
+                      ? { position: form.staff.position || null, phone: form.staff.phone || null, baseSalary: salary, hiredOn: form.staff.hiredOn || null }
+                      : null,
+                    badge: form.makeBadge,
                   });
+                  toast.ok(`${r.user.name} est enregistré${r.staff ? ', avec sa fiche collaborateur' : ''}`);
+                  if (r.user.badge && (await askConfirm('Imprimer son badge maintenant ?'))) await call('admin.printBadge', r.user.id);
                 }
                 setForm(null);
                 users.reload();
@@ -717,7 +775,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
               </Field>
               <Field label="Identifiant">
-                <input value={form.login} disabled={Boolean(form.id)} onChange={(e) => setForm({ ...form, login: e.target.value })} required />
+                <input value={form.login} onChange={(e) => setForm({ ...form, login: e.target.value })} required />
               </Field>
               <Field label={form.id ? 'Nouveau code (laisser vide pour garder)' : 'Code secret'} hint="Chiffres seulement ; la longueur minimale se règle dans Paramètres › Sécurité">
                 <input type="password" inputMode="numeric" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value })} required={!form.id} />
@@ -816,11 +874,70 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Compte actif
                 </label>
               )}
+              {form.id ? (
+                <Field label="Badge" hint="Scanné sur l'écran de connexion, il remplit l'identifiant : il ne reste que le code à taper.">
+                  {form.badge ? (
+                    <span>
+                      <code>{form.badge}</code>{' '}
+                      <button type="button" onClick={() => call('admin.printBadge', form.id!).catch(toast.error)}>
+                        Imprimer
+                      </button>{' '}
+                      <button type="button" className="ghost" onClick={() => void editBadge(form.id!, true)}>
+                        Refaire
+                      </button>
+                    </span>
+                  ) : (
+                    <button type="button" onClick={() => void editBadge(form.id!, false)}>
+                      Créer son badge
+                    </button>
+                  )}
+                </Field>
+              ) : (
+                <label className="inline">
+                  <input type="checkbox" checked={form.makeBadge} onChange={(e) => setForm({ ...form, makeBadge: e.target.checked })} /> Lui faire un badge (carte à
+                  code-barres pour se connecter)
+                </label>
+              )}
             </div>
+            {!form.id && canStaff && (
+              <fieldset className="box">
+                <legend>
+                  <label className="inline">
+                    <input
+                      type="checkbox"
+                      checked={form.staff !== null}
+                      onChange={(e) => setForm({ ...form, staff: e.target.checked ? { position: '', phone: '', baseSalary: '', hiredOn: today() } : null })}
+                    />{' '}
+                    Créer aussi sa fiche collaborateur (salaire, avances, pointage)
+                  </label>
+                </legend>
+                {form.staff && (
+                  <div className="grid2">
+                    <Field label="Poste">
+                      <input value={form.staff.position} placeholder="Caissière, vendeur…" onChange={(e) => setForm({ ...form, staff: { ...form.staff!, position: e.target.value } })} />
+                    </Field>
+                    <Field label="Téléphone">
+                      <input value={form.staff.phone} inputMode="tel" onChange={(e) => setForm({ ...form, staff: { ...form.staff!, phone: e.target.value } })} />
+                    </Field>
+                    <Field label="Salaire de base (FCFA)">
+                      <input value={form.staff.baseSalary} inputMode="numeric" onChange={(e) => setForm({ ...form, staff: { ...form.staff!, baseSalary: e.target.value } })} />
+                    </Field>
+                    <Field label="Date d'entrée">
+                      <input type="date" value={form.staff.hiredOn} onChange={(e) => setForm({ ...form, staff: { ...form.staff!, hiredOn: e.target.value } })} />
+                    </Field>
+                  </div>
+                )}
+              </fieldset>
+            )}
             <div className="actions">
               <button className="primary" type="submit">
                 Enregistrer
               </button>
+              {form.id && (
+                <button type="button" className="danger" onClick={() => void remove(form.id!, form.name)}>
+                  Supprimer l'utilisateur
+                </button>
+              )}
             </div>
           </form>
         </Modal>

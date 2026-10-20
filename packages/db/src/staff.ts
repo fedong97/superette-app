@@ -1,5 +1,5 @@
 import { computePayroll, type Fcfa, type Payroll } from '@superette/core';
-import type { AdminService } from './admin';
+import type { AdminService, Role, User, UserRegisters } from './admin';
 import type { Db } from './database';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 
@@ -224,6 +224,29 @@ export class StaffService extends Base {
       )
       .run(id, label, now);
     this.enqueue(null, 'account', id, 'upsert', {});
+  }
+
+  /**
+   * Nouvel employé en une fois : son compte utilisateur (rôle, caisses), sa
+   * fiche collaborateur (poste, téléphone, salaire, sous-comptes) et son badge.
+   * Tout est créé ou rien.
+   */
+  hire(
+    ctx: Context,
+    input: {
+      user: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null };
+      staff?: Omit<StaffInput, 'name' | 'userId'> | null;
+      badge?: boolean;
+    },
+  ): { user: User; staff: (Staff & StaffBalance) | null } {
+    if (!this.admin) throw new AppError('Service des utilisateurs absent', 'INVALID');
+    const admin = this.admin;
+    return this.tx(() => {
+      let user = admin.createUser(ctx.userId, input.user);
+      if (input.badge) user = admin.newBadge(ctx.userId, user.id);
+      const staff = input.staff ? this.save(ctx, { ...input.staff, name: input.user.name, userId: user.id }) : null;
+      return { user, staff };
+    });
   }
 
   save(ctx: Context, input: StaffInput, id?: string): Staff & StaffBalance {

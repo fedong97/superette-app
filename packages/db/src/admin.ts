@@ -44,6 +44,10 @@ export interface User {
   /** Dépôts où il vend et complète une ligne (JSON d'ids) ; null = selon son droit « vendre depuis un autre dépôt ». */
   sale_warehouses: string | null;
   active: number;
+  /** Code-barres du badge de l'employé (connexion en le scannant). */
+  badge?: string | null;
+  /** Supprimé : gardé pour l'historique, ne se connecte plus et n'apparaît plus dans les listes. */
+  deleted_at?: string | null;
 }
 
 export const REGISTER_KINDS: Record<RegisterKind, string> = {
@@ -565,11 +569,11 @@ export class AdminService extends Base {
   // --- Utilisateurs ---------------------------------------------------------
 
   listUsers(): User[] {
-    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active FROM users ORDER BY name').all() as User[];
+    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active, badge FROM users WHERE deleted_at IS NULL ORDER BY name').all() as User[];
   }
 
   getUser(id: string): User {
-    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active FROM users WHERE id = ?').get(id) as User | undefined;
+    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active, badge, deleted_at FROM users WHERE id = ?').get(id) as User | undefined;
     if (!user) throw new AppError('Utilisateur introuvable', 'NOT_FOUND');
     return user;
   }
@@ -579,6 +583,9 @@ export class AdminService extends Base {
     input: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null },
   ): User {
     this.checkPinLength(input.pin, input.storeId);
+    if (!/^[a-z0-9._-]{2,30}$/.test(input.login.trim().toLowerCase())) {
+      throw new AppError("Identifiant : 2 à 30 lettres sans accent, chiffres, point, tiret ou soulignement", 'INVALID');
+    }
     const id = newId();
     const registerId = this.checkRegister(input.registerId ?? null, 'cash');
     const emoneyId = this.checkRegister(input.emoneyRegisterId ?? null, 'electronic');
@@ -603,9 +610,19 @@ export class AdminService extends Base {
   updateUser(
     byUserId: string,
     id: string,
-    patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null },
+    patch: UserRegisters & { name?: string; login?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null },
   ): User {
     const current = this.getUser(id);
+    if (current.deleted_at) throw new AppError('Cet utilisateur a été supprimé', 'INVALID');
+    if (patch.login !== undefined) {
+      const login = patch.login.trim().toLowerCase();
+      if (!/^[a-z0-9._-]{2,30}$/.test(login)) throw new AppError("Identifiant : 2 à 30 lettres sans accent, chiffres, point, tiret ou soulignement", 'INVALID');
+      if (login !== current.login) {
+        if (this.db.prepare('SELECT 1 FROM users WHERE login = ? AND id <> ?').get(login, id)) throw new AppError('Identifiant déjà utilisé', 'DUPLICATE');
+        this.db.prepare('UPDATE users SET login = ? WHERE id = ?').run(login, id);
+      }
+    }
+    if (patch.active === false || (patch.role !== undefined && patch.role !== 'admin')) this.keepOneAdmin(id);
     if (patch.saleWarehouses !== undefined) {
       const ids = patch.saleWarehouses ? [...new Set(patch.saleWarehouses)] : null;
       this.db.prepare('UPDATE users SET sale_warehouses = ? WHERE id = ?').run(ids ? JSON.stringify(ids) : null, id);
@@ -630,6 +647,81 @@ export class AdminService extends Base {
     return user;
   }
 
+  /** Refuse de retirer le dernier administrateur actif. */
+  private keepOneAdmin(id: string): void {
+    const others = this.db.prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND deleted_at IS NULL AND id <> ?").pluck().get(id) as number;
+    const isAdmin = this.db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'admin' AND active = 1").get(id);
+    if (isAdmin && others === 0) throw new AppError('Il faut garder au moins un administrateur actif', 'INVALID');
+  }
+
+  /**
+   * L'utilisateur a-t-il déjà laissé une trace (vente, journée de caisse,
+   * mouvement…) ? On cherche son identifiant dans toutes les colonnes qui
+   * désignent un utilisateur.
+   */
+  private userHasHistory(id: string): boolean {
+    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('users', 'user_prefs', 'user_rights', 'login_attempts', 'audit_log', 'outbox')").pluck().all() as string[];
+    for (const t of tables) {
+      const cols = (this.db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[])
+        .map((c) => c.name)
+        .filter((c) => c === 'user_id' || c.endsWith('_by') || c === 'cashier_id' || c === 'seller_id');
+      for (const c of cols) if (this.db.prepare(`SELECT 1 FROM ${t} WHERE ${c} = ? LIMIT 1`).get(id)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Supprime un utilisateur. Sans aucune trace, il est effacé ; sinon il reste
+   * pour l'historique (son nom sur ses tickets et ses écritures), désactivé,
+   * caché des listes, et son identifiant redevient libre.
+   */
+  deleteUser(byUserId: string, id: string): { erased: boolean } {
+    const user = this.getUser(id);
+    if (user.deleted_at) return { erased: false };
+    if (id === byUserId) throw new AppError('Vous ne pouvez pas supprimer votre propre compte', 'INVALID');
+    this.keepOneAdmin(id);
+    return this.tx(() => {
+      // Avec un serveur, un autre PC peut avoir des ventes de lui pas encore reçues : on le garde.
+      const erased = !this.getSetting('sync.deviceId') && !this.userHasHistory(id);
+      if (erased) {
+        this.db.prepare('UPDATE audit_log SET user_id = NULL WHERE user_id = ?').run(id);
+        for (const t of ['user_prefs', 'login_attempts']) this.db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+        this.db.prepare('DELETE FROM user_rights WHERE id = ?').run(id);
+        this.db.prepare('UPDATE staff SET user_id = NULL WHERE user_id = ?').run(id);
+        this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+        this.enqueue(null, 'user', id, 'delete', null);
+      } else {
+        this.db
+          .prepare('UPDATE users SET active = 0, deleted_at = ?, badge = NULL, login = ?, register_id = NULL, emoney_register_id = NULL, bank_register_id = NULL WHERE id = ?')
+          .run(this.now(), `${user.login}~${id.slice(0, 8)}`, id);
+        this.enqueue(null, 'user', id, 'upsert', this.getUser(id));
+      }
+      this.audit(byUserId, 'user.delete', 'user', erased ? undefined : id, { name: user.name, login: user.login, erased });
+      return { erased };
+    });
+  }
+
+  /** Donne un badge à l'utilisateur (ou le refait : l'ancien badge ne marche plus). */
+  newBadge(byUserId: string, id: string): User {
+    const user = this.getUser(id);
+    if (user.deleted_at) throw new AppError('Cet utilisateur a été supprimé', 'INVALID');
+    let badge = '';
+    do badge = `FX${String(randomInt(0, 100_000_000)).padStart(8, '0')}`;
+    while (this.db.prepare('SELECT 1 FROM users WHERE badge = ?').get(badge));
+    this.db.prepare('UPDATE users SET badge = ? WHERE id = ?').run(badge, id);
+    const next = this.getUser(id);
+    this.enqueue(null, 'user', id, 'upsert', next);
+    this.audit(byUserId, 'user.badge', 'user', id);
+    return next;
+  }
+
+  /** Identifiant de l'utilisateur dont on a scanné le badge (null si inconnu). */
+  loginForBadge(badge: string): string | null {
+    const code = badge.trim().toUpperCase();
+    if (!code) return null;
+    return (this.db.prepare('SELECT login FROM users WHERE badge = ? AND active = 1 AND deleted_at IS NULL').pluck().get(code) as string | undefined) ?? null;
+  }
+
   /** Longueur minimale du code fixée dans les paramètres du magasin (celui de l'utilisateur, sinon celui de ce poste). */
   private checkPinLength(pin: string, storeId: string | null): void {
     const sid = storeId ?? this.getSetting('station.storeId');
@@ -651,8 +743,8 @@ export class AdminService extends Base {
 
   login(login: string, pin: string): User {
     const row = this.db
-      .prepare('SELECT id, pin_hash, store_id FROM users WHERE login = ? AND active = 1')
-      .get(login.trim().toLowerCase()) as { id: string; pin_hash: string; store_id: string | null } | undefined;
+      .prepare('SELECT id, pin_hash, store_id FROM users WHERE (login = ? OR badge = ?) AND active = 1 AND deleted_at IS NULL')
+      .get(login.trim().toLowerCase(), login.trim().toUpperCase()) as { id: string; pin_hash: string; store_id: string | null } | undefined;
     const attempts = row
       ? ((this.db.prepare('SELECT failures, locked_until FROM login_attempts WHERE user_id = ?').get(row.id) as { failures: number; locked_until: string | null } | undefined) ?? null)
       : null;

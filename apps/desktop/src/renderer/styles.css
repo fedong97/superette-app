@@ -168,6 +168,8 @@ section.card .grid2 { gap: 16px; }
 
 /* Achats et fournisseurs */
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset.box { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px 12px; margin: 12px 0 0; min-width: 0; }
+fieldset.box legend { padding: 0 6px; font-weight: bold; }
 .grid2.top { align-items: start; }
 input.gap { border-color: #c62828; background: #fdecea; color: #c62828; }
 .nowrap { white-space: nowrap; }

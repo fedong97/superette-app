@@ -6,7 +6,7 @@ import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa,
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
 type MonthRow = Result<'staff.month'>[number];
-export type StaffTab = 'list' | 'salaries' | 'targets' | 'statement';
+export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement';
 
 const OFFICE_METHODS = { CASH: 'Espèces (caisse centrale)', MTN_MOMO: 'MTN MoMo (caisse électronique centrale)', ORANGE_MONEY: 'Orange Money (caisse électronique centrale)', BANK_TRANSFER: 'Virement', CHEQUE: 'Chèque' } as const;
 type OfficeMethod = keyof typeof OFFICE_METHODS;
@@ -19,7 +19,10 @@ const periodFr = (p: string) => new Date(`${p}-15T12:00:00`).toLocaleDateString(
 export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: StaffTab }) {
   const pay = has(user, 'staff_salaries');
   const targets = has(user, 'staff_targets');
-  const [tab, setTab] = useState<StaffTab>((initialTab === 'salaries' && !pay) || (initialTab === 'targets' && !targets) ? 'list' : initialTab);
+  const attendance = has(user, 'staff_attendance');
+  const [tab, setTab] = useState<StaffTab>(
+    (initialTab === 'salaries' && !pay) || (initialTab === 'targets' && !targets) || (initialTab === 'attendance' && !attendance) ? 'list' : initialTab,
+  );
   const [shown, setShown] = useState<string | null>(null);
   return (
     <div className="page">
@@ -33,6 +36,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
           ['list', 'Collaborateurs'],
           ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []),
           ...(targets ? ([['targets', 'Objectifs et commissions']] as [StaffTab, string][]) : []),
+          ...(attendance ? ([['attendance', 'Pointage']] as [StaffTab, string][]) : []),
           ['statement', 'Extrait de compte'],
         ]}
       />
@@ -47,6 +51,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
       )}
       {tab === 'salaries' && pay && <Salaries />}
       {tab === 'targets' && targets && <Targets />}
+      {tab === 'attendance' && attendance && <AttendanceMonth />}
       {tab === 'statement' && <Statement initial={shown} />}
     </div>
   );
@@ -857,5 +862,146 @@ function TargetEditor({ row, onClose, onSaved }: { row: TargetRow; onClose: () =
         </button>
       </div>
     </Modal>
+  );
+}
+
+type AttendanceRow = Result<'attendance.month'>[number];
+const hm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+const hours = (minutes: number) => `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
+
+/**
+ * Pointage du mois : arrivée à la première connexion du jour, départ à la
+ * clôture de caisse ou par « Je pars ». Retards au-delà de l'heure et de la
+ * tolérance réglées dans Administration › Paramètres › Pointage.
+ */
+function AttendanceMonth() {
+  const toast = useToast();
+  const settings = useStoreSettings();
+  const [period, setPeriod] = useState(today().slice(0, 7));
+  const rows = useLoad(() => call('attendance.month', period), [period]);
+  const [open, setOpen] = useState<AttendanceRow | null>(null);
+  const [fix, setFix] = useState<{ userId: string; name: string; day: string; arrived: string; left: string; reason: string } | null>(null);
+  const list = rows.data ?? [];
+  return (
+    <>
+      <div className="toolbar">
+        <Field label="Mois">
+          <input type="month" value={period} max={today().slice(0, 7)} onChange={(e) => setPeriod(e.target.value || today().slice(0, 7))} />
+        </Field>
+        <span className="spacer" />
+        <button onClick={() => window.print()} disabled={!list.length}>
+          Imprimer l’état
+        </button>
+      </div>
+      <p className="muted">
+        Arrivée attendue à {settings.workStart} (retard au-delà de {settings.lateToleranceMinutes} min). L’arrivée est notée à la première connexion du jour, le départ à la
+        clôture de la caisse ou par « Je pars » en bas de l’écran. Cliquez une ligne pour voir les jours et corriger un oubli.
+      </p>
+      {list.length ? (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Employé</th>
+              <th className="r">Jours présents</th>
+              <th className="r">Heures</th>
+              <th className="r">Retards</th>
+              <th className="r">Minutes de retard</th>
+              <th className="r">Absences</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((r) => (
+              <tr key={r.user_id} className="clickable" onClick={() => setOpen(r)}>
+                <td>
+                  <b>{r.name}</b>
+                </td>
+                <td className="r">{r.present}</td>
+                <td className="r">{hours(r.minutes)}</td>
+                <td className={`r ${r.late ? 'neg' : ''}`}>{r.late || ''}</td>
+                <td className="r">{r.late_minutes || ''}</td>
+                <td className={`r ${r.absences.length ? 'neg' : ''}`} title={r.absences.map(dateFr).join(', ')}>
+                  {r.absences.length || ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <Empty>Personne à pointer dans ce magasin.</Empty>
+      )}
+      {open && (
+        <Modal title={`Pointage de ${open.name}`} onClose={() => setOpen(null)} wide>
+          <table className="list">
+            <thead>
+              <tr>
+                <th>Jour</th>
+                <th>Arrivée</th>
+                <th>Départ</th>
+                <th className="r">Durée</th>
+                <th className="r">Retard</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {[...open.days.map((d) => ({ ...d, absent: false })), ...open.absences.map((day) => ({ day, arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, corrected: false, correction_reason: null, absent: true }))]
+                .sort((a, b) => a.day.localeCompare(b.day))
+                .map((d) => (
+                  <tr key={d.day} className={d.absent ? 'inactive' : ''}>
+                    <td>{dateFr(d.day)}</td>
+                    <td>{d.absent ? <span className="tag rupture">absent</span> : hm(d.arrived_at)}</td>
+                    <td>{hm(d.left_at)}</td>
+                    <td className="r">{d.minutes ? hours(d.minutes) : ''}</td>
+                    <td className={`r ${d.late_minutes ? 'neg' : ''}`}>{d.late_minutes ? `${d.late_minutes} min` : ''}</td>
+                    <td>
+                      {d.corrected && <small className="muted" title={d.correction_reason ?? ''}>corrigé </small>}
+                      <button
+                        className="link"
+                        onClick={() => setFix({ userId: open.user_id, name: open.name, day: d.day, arrived: hm(d.arrived_at), left: hm(d.left_at), reason: '' })}
+                      >
+                        Corriger…
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </Modal>
+      )}
+      {fix && (
+        <Modal title={`${fix.name}, ${dateFr(fix.day)}`} onClose={() => setFix(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await call('attendance.correct', fix.userId, fix.day, { arrived: fix.arrived || null, left: fix.left || null, reason: fix.reason });
+                toast.ok('Pointage corrigé');
+                setFix(null);
+                setOpen(null);
+                rows.reload();
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          >
+            <div className="grid2">
+              <Field label="Arrivée">
+                <input type="time" value={fix.arrived} onChange={(e) => setFix({ ...fix, arrived: e.target.value })} />
+              </Field>
+              <Field label="Départ">
+                <input type="time" value={fix.left} onChange={(e) => setFix({ ...fix, left: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Motif">
+              <input value={fix.reason} required placeholder="Badge oublié, mission à l’extérieur…" onChange={(e) => setFix({ ...fix, reason: e.target.value })} />
+            </Field>
+            <div className="actions">
+              <button className="primary" type="submit">
+                Enregistrer
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </>
   );
 }

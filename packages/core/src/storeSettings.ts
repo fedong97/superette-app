@@ -103,6 +103,12 @@ export interface StoreSettings {
   /** Points à avoir au minimum pour payer avec. */
   loyaltyMinRedeem: number;
 
+  /** Pointage : heure d'arrivée attendue (HH:MM), au-delà de la tolérance l'arrivée est en retard. */
+  workStart: string;
+  lateToleranceMinutes: number;
+  /** Jours travaillés (0 = dimanche … 6 = samedi) : « 123456 » du lundi au samedi. */
+  workDays: string;
+
   /** Paie : retenues légales (CNPS, IRPP, CAC, CFC, RAV, TDL) et charges patronales. */
   payroll: PayrollRules;
 
@@ -162,6 +168,9 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   loyaltySpendPerPoint: 1000,
   loyaltyPointValue: 10,
   loyaltyMinRedeem: 100,
+  workStart: '08:00',
+  lateToleranceMinutes: 10,
+  workDays: '123456',
   payroll: DEFAULT_PAYROLL,
   printTemplates: [],
   printDefaults: {},
@@ -187,6 +196,7 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   loyaltySpendPerPoint: [1, 1e7],
   loyaltyPointValue: [1, 1e6],
   loyaltyMinRedeem: [0, 1e7],
+  lateToleranceMinutes: [0, 240],
 };
 const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
@@ -225,6 +235,11 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       if (k === 'posLayout' && !(s in POS_LAYOUTS)) throw new Error("Présentation de l'écran de caisse : moderne, classique ou conventionnel");
       if (k === 'barcodeKind' && s !== 'ean8' && s !== 'ean13') throw new Error('Format des codes internes : EAN-8 ou EAN-13');
       if (k === 'labelFormat' && !isBarcodeLabelFormat(s)) throw new Error("Format d'étiquette inconnu");
+      if (k === 'workStart' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) throw new Error("Heure d'arrivée : HH:MM, par exemple 08:00");
+      if (k === 'workDays') {
+        s = [...new Set(s.replace(/[^0-6]/g, ''))].sort().join('');
+        if (!s) throw new Error('Choisissez au moins un jour travaillé');
+      }
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);

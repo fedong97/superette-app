@@ -1931,7 +1931,7 @@ CREATE TABLE containers (
   active INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL
 );
--- Emballage d'un article et nombre d'emballages par unité vendue (1 bouteille ; 1/12 de casier…).
+-- Emballage d'un article : un emballage pour container_units unités vendues (millièmes : 1 000 = une bouteille, 12 000 = un casier de 12).
 ALTER TABLE articles ADD COLUMN container_id TEXT;
 ALTER TABLE articles ADD COLUMN container_units INTEGER NOT NULL DEFAULT 1000;
 -- Mouvements d'emballages : sortis chez le client, vides rapportés, reçus du fournisseur,
@@ -2104,6 +2104,42 @@ DROP TABLE customer_orders;
 ALTER TABLE customer_orders_new RENAME TO customer_orders;
 CREATE INDEX customer_orders_store ON customer_orders(store_id, status, planned_date);
 CREATE UNIQUE INDEX customer_orders_web ON customer_orders(web_ref) WHERE web_ref IS NOT NULL;
+
+-- Pièces d'« Encaisser » et « Décaisser » : consignes et point Mobile Money en plus.
+CREATE TABLE treasury_entries_new (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  direction TEXT NOT NULL CHECK (direction IN ('IN', 'OUT')),
+  kind TEXT NOT NULL CHECK (kind IN ('staff_advance', 'staff_salary', 'staff_repayment', 'customer_refund', 'container_deposit', 'container_refund', 'agent_in', 'agent_out', 'other')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  method TEXT NOT NULL,
+  reference TEXT,
+  piece TEXT,
+  label TEXT NOT NULL,
+  party TEXT,
+  staff_id TEXT,
+  salary_id TEXT,
+  customer_id TEXT,
+  account_id TEXT,
+  register_id TEXT,
+  session_id TEXT,
+  from_central INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  cancelled_by TEXT,
+  authorized_by TEXT,
+  printed INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+INSERT INTO treasury_entries_new SELECT id, number, store_id, direction, kind, amount, method, reference, piece, label, party, staff_id, salary_id, customer_id, account_id,
+  register_id, session_id, from_central, status, cancel_reason, cancelled_by, authorized_by, printed, user_id, at, updated_at FROM treasury_entries;
+DROP TABLE treasury_entries;
+ALTER TABLE treasury_entries_new RENAME TO treasury_entries;
+CREATE INDEX treasury_entries_session ON treasury_entries(session_id);
+CREATE INDEX treasury_entries_staff ON treasury_entries(staff_id);
 `,
   },
 ];

@@ -218,7 +218,8 @@ export class CashDeskService extends Base {
         if (maxPct > 0 && s.base_salary > 0) {
           const ceiling = Math.floor((s.base_salary * maxPct) / 100);
           const after = Math.max(0, s.advances) + input.amount;
-          if (after > ceiling && !input.authorizedBy) {
+          const boss = input.authorizedBy ? (this.db.prepare("SELECT 1 FROM users WHERE id = ? AND role IN ('admin', 'manager')").get(input.authorizedBy) as unknown) : null;
+          if (after > ceiling && !boss) {
             throw new AppError(`Avances de ${s.name} limitées à ${ceiling} FCFA (${maxPct} % du salaire) : il en doit déjà ${Math.max(0, s.advances)}. Code du gérant nécessaire`, 'SUPERVISOR_REQUIRED');
           }
         }

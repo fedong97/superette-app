@@ -200,6 +200,10 @@ export class AgentService extends Base {
     if (def.float < 0 && input.amount > acc.float) throw new AppError(`La flotte de ${acc.name} n'a que ${acc.float} FCFA`, 'INSUFFICIENT');
     const session = def.cash !== 0 ? (ctx.registerId ? this.pos.currentSession(ctx.registerId) : null) : null;
     if (def.cash !== 0 && !session) throw new AppError('Ouvrez la caisse : les espèces du point Mobile Money passent par la journée', 'NO_SESSION');
+    if (session && def.cash < 0) {
+      const cash = this.pos.zReport(session.id).cash.expected;
+      if (input.amount > cash) throw new AppError(`Il n'y a que ${cash} FCFA en espèces dans la caisse`, 'INSUFFICIENT');
+    }
     const who = phone ?? input.biller?.trim() ?? acc.name;
     const label = `${AGENT_KINDS[input.kind].label.split(' (')[0]}, ${acc.name}${phone ? ` · ${phone}` : ''}${input.biller?.trim() ? ` · ${input.biller.trim()}` : ''}`;
     return this.tx(() => {

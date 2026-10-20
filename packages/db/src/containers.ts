@@ -143,7 +143,7 @@ export class ContainerService extends Base {
     });
   }
 
-  /** Emballage d'un article : `units` emballages (en millièmes) par unité vendue ; null le retire. */
+  /** Emballage d'un article : un emballage pour `units` unités vendues (en millièmes : 12 000 = un casier de 12) ; null le retire. */
   setArticleContainer(userId: string, articleId: string, containerId: string | null, units: Milli = 1000): void {
     const exists = this.db.prepare('SELECT 1 FROM articles WHERE id = ?').get(articleId);
     if (!exists) throw new AppError('Article introuvable', 'NOT_FOUND');
@@ -165,12 +165,13 @@ export class ContainerService extends Base {
     for (const l of lines) {
       const c = get.get(l.articleId) as { id: string; name: string; deposit: number; container_units: number } | undefined;
       if (!c || l.qty <= 0) continue;
-      const count = (l.qty * c.container_units) / 1_000_000;
+      const count = l.qty / c.container_units;
       const cur = out.get(c.id) ?? { container_id: c.id, name: c.name, deposit: c.deposit, count: 0 };
       cur.count += count;
       out.set(c.id, cur);
     }
-    return [...out.values()].map((n) => ({ ...n, count: Math.round(n.count) })).filter((n) => n.count > 0);
+    // Un casier entamé part quand même : on arrondit au-dessus.
+    return [...out.values()].map((n) => ({ ...n, count: Math.ceil(n.count - 1e-9) })).filter((n) => n.count > 0);
   }
 
   // --- Mouvements --------------------------------------------------------------------

@@ -751,3 +751,46 @@ function DeclaredZView({ z, lines, diffClass, compact }: { z: Result<'pos.zRepor
     </div>
   );
 }
+
+/**
+ * Ticket envoyé au client par WhatsApp : le numéro de sa fiche est proposé,
+ * la facture A4 peut être enregistrée en PDF pour la joindre au message.
+ */
+export function WhatsappTicketDialog({ saleId, number, onClose }: { saleId: string; number: string; onClose: () => void }) {
+  const toast = useToast();
+  const [phone, setPhone] = useState('');
+  const [pdf, setPdf] = useState(false);
+  useEffect(() => {
+    call('pos.ticketPhone', saleId).then((p) => p && setPhone(p), () => undefined);
+  }, [saleId]);
+  return (
+    <Modal title={`Envoyer le ticket ${number} par WhatsApp`} onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            if (pdf && !(await call('pos.printInvoice', saleId, { output: 'pdf' }))) return;
+            const r = await call('pos.whatsappTicket', saleId, phone);
+            window.open(r.link);
+            toast.ok(pdf ? 'WhatsApp est ouvert : joignez le PDF enregistré, puis envoyez.' : 'WhatsApp est ouvert avec le ticket : il ne reste qu’à envoyer.');
+            onClose();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <Field label="Numéro WhatsApp du client" hint="9 chiffres : l’indicatif 237 est ajouté.">
+          <input autoFocus inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="6XX XX XX XX" required />
+        </Field>
+        <label className="inline">
+          <input type="checkbox" checked={pdf} onChange={(e) => setPdf(e.target.checked)} /> Enregistrer aussi la facture A4 en PDF pour la joindre
+        </label>
+        <div className="actions">
+          <button className="primary" type="submit">
+            Ouvrir WhatsApp
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

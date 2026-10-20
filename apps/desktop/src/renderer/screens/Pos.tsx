@@ -9,7 +9,7 @@ import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
-import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
+import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog, WhatsappTicketDialog } from './PosDialogs';
 import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
@@ -174,6 +174,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const can = (p: Permission) => has(user, p);
   const [weightFor, setWeightFor] = useState<Article | null>(null);
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
+  const [waSale, setWaSale] = useState<{ id: string; number: string } | null>(null);
+  const sendWhatsapp = () => lastSale && setWaSale({ id: lastSale.id, number: lastSale.number });
   const [customer, setCustomer] = useState<Customer | null>(null);
   /** Nom donné par un client comptoir (facultatif), imprimé sur le ticket et la facture. */
   const [clientName, setClientName] = useState('');
@@ -876,7 +878,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
 
   const dialogs = (
     <>
-    {dialog === 'pay' && (
+    {waSale && <WhatsappTicketDialog saleId={waSale.id} number={waSale.number} onClose={() => setWaSale(null)} />}
+      {dialog === 'pay' && (
       <PaymentDialog
         total={toPay}
         needsSupervisor={discountNeedsCode}
@@ -1424,6 +1427,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
               Facture A4 <kbd>F9</kbd>
             </button>
+            <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp">
+              WhatsApp
+            </button>
             <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
               Tiroir <kbd>F5</kbd>
             </button>
@@ -1683,6 +1689,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           </button>
           <button disabled={!lastSale || lines.length > 0} onClick={printA4}>
             Facture A4 <kbd>F9</kbd>
+          </button>
+          <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp">
+            WhatsApp
           </button>
           <button disabled={!lines.length} onClick={openPay}>
             Encaisser <kbd>Ctrl+E</kbd>
@@ -2024,6 +2033,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         </button>
         <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>📄</i>Facture A4 <kbd>F9</kbd>
+        </button>
+        <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp" style={{ '--c': '#16a34a' } as React.CSSProperties}>
+          <i aria-hidden>💬</i>WhatsApp
         </button>
         <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>

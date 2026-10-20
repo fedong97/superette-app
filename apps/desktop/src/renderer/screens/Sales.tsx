@@ -3,7 +3,7 @@ import { PAYMENT_METHODS } from '@superette/core';
 import { type Result, call } from '../api';
 import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
 import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
-import { ZView } from './PosDialogs';
+import { WhatsappTicketDialog, ZView } from './PosDialogs';
 import { InvoicePreview } from './docPreview';
 import { tx } from '../tax';
 
@@ -225,6 +225,7 @@ export function SaleDetail({ sale, onClose, onChanged }: { sale: Result<'pos.sal
   const can = useCan();
   const [preview, setPreview] = useState(false);
   const [voiding, setVoiding] = useState<'cancel' | 'hide' | null>(null);
+  const [whatsapp, setWhatsapp] = useState(false);
   const live = sale.kind === 'sale' && sale.status === 'completed';
   if (preview) return <InvoicePreview saleId={sale.id} onClose={() => setPreview(false)} />;
   if (voiding)
@@ -297,9 +298,13 @@ export function SaleDetail({ sale, onClose, onChanged }: { sale: Result<'pos.sal
             Supprimer
           </button>
         )}
+        <button onClick={() => setWhatsapp(true)} title="Envoyer le ticket au client par WhatsApp">
+          WhatsApp
+        </button>
         <button className="primary" disabled={!can('sale_reprint')} onClick={() => call('pos.printTicket', sale.id).then(() => toast.ok('Ticket réimprimé'), toast.error)}>
           Réimprimer le ticket
         </button>
+        {whatsapp && <WhatsappTicketDialog saleId={sale.id} number={sale.number} onClose={() => setWhatsapp(false)} />}
       </div>
     </Modal>
   );

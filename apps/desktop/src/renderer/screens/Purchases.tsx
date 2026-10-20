@@ -301,6 +301,7 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
   const order = useLoad(() => call('purchases.order', id), [id]);
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
   const [preview, setPreview] = useState(false);
+  const [whatsapp, setWhatsapp] = useState(false);
   const o = order.data;
   if (!o) return null;
   const setStatus = async (status: 'sent' | 'closed' | 'cancelled', question?: string) => {
@@ -381,6 +382,10 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
         <button onClick={onBack}>Retour à la liste</button>
         <button onClick={() => setPreview(true)}>Aperçu et impression…</button>
         {preview && <DocPreview source={{ kind: 'purchaseOrder', id: o.id }} onClose={() => setPreview(false)} />}
+        <button onClick={() => setWhatsapp(true)} title="Envoyer le bon au fournisseur par WhatsApp">
+          WhatsApp au fournisseur
+        </button>
+        {whatsapp && <WhatsappOrderDialog orderId={o.id} number={o.number} supplier={o.supplier_name} onClose={() => setWhatsapp(false)} />}
         {canEdit && o.state === 'draft' && <button onClick={() => onEdit(o)}>Modifier</button>}
         {canClose && o.state === 'draft' && (
           <>
@@ -1457,5 +1462,42 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
         </button>
       </div>
     </>
+  );
+}
+
+/** Bon de commande envoyé au fournisseur par WhatsApp, avec le PDF du bon à joindre. */
+function WhatsappOrderDialog({ orderId, number, supplier, onClose }: { orderId: string; number: string; supplier: string; onClose: () => void }) {
+  const toast = useToast();
+  const [phone, setPhone] = useState('');
+  const [pdf, setPdf] = useState(true);
+  return (
+    <Modal title={`Envoyer le bon ${number} à ${supplier}`} onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            if (pdf && !(await call('purchases.printOrder', orderId, { output: 'pdf' }))) return;
+            const r = await call('purchases.whatsappOrder', orderId, phone || null);
+            window.open(r.link);
+            toast.ok(pdf ? 'WhatsApp est ouvert : joignez le PDF du bon, puis envoyez.' : 'WhatsApp est ouvert avec le bon de commande.');
+            onClose();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <Field label="Numéro WhatsApp" hint="Vide : le téléphone de la fiche du fournisseur.">
+          <input autoFocus inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="6XX XX XX XX" />
+        </Field>
+        <label className="inline">
+          <input type="checkbox" checked={pdf} onChange={(e) => setPdf(e.target.checked)} /> Enregistrer d’abord le bon en PDF pour le joindre
+        </label>
+        <div className="actions">
+          <button className="primary" type="submit">
+            Ouvrir WhatsApp
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

@@ -59,3 +59,69 @@ export function whatsappLink(phone: string | null | undefined, text: string): st
   const n = whatsappNumber(phone);
   return n ? `https://wa.me/${n}?text=${encodeURIComponent(text)}` : null;
 }
+
+/** Ticket envoyé au client par WhatsApp : lignes, total, paiements. */
+export interface TicketMessageData {
+  store: string;
+  storePhone?: string | null;
+  number: string;
+  date: string;
+  kind: 'sale' | 'return';
+  customer?: string | null;
+  lines: { label: string; qty: string; total: number }[];
+  total: number;
+  discount: number;
+  payments: { label: string; amount: number }[];
+  change: number;
+}
+
+export function ticketMessage(d: TicketMessageData): string {
+  const when = new Date(d.date);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${pad(when.getDate())}/${pad(when.getMonth() + 1)}/${when.getFullYear()} ${pad(when.getHours())}:${pad(when.getMinutes())}`;
+  return [
+    `*${d.store}*`,
+    `${d.kind === 'return' ? 'Avoir' : 'Ticket'} ${d.number} du ${stamp}`,
+    d.customer ? `Client : ${d.customer}` : '',
+    '',
+    ...d.lines.map((l) => `${l.qty} × ${l.label} : ${formatFcfa(l.total)}`),
+    '',
+    d.discount ? `Remises : −${formatFcfa(d.discount)}` : '',
+    `*Total : ${formatFcfa(d.total)}*`,
+    ...d.payments.map((p) => `${p.label} : ${formatFcfa(p.amount)}`),
+    d.change ? `Monnaie rendue : ${formatFcfa(d.change)}` : '',
+    '',
+    `Merci de votre visite !${d.storePhone ? ` ${d.storePhone}` : ''}`,
+  ]
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Bon de commande envoyé au fournisseur par WhatsApp. */
+export interface OrderMessageData {
+  store: string;
+  storePhone?: string | null;
+  supplier: string;
+  number: string;
+  expected?: string | null;
+  lines: { label: string; qty: string; reference?: string | null }[];
+  total: number | null;
+}
+
+export function purchaseOrderMessage(d: OrderMessageData): string {
+  return [
+    `Bonjour ${d.supplier},`,
+    '',
+    `Voici notre bon de commande ${d.number} :`,
+    ...d.lines.map((l) => `- ${l.qty} × ${l.label}${l.reference ? ` (réf. ${l.reference})` : ''}`),
+    d.total ? `Montant : ${formatFcfa(d.total)}` : '',
+    d.expected ? `Livraison souhaitée le ${dayFr(d.expected)}.` : '',
+    '',
+    'Merci de nous confirmer la disponibilité et la date de livraison.',
+    `${d.store}${d.storePhone ? ` ${d.storePhone}` : ''}`,
+  ]
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}

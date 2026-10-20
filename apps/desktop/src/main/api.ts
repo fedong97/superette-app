@@ -8,6 +8,10 @@ import {
   staffBadgeHtml,
   reminderMessage,
   whatsappLink,
+  ticketMessage,
+  purchaseOrderMessage,
+  PAYMENT_METHODS,
+  formatQty,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -1232,6 +1236,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     ) => s.purchases.updateOrder(ctx(['purchase_orders']), id, input),
     'purchases.setOrderStatus': (id: string, status: 'sent' | 'closed' | 'cancelled') => s.purchases.setOrderStatus(ctx(['order_close']), id, status),
     'purchases.receiveOrder': (id: string, input: Parameters<Services['purchases']['receiveOrder']>[2]) => s.purchases.receiveOrder(ctx(['order_receive']), id, input),
+    /** Bon de commande envoyé au fournisseur par WhatsApp (au numéro de sa fiche, ou celui tapé). */
+    'purchases.whatsappOrder': (id: string, phone?: string | null) => {
+      requireUser(['purchase_orders']);
+      const order = s.purchases.getOrder(id);
+      const supplier = s.purchases.getSupplier(order.supplier_id);
+      const store = s.admin.getStore(order.store_id);
+      const text = purchaseOrderMessage({
+        store: store.name,
+        storePhone: store.phone,
+        supplier: supplier.name,
+        number: order.number,
+        expected: order.expected_date,
+        lines: order.lines.map((l) => ({ label: l.article_name, qty: formatQty(l.qty, l.unit), reference: l.supplier_ref })),
+        total: order.total_ht || null,
+      });
+      const link = whatsappLink(phone?.trim() || supplier.phone, text);
+      if (!link) throw new AppError('Tapez le numéro WhatsApp du fournisseur (9 chiffres)', 'NO_PHONE');
+      return { link, text, phone: phone?.trim() || supplier.phone };
+    },
     'purchases.printOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (requireUser(), printer.purchaseOrder(id, opts)),
     'purchases.previewOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => (
       requireUser(), { ...printer.previewPurchaseOrder(id, opts), doc: 'purchaseOrder' as const, variant: 'order' as DocVariant }
@@ -1384,6 +1407,43 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.sales': (opts: { sessionId?: string; date?: string }) => {
       const c = ctx();
       return can(user!, ['sales']) ? s.pos.listSales({ ...opts, storeId: c.storeId }) : ownRecent(user!);
+    },
+    /**
+     * Ticket envoyé au client par WhatsApp : le message rempli et le lien qui
+     * ouvre WhatsApp au numéro du client (celui de sa fiche, ou celui tapé).
+     */
+    'pos.whatsappTicket': (saleId: string, phone?: string | null) => {
+      requireSaleAccess(saleId);
+      const sale = s.pos.getSale(saleId);
+      const store = s.admin.getStore(sale.store_id);
+      const customer = sale.customer_id ? s.customers.getCustomer(sale.customer_id) : null;
+      const number = phone?.trim() || customer?.phone || '';
+      const text = ticketMessage({
+        store: store.name,
+        storePhone: store.phone,
+        number: sale.number,
+        date: sale.created_at,
+        kind: sale.kind,
+        customer: customer?.name ?? sale.customer_name,
+        lines: sale.lines.map((l) => ({
+          label: l.pack_name ? `${l.label} (${l.pack_name})` : l.label,
+          qty: l.pack_units ? formatQty(Math.round((l.qty * 1000) / l.pack_units), 'piece') : formatQty(l.qty, l.unit),
+          total: Math.abs(l.total_ttc),
+        })),
+        total: Math.abs(sale.total_ttc),
+        discount: sale.total_discount + sale.total_promo,
+        payments: sale.payments.map((p) => ({ label: PAYMENT_METHODS[p.method], amount: Math.abs(p.amount) })),
+        change: sale.change_given,
+      });
+      const link = whatsappLink(number, text);
+      if (!link) throw new AppError('Tapez le numéro WhatsApp du client (9 chiffres)', 'NO_PHONE');
+      return { link, text, phone: number };
+    },
+    /** Téléphone du client du ticket (proposé avant l'envoi par WhatsApp). */
+    'pos.ticketPhone': (saleId: string) => {
+      requireSaleAccess(saleId);
+      const sale = s.pos.getSale(saleId);
+      return sale.customer_id ? (s.customers.getCustomer(sale.customer_id).phone ?? null) : null;
     },
     'pos.hold': (label: string, lines: SaleLineInput[]) => {
       const c = ctx(['sale_hold']);

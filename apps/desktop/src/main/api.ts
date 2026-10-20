@@ -180,6 +180,8 @@ export interface Printer {
   /** Tiroir d'une vente enregistrée sans ticket (F4) : il s'ouvre selon les réglages, comme avec le ticket. */
   saleDrawer(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
+  /** Bon de passation d'une relève d'équipe. */
+  handover(handoverId: string): Promise<void>;
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
   /** Bon d'un mouvement de caisse électronique : versement vers la centrale, transfert, banque… */
@@ -1658,6 +1660,30 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const voucher = s.treasury.sessionMovements(se.id).find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
       return { sessionId: se.id, counted: se.counted_cash ?? 0, floatLeft: se.float_left ?? 0, deposit: se.deposit ?? 0, voucherId: voucher?.id ?? null, voucherNumber: voucher?.number ?? null };
     },
+    /**
+     * Relève d'équipe : le caissier qui part compte le tiroir à l'aveugle, celui
+     * qui arrive tape son identifiant et son code. Le bon de passation s'imprime,
+     * la journée continue au nom du nouveau caissier (même fond, même Z).
+     */
+    'treasury.handover': async (counted: DenominationCount, login: string, pin: string, registerId?: string) => {
+      const c = sameRegister(ctx(TREASURY), registerId);
+      const station = s.admin.station()!;
+      const next = s.admin.login(login, pin);
+      if (!can(next, TREASURY)) throw new AppError(`${next.name} n'a pas accès à la caisse`, 'FORBIDDEN');
+      const own = s.admin.getUser(next.id).register_id;
+      if (own && own !== c.registerId) throw new AppError(`${next.name} travaille sur une autre caisse : attribuez-lui ${s.admin.getRegister(c.registerId!).name} dans sa fiche`, 'INVALID');
+      if (!own && !isSupervisor(next)) throw new AppError(`Aucune caisse n'est attribuée à ${next.name}`, 'INVALID');
+      const h = s.pos.handover(c, counted, next.id);
+      if (!s.fiches.current()) {
+        s.attendance.leave(c.userId, c.storeId);
+        s.attendance.arrive(next.id, station.store.id);
+      }
+      user = next;
+      chosenRegisterId = own ? null : c.registerId;
+      await printer.handover(h.id).catch(() => undefined);
+      return { id: h.id, number: h.number, from: h.from_name, to: h.to_name, counted: h.counted };
+    },
+    'treasury.printHandover': (id: string) => (requireUser(TREASURY), printer.handover(id)),
     /** Écarts de clôture qui attendent le motif du gérant. */
     'treasury.pendingGaps': () => {
       const u = requireUser();

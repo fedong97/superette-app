@@ -59,7 +59,7 @@ function FullTreasury({
   const [selected, setSelected] = useState<string | null>(canCentral && initialTab === 'central' ? CENTRAL : canCentral && initialTab === 'emoney' ? EMONEY : null);
   const [tab, setTab] = useState<Exclude<TreasuryTab, 'central' | 'emoney'>>(initialTab === 'history' ? 'history' : 'day');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'open' | 'close' | 'declared' | 'central-in' | 'central-out' | null>(null);
+  const [dialog, setDialog] = useState<'open' | 'close' | 'handover' | 'declared' | 'central-in' | 'central-out' | null>(null);
   // Historique filtré par type de caisse : espèces, électronique ou banque.
   const [kind, setKind] = useState<RegisterKind | 'all'>('all');
 
@@ -169,9 +169,12 @@ function FullTreasury({
           )
         ) : here ? (
           open ? (
-            <button className="danger" onClick={() => setDialog('close')}>
-              Fermer la caisse…
-            </button>
+            <>
+              <button onClick={() => setDialog('handover')}>Relève d'équipe…</button>
+              <button className="danger" onClick={() => setDialog('close')}>
+                Fermer la caisse…
+              </button>
+            </>
           ) : (
             <button className="primary" onClick={() => setDialog('open')}>
               Ouvrir la caisse…
@@ -269,6 +272,17 @@ function FullTreasury({
           onDone={() => {
             setDialog(null);
             setSessionId(null);
+            reload();
+          }}
+        />
+      )}
+      {dialog === 'handover' && open && (
+        <HandoverDialog
+          session={open}
+          user={user}
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
             reload();
           }}
         />
@@ -1002,7 +1016,7 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
   const toast = useToast();
   const state = useLoad(() => call('treasury.state'), [registerId]);
   const day = useLoad(() => call('treasury.myDay'), [registerId]);
-  const [dialog, setDialog] = useState<'open' | 'close' | null>(null);
+  const [dialog, setDialog] = useState<'open' | 'close' | 'handover' | null>(null);
   const reload = () => {
     state.reload();
     day.reload();
@@ -1046,9 +1060,12 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
             <strong className={`tre-state ${open ? 'open' : 'closed'}`}>{open ? (register.stale ? 'Ouverte (journée non clôturée)' : 'Ouverte.') : 'Fermée.'}</strong>
             <span className="spacer" />
             {open ? (
-              <button className="danger" onClick={() => setDialog('close')}>
-                Fermer la caisse…
-              </button>
+              <>
+                <button onClick={() => setDialog('handover')}>Relève d'équipe…</button>
+                <button className="danger" onClick={() => setDialog('close')}>
+                  Fermer la caisse…
+                </button>
+              </>
             ) : (
               <button className="primary" onClick={() => setDialog('open')}>
                 Ouvrir la caisse…
@@ -1112,6 +1129,17 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
         <OpenDialog
           register={register}
           canOpen={state.data.canOpen}
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            reload();
+          }}
+        />
+      )}
+      {dialog === 'handover' && open && (
+        <HandoverDialog
+          session={open}
+          user={user}
           onClose={() => setDialog(null)}
           onDone={() => {
             setDialog(null);
@@ -1232,6 +1260,101 @@ function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNull
             </button>
             <button type="submit" className="danger" disabled={deposit === null || deposit < 0}>
               Clôturer et verser
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * Relève d'équipe : le caissier qui part compte le tiroir sans voir l'attendu,
+ * celui qui arrive se connecte, et le bon de passation s'imprime avec l'écart.
+ * La journée continue : même fond, même Z, qui détaillera chaque caissier.
+ */
+function HandoverDialog({ session, user, onClose, onDone }: { session: NonNullable<RegisterRow['session']>; user: User; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [count, setCount] = useState<Record<number, number>>({});
+  const [step, setStep] = useState<'count' | 'next'>('count');
+  const [login, setLogin] = useState('');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<Result<'treasury.handover'> | null>(null);
+  const counted = countedTotal(count);
+
+  if (done) {
+    return (
+      <Modal title="Relève faite" onClose={onDone}>
+        <p>
+          Merci {done.from}. Bienvenue {done.to} : la caisse est à votre nom, la journée continue.
+        </p>
+        <p className="muted">Le bon de passation n° {done.number} est imprimé : signez-le tous les deux.</p>
+        <div className="actions">
+          <button onClick={() => call('treasury.printHandover', done.id).catch(toast.error)}>Réimprimer le bon</button>
+          <button className="primary" onClick={onDone}>
+            Terminer
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Relève d'équipe" onClose={onClose} wide>
+      {step === 'count' ? (
+        <>
+          <p>{user.name}, comptez les espèces du tiroir par coupure avant de passer la main. La caisse reste ouverte.</p>
+          <Denominations count={count} onChange={setCount} />
+          <div className="actions">
+            <span className="big-total">{fcfa(counted)}</span>
+            <button className="primary" onClick={() => setStep('next')}>
+              Valider le comptage
+            </button>
+          </div>
+        </>
+      ) : (
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              setDone(await call('treasury.handover', count, login.trim(), pin, session.register_id));
+            } catch (err) {
+              toast.error(err);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <p>
+            Espèces comptées : <b>{fcfa(counted)}</b>. Le caissier qui arrive se connecte :
+          </p>
+          <div className="grid2">
+            <Field label="Identifiant (ou badge)">
+              <input
+                autoFocus
+                value={login}
+                onChange={(e) => setLogin(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key !== 'Enter' || !/^FX\d{8}$/i.test(login.trim())) return;
+                  e.preventDefault();
+                  const found = await call('auth.badge', login.trim()).catch(() => null);
+                  if (found) setLogin(found);
+                  (e.currentTarget.form?.elements.namedItem('pin') as HTMLInputElement | null)?.focus();
+                }}
+              />
+            </Field>
+            <Field label="Code">
+              <input name="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+            </Field>
+          </div>
+          <div className="actions">
+            <button type="button" className="ghost" onClick={() => setStep('count')}>
+              Recompter
+            </button>
+            <button type="submit" className="primary" disabled={busy || !login.trim() || !pin}>
+              Passer la main
             </button>
           </div>
         </form>

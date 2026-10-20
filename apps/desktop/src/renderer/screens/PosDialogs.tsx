@@ -673,6 +673,29 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
             <tr><td>Annulations ({z.cancelled.count})</td><td className="r">{fcfa(z.cancelled.amount)}</td></tr>
           </tbody>
         </table>
+        {z.byCashier.length > 0 && (
+          <table className="list">
+            <caption>Par caissier{z.handovers.length ? ` (${z.handovers.length} relève${z.handovers.length > 1 ? 's' : ''})` : ''}</caption>
+            <thead>
+              <tr>
+                <th>Caissier</th>
+                <th className="r">Tickets</th>
+                <th className="r">Net TTC</th>
+                <th className="r">Écart</th>
+              </tr>
+            </thead>
+            <tbody>
+              {z.byCashier.map((c) => (
+                <tr key={c.user_id}>
+                  <td>{c.name}</td>
+                  <td className="r">{c.tickets}</td>
+                  <td className="r">{fcfa(c.net)}</td>
+                  <td className={`r ${c.difference && c.difference < 0 ? 'neg' : ''}`}>{c.difference === null ? '—' : fcfa(c.difference)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

@@ -1770,4 +1770,28 @@ CREATE TABLE attendance (
 CREATE INDEX attendance_day ON attendance(day, user_id);
 `,
   },
+  {
+    version: 48,
+    name: "relève d'équipe",
+    sql: `
+-- Relève d'équipe : le caissier qui part compte le tiroir, celui qui arrive
+-- continue la même journée. Attendu et compté au moment de la relève ;
+-- l'écart est celui du caissier qui part (sans ceux des relèves d'avant).
+CREATE TABLE cash_handovers (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  register_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  from_user TEXT NOT NULL,
+  to_user TEXT NOT NULL,
+  at TEXT NOT NULL,
+  counted_detail TEXT NOT NULL,
+  expected INTEGER NOT NULL,
+  counted INTEGER NOT NULL,
+  difference INTEGER NOT NULL
+);
+CREATE INDEX cash_handovers_session ON cash_handovers(session_id, at);
+`,
+  },
 ];

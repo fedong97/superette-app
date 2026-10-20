@@ -34,6 +34,7 @@ const TABLES: Record<string, string> = {
   register: 'registers',
   user: 'users',
   attendance: 'attendance',
+  cash_handover: 'cash_handovers',
   department: 'departments',
   family: 'families',
   lot: 'lots',

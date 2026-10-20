@@ -761,6 +761,7 @@ export const EN: Record<string, string> = {
   "Paiement refusé": "Payment declined",
   "Paiements": "Payments",
   "Par": "By",
+  "Couleurs et badges": "Colors and badges",
   "Paramètres": "Settings",
   "Partir 🚚": "Leave 🚚",
   "Pas de caisse électronique centrale : choisissez-la dans Administration › Paramètres": "No central electronic register: choose it in Administration › Settings",

@@ -12,7 +12,7 @@ export function setSyncClientVersion(version: string) {
  * Échanges HTTP avec le serveur central (fetch : Node 22 et Electron).
  * Utilisé par le processus principal de l'application et par les tests.
  */
-async function request<T>(baseUrl: string, path: string, init: { method?: string; token?: string; body?: unknown } = {}): Promise<T> {
+async function request<T>(baseUrl: string, path: string, init: { method?: string; token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
@@ -23,7 +23,7 @@ async function request<T>(baseUrl: string, path: string, init: { method?: string
         ...(clientVersion ? { 'x-fedonix-version': clientVersion } : {}),
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(init.timeoutMs ?? 60_000),
     });
   } catch (e) {
     throw new AppError(`Serveur central injoignable (${e instanceof Error ? e.message : String(e)})`, 'SYNC_OFFLINE');
@@ -192,4 +192,62 @@ export async function takeShelfCart(s: Services, id: string): Promise<ShelfCart>
   const creds = s.sync.credentials();
   if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
   return request<ShelfCart>(creds.url, `/api/v1/carts/${encodeURIComponent(id)}/take`, { token: creds.token, body: {} });
+}
+
+/** Commande passée sur la boutique en ligne du magasin, en attente d'un poste. */
+export interface WebOrder {
+  id: string;
+  number: string;
+  customerName: string;
+  phone: string;
+  address: string | null;
+  slot: string | null;
+  note: string | null;
+  deliveryFee: number;
+  lines: { articleId: string; name: string; qty: number; price: number }[];
+  total: number;
+  at: string;
+}
+
+/** Commandes de la boutique en ligne qui attendent un poste du magasin ; aucune si le PC n'est pas relié. */
+export async function webOrders(s: Services): Promise<WebOrder[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ orders: WebOrder[] }>(creds.url, '/api/v1/web-orders', { token: creds.token })).orders;
+}
+
+/** Prend la commande de la boutique pour ce poste (un seul poste l'obtient). */
+export async function takeWebOrder(s: Services, id: string): Promise<WebOrder> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : les commandes de la boutique en ligne n'arrivent pas", 'SYNC_NOT_CONFIGURED');
+  return request<WebOrder>(creds.url, `/api/v1/web-orders/${encodeURIComponent(id)}/take`, { token: creds.token, body: {} });
+}
+
+/** Une sauvegarde de 200 Mo sur une connexion lente : jusqu'à 30 minutes. */
+const BACKUP_TIMEOUT_MS = 30 * 60_000;
+
+/** Envoie au serveur une sauvegarde déjà chiffrée sur ce PC (le serveur n'a pas la clé). */
+export async function uploadStationBackup(s: Services, input: { name: string; data: Buffer; sha256: string }): Promise<{ id: string; at: string }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : la sauvegarde en ligne est impossible", 'SYNC_NOT_CONFIGURED');
+  return request<{ id: string; at: string }>(creds.url, '/api/v1/station-backups', {
+    token: creds.token,
+    body: { name: input.name, size: input.data.length, sha256: input.sha256, data: input.data.toString('base64') },
+    timeoutMs: BACKUP_TIMEOUT_MS,
+  });
+}
+
+/** Sauvegardes en ligne des PC du magasin, de la plus récente à la plus ancienne. */
+export async function stationBackups(s: Services): Promise<{ id: string; name: string; size: number; at: string; device: string | null }[]> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : les sauvegardes en ligne ne sont pas accessibles", 'SYNC_NOT_CONFIGURED');
+  return (await request<{ backups: { id: string; name: string; size: number; at: string; device: string | null }[] }>(creds.url, '/api/v1/station-backups', { token: creds.token })).backups;
+}
+
+/** Récupère une sauvegarde en ligne du magasin (toujours chiffrée : la clé du magasin l'ouvre). */
+export async function downloadStationBackup(s: Services, id: string): Promise<{ name: string; data: Buffer }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : les sauvegardes en ligne ne sont pas accessibles", 'SYNC_NOT_CONFIGURED');
+  const r = await request<{ name: string; data: string }>(creds.url, `/api/v1/station-backups/${encodeURIComponent(id)}`, { token: creds.token, timeoutMs: BACKUP_TIMEOUT_MS });
+  return { name: r.name, data: Buffer.from(r.data, 'base64') };
 }

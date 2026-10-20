@@ -80,7 +80,7 @@
 
   var ONGLETS = [
     ['accueil', 'Accueil'], ['postes', 'Postes'], ['activite', 'Activité'],
-    ['ventes', 'Ventes'], ['majs', 'Mises à jour'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
+    ['ventes', 'Ventes'], ['boutique', 'Boutique en ligne'], ['majs', 'Mises à jour'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
   ];
 
   function esc(v) {
@@ -209,7 +209,7 @@
   }
 
   function afficher(silencieux) {
-    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, majs: vueMajs, sauvegardes: vueSauvegardes, reglages: vueReglages };
+    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, boutique: vueBoutique, majs: vueMajs, sauvegardes: vueSauvegardes, reglages: vueReglages };
     var o = onglet;
     if (!silencieux) page.innerHTML = '<p class="muted">Chargement…</p>';
     vues[o]().then(function (html) {
@@ -352,6 +352,26 @@
         j.stores.forEach(function (s, i) {
           h += '<tr><td>' + (i === 0 ? esc(nom) : '') + '</td><td>' + esc(s.store) + '</td><td class="nombre">' + s.sales + '</td><td class="nombre">' + fcfa(s.total) + '</td></tr>';
         });
+      });
+      return h + '</tbody></table></div>';
+    });
+  }
+
+  // ——— Boutique en ligne ———
+
+  function vueBoutique() {
+    return api('web-orders').then(function (cmds) {
+      var h = '<h2>Commandes de la boutique en ligne</h2><p class="muted">Commandes passées sur la page internet des magasins (<code>/boutique/&lt;code du magasin&gt;</code>). Un poste du magasin les prend et appelle le client pour confirmer. La boutique s\'ouvre dans FEDONIX 360, Administration › Paramètres du magasin.</p><div class="bloc">';
+      if (!cmds.length) return h + '<p class="muted">Aucune commande reçue pour le moment.</p></div>';
+      var etats = { waiting: ['alerte', 'En attente'], taken: ['ok', 'Prise'], cancelled: ['non', 'Annulée'] };
+      h += '<table><thead><tr><th>Reçue</th><th>Numéro</th><th>Magasin</th><th>Client</th><th>Retrait ou livraison</th><th class="nombre">Montant</th><th>État</th></tr></thead><tbody>';
+      cmds.forEach(function (c) {
+        var e = etats[c.status] || ['non', c.status];
+        h += '<tr><td>' + esc(date(c.at)) + '</td><td><code>' + esc(c.number) + '</code></td><td>' + esc(c.store) + '</td>' +
+          '<td>' + esc(c.customerName) + '<div class="muted">' + esc(c.phone) + '</div></td>' +
+          '<td>' + (c.address ? 'Livraison : ' + esc(c.address) : 'Retrait au magasin') + (c.slot ? '<div class="muted">' + esc(c.slot) + '</div>' : '') + '</td>' +
+          '<td class="nombre">' + fcfa(c.total) + '<div class="muted">' + c.lines.length + ' article' + (c.lines.length > 1 ? 's' : '') + '</div></td>' +
+          '<td><span class="pastille ' + e[0] + '">' + e[1] + '</span>' + (c.takenBy ? '<div class="muted">' + esc(c.takenBy) + ', ' + esc(depuis(c.takenAt)) + '</div>' : '') + '</td></tr>';
       });
       return h + '</tbody></table></div>';
     });

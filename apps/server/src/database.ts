@@ -306,6 +306,46 @@ CREATE TABLE shelf_carts (
 CREATE INDEX shelf_carts_waiting ON shelf_carts (store_id, created_at) WHERE taken_at IS NULL;
 `,
   },
+  {
+    version: 9,
+    sql: `
+-- Commande passée sur la boutique en ligne du magasin (/boutique/<code>) : un poste du
+-- magasin la prend (une seule fois) et en fait une commande client.
+CREATE TABLE web_orders (
+  id UUID PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL,
+  customer_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  address TEXT,
+  slot TEXT,
+  note TEXT,
+  delivery_fee INT NOT NULL DEFAULT 0,
+  lines JSONB NOT NULL,
+  total INT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'taken', 'cancelled')),
+  taken_by_device UUID,
+  taken_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX web_orders_waiting ON web_orders (store_id, created_at) WHERE status = 'waiting';
+CREATE INDEX web_orders_recent ON web_orders (created_at);
+-- Sauvegarde en ligne d'un PC : un fichier déjà chiffré sur le PC (le serveur n'a pas la clé),
+-- rangé dans un dossier du serveur ; les 10 plus récentes de chaque PC sont gardées.
+CREATE TABLE station_backups (
+  id UUID PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  name TEXT NOT NULL,
+  size INT NOT NULL,
+  sha256 TEXT NOT NULL,
+  file TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX station_backups_device ON station_backups (device_id, created_at);
+CREATE INDEX station_backups_store ON station_backups (store_id, created_at);
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

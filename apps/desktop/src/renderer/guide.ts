@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.74.0',
+    items: [
+      'Couleurs de l’entreprise : Administration › Couleurs et badges. Choisissez une couleur principale et une secondaire (ou une palette toute prête) : toute l’application, les badges, les cartes de fidélité et les documents A4 les prennent, sur tous les postes.',
+      'Nouveau badge du personnel : nom complet, photo, logo, rôle, matricule, poste, téléphone, date d’expiration et code-barres de connexion, aux couleurs de l’entreprise. Trois modèles (Bandeau, Arcs, Angles), taille et sens au choix, éléments à afficher ou masquer, et verso avec les règles et la signature.',
+      'Photo de l’employé dans sa fiche utilisateur : prise avec la caméra du PC ou importée.',
+    ],
+  },
+  {
     version: '0.73.0',
     items: [
       'Panier préparé au rayon : dans l’application Android, le vendeur connecté touche « Préparer un panier pour un client », scanne les produits avec le client, puis « Envoyer à la caisse ». Le caissier le retrouve dans « Rappeler » (F10) sous « Paniers des vendeurs » ; la vente compte pour le vendeur (Ma journée, objectifs et commissions).',

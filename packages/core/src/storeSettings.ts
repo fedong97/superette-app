@@ -1,3 +1,5 @@
+import { type BadgeLayout, DEFAULT_BADGE, normalizeBadge } from './badge';
+import { DEFAULT_BRAND_COLOR, DEFAULT_BRAND_COLOR2, isHexColor } from './brand';
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
 import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
 import { DEFAULT_PAYROLL, normalizePayroll, type PayrollRules } from './payroll';
@@ -15,6 +17,11 @@ export interface StoreSettings {
   ticketHeader: string;
   /** Logo imprimé sur le ticket et les factures : image PNG en data URL, ou vide. */
   logo: string;
+  /** Couleurs de l'entreprise (#rrggbb) : toute l'application, le badge et les documents A4 les prennent. */
+  brandColor: string;
+  brandColor2: string;
+  /** Format et contenu du badge du personnel. */
+  badge: BadgeLayout;
 
   /** Remise maximale (en % du ticket) que tout vendeur accorde sans le code du gérant ; 0 : aucune. */
   maxDiscountPct: number;
@@ -128,6 +135,9 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   rccm: '',
   ticketHeader: '',
   logo: '',
+  brandColor: DEFAULT_BRAND_COLOR,
+  brandColor2: DEFAULT_BRAND_COLOR2,
+  badge: DEFAULT_BADGE,
   maxDiscountPct: 0,
   cashRounding: 1,
   ticketCopies: 1,
@@ -216,6 +226,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       next.printDefaults = normalizeDefaults(raw);
     } else if (k === 'payroll') {
       next.payroll = normalizePayroll(raw);
+    } else if (k === 'badge') {
+      next.badge = normalizeBadge(raw);
     } else if (typeof def === 'boolean') {
       (next as unknown as Record<string, unknown>)[k] = Boolean(raw);
     } else if (typeof def === 'number') {
@@ -231,6 +243,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
         s = s.toUpperCase();
         if (!/^[A-Z0-9]{0,6}$/.test(s)) throw new Error('Préfixe : 6 lettres ou chiffres au plus, sans espace');
       }
+      if ((k === 'brandColor' || k === 'brandColor2') && !isHexColor(s)) throw new Error('Couleur attendue au format #RRVVBB');
+      if (k === 'brandColor' || k === 'brandColor2') s = s.toLowerCase();
       if (k === 'logo' && s && !s.startsWith('data:image/')) throw new Error('Logo : image attendue');
       if (k === 'posLayout' && !(s in POS_LAYOUTS)) throw new Error("Présentation de l'écran de caisse : moderne, classique ou conventionnel");
       if (k === 'barcodeKind' && s !== 'ean8' && s !== 'ean13') throw new Error('Format des codes internes : EAN-8 ou EAN-13');
@@ -254,7 +268,7 @@ export function parseStoreSettings(json: string | null | undefined): StoreSettin
   if (!json) return { ...DEFAULT_STORE_SETTINGS };
   try {
     const parsed = { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
-    return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll } };
+    return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll }, badge: normalizeBadge(parsed.badge) };
   } catch {
     return { ...DEFAULT_STORE_SETTINGS };
   }

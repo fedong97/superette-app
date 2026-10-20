@@ -144,6 +144,15 @@ export class StaffService extends Base {
     return rows.map((s) => ({ ...s, ...this.balance(s.id) }));
   }
 
+  /** Fiche collaborateur active rattachée à un utilisateur (matricule et poste du badge), null sans fiche. */
+  forUser(userId: string): Pick<Staff, 'id' | 'code' | 'name' | 'position' | 'phone' | 'hired_on'> | null {
+    return (
+      (this.db.prepare('SELECT id, code, name, position, phone, hired_on FROM staff WHERE user_id = ? AND active = 1 ORDER BY created_at LIMIT 1').get(userId) as
+        | Pick<Staff, 'id' | 'code' | 'name' | 'position' | 'phone' | 'hired_on'>
+        | undefined) ?? null
+    );
+  }
+
   get(id: string): Staff & StaffBalance {
     const s = this.query('s.id = ?').get(id) as Staff | undefined;
     if (!s) throw new AppError('Collaborateur introuvable', 'NOT_FOUND');

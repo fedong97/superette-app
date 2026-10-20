@@ -692,7 +692,7 @@ export class AdminService extends Base {
         this.enqueue(null, 'user', id, 'delete', null);
       } else {
         this.db
-          .prepare('UPDATE users SET active = 0, deleted_at = ?, badge = NULL, login = ?, register_id = NULL, emoney_register_id = NULL, bank_register_id = NULL WHERE id = ?')
+          .prepare('UPDATE users SET active = 0, deleted_at = ?, badge = NULL, photo = NULL, login = ?, register_id = NULL, emoney_register_id = NULL, bank_register_id = NULL WHERE id = ?')
           .run(this.now(), `${user.login}~${id.slice(0, 8)}`, id);
         this.enqueue(null, 'user', id, 'upsert', this.getUser(id));
       }
@@ -713,6 +713,29 @@ export class AdminService extends Base {
     this.enqueue(null, 'user', id, 'upsert', next);
     this.audit(byUserId, 'user.badge', 'user', id);
     return next;
+  }
+
+  /** Photo de l'employé (data URL) imprimée sur son badge ; null sans photo. */
+  userPhoto(id: string): string | null {
+    return (this.db.prepare('SELECT photo FROM users WHERE id = ?').pluck().get(id) as string | null | undefined) ?? null;
+  }
+
+  /**
+   * Photo de l'employé, déjà réduite par l'interface ; null la retire. Elle part
+   * aux autres postes avec la fiche de l'utilisateur.
+   */
+  setUserPhoto(byUserId: string, id: string, photo: string | null): void {
+    const user = this.getUser(id);
+    if (user.deleted_at) throw new AppError('Cet utilisateur a été supprimé', 'INVALID');
+    if (photo !== null) {
+      if (typeof photo !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo)) throw new AppError('Image invalide : choisissez une photo JPEG ou PNG', 'INVALID');
+      if (photo.length > 200_000) throw new AppError('Photo trop lourde, même réduite : choisissez une autre image', 'INVALID');
+    }
+    this.tx(() => {
+      this.db.prepare('UPDATE users SET photo = ? WHERE id = ?').run(photo, id);
+      this.enqueue(null, 'user', id, 'upsert', {});
+      this.audit(byUserId, photo ? 'user.photo' : 'user.photo_remove', 'user', id);
+    });
   }
 
   /** Identifiant de l'utilisateur dont on a scanné le badge (null si inconnu). */

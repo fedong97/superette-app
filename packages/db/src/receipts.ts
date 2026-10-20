@@ -128,6 +128,7 @@ export class ReceiptService extends Base {
       niu: store.taxpayer_number,
       rccm: set.rccm,
       logo: set.logo,
+      color: set.brandColor,
       message: set.ticketHeader,
       thanks: this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
       vatEnabled: store.vat_enabled === 1,

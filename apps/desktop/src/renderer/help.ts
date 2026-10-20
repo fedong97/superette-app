@@ -497,8 +497,21 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Ajouter un employé » ouvre la fiche « Nouvel employé » : nom, identifiant, code, rôle et caisses, puis, en une fois, sa fiche collaborateur (poste, téléphone, salaire) et son badge.',
           'Dans la fiche d’un utilisateur, l’identifiant se modifie (lettres, chiffres, point, tiret ; 2 à 30 caractères).',
           'Badge : « Créer son badge » donne un code-barres imprimé sur une carte. À la connexion, le scanner remplit l’identifiant ; il reste à taper le code. « Refaire » rend l’ancien badge inutilisable.',
+          'Photo (badge) : « Prendre une photo » utilise la caméra du PC, « Importer… » une image. Elle est recadrée au format photo d’identité et s’imprime sur son badge.',
           '« Supprimer l’utilisateur » : sans aucune opération, il est effacé ; sinon il disparaît des listes et ne se connecte plus, son nom reste sur ses tickets et son identifiant redevient libre.',
           'La colonne Privilèges montre ce qui est ajouté (+) ou retiré (−) à son rôle. Un utilisateur « bloqué » après trop de codes faux se débloque avec « Débloquer ».',
+        ],
+      },
+      {
+        tab: 'brand',
+        title: 'Couleurs et badges',
+        steps: [
+          'Choisissez la couleur principale et la couleur secondaire de l’entreprise, ou une palette toute prête : tout l’écran change aussitôt. « Enregistrer » les garde pour tous les postes et tous les magasins.',
+          'Les badges, les cartes de fidélité et les en-têtes de tableau des documents A4 prennent aussi ces couleurs. Le texte posé sur une couleur claire passe en noir pour rester lisible.',
+          'Badge : choisissez le modèle (Bandeau, Arcs ou Angles), la taille (carte bancaire, grand badge ou format libre en mm), le sens et les éléments imprimés : logo, nom du magasin, rôle, photo, matricule, poste, téléphone, expiration, code-barres, décor.',
+          'Le matricule, le poste, le téléphone et la date d’entrée viennent de la fiche collaborateur ; la photo, de la fiche de l’utilisateur.',
+          '« Imprimer aussi le verso » ajoute à côté du recto les règles du badge, les dates d’entrée et d’expiration et une ligne de signature.',
+          'L’aperçu montre un exemple ou le badge d’un employé. « Imprimer tous les badges » sort ceux de tous les employés qui ont un badge, sur des feuilles A4 à découper.',
         ],
       },
       {

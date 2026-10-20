@@ -107,7 +107,7 @@ const initials = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
     .join('');
-const TILE_COLORS = ['#1f7a5c', '#e0a800', '#0891b2', '#db2777', '#7c3aed', '#22a06b', '#2563eb', '#ea580c'];
+const TILE_COLORS = ['var(--brand)', '#e0a800', '#0891b2', '#db2777', '#7c3aed', '#22a06b', '#2563eb', '#ea580c'];
 /** Couleur stable par produit (le nom donne toujours la même). */
 const tileColor = (name: string) => {
   let h = 0;

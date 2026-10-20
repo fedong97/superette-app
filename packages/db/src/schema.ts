@@ -1802,4 +1802,12 @@ CREATE INDEX cash_handovers_session ON cash_handovers(session_id, at);
 ALTER TABLE sales ADD COLUMN seller_id TEXT;
 `,
   },
+  {
+    version: 50,
+    name: "photo de l'employé pour son badge",
+    sql: `
+-- Photo de l'employé (data URL réduite), imprimée sur son badge. Lue à part : les listes restent légères.
+ALTER TABLE users ADD COLUMN photo TEXT;
+`,
+  },
 ];

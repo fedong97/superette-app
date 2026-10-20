@@ -265,6 +265,10 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Application Android : onglet panier pour un utilisateur qui a le droit « Préparer un panier au rayon » (prix indicatif du catalogue) ; envoi à `POST /api/v1/mobile/carts`, sans doublon.
 - Caisse : « Rappeler » liste les paniers du magasin (`GET /api/v1/carts`), une seule caisse prend un panier ; la vente porte `seller_id` et compte pour le vendeur dans ses objectifs et commissions.
 
+**Couleurs de l'entreprise et badge du personnel (0.74.0)**
+- Administration › Couleurs et badges : couleur principale et secondaire (`brandColor`, `brandColor2` dans les paramètres, copiés dans tous les magasins). L'écran réécrit ses variables CSS (`--brand`, `--brand-soft`…), le texte posé dessus passe en noir ou blanc selon le contraste ; les documents A4 et les cartes de fidélité suivent.
+- Badge : trois modèles (Bandeau, Arcs, Angles), carte bancaire, grand badge ou format libre, horizontal ou vertical, éléments au choix et verso (règles, dates, signature). Photo de l'employé dans la fiche utilisateur (caméra ou image), matricule, poste, téléphone et date d'entrée pris dans la fiche collaborateur.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

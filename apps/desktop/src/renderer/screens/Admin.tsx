@@ -7,6 +7,7 @@ import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
 import { MobilePay } from './AdminMobilePay';
 import { Settings } from './AdminSettings';
+import { BrandAndBadge, UserPhotoField } from './AdminBrand';
 import { PrintTemplates } from './PrintTemplates';
 import { FiscalYears } from './Accounting';
 import { Fiches, Repair } from './Dossiers';
@@ -19,7 +20,7 @@ import serverLogo from '../assets/logo-serveur.png';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -36,6 +37,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
     ['settings', 'Paramètres'],
+    ['brand', 'Couleurs et badges'],
     ...(can('accounting') || can('fiscal_years') ? ([['fiscal', 'Exercices comptables']] as [Tab, string][]) : []),
     ['templates', "Modèles d'impression"],
     ...(can('backups') ? ([['backups', 'Sauvegardes']] as [Tab, string][]) : []),
@@ -82,6 +84,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
           }}
         />
       )}
+      {tab === 'brand' && <BrandAndBadge canEdit={can('settings_edit')} onChanged={onChanged} />}
       {tab === 'fiscal' && (can('accounting') || can('fiscal_years')) && <FiscalYears />}
       {tab === 'templates' && <PrintTemplates key={editTpl ?? ''} user={user} initialEdit={editTpl} />}
       {tab === 'backups' && can('backups') && <Backups isAdmin={user.role === 'admin'} onChanged={onChanged} />}
@@ -874,6 +877,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Compte actif
                 </label>
               )}
+              {form.id && <UserPhotoField userId={form.id} canEdit={canManage} />}
               {form.id ? (
                 <Field label="Badge" hint="Scanné sur l'écran de connexion, il remplit l'identifiant : il ne reste que le code à taper.">
                   {form.badge ? (

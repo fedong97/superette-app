@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { purchaseOrderMessage, staffBadgeHtml, ticketMessage, whatsappLink } from '../src';
+import { badgesHtml, DEFAULT_BADGE, purchaseOrderMessage, ticketMessage, whatsappLink } from '../src';
 
 describe('envois par WhatsApp', () => {
   it('écrit le ticket du client avec les lignes, le total et les paiements', () => {
@@ -43,8 +43,8 @@ describe('envois par WhatsApp', () => {
   });
 
   it('dessine le badge avec son code-barres', () => {
-    const html = staffBadgeHtml({ store: 'Superette Akwa', name: 'Awa', role: 'Caissier', code: 'FX12345678' });
-    expect(html).toContain('Badge du personnel');
+    const html = badgesHtml([{ store: 'Superette Akwa', name: 'Awa', role: 'Caissier', code: 'FX12345678' }], DEFAULT_BADGE);
+    expect(html).toContain('Caissier');
     expect(html).toContain('<svg');
     expect(html).toContain('Awa');
   });

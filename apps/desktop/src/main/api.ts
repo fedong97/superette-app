@@ -5,7 +5,10 @@ import {
   type LabelFormatId,
   barcodeLabelsHtml,
   loyaltyCardHtml,
-  staffBadgeHtml,
+  badgesHtml,
+  badgeExpiry,
+  type BadgeCard,
+  type BadgeLayout,
   reminderMessage,
   whatsappLink,
   ticketMessage,
@@ -354,6 +357,28 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const PRODUCTION: Permission[] = ['production', 'production_recipes', 'production_create', 'production_validate', 'production_cancel', ...STOCK];
   /** Paramètres du magasin de ce poste. */
   const settings = () => s.admin.storeSettings(ctx().storeId);
+  /** Ce qui s'imprime sur le badge d'un employé : fiche collaborateur, photo, couleurs et logo de son magasin. */
+  const badgeCard = (target: User): BadgeCard => {
+    const storeId = target.store_id ?? s.admin.station()?.store.id ?? ctx().storeId;
+    const set = s.admin.storeSettings(storeId);
+    const staff = s.staff.forUser(target.id);
+    return {
+      store: s.admin.getStore(storeId).name,
+      logo: set.logo || null,
+      // Le nom complet est celui de la fiche collaborateur quand elle existe.
+      name: staff && staff.name.length > target.name.length ? staff.name : target.name,
+      role: ROLE_LABELS[target.role],
+      position: staff?.position ?? null,
+      number: staff?.code ?? null,
+      phone: staff?.phone ?? null,
+      hiredOn: staff?.hired_on ?? null,
+      code: target.badge ?? '',
+      photo: s.admin.userPhoto(target.id),
+      expires: badgeExpiry(new Date(), set.badge.validityMonths),
+      color: set.brandColor,
+      color2: set.brandColor2,
+    };
+  };
   /** Code interne donné à l'enregistrement d'un article sans code, si le magasin l'a choisi. */
   const autoBarcode = () => (settings().barcodeAuto ? settings().barcodeKind : null);
   const codeByFamily = () => settings().articleCodeByFamily;
@@ -933,13 +958,44 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
       return s.admin.newBadge(u.id, id);
     },
-    'admin.printBadge': (id: string) => {
+    /** Badges d'un ou plusieurs employés sur une planche A4, au format choisi dans Administration. */
+    'admin.printBadge': (id: string | string[], copies = 1) => {
       requireUser(['users_manage']);
-      const target = s.admin.getUser(id);
-      if (!target.badge) throw new AppError("Cet utilisateur n'a pas encore de badge", 'INVALID');
-      const station = s.admin.station();
-      const storeName = target.store_id ? s.admin.getStore(target.store_id).name : (station?.store.name ?? '');
-      return printer.a4(staffBadgeHtml({ store: storeName, name: target.name, role: ROLE_LABELS[target.role], code: target.badge, logo: settings().logo || null }));
+      const ids = Array.isArray(id) ? id : Array.from({ length: Math.max(1, Math.min(10, Math.round(copies))) }, () => id);
+      const cards = ids.map((uid) => {
+        const target = s.admin.getUser(uid);
+        if (!target.badge) throw new AppError(`${target.name} n'a pas encore de badge`, 'INVALID');
+        return badgeCard(target);
+      });
+      return printer.a4(badgesHtml(cards, settings().badge));
+    },
+    /** Aperçu du badge (Administration) : celui d'un employé, ou un exemple, avec les réglages en cours de modification. */
+    'admin.badgePreview': (input: { userId?: string | null; layout?: BadgeLayout; color?: string; color2?: string }) => {
+      requireUser();
+      const set = settings();
+      const layout = { ...set.badge, ...(input.layout ?? {}) };
+      const card: BadgeCard = input.userId
+        ? badgeCard(s.admin.getUser(input.userId))
+        : {
+            store: s.admin.getStore(ctx().storeId).name,
+            logo: set.logo || null,
+            name: 'Thomas MBARGA',
+            role: 'Caissier',
+            position: 'Caisse principale',
+            number: 'COL-0012',
+            phone: '6 99 12 34 56',
+            hiredOn: '2024-03-01',
+            code: 'FX12345678',
+            photo: null,
+            expires: badgeExpiry(new Date(), layout.validityMonths),
+          };
+      return badgesHtml([{ ...card, color: input.color ?? card.color ?? set.brandColor, color2: input.color2 ?? card.color2 ?? set.brandColor2 }], layout);
+    },
+    'admin.userPhoto': (id: string) => (requireUser(), s.admin.userPhoto(id)),
+    'admin.setUserPhoto': (id: string, photo: string | null) => {
+      const u = requireUser(['users_manage']);
+      if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
+      s.admin.setUserPhoto(u.id, id, photo);
     },
     /** Nouvel employé : utilisateur, fiche collaborateur et badge en une fois. */
     'admin.hire': (input: {
@@ -1020,7 +1076,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.saveStoreSettings': (patch: Partial<StoreSettings>) => {
       const c = ctx(['settings_edit']);
       if (patch.posLayout !== undefined) requireAdmin();
-      return s.admin.saveStoreSettings(c.userId, c.storeId, patch);
+      // Les couleurs de l'entreprise et le badge valent pour tous ses magasins.
+      const shared = Object.fromEntries(Object.entries(patch).filter(([k]) => k === 'brandColor' || k === 'brandColor2' || k === 'badge'));
+      const saved = s.admin.saveStoreSettings(c.userId, c.storeId, patch);
+      if (Object.keys(shared).length) for (const st of s.admin.listStores()) if (st.id !== c.storeId) s.admin.saveStoreSettings(c.userId, st.id, shared);
+      return saved;
     },
     'admin.audit': () => (requireUser(['audit']), s.admin.auditLog()),
     'admin.printers': () => (requireUser(), printer.list()),
@@ -1978,6 +2038,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           niu: store.taxpayer_number,
           rccm: set.rccm,
           logo: set.logo,
+          color: set.brandColor,
           message: set.ticketHeader,
           thanks: s.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
           vatEnabled: store.vat_enabled === 1,
@@ -2028,7 +2089,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'loyalty.printCard': (customerId: string, copies?: number) => {
       const storeId = ctx(['customers']).storeId;
       const c = s.customers.getCustomer(customerId);
-      return printer.a4(loyaltyCardHtml({ store: s.admin.getStore(storeId).name, customer: c.name, code: c.code, phone: c.phone, logo: settings().logo || null }, copies));
+      return printer.a4(loyaltyCardHtml({ store: s.admin.getStore(storeId).name, customer: c.name, code: c.code, phone: c.phone, logo: settings().logo || null, color: settings().brandColor }, copies));
     },
     /** Carte scannée à la caisse : code du client ou numéro de téléphone. */
     'loyalty.findCustomer': (code: string) => (requireUser(), s.customers.findByCard(code)),

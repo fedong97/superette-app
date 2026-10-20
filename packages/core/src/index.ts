@@ -30,3 +30,5 @@ export * from './takeover';
 export * from './assets';
 export * from './customerDisplay';
 export * from './articleFile';
+export * from './brand';
+export * from './badge';

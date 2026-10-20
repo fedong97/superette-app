@@ -3,6 +3,7 @@ import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
+import { applyBrand } from './theme';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';
 import { Orders } from './screens/Orders';
@@ -123,8 +124,8 @@ const winIcon = (kind: WinKind) =>
   kind === 'stock' ? MENU_ICONS['Magasinier']! : (MENU_ICONS[MENUS.find(([, items]) => items.some((it) => it.open?.[0] === kind))?.[0] ?? ''] ?? '▣');
 const MENU_COLORS: Record<string, string> = {
   Fichier: '#64748b',
-  Facturation: '#1f7a5c',
-  Vente: '#22a06b',
+  Facturation: 'var(--brand)',
+  Vente: 'var(--brand2)',
   Achats: '#2563eb',
   Fabrication: '#7c3aed',
   Trésorerie: '#e0a800',
@@ -384,6 +385,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Droits par rôle', open: ['admin', 'rights'] },
       { label: 'Privilèges par utilisateur', open: ['admin', 'privileges'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
+      { label: 'Couleurs et badges', open: ['admin', 'brand'] },
       { label: 'Exercices comptables', open: ['admin', 'fiscal'], perm: ['accounting', 'fiscal_years'] },
       { label: "Modèles d'impression", open: ['admin', 'templates'] },
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
@@ -449,6 +451,9 @@ export function App() {
       setState(s);
     });
   useEffect(() => void refresh(), []);
+  // Couleurs de l'entreprise, dès l'écran de connexion.
+  const brand = state?.storeSettings;
+  useEffect(() => applyBrand(brand?.brandColor, brand?.brandColor2), [brand?.brandColor, brand?.brandColor2]);
 
   if (!state) return <div className="splash">Chargement…</div>;
 

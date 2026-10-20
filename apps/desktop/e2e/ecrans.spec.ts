@@ -16,12 +16,15 @@ test('la roulette fait défiler chaque menu ouvert sans le fermer', async () => 
     await createStore(page);
     const items = page.locator('nav.rail .rail-item');
     const drop = page.locator('.menu-drop');
+    // La barre verte s'affiche après la fermeture du guide de démarrage.
+    await expect(items.first()).toBeVisible();
     let scrolled = 0;
     for (let m = 0; m < (await items.count()); m++) {
       const name = (await items.nth(m).innerText()).split('\n').pop()!.trim();
       if (/Tous les menus|Personnaliser/.test(name)) continue;
       await items.nth(m).click();
-      if (!(await drop.isVisible())) continue;
+      if (!(await drop.waitFor({ timeout: 2000 }).then(() => true, () => false))) continue;
+      await page.waitForTimeout(150);
       if (await drop.evaluate((d) => d.scrollHeight > d.clientHeight + 4)) {
         const box = (await drop.boundingBox())!;
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);

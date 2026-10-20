@@ -1,3 +1,5 @@
+import { type BadgeLayout, DEFAULT_BADGE, normalizeBadge } from './badge';
+import { DEFAULT_BRAND_COLOR, DEFAULT_BRAND_COLOR2, isHexColor } from './brand';
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
 import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
 import { DEFAULT_PAYROLL, normalizePayroll, type PayrollRules } from './payroll';
@@ -15,6 +17,11 @@ export interface StoreSettings {
   ticketHeader: string;
   /** Logo imprimé sur le ticket et les factures : image PNG en data URL, ou vide. */
   logo: string;
+  /** Couleurs de l'entreprise (#rrggbb) : toute l'application, le badge et les documents A4 les prennent. */
+  brandColor: string;
+  brandColor2: string;
+  /** Format et contenu du badge du personnel. */
+  badge: BadgeLayout;
 
   /** Remise maximale (en % du ticket) que tout vendeur accorde sans le code du gérant ; 0 : aucune. */
   maxDiscountPct: number;
@@ -103,6 +110,12 @@ export interface StoreSettings {
   /** Points à avoir au minimum pour payer avec. */
   loyaltyMinRedeem: number;
 
+  /** Pointage : heure d'arrivée attendue (HH:MM), au-delà de la tolérance l'arrivée est en retard. */
+  workStart: string;
+  lateToleranceMinutes: number;
+  /** Jours travaillés (0 = dimanche … 6 = samedi) : « 123456 » du lundi au samedi. */
+  workDays: string;
+
   /** Paie : retenues légales (CNPS, IRPP, CAC, CFC, RAV, TDL) et charges patronales. */
   payroll: PayrollRules;
 
@@ -122,6 +135,9 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   rccm: '',
   ticketHeader: '',
   logo: '',
+  brandColor: DEFAULT_BRAND_COLOR,
+  brandColor2: DEFAULT_BRAND_COLOR2,
+  badge: DEFAULT_BADGE,
   maxDiscountPct: 0,
   cashRounding: 1,
   ticketCopies: 1,
@@ -162,6 +178,9 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   loyaltySpendPerPoint: 1000,
   loyaltyPointValue: 10,
   loyaltyMinRedeem: 100,
+  workStart: '08:00',
+  lateToleranceMinutes: 10,
+  workDays: '123456',
   payroll: DEFAULT_PAYROLL,
   printTemplates: [],
   printDefaults: {},
@@ -187,6 +206,7 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   loyaltySpendPerPoint: [1, 1e7],
   loyaltyPointValue: [1, 1e6],
   loyaltyMinRedeem: [0, 1e7],
+  lateToleranceMinutes: [0, 240],
 };
 const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
@@ -206,6 +226,8 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       next.printDefaults = normalizeDefaults(raw);
     } else if (k === 'payroll') {
       next.payroll = normalizePayroll(raw);
+    } else if (k === 'badge') {
+      next.badge = normalizeBadge(raw);
     } else if (typeof def === 'boolean') {
       (next as unknown as Record<string, unknown>)[k] = Boolean(raw);
     } else if (typeof def === 'number') {
@@ -221,10 +243,17 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
         s = s.toUpperCase();
         if (!/^[A-Z0-9]{0,6}$/.test(s)) throw new Error('Préfixe : 6 lettres ou chiffres au plus, sans espace');
       }
+      if ((k === 'brandColor' || k === 'brandColor2') && !isHexColor(s)) throw new Error('Couleur attendue au format #RRVVBB');
+      if (k === 'brandColor' || k === 'brandColor2') s = s.toLowerCase();
       if (k === 'logo' && s && !s.startsWith('data:image/')) throw new Error('Logo : image attendue');
       if (k === 'posLayout' && !(s in POS_LAYOUTS)) throw new Error("Présentation de l'écran de caisse : moderne, classique ou conventionnel");
       if (k === 'barcodeKind' && s !== 'ean8' && s !== 'ean13') throw new Error('Format des codes internes : EAN-8 ou EAN-13');
       if (k === 'labelFormat' && !isBarcodeLabelFormat(s)) throw new Error("Format d'étiquette inconnu");
+      if (k === 'workStart' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) throw new Error("Heure d'arrivée : HH:MM, par exemple 08:00");
+      if (k === 'workDays') {
+        s = [...new Set(s.replace(/[^0-6]/g, ''))].sort().join('');
+        if (!s) throw new Error('Choisissez au moins un jour travaillé');
+      }
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);
@@ -239,7 +268,7 @@ export function parseStoreSettings(json: string | null | undefined): StoreSettin
   if (!json) return { ...DEFAULT_STORE_SETTINGS };
   try {
     const parsed = { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
-    return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll } };
+    return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll }, badge: normalizeBadge(parsed.badge) };
   } catch {
     return { ...DEFAULT_STORE_SETTINGS };
   }

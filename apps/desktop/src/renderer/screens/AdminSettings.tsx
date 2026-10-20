@@ -616,6 +616,39 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       ],
     ],
     [
+      'Pointage du personnel',
+      'L’arrivée est notée à la première connexion du jour, le départ à la clôture de caisse ou par « Je pars ». État du mois : Charge › Pointage du personnel.',
+      [
+        { label: 'Heure d’arrivée attendue', render: () => <input type="time" disabled={!canEdit} value={String(sv('workStart'))} onChange={(e) => e.target.value && sset('workStart', e.target.value)} /> },
+        { label: 'Tolérance avant un retard', render: () => num('lateToleranceMinutes', 'minutes') },
+        {
+          label: 'Jours travaillés',
+          hint: 'Un jour travaillé sans pointage compte comme absence.',
+          render: () => (
+            <span>
+              {(['1', '2', '3', '4', '5', '6', '0'] as const).map((d) => {
+                const days = String(sv('workDays'));
+                return (
+                  <label key={d} className="inline">
+                    <input
+                      type="checkbox"
+                      disabled={!canEdit}
+                      checked={days.includes(d)}
+                      onChange={(e) => {
+                        const next = e.target.checked ? days + d : days.replace(d, '');
+                        if (next) sset('workDays', next);
+                      }}
+                    />{' '}
+                    {['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'][Number(d)]}
+                  </label>
+                );
+              })}
+            </span>
+          ),
+        },
+      ],
+    ],
+    [
       'Sécurité',
       '',
       [

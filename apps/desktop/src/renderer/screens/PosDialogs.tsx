@@ -324,10 +324,28 @@ function MobilePayRequest({ method, amount, phone, onPaid }: { method: 'MTN_MOMO
   );
 }
 
-export function HeldDialog({ onClose, onResume }: { onClose: () => void; onResume: (id: string) => void }) {
+export function HeldDialog({ onClose, onResume, onTakeCart }: { onClose: () => void; onResume: (id: string) => void; onTakeCart?: (id: string) => void }) {
   const held = useLoad(() => call('pos.held'));
+  const carts = useLoad(() => call('pos.shelfCarts'));
   return (
     <Modal title="Tickets en attente" onClose={onClose}>
+      {Boolean(carts.data?.length) && onTakeCart && (
+        <>
+          <h3>Paniers des vendeurs</h3>
+          <div className="pick-list">
+            {carts.data!.map((c) => (
+              <button key={c.id} onClick={() => onTakeCart(c.id)}>
+                <span>
+                  Panier n° {c.number} · {c.sellerName}
+                  {c.label ? ` · ${c.label}` : ''} · {new Date(c.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span>{c.lines} ligne(s)</span>
+              </button>
+            ))}
+          </div>
+          <h3>Tickets mis en attente</h3>
+        </>
+      )}
       {Boolean(held.data?.length) && <p className="muted">Entrée reprend le ticket sélectionné, ↑ ↓ pour changer.</p>}
       {held.data?.length === 0 && <Empty>Aucun ticket en attente. À la caisse, F3 met la fiche en cours en attente pour servir un autre client.</Empty>}
       <div
@@ -673,6 +691,29 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
             <tr><td>Annulations ({z.cancelled.count})</td><td className="r">{fcfa(z.cancelled.amount)}</td></tr>
           </tbody>
         </table>
+        {z.byCashier.length > 0 && (
+          <table className="list">
+            <caption>Par caissier{z.handovers.length ? ` (${z.handovers.length} relève${z.handovers.length > 1 ? 's' : ''})` : ''}</caption>
+            <thead>
+              <tr>
+                <th>Caissier</th>
+                <th className="r">Tickets</th>
+                <th className="r">Net TTC</th>
+                <th className="r">Écart</th>
+              </tr>
+            </thead>
+            <tbody>
+              {z.byCashier.map((c) => (
+                <tr key={c.user_id}>
+                  <td>{c.name}</td>
+                  <td className="r">{c.tickets}</td>
+                  <td className="r">{fcfa(c.net)}</td>
+                  <td className={`r ${c.difference && c.difference < 0 ? 'neg' : ''}`}>{c.difference === null ? '—' : fcfa(c.difference)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -749,5 +790,48 @@ function DeclaredZView({ z, lines, diffClass, compact }: { z: Result<'pos.zRepor
         <p className="muted">Dont règlements clients : {z.customerReceipts.map((m) => `${m.label} ${fcfa(m.amount)}`).join(', ')}</p>
       )}
     </div>
+  );
+}
+
+/**
+ * Ticket envoyé au client par WhatsApp : le numéro de sa fiche est proposé,
+ * la facture A4 peut être enregistrée en PDF pour la joindre au message.
+ */
+export function WhatsappTicketDialog({ saleId, number, onClose }: { saleId: string; number: string; onClose: () => void }) {
+  const toast = useToast();
+  const [phone, setPhone] = useState('');
+  const [pdf, setPdf] = useState(false);
+  useEffect(() => {
+    call('pos.ticketPhone', saleId).then((p) => p && setPhone(p), () => undefined);
+  }, [saleId]);
+  return (
+    <Modal title={`Envoyer le ticket ${number} par WhatsApp`} onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            if (pdf && !(await call('pos.printInvoice', saleId, { output: 'pdf' }))) return;
+            const r = await call('pos.whatsappTicket', saleId, phone);
+            window.open(r.link);
+            toast.ok(pdf ? 'WhatsApp est ouvert : joignez le PDF enregistré, puis envoyez.' : 'WhatsApp est ouvert avec le ticket : il ne reste qu’à envoyer.');
+            onClose();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <Field label="Numéro WhatsApp du client" hint="9 chiffres : l’indicatif 237 est ajouté.">
+          <input autoFocus inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="6XX XX XX XX" required />
+        </Field>
+        <label className="inline">
+          <input type="checkbox" checked={pdf} onChange={(e) => setPdf(e.target.checked)} /> Enregistrer aussi la facture A4 en PDF pour la joindre
+        </label>
+        <div className="actions">
+          <button className="primary" type="submit">
+            Ouvrir WhatsApp
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

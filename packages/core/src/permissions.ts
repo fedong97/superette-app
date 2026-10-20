@@ -61,6 +61,7 @@ export const PERMISSIONS = {
   // --- Facturation -------------------------------------------------------------
   cash: { label: 'Facturation au comptant (caisse)', group: 'Facturation', type: 'Menu', roles: POS },
   credit: { label: 'Vente à crédit', group: 'Facturation', type: 'Menu', roles: POS },
+  shelf_cart: { label: 'Préparer un panier au rayon sur le téléphone, envoyé à la caisse', group: 'Facturation', type: 'Fonction', roles: POS },
   sales: { label: 'Voir tout le registre des factures (sinon ses 3 dernières factures)', group: 'Facturation', type: 'Menu', roles: ACCOUNTING },
   quotes: { label: 'Devis et proformas', group: 'Facturation', type: 'Menu', roles: COUNTER },
   quote_save: { label: 'Créer ou modifier un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },
@@ -193,6 +194,7 @@ export const PERMISSIONS = {
   staff_edit: { label: 'Ajouter ou modifier un collaborateur', group: 'Personnel', type: 'Bouton', parent: 'staff' },
   staff_salaries: { label: 'Constater les salaires du mois et les payer au bureau', group: 'Personnel', type: 'Menu', parent: 'staff' },
   staff_targets: { label: 'Objectifs de vente et commissions des vendeurs', group: 'Personnel', type: 'Menu', parent: 'staff' },
+  staff_attendance: { label: 'Pointage du personnel : état du mois, retards, absences et corrections', group: 'Personnel', type: 'Menu', roles: MANAGE },
 
   // --- Fiscalité ---------------------------------------------------------------
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
@@ -218,6 +220,7 @@ export const PERMISSIONS = {
 
   // --- Paramétrage du système ----------------------------------------------------
   admin: { label: 'Administration (consulter caisses, dépôts, utilisateurs)', group: 'Paramétrage du système', type: 'Menu', roles: MANAGE },
+  training: { label: 'Ouvrir le mode formation (caisse d’entraînement sur une copie de la boutique)', group: 'Paramétrage du système', type: 'Fonction', roles: MANAGE },
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   warehouses_manage: { label: 'Créer, modifier et désactiver les dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },

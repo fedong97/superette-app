@@ -22,7 +22,7 @@ import { AppError, Base, type Clock, newId } from './util';
  * dans la fiche sont ajoutées à la boutique, par le même chemin que la
  * synchronisation entre PC (la plus récente l'emporte, rien n'est écrasé en bloc).
  */
-export type FicheKind = 'intervention' | 'comptable' | 'installation';
+export type FicheKind = 'intervention' | 'comptable' | 'installation' | 'formation';
 
 export const FICHE_EXTENSION = 'fedonix';
 /** Fiche compressée pour l'envoyer par e-mail ou WhatsApp (5 à 10 fois plus petite). */
@@ -85,6 +85,7 @@ export const FICHE_KIND_LABELS: Record<FicheKind, string> = {
   intervention: "Fiche d'intervention",
   comptable: 'Copie comptable',
   installation: 'Installation préparée',
+  formation: 'Mode formation',
 };
 
 /** Ce que la fiche sait d'elle-même (réglage `fiche.meta`). */
@@ -104,6 +105,8 @@ export interface FicheMeta {
   baseSeq: number;
   /** Réglages de la boutique au moment de la sortie (sans ceux du PC). */
   settings: Record<string, string>;
+  /** Mode formation : fichier de la vraie boutique, rouvert à la fin de la formation. */
+  origin?: string | null;
   /** Compteurs de numéros au moment de la sortie. */
   counters: Record<string, number>;
 }
@@ -276,6 +279,7 @@ const frDateTime = (iso: string) => {
 export function ficheBanner(meta: Pick<FicheMeta, 'kind' | 'storeName' | 'at'>): string {
   const when = frDateTime(meta.at);
   if (meta.kind === 'installation') return `Installation préparée pour ${meta.storeName}`;
+  if (meta.kind === 'formation') return `MODE FORMATION : copie d'entraînement de ${meta.storeName}. Les ventes faites ici ne comptent pas dans la boutique.`;
   return `${FICHE_KIND_LABELS[meta.kind]} de ${meta.storeName}, données arrêtées au ${when} : la caisse ne vend pas ici.`;
 }
 
@@ -312,6 +316,8 @@ export class FicheService extends Base {
       log?: boolean;
       /** Poste distant (dépôt sans réseau) : installation sur une autre caisse, qui fera ses remontées par fichier. */
       remote?: { registerId: string };
+      /** Mode formation : fichier de la boutique à rouvrir en fin de formation. */
+      origin?: string | null;
     } = {},
   ): Promise<DossierInfo> {
     if (!(kind in FICHE_KIND_LABELS)) throw new AppError('Sorte de fiche inconnue', 'INVALID');
@@ -359,6 +365,7 @@ export class FicheService extends Base {
       baseSeq: 0,
       settings: {},
       counters: {},
+      origin: kind === 'formation' ? (opts.origin ?? null) : undefined,
     };
     try {
       // Copie à chaud : la caisse continue de vendre pendant la sortie de la fiche.
@@ -375,6 +382,21 @@ export class FicheService extends Base {
           }
           for (const c of copy.prepare('SELECT name, value FROM counters').all() as { name: string; value: number }[]) meta.counters[c.name] = c.value;
           copy.prepare('DELETE FROM sync_conflicts').run();
+          // Formation : rien ne repart d'ici, la file d'envoi est vidée.
+          if (kind === 'formation') {
+            copy.prepare('DELETE FROM outbox').run();
+            // Les tickets imprimés pendant la formation le disent : ils ne valent rien.
+            for (const st of copy.prepare('SELECT id, settings FROM stores').all() as { id: string; settings: string | null }[]) {
+              let json: Record<string, unknown> = {};
+              try {
+                json = st.settings ? (JSON.parse(st.settings) as Record<string, unknown>) : {};
+              } catch {
+                json = {};
+              }
+              json['ticketHeader'] = `*** FORMATION : TICKET SANS VALEUR ***${json['ticketHeader'] ? ` ${String(json['ticketHeader'])}` : ''}`.slice(0, 120);
+              copy.prepare('UPDATE stores SET settings = ? WHERE id = ?').run(JSON.stringify(json), st.id);
+            }
+          }
           if (remote) {
             // Le poste distant ouvre sur sa caisse et ne remontera que ce qu'il fera lui-même.
             const set = copy.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
@@ -510,7 +532,7 @@ export class FicheService extends Base {
    */
   async saveCopy(dir: string): Promise<DossierInfo> {
     const meta = this.current();
-    if (!meta || meta.kind === 'installation') throw new AppError("Seule une fiche d'intervention ou une copie comptable se rapporte à la boutique", 'INVALID');
+    if (!meta || meta.kind === 'installation' || meta.kind === 'formation') throw new AppError("Seule une fiche d'intervention ou une copie comptable se rapporte à la boutique", 'INVALID');
     const file = join(dir, basename(this.db.name).replace(/\.[^.]+$/, '') + `.${FICHE_EXTENSION}`);
     if (resolve(file) === resolve(this.db.name)) throw new AppError('Choisissez la clé USB ou un autre dossier que celui de la fiche', 'INVALID');
     const tmp = `${file}.part`;
@@ -543,6 +565,7 @@ export class FicheService extends Base {
     const meta = readFicheFile(file);
     if (!meta) throw new AppError("Ce fichier n'est pas une fiche FEDONIX 360", 'INVALID');
     if (meta.kind === 'installation') throw new AppError("Une installation préparée s'installe au premier démarrage d'un PC : elle ne se rapporte pas", 'INVALID');
+    if (meta.kind === 'formation') throw new AppError('Une copie de formation ne se rapporte jamais : ce qui y est fait ne compte pas', 'INVALID');
     if (!this.db.prepare('SELECT 1 FROM stores WHERE id = ?').get(meta.storeId)) {
       throw new AppError(`Cette fiche appartient à une autre boutique (${meta.storeName})`, 'INVALID');
     }

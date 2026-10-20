@@ -1,6 +1,7 @@
 import { DEFAULT_STORE_SETTINGS, type Permission, type StoreSettings } from '@superette/core';
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { formatFcfa, formatQty } from '@superette/core';
+import { call } from './api';
 
 export const fcfa = (v: number) => formatFcfa(v);
 export const qty = formatQty;
@@ -226,6 +227,78 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 /** Demande le code d'un gérant (annulation, retour, remise, prélèvement). */
+/**
+ * Accord du gérant sur son téléphone : la caisse demande, le gérant accepte
+ * avec son code sur la page du gérant. Le code renvoyé (« @accord:… ») vaut
+ * code du gérant pendant 2 minutes sur ce PC. Rien n'est montré si le PC
+ * n'est pas relié au serveur.
+ */
+export function PhoneApproval({ action, onCode }: { action: string; onCode: (code: string) => void }) {
+  const [available, setAvailable] = useState(false);
+  const [waiting, setWaiting] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    call('approval.available').then(setAvailable, () => setAvailable(false));
+  }, []);
+  useEffect(() => {
+    if (!waiting) return;
+    let stop = false;
+    const tick = async () => {
+      if (stop) return;
+      try {
+        const r = await call('approval.poll', waiting);
+        if (stop) return;
+        if (r.status === 'approved' && r.code) {
+          setWaiting(null);
+          setMessage(`Accordé par ${r.name ?? 'le gérant'}`);
+          return onCode(r.code);
+        }
+        if (r.status !== 'pending') {
+          setWaiting(null);
+          return setMessage(r.status === 'refused' ? 'Le gérant a refusé.' : 'Pas de réponse à temps : redemandez.');
+        }
+      } catch (e) {
+        setWaiting(null);
+        return setMessage(e instanceof Error ? e.message : String(e));
+      }
+      setTimeout(tick, 2_000);
+    };
+    const t = setTimeout(tick, 2_000);
+    return () => {
+      stop = true;
+      clearTimeout(t);
+    };
+  }, [waiting]);
+  if (!available) return null;
+  return (
+    <div className="phone-approval">
+      {waiting ? (
+        <>
+          <span className="spinner-dot" /> En attente de la réponse du gérant sur son téléphone…
+          <button type="button" className="link" onClick={() => setWaiting(null)}>
+            Annuler
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={async () => {
+            setMessage(null);
+            try {
+              setWaiting((await call('approval.request', action)).id);
+            } catch (e) {
+              setMessage(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        >
+          Demander sur le téléphone du gérant
+        </button>
+      )}
+      {message && <small className="muted">{message}</small>}
+    </div>
+  );
+}
+
 export function SupervisorPrompt({ action, onCancel, onConfirm }: { action: string; onCancel: () => void; onConfirm: (pin: string) => void }) {
   const [pin, setPin] = useState('');
   const ref = useRef<HTMLInputElement>(null);
@@ -242,6 +315,7 @@ export function SupervisorPrompt({ action, onCancel, onConfirm }: { action: stri
         <Field label="Code gérant">
           <input ref={ref} type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
         </Field>
+        <PhoneApproval action={action} onCode={onConfirm} />
         <div className="actions">
           <button type="button" className="ghost" onClick={onCancel}>
             Annuler

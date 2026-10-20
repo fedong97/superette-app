@@ -245,15 +245,31 @@ export class MobileService {
     };
   }
 
-  /** Droit « Saisir le stock physique dans un inventaire » : rôle, réglages du rôle, privilèges personnels. */
-  private async canCount(userId: string, role: string): Promise<boolean> {
+  /** Un droit de l'utilisateur, comme sur les PC : rôle, réglages du rôle, privilèges personnels. */
+  private async hasRight(userId: string, role: string, right: string, defaults: string[]): Promise<boolean> {
     if (role === 'admin') return true;
     const ur = await this.one('user_rights', userId);
-    if (json<string[]>(ur?.['revokes'], []).includes('inventory_count')) return false;
-    if (json<string[]>(ur?.['grants'], []).includes('inventory_count')) return true;
+    if (json<string[]>(ur?.['revokes'], []).includes(right)) return false;
+    if (json<string[]>(ur?.['grants'], []).includes(right)) return true;
     const rr = await this.one('role_rights', role);
-    const saved = json<Record<string, boolean>>(rr?.['rights'], {})['inventory_count'];
-    return saved ?? ['manager', 'stock'].includes(role);
+    const saved = json<Record<string, boolean>>(rr?.['rights'], {})[right];
+    return saved ?? defaults.includes(role);
+  }
+
+  /** Droit « Saisir le stock physique dans un inventaire ». */
+  private canCount(userId: string, role: string): Promise<boolean> {
+    return this.hasRight(userId, role, 'inventory_count', ['manager', 'stock']);
+  }
+
+  /** Droit « Préparer un panier au rayon sur le téléphone ». */
+  private canCart(userId: string, role: string): Promise<boolean> {
+    return this.hasRight(userId, role, 'shelf_cart', ['manager', 'cashier', 'seller']);
+  }
+
+  /** Ce que la personne connectée peut faire sur le téléphone. */
+  async rights(caller: MobileCaller): Promise<{ count: boolean; cart: boolean }> {
+    if (caller.guest) return { count: true, cart: false };
+    return { count: await this.canCount(caller.user.id, caller.user.role), cart: await this.canCart(caller.user.id, caller.user.role) };
   }
 
   // ——— Rattachement du téléphone ———
@@ -426,11 +442,12 @@ export class MobileService {
     const storeId = user.payload['store_id'] as string | null;
     if (storeId && storeId !== device.store_id) throw new ForbiddenException('Cet utilisateur appartient à un autre magasin');
     const role = str(user.payload['role']);
-    if (!(await this.canCount(user.entity_id, role))) throw new ForbiddenException('Vous n’avez pas le droit de compter un inventaire. Demandez-le au gérant.');
+    const can = { count: await this.canCount(user.entity_id, role), cart: await this.canCart(user.entity_id, role) };
+    if (!can.count && !can.cart) throw new ForbiddenException('Vous n’avez ni le droit de compter un inventaire ni celui de préparer un panier. Demandez-le au gérant.');
     const session = randomBytes(32).toString('base64url');
     await this.pg.query('INSERT INTO mobile_sessions (token_hash, device_id, user_id, last_seen_at) VALUES ($1, $2, $3, now())', [hashToken(session), device.id, user.entity_id]);
     const store = await this.one('store', device.store_id);
-    return { session, user: { id: user.entity_id, name: str(user.payload['name']), role }, storeName: str(store?.['name']) };
+    return { session, user: { id: user.entity_id, name: str(user.payload['name']), role }, storeName: str(store?.['name']), can };
   }
 
   async caller(authorization: string | undefined, session: string | undefined): Promise<MobileCaller> {
@@ -462,6 +479,61 @@ export class MobileService {
     const device = await this.device(authorization);
     if (session) await this.pg.query('DELETE FROM mobile_sessions WHERE token_hash = $1 AND device_id = $2', [hashToken(session), device.id]);
     return { ok: true };
+  }
+
+  // ——— Panier préparé au rayon ———
+
+  /**
+   * Panier préparé par un vendeur sur le téléphone : il part à la caisse, qui
+   * le charge comme un ticket en attente, au nom du vendeur (commission).
+   * Le même panier renvoyé (réseau coupé) n'est enregistré qu'une fois.
+   */
+  async pushCart(caller: MobileCaller, input: { id: string; label?: string | null; lines: { articleId: string; qty: number; packId?: string | null }[] }) {
+    if (!(await this.rights(caller)).cart) throw new ForbiddenException('Vous n’avez pas le droit de préparer un panier. Demandez-le au gérant.');
+    const id = str(input?.id).trim();
+    if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Panier invalide');
+    const lines = (Array.isArray(input?.lines) ? input.lines : [])
+      .map((l) => ({ articleId: str(l?.articleId), qty: Math.round(Number(l?.qty)), packId: l?.packId ? str(l.packId) : null }))
+      .filter((l) => l.articleId && Number.isSafeInteger(l.qty) && l.qty > 0);
+    if (!lines.length || lines.length > 200) throw new BadRequestException('Le panier est vide (200 lignes au plus)');
+    const label = str(input?.label).trim().slice(0, 60) || null;
+    const { rows } = await this.pg.query<{ number: number }>(
+      `INSERT INTO shelf_carts (id, device_id, store_id, user_id, user_name, label, lines, number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT COALESCE(MAX(number), 0) + 1 FROM shelf_carts WHERE store_id = $3 AND created_at >= date_trunc('day', now())))
+       ON CONFLICT (id) DO NOTHING RETURNING number`,
+      [id, caller.device.id, caller.device.store_id, caller.user.id, caller.user.name, label, JSON.stringify(lines)],
+    );
+    const number = rows[0]?.number ?? (await this.pg.query<{ number: number }>('SELECT number FROM shelf_carts WHERE id = $1', [id])).rows[0]?.number ?? null;
+    return { id, number };
+  }
+
+  /** Paniers du vendeur aujourd'hui : envoyés, pris en caisse. */
+  async myCarts(caller: MobileCaller) {
+    const { rows } = await this.pg.query<{ id: string; number: number; label: string | null; lines: unknown[]; created_at: Date; taken_at: Date | null }>(
+      "SELECT id, number, label, lines, created_at, taken_at FROM shelf_carts WHERE user_id = $1 AND store_id = $2 AND created_at >= now() - interval '1 day' ORDER BY created_at DESC",
+      [caller.user.id, caller.device.store_id],
+    );
+    return { carts: rows.map((r) => ({ id: r.id, number: r.number, label: r.label, lines: r.lines.length, at: new Date(r.created_at).toISOString(), takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null })) };
+  }
+
+  /** Paniers des vendeurs qui attendent une caisse du magasin du PC. */
+  async waitingCarts(storeId: string) {
+    const { rows } = await this.pg.query<{ id: string; number: number; label: string | null; user_id: string; user_name: string; lines: unknown; created_at: Date }>(
+      "SELECT id, number, label, user_id, user_name, lines, created_at FROM shelf_carts WHERE store_id = $1 AND taken_at IS NULL AND created_at >= now() - interval '12 hours' ORDER BY created_at",
+      [storeId],
+    );
+    return { carts: rows.map((r) => ({ id: r.id, number: r.number, label: r.label, sellerId: r.user_id, sellerName: r.user_name, lines: r.lines, at: new Date(r.created_at).toISOString() })) };
+  }
+
+  /** La caisse prend le panier : une seule caisse l'obtient. */
+  async takeCart(device: { id: string; store_id: string }, id: string) {
+    const { rows } = await this.pg.query<{ id: string; number: number; label: string | null; user_id: string; user_name: string; lines: unknown; created_at: Date }>(
+      'UPDATE shelf_carts SET taken_at = now(), taken_by = $3 WHERE id = $1 AND store_id = $2 AND taken_at IS NULL RETURNING id, number, label, user_id, user_name, lines, created_at',
+      [id, device.store_id, device.id],
+    );
+    const r = rows[0];
+    if (!r) throw new HttpException('Ce panier a déjà été pris par une caisse', HttpStatus.CONFLICT);
+    return { id: r.id, number: r.number, label: r.label, sellerId: r.user_id, sellerName: r.user_name, lines: r.lines, at: new Date(r.created_at).toISOString() };
   }
 
   // ——— Données pour le téléphone ———
@@ -497,6 +569,8 @@ export class MobileService {
               : [],
           // Les photos partent à part (une par fiche ouverte) : le catalogue reste léger.
           thumb: null as string | null,
+          /** Prix de vente indicatif (la caisse refait le prix du magasin et les promotions). */
+          price: Number(p['sale_price'] ?? 0) || 0,
         };
       });
   }
@@ -579,7 +653,8 @@ export class MobileService {
     const users = await this.userNames();
     const out = [];
     const showExpected = settings.showExpected && !caller.guest;
-    for (const inv of await this.openInventories(caller.device.store_id)) {
+    const can = await this.rights(caller);
+    for (const inv of can.count ? await this.openInventories(caller.device.store_id) : []) {
       if (caller.guest && inv.id !== caller.guest.inventoryId) continue;
       const lines = await this.lines(inv.id);
       const levels = settings.showExpected || settings.recount ? await this.stockLevels(inv.warehouseId) : new Map<string, number>();
@@ -611,7 +686,7 @@ export class MobileService {
         expected: showExpected ? Object.fromEntries([...lines.keys()].map((a) => [a, levels.get(a) ?? 0])) : null,
       });
     }
-    return { inventories: out, catalogVersion: await this.catalogVersion(), showExpected, user: caller.user };
+    return { inventories: out, catalogVersion: await this.catalogVersion(), showExpected, user: caller.user, can };
   }
 
   /**
@@ -626,6 +701,7 @@ export class MobileService {
    */
   async pushCounts(caller: MobileCaller, counts: MobileCountInput[], sentAt?: string) {
     if (!Array.isArray(counts) || counts.length > 1000) throw new BadRequestException('Lot de comptages invalide (1000 au plus)');
+    if (!(await this.rights(caller)).count) throw new ForbiddenException('Vous n’avez pas le droit de compter un inventaire. Demandez-le au gérant.');
     const accepted: string[] = [];
     const rejected: { id: string; reason: string }[] = [];
     const touched = new Map<string, Set<string>>();

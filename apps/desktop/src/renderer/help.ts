@@ -64,6 +64,9 @@ const POS: PageHelp = {
         'Touchez « Client comptoir » en haut du ticket (ou F8) pour choisir un client : ses prix (gros, super gros) s’appliquent et son solde s’affiche. « Comptant » et « Crédit » passent d’une vente à l’autre.',
         'F6 fait une remise sur la ligne ; sans le droit, le code d’un gérant est demandé.',
         '« En attente » (F3) met la fiche de côté pour servir un autre client ; « Rappeler » (F10) la reprend.',
+        '« Rappeler » montre aussi les paniers préparés au rayon par les vendeurs sur leur téléphone : choisissez « Panier n° … de … », ses produits arrivent sur la fiche et la vente compte pour le vendeur.',
+        'Quand le code du gérant est demandé et que le gérant est absent : « Demander sur le téléphone du gérant ». Il accepte avec son code sur sa page Gérant, et la caisse continue (PC relié au serveur).',
+        'WhatsApp, à côté de Facture A4 : envoie le ticket au téléphone du client, avec la facture en PDF si vous le cochez.',
       ],
     },
     {
@@ -441,6 +444,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           'L’attendu = solde de départ + encaissé + transferts reçus − sorties.',
         ],
       },
+      {
+        tab: 'day',
+        title: 'Relève d’équipe',
+        steps: [
+          '« Relève d’équipe… » quand un caissier en remplace un autre sans fermer la caisse.',
+          'Le caissier qui part compte le tiroir par coupure, sans voir l’attendu. Celui qui arrive tape son identifiant (ou scanne son badge) et son code.',
+          'Le bon de passation s’imprime avec l’attendu, le compté et l’écart de celui qui part : signez-le tous les deux.',
+          'La journée continue : même fond, même Z. Le Z donne les ventes et l’écart de chaque caissier.',
+        ],
+      },
       { tab: 'history', title: 'Historique et écarts', perm: 'cash_amounts', steps: ['Le filtre « Type » montre les caisses espèces, électroniques ou banque.', 'Un écart au-delà du seuil se justifie avec « Justifier l’écart… ».'] },
       { tab: 'central', title: 'Caisse centrale', perm: 'central_cash', steps: ['Entrées (banque, exploitant) et sorties (dépôt en banque…) avec bon imprimé ; le livre montre le solde.'] },
       {
@@ -481,8 +494,24 @@ export const HELP: Record<WinKind, PageHelp> = {
         tab: 'users',
         title: 'Utilisateurs',
         steps: [
-          '« Ajouter un utilisateur » : nom, identifiant, code, rôle, et ses caisses espèces, électronique et banque.',
+          '« Ajouter un employé » ouvre la fiche « Nouvel employé » : nom, identifiant, code, rôle et caisses, puis, en une fois, sa fiche collaborateur (poste, téléphone, salaire) et son badge.',
+          'Dans la fiche d’un utilisateur, l’identifiant se modifie (lettres, chiffres, point, tiret ; 2 à 30 caractères).',
+          'Badge : « Créer son badge » donne un code-barres imprimé sur une carte. À la connexion, le scanner remplit l’identifiant ; il reste à taper le code. « Refaire » rend l’ancien badge inutilisable.',
+          'Photo (badge) : « Prendre une photo » utilise la caméra du PC, « Importer… » une image. Elle est recadrée au format photo d’identité et s’imprime sur son badge.',
+          '« Supprimer l’utilisateur » : sans aucune opération, il est effacé ; sinon il disparaît des listes et ne se connecte plus, son nom reste sur ses tickets et son identifiant redevient libre.',
           'La colonne Privilèges montre ce qui est ajouté (+) ou retiré (−) à son rôle. Un utilisateur « bloqué » après trop de codes faux se débloque avec « Débloquer ».',
+        ],
+      },
+      {
+        tab: 'brand',
+        title: 'Couleurs et badges',
+        steps: [
+          'Choisissez la couleur principale et la couleur secondaire de l’entreprise, ou une palette toute prête : tout l’écran change aussitôt. « Enregistrer » les garde pour tous les postes et tous les magasins.',
+          'Les badges, les cartes de fidélité et les en-têtes de tableau des documents A4 prennent aussi ces couleurs. Le texte posé sur une couleur claire passe en noir pour rester lisible.',
+          'Badge : choisissez le modèle (Bandeau, Arcs ou Angles), la taille (carte bancaire, grand badge ou format libre en mm), le sens et les éléments imprimés : logo, nom du magasin, rôle, photo, matricule, poste, téléphone, expiration, code-barres, décor.',
+          'Le matricule, le poste, le téléphone et la date d’entrée viennent de la fiche collaborateur ; la photo, de la fiche de l’utilisateur.',
+          '« Imprimer aussi le verso » ajoute à côté du recto les règles du badge, les dates d’entrée et d’expiration et une ligne de signature.',
+          'L’aperçu montre un exemple ou le badge d’un employé. « Imprimer tous les badges » sort ceux de tous les employés qui ont un badge, sur des feuilles A4 à découper.',
         ],
       },
       {
@@ -615,6 +644,17 @@ export const HELP: Record<WinKind, PageHelp> = {
         ],
       },
       { tab: 'statement', title: 'Extrait de compte', steps: ['Salaires constatés et payés, avances versées, remboursées ou retenues, avec les deux soldes après chaque ligne.'] },
+      {
+        tab: 'attendance',
+        title: 'Pointage',
+        perm: 'staff_attendance',
+        steps: [
+          'L’arrivée se note à la première connexion du jour ; le départ à la fermeture de la caisse ou avec « Je pars » (Fichier, ou en bas de l’écran).',
+          'Le tableau du mois donne pour chacun les jours de présence, les heures, les retards et les absences. Cliquez une personne pour ses journées.',
+          'Un oubli se corrige avec « Corriger » : heures d’arrivée et de départ, et un motif obligatoire.',
+          'L’heure d’embauche, la tolérance de retard et les jours travaillés se règlent dans Administration › Paramètres › Pointage du personnel.',
+        ],
+      },
     ],
   },
 };

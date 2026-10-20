@@ -9,7 +9,7 @@ import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
-import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog } from './PosDialogs';
+import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog, WhatsappTicketDialog } from './PosDialogs';
 import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
@@ -107,7 +107,7 @@ const initials = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
     .join('');
-const TILE_COLORS = ['#1f7a5c', '#e0a800', '#0891b2', '#db2777', '#7c3aed', '#22a06b', '#2563eb', '#ea580c'];
+const TILE_COLORS = ['var(--brand)', '#e0a800', '#0891b2', '#db2777', '#7c3aed', '#22a06b', '#2563eb', '#ea580c'];
 /** Couleur stable par produit (le nom donne toujours la même). */
 const tileColor = (name: string) => {
   let h = 0;
@@ -174,6 +174,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const can = (p: Permission) => has(user, p);
   const [weightFor, setWeightFor] = useState<Article | null>(null);
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
+  const [waSale, setWaSale] = useState<{ id: string; number: string } | null>(null);
+  const sendWhatsapp = () => lastSale && setWaSale({ id: lastSale.id, number: lastSale.number });
   const [customer, setCustomer] = useState<Customer | null>(null);
   /** Nom donné par un client comptoir (facultatif), imprimé sur le ticket et la facture. */
   const [clientName, setClientName] = useState('');
@@ -181,6 +183,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const [quote, setQuote] = useState<{ id: string; number: string; validUntil: string } | null>(null);
   /** Commande client chargée : sa marchandise réservée lui revient, elle passe « facturée » à la validation. */
   const [order, setOrder] = useState<{ id: string; number: string } | null>(null);
+  /** Vendeur du panier préparé au rayon : la vente compte pour lui. */
+  const [seller, setSeller] = useState<{ id: string | null; name: string } | null>(null);
   /** Tarif et dépôt choisis pour cette fiche (null : ceux du client et du magasin). */
   const [levelChoice, setLevelChoice] = useState<PriceLevel | null>(null);
   const [warehouseChoice, setWarehouseChoice] = useState<string | null>(null);
@@ -195,6 +199,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const fidelity = useLoad(() => (customer ? call('loyalty.status', customer.id) : Promise.resolve(null)), [customer?.id, lastSale?.id]);
   // Tickets en attente sur cette caisse : leur nombre s'affiche sur le bouton « Ouvrir ».
   const held = useLoad(() => call('pos.held'), []);
+  // Paniers des vendeurs : relus toutes les 20 secondes (PC relié au serveur).
+  const carts = useLoad(() => call('pos.shelfCarts'), []);
+  useEffect(() => {
+    const t = setInterval(() => carts.reload(), 20_000);
+    return () => clearInterval(t);
+  }, []);
   // Clients existants proposés pendant la frappe du nom (évite les doublons).
   const namesake = useLoad(() => (clientName.trim().length >= 2 ? call('customers.list', { search: clientName.trim() }) : Promise.resolve([])), [clientName]);
   /** Vente bloquée en attente du code gérant (remise ou dépassement du plafond). */
@@ -383,6 +393,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const clear = () => {
     setQuote(null);
     setOrder(null);
+    setSeller(null);
     setReplacing(null);
     setClientName('');
     setLines([]);
@@ -473,6 +484,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           optionsPin,
           delivery: deliveryInput(),
           replacesId: replacing?.id ?? null,
+          sellerId: seller?.id ?? null,
           ...pins,
         }),
       );
@@ -543,6 +555,23 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       held.reload();
     } catch (err) {
       toast.error(err);
+    }
+  };
+
+  /** Panier préparé au rayon par un vendeur : il arrive sur la fiche, à son nom. */
+  const takeCart = async (id: string) => {
+    if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
+    try {
+      const c = await call('pos.takeShelfCart', id);
+      setLines(await reload(c.lines));
+      setSeller({ id: c.sellerId, name: c.sellerName });
+      setLastSale(null);
+      setDialog(null);
+      carts.reload();
+      toast.ok(`Panier n° ${c.number} de ${c.sellerName}${c.label ? ` (${c.label})` : ''}${c.missing ? ` : ${c.missing} article(s) inconnu(s) de ce PC laissé(s) de côté` : ''}`);
+    } catch (err) {
+      toast.error(err);
+      carts.reload();
     }
   };
 
@@ -876,7 +905,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
 
   const dialogs = (
     <>
-    {dialog === 'pay' && (
+    {waSale && <WhatsappTicketDialog saleId={waSale.id} number={waSale.number} onClose={() => setWaSale(null)} />}
+      {dialog === 'pay' && (
       <PaymentDialog
         total={toPay}
         needsSupervisor={discountNeedsCode}
@@ -1054,8 +1084,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         onClose={() => {
           setDialog(null);
           held.reload();
+          carts.reload();
         }}
         onResume={resume}
+        onTakeCart={takeCart}
       />
     )}
     {dialog === 'statement' && customer && (
@@ -1093,8 +1125,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     if (w) chooseOption(`Vendre depuis le dépôt « ${w.name} ».`, 'sale_warehouse', mine, () => setWarehouseChoice(w.id === salesWarehouse?.id ? null : w.id));
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
-  const heldCount = held.data?.length ?? 0;
-  const ficheNumber = replacing ? `Modif. ${replacing.number}` : quote && lines.length ? `Devis ${quote.number}` : order && lines.length ? `Commande ${order.number}` : 'Nouveau';
+  const heldCount = (held.data?.length ?? 0) + (carts.data?.length ?? 0);
+  const ficheNumber = replacing
+    ? `Modif. ${replacing.number}`
+    : quote && lines.length
+      ? `Devis ${quote.number}`
+      : order && lines.length
+        ? `Commande ${order.number}`
+        : seller && lines.length
+          ? `Panier de ${seller.name}`
+          : 'Nouveau';
   const tariffSelect = (
     <select value={level} onChange={(e) => pickLevel(e.target.value as PriceLevel)} title="Tarif de cette fiche ; par défaut celui du client">
       {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
@@ -1424,6 +1464,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
               Facture A4 <kbd>F9</kbd>
             </button>
+            <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp">
+              WhatsApp
+            </button>
             <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
               Tiroir <kbd>F5</kbd>
             </button>
@@ -1683,6 +1726,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           </button>
           <button disabled={!lastSale || lines.length > 0} onClick={printA4}>
             Facture A4 <kbd>F9</kbd>
+          </button>
+          <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp">
+            WhatsApp
           </button>
           <button disabled={!lines.length} onClick={openPay}>
             Encaisser <kbd>Ctrl+E</kbd>
@@ -2012,7 +2058,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           <i aria-hidden>↺</i>
           <span>
             Rappeler
-            {(held.data?.length ?? 0) > 0 && <b className="held-count">{held.data!.length}</b>}
+            {heldCount > 0 && <b className="held-count">{heldCount}</b>}
           </span>
           <kbd>F10</kbd>
         </button>
@@ -2024,6 +2070,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         </button>
         <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>📄</i>Facture A4 <kbd>F9</kbd>
+        </button>
+        <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp" style={{ '--c': '#16a34a' } as React.CSSProperties}>
+          <i aria-hidden>💬</i>WhatsApp
         </button>
         <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>

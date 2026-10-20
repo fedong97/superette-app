@@ -571,6 +571,10 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
       await printReceipt(s.receipts.zReport(sessionId), false);
     },
 
+    async handover(handoverId) {
+      await printReceipt(s.receipts.handoverSlip(handoverId), false, true);
+    },
+
     async centralVoucher(movementId) {
       await printReceipt(s.receipts.centralVoucher(movementId), false, true);
     },

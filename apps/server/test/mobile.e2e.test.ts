@@ -55,6 +55,7 @@ describe('inventaire sur téléphone', () => {
     ctx = { storeId, registerId: boot.register.id, userId: boot.admin.id };
     pc.admin.createUser(boot.admin.id, { name: 'Awa', login: 'awa', pin: '5678', role: 'stock', storeId });
     pc.admin.createUser(boot.admin.id, { name: 'Paul', login: 'paul', pin: '1111', role: 'cashier', storeId });
+    pc.admin.createUser(boot.admin.id, { name: 'Jean', login: 'jean', pin: '2222', role: 'accountant', storeId });
     const tva = pc.admin.listVatRates()[0]!.id;
     const boissons = pc.catalogue.createDepartment('Boissons');
     const fam = pc.catalogue.createFamily(boissons.id, 'Bières');
@@ -107,9 +108,14 @@ describe('inventaire sur téléphone', () => {
 
   it('connecte le compteur avec son code et le droit de compter', async () => {
     expect((await phone('/login', { login: 'awa', pin: '0000' })).status).toBe(401);
-    const paul = await phone('/login', { login: 'paul', pin: '1111' });
-    expect(paul.status).toBe(403);
-    expect((await paul.json()).message).toContain('droit de compter');
+    const jean = await phone('/login', { login: 'jean', pin: '2222' });
+    expect(jean.status).toBe(403);
+    expect((await jean.json()).message).toContain('droit de compter');
+    // Un caissier se connecte pour préparer un panier, sans voir les inventaires.
+    const paul = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
+    expect(paul.can).toEqual({ count: false, cart: true });
+    expect((await (await phone('/inventories', undefined, paul.session)).json()).inventories).toEqual([]);
+    expect((await phone('/counts', { counts: [] }, paul.session)).status).toBe(403);
     const ok = await (await phone('/login', { login: 'AWA', pin: '5678' })).json();
     expect(ok.user).toMatchObject({ name: 'Awa', role: 'stock' });
     session = ok.session;

@@ -2,6 +2,8 @@ import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query, Re
 import type { Request, Response } from 'express';
 import { ADMIN_PAGE, MANAGER_ICON, MANAGER_PAGE } from './admin.page';
 import { AdminService, LONG_SESSION_MS } from './admin.service';
+import { ALERT_KINDS, AlertsService } from './alerts.service';
+import { ApprovalsService } from './approvals.service';
 import { BackupService } from './backup.service';
 import { ManagerService } from './manager.service';
 import { UpdatesService } from './updates.service';
@@ -43,6 +45,18 @@ self.addEventListener('fetch', (e) => {
   if (e.request.mode !== 'navigate') return;
   e.respondWith(fetch(e.request).catch(() => new Response('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font:16px system-ui;padding:24px">Pas de connexion au serveur FEDONIX 360. Vérifiez le réseau puis rouvrez l’application.</p>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
 });
+self.addEventListener('push', (e) => {
+  const d = (() => { try { return e.data.json(); } catch { return { title: 'FEDONIX 360', body: e.data ? e.data.text() : '' }; } })();
+  e.waitUntil(self.registration.showNotification(d.title || 'FEDONIX 360', { body: d.body || '', tag: d.tag, icon: '/gerant/icon.png', badge: '/gerant/icon.png', data: { url: d.url || '/gerant' }, renotify: true }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/gerant';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const open = list.find((c) => c.url.includes('/gerant'));
+    return open ? open.focus() : self.clients.openWindow(url);
+  }));
+});
 `;
 
 /** Interface du serveur dans le navigateur (ou dans la fenêtre de FEDONIX 360 Serveur). */
@@ -53,6 +67,8 @@ export class AdminController {
     @Inject(BackupService) private readonly backups: BackupService,
     @Inject(UpdatesService) private readonly updates: UpdatesService,
     @Inject(ManagerService) private readonly manager: ManagerService,
+    @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
+    @Inject(AlertsService) private readonly alerts: AlertsService,
   ) {}
 
   private guard(req: Request) {
@@ -106,6 +122,50 @@ export class AdminController {
   managerDashboard(@Req() req: Request, @Query('day') day?: string) {
     this.guard(req);
     return this.manager.dashboard(day || undefined);
+  }
+
+  /** Demandes d'accord des caisses, en attente. */
+  @Get('admin/api/approvals')
+  pendingApprovals(@Req() req: Request) {
+    this.guard(req);
+    return this.approvals.pending();
+  }
+
+  @Post('admin/api/approvals/:id')
+  @HttpCode(200)
+  decideApproval(@Req() req: Request, @Param('id') id: string, @Body() body: { approve: boolean; pin?: string }) {
+    this.guard(req);
+    return this.approvals.decide(id, body);
+  }
+
+  /** Alertes nées depuis `since` (la page les montre avec un son). */
+  @Get('admin/api/alerts')
+  async phoneAlerts(@Req() req: Request, @Query('since') since?: string) {
+    this.guard(req);
+    const feed = await this.alerts.feed(since === undefined || since === '' ? undefined : Number(since));
+    return { ...feed, kinds: ALERT_KINDS };
+  }
+
+  /** Clé publique des notifications ; elles ne marchent qu'avec un serveur en HTTPS. */
+  @Get('admin/api/push/key')
+  async pushKey(@Req() req: Request) {
+    this.guard(req);
+    return { publicKey: (await this.alerts.vapid()).publicKey };
+  }
+
+  @Post('admin/api/push/subscribe')
+  @HttpCode(200)
+  pushSubscribe(@Req() req: Request, @Body() body: Parameters<AlertsService['subscribe']>[0]) {
+    this.guard(req);
+    const origin = String(req.headers.origin ?? `${req.protocol}://${req.headers.host ?? ''}`);
+    return this.alerts.subscribe(body, origin);
+  }
+
+  @Post('admin/api/push/unsubscribe')
+  @HttpCode(200)
+  pushUnsubscribe(@Req() req: Request, @Body() body: { endpoint: string }) {
+    this.guard(req);
+    return this.alerts.unsubscribe(body?.endpoint);
   }
 
   @Get('admin/api/session')

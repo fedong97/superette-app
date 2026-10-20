@@ -109,6 +109,57 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.74.0',
+    items: [
+      'Couleurs de l’entreprise : Administration › Couleurs et badges. Choisissez une couleur principale et une secondaire (ou une palette toute prête) : toute l’application, les badges, les cartes de fidélité et les documents A4 les prennent, sur tous les postes.',
+      'Nouveau badge du personnel : nom complet, photo, logo, rôle, matricule, poste, téléphone, date d’expiration et code-barres de connexion, aux couleurs de l’entreprise. Trois modèles (Bandeau, Arcs, Angles), taille et sens au choix, éléments à afficher ou masquer, et verso avec les règles et la signature.',
+      'Photo de l’employé dans sa fiche utilisateur : prise avec la caméra du PC ou importée.',
+    ],
+  },
+  {
+    version: '0.73.0',
+    items: [
+      'Panier préparé au rayon : dans l’application Android, le vendeur connecté touche « Préparer un panier pour un client », scanne les produits avec le client, puis « Envoyer à la caisse ». Le caissier le retrouve dans « Rappeler » (F10) sous « Paniers des vendeurs » ; la vente compte pour le vendeur (Ma journée, objectifs et commissions).',
+      'Nouveau droit « Préparer un panier au rayon sur le téléphone » (Facturation), donné aux gérants, caissiers et vendeurs.',
+    ],
+  },
+  {
+    version: '0.72.0',
+    items: [
+      'Accord du gérant à distance : quand la caisse demande le code du gérant, « Demander sur le téléphone du gérant » envoie la demande sur sa page Gérant. Il accepte avec son code (ou refuse) et la caisse continue. Le PC doit être relié au serveur.',
+      'Page Gérant › 🔔 Alertes sur ce téléphone : demandes d’accord, écarts de caisse, grosses remises (seuil réglable), tickets annulés, ruptures de stock et PC muets. Page ouverte, chaque alerte sonne ; avec un serveur en https://, le téléphone les reçoit même page fermée.',
+    ],
+  },
+  {
+    version: '0.71.0',
+    items: [
+      'Trésorerie › « Relève d’équipe… » : le caissier qui part compte le tiroir sans voir l’attendu, celui qui arrive se connecte, et un bon de passation s’imprime avec l’écart de celui qui part. La journée et le Z restent les mêmes ; le Z détaille les ventes et l’écart de chaque caissier.',
+    ],
+  },
+  {
+    version: '0.70.0',
+    items: [
+      'Bouton « WhatsApp » à la caisse (à côté de Facture A4) et dans le détail d’une vente : le ticket part sur le téléphone du client, avec la facture A4 en PDF si vous le cochez.',
+      'Bons de commande › « WhatsApp au fournisseur » : la commande part sur le numéro du fournisseur, avec le bon en PDF.',
+    ],
+  },
+  {
+    version: '0.69.0',
+    items: [
+      'Accueil › « Ma journée » pour le caissier et le vendeur : ses ventes du jour, ses tickets, son panier moyen, la barre de son objectif et sa commission du mois.',
+      'Fichier › « Mode formation… » : FEDONIX 360 s’ouvre sur une copie de la boutique avec un bandeau orange. On y vend pour s’entraîner ; rien ne compte dans la boutique ni ne part au serveur. « Quitter la formation » ramène à la boutique.',
+    ],
+  },
+  {
+    version: '0.68.0',
+    items: [
+      'Fiche utilisateur : l’identifiant se modifie, et « Supprimer l’utilisateur » efface un compte jamais utilisé ou retire des listes celui qui a déjà travaillé (son nom reste sur ses tickets).',
+      '« Ajouter un employé » : utilisateur, rôle, caisses, fiche collaborateur (poste, téléphone, salaire) et badge en une seule fiche.',
+      'Badge : une carte avec code-barres ; scannée à l’écran de connexion, elle remplit l’identifiant.',
+      'Charge › Collaborateurs › Pointage : arrivée à la première connexion, départ à la fermeture de la caisse ou avec « Je pars ». Heures, retards et absences du mois ; le gérant corrige un oubli avec un motif. Horaires dans Administration › Paramètres.',
+    ],
+  },
+  {
     version: '0.67.0',
     items: [
       'Version anglaise : le bouton « English » en bas de l’écran (et sur l’écran de connexion) passe les écrans en anglais pour l’utilisateur connecté ; « Français » revient au français. La caisse, la trésorerie, les clients, les ventes, les commandes et les livraisons sont entièrement traduits, avec les messages d’erreur ; pour les autres écrans, les menus et les titres.',

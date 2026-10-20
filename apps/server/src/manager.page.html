@@ -74,10 +74,25 @@
   .maj { text-align: center; color: var(--gris); font-size: 12px; margin-top: 8px; }
   details summary { cursor: pointer; color: var(--vert-fonce); font-size: 14px; margin-top: 6px; }
   #installer { display: none; }
+  #demandes { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 0 12px calc(12px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; max-width: 720px; margin: 0 auto; }
+  .demande { background: #fff; border: 2px solid var(--orange); border-radius: 14px; padding: 12px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .demande b { display: block; font-size: 16px; }
+  .demande small { color: var(--gris); }
+  .demande form { display: flex; gap: 8px; margin-top: 10px; }
+  .demande input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 9px 10px; border: 1px solid #d0d5dd; border-radius: 8px; }
+  .demande .oui { background: var(--vert); color: #fff; border-color: var(--vert); border-radius: 8px; }
+  .demande .non-btn { border-radius: 8px; color: var(--rouge); }
+  #toasts { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 0; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; padding: 0 12px; }
+  #toasts div { pointer-events: auto; max-width: 560px; width: 100%; background: #1d2430; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  #toasts div b { display: block; }
+  .reglages label { display: flex; gap: 10px; align-items: center; padding: 6px 0; }
+  .reglages input[type=number] { width: 70px; font: inherit; padding: 4px 6px; border: 1px solid #d0d5dd; border-radius: 6px; }
 </style>
 </head>
 <body>
+<div id="toasts"></div>
 <div id="app"></div>
+<div id="demandes"></div>
 <script>
 (() => {
   const app = document.getElementById('app');
@@ -131,8 +146,10 @@
 
   async function load() {
     try {
+      const first = !data;
       data = await api(`/admin/api/manager?day=${day}`);
       render();
+      if (first) { demandes(); alertes(); }
     } catch (err) {
       if (err.status === 401) return login();
       if (!data) app.innerHTML = `<main><div class="message erreur">${esc(err.message)}</div><button onclick="location.reload()">Réessayer</button></main>`;
@@ -205,6 +222,7 @@
         <div class="haut"><h1>${shown ? esc(shown.name) : 'FEDONIX 360 Gérant'}</h1>
           ${installPrompt ? '<button id="installer2">Installer</button>' : ''}
           <a href="/gerant/inventaire" class="lien">Inventaire</a>
+          <button id="cloche" title="Alertes sur ce téléphone">🔔</button>
           <button id="actualiser" title="Actualiser">⟳</button></div>
         <div class="jours">
           <button data-jour="${auj()}" class="${day === auj() ? 'actif' : ''}">Aujourd’hui</button>
@@ -214,6 +232,7 @@
       </header>
       ${many ? `<div class="magasins"><button data-magasin="" class="${store ? '' : 'actif'}">Tous</button>${data.stores.map((s) => `<button data-magasin="${esc(s.id)}" class="${store === s.id ? 'actif' : ''}">${esc(s.name)}</button>`).join('')}</div>` : ''}
       <main>
+        ${showSettings ? settingsBlock() : ''}
         ${data.stores.length ? (shown ? storeBlock(shown, alerts) : overview()) : '<section class="vide">Aucun magasin n’a encore envoyé ses données à ce serveur.</section>'}
         <div class="maj">Mis à jour à ${heure(data.generatedAt)}${data.today ? ' · actualisé chaque minute' : ''}</div>
       </main>`;
@@ -221,9 +240,152 @@
     app.querySelectorAll('[data-magasin]').forEach((b) => (b.onclick = () => window.choisir(b.dataset.magasin)));
     document.getElementById('date').onchange = (e) => { if (e.target.value) { day = e.target.value; load(); } };
     document.getElementById('actualiser').onclick = load;
+    document.getElementById('cloche').onclick = () => { showSettings = !showSettings; render(); window.scrollTo(0, 0); };
+    if (showSettings) bindSettings();
     const inst = document.getElementById('installer2');
     if (inst) inst.onclick = async () => { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; render(); };
   }
+
+  // ——— Demandes d'accord des caisses et alertes ———
+  const KINDS = { approval: 'Demandes d’accord des caisses', gap: 'Écarts de caisse à la clôture', discount: 'Grosses remises', cancel: 'Tickets annulés', stockout: 'Ruptures de stock', silent: 'PC qui ne donnent plus de nouvelles' };
+  const prefs = (() => {
+    try { return { kinds: Object.keys(KINDS), discountPct: 20, ...JSON.parse(localStorage.getItem('fedo.gerant.alertes') || '{}') }; } catch { return { kinds: Object.keys(KINDS), discountPct: 20 }; }
+  })();
+  const savePrefs = () => { try { localStorage.setItem('fedo.gerant.alertes', JSON.stringify(prefs)); } catch {} };
+  let showSettings = false;
+  let cursor = null;
+  const seen = new Set();
+  let shownIds = '';
+  let audio = null;
+  let pushOn = false;
+
+  function beep() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.25].forEach((t) => {
+        const o = audio.createOscillator(); const g = audio.createGain();
+        o.frequency.value = 880; o.connect(g); g.connect(audio.destination);
+        g.gain.setValueAtTime(0.25, audio.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + t + 0.2);
+        o.start(audio.currentTime + t); o.stop(audio.currentTime + t + 0.22);
+      });
+    } catch {}
+    if (navigator.vibrate) navigator.vibrate([150, 80, 150]);
+  }
+  // Le navigateur ne joue un son qu'après un premier toucher de la page.
+  document.addEventListener('pointerdown', () => { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch {} }, { once: true });
+
+  function toast(title, text) {
+    const box = document.getElementById('toasts');
+    const d = document.createElement('div');
+    d.innerHTML = `<b>${esc(title)}</b>${esc(text)}`;
+    d.onclick = () => d.remove();
+    box.appendChild(d);
+    setTimeout(() => d.remove(), 12_000);
+  }
+
+  async function demandes() {
+    let list = [];
+    try { list = await api('/admin/api/approvals'); } catch (err) { if (err.status === 401) return; }
+    const ids = list.map((a) => a.id).join(',');
+    if (ids === shownIds) return;
+    const fresh = list.some((a) => !shownIds.includes(a.id));
+    shownIds = ids;
+    const box = document.getElementById('demandes');
+    box.innerHTML = list.map((a) => `<div class="demande" data-id="${esc(a.id)}">
+        <span class="pastille alerte">Accord demandé ${heure(a.at)}</span>
+        <b>${esc(a.action)}</b>
+        <small>${[a.store, a.register, a.requestedBy].filter(Boolean).map(esc).join(' · ')}</small>
+        <form><input type="password" inputmode="numeric" placeholder="Votre code" autocomplete="off"><button class="oui" type="submit">Accepter</button><button class="non-btn" type="button">Refuser</button></form>
+      </div>`).join('');
+    box.querySelectorAll('.demande').forEach((el) => {
+      const id = el.dataset.id;
+      const send = async (approve) => {
+        try {
+          const r = await api(`/admin/api/approvals/${id}`, { method: 'POST', body: JSON.stringify({ approve, pin: el.querySelector('input').value }) });
+          toast(r.status === 'approved' ? 'Accordé' : 'Refusé', r.status === 'approved' ? 'La caisse peut continuer.' : 'La caisse est prévenue.');
+          shownIds = '';
+          demandes();
+        } catch (err) { toast('Pas accordé', err.message); el.querySelector('input').value = ''; }
+      };
+      el.querySelector('form').onsubmit = (e) => { e.preventDefault(); send(true); };
+      el.querySelector('.non-btn').onclick = () => send(false);
+    });
+    if (fresh && prefs.kinds.includes('approval')) beep();
+  }
+
+  async function alertes() {
+    try {
+      const r = await api(`/admin/api/alerts${cursor === null ? '' : `?since=${cursor}`}`);
+      const first = cursor === null;
+      cursor = r.cursor;
+      const news = r.alerts.filter((a) => !seen.has(a.key) && prefs.kinds.includes(a.kind) && (a.kind !== 'discount' || (a.pct || 0) >= prefs.discountPct));
+      r.alerts.forEach((a) => seen.add(a.key));
+      if (first && !news.some((a) => a.kind === 'silent')) return;
+      news.forEach((a) => toast(a.store ? `${a.title} · ${a.store}` : a.title, a.text));
+      if (news.length) beep();
+    } catch {}
+  }
+
+  async function pushState() {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/gerant');
+      pushOn = Boolean(reg && (await reg.pushManager.getSubscription()));
+    } catch { pushOn = false; }
+  }
+
+  async function pushToggle() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const cur = await reg.pushManager.getSubscription();
+      if (cur && pushOn) {
+        await api('/admin/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: cur.endpoint }) });
+        await cur.unsubscribe();
+        pushOn = false;
+      } else {
+        if ((await Notification.requestPermission()) !== 'granted') throw new Error('Autorisez les notifications pour cette page dans le navigateur');
+        const { publicKey } = await api('/admin/api/push/key');
+        const raw = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        const sub = cur || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw }));
+        await api('/admin/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON(), kinds: prefs.kinds, discountPct: prefs.discountPct }) });
+        pushOn = true;
+      }
+    } catch (err) { toast('Notifications', err.message); }
+    render();
+  }
+
+  async function pushPrefs() {
+    savePrefs();
+    if (!pushOn) return;
+    try {
+      const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+      if (sub) await api('/admin/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON(), kinds: prefs.kinds, discountPct: prefs.discountPct }) });
+    } catch {}
+  }
+
+  function settingsBlock() {
+    const canPush = 'serviceWorker' in navigator && 'PushManager' in window && window.isSecureContext;
+    return `<section class="reglages"><h2>Alertes sur ce téléphone</h2>
+      ${Object.entries(KINDS).map(([k, label]) => `<label><input type="checkbox" data-kind="${k}" ${prefs.kinds.includes(k) ? 'checked' : ''}> ${esc(label)}${k === 'discount' ? ` dès <input type="number" id="pct" min="1" max="100" value="${prefs.discountPct}"> %` : ''}</label>`).join('')}
+      <p class="muted" style="font-size:13px">Page ouverte, chaque alerte sonne et s’affiche en haut de l’écran.</p>
+      ${canPush
+        ? `<button class="principal" id="push">${pushOn ? 'Ne plus recevoir les alertes page fermée' : 'Recevoir les alertes même page fermée'}</button>`
+        : '<p class="muted" style="font-size:13px">Les notifications page fermée demandent une adresse du serveur en <b>https://</b> (serveur sur internet). Au magasin, gardez cette page ouverte.</p>'}
+    </section>`;
+  }
+
+  function bindSettings() {
+    app.querySelectorAll('[data-kind]').forEach((c) => (c.onchange = () => {
+      prefs.kinds = c.checked ? [...new Set([...prefs.kinds, c.dataset.kind])] : prefs.kinds.filter((k) => k !== c.dataset.kind);
+      pushPrefs();
+    }));
+    const pct = document.getElementById('pct');
+    if (pct) pct.onchange = () => { prefs.discountPct = Math.min(100, Math.max(1, Number(pct.value) || 20)); pushPrefs(); };
+    const push = document.getElementById('push');
+    if (push) push.onclick = pushToggle;
+  }
+
+  setInterval(() => { if (document.visibilityState === 'visible' && data) { demandes(); alertes(); } }, 5_000);
+  pushState();
 
   window.choisir = (id) => {
     store = id;

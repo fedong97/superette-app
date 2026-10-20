@@ -114,7 +114,7 @@ export class CommissionService extends Base {
       `SELECT a.family_id, date(s.created_at, 'localtime') AS day,
               SUM(l.total_ttc) AS amount
        FROM sale_lines l JOIN sales s ON s.id = l.sale_id JOIN articles a ON a.id = l.article_id
-       WHERE s.store_id = @storeId AND s.user_id = @userId AND s.status = 'completed' AND l.article_id <> @fee
+       WHERE s.store_id = @storeId AND COALESCE(s.seller_id, s.user_id) = @userId AND s.status = 'completed' AND l.article_id <> @fee
          AND strftime('%Y-%m', s.created_at, 'localtime') = @period
        GROUP BY a.family_id, day`,
     );
@@ -145,7 +145,7 @@ export class CommissionService extends Base {
         day_sales: daySales,
         tickets: this.db
           .prepare(
-            `SELECT COUNT(*) FROM sales WHERE store_id = ? AND user_id = ? AND kind = 'sale' AND status = 'completed' AND strftime('%Y-%m', created_at, 'localtime') = ?`,
+            `SELECT COUNT(*) FROM sales WHERE store_id = ? AND COALESCE(seller_id, user_id) = ? AND kind = 'sale' AND status = 'completed' AND strftime('%Y-%m', created_at, 'localtime') = ?`,
           )
           .pluck()
           .get(storeId, st.user_id ?? '', period) as number,
@@ -154,6 +154,46 @@ export class CommissionService extends Base {
         commission,
       };
     });
+  }
+
+  /**
+   * « Ma journée » du vendeur ou du caissier : ses propres ventes du jour,
+   * ses tickets, son objectif et sa commission du mois, ses commandes en cours.
+   */
+  myDay(storeId: string, userId: string) {
+    const today = this.today();
+    const sums = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN kind = 'sale' THEN total_ttc ELSE 0 END), 0) AS sales,
+                COALESCE(SUM(CASE WHEN kind <> 'sale' THEN -ABS(total_ttc) ELSE 0 END), 0) AS returns,
+                COALESCE(SUM(CASE WHEN kind = 'sale' THEN 1 ELSE 0 END), 0) AS tickets
+         FROM sales WHERE store_id = ? AND COALESCE(seller_id, user_id) = ? AND status = 'completed' AND date(created_at, 'localtime') = ?`,
+      )
+      .get(storeId, userId, today) as { sales: Fcfa; returns: Fcfa; tickets: number };
+    const staffId = this.db.prepare('SELECT id FROM staff WHERE user_id = ? AND active = 1').pluck().get(userId) as string | undefined;
+    const target = staffId ? (this.month(storeId, today.slice(0, 7)).find((r) => r.staff_id === staffId) ?? null) : null;
+    const orders = this.db
+      .prepare("SELECT COUNT(*) FROM customer_orders WHERE store_id = ? AND user_id = ? AND status IN ('new', 'prepared')")
+      .pluck()
+      .get(storeId, userId) as number;
+    return {
+      day: today,
+      sales: sums.sales,
+      returns: sums.returns,
+      net: sums.sales + sums.returns,
+      tickets: sums.tickets,
+      average: sums.tickets ? Math.round(sums.sales / sums.tickets) : 0,
+      target: target && {
+        month_target: target.month_target,
+        day_target: target.day_target,
+        month_sales: target.month_sales,
+        day_sales: target.day_sales,
+        month_rate: target.month_rate,
+        day_rate: target.day_rate,
+        commission: target.commission,
+      },
+      open_orders: orders,
+    };
   }
 
   /** Commission du mois de chaque collaborateur, pour la feuille des salaires. */

@@ -186,6 +186,8 @@ export interface SaleInput {
   warehouseId?: string | null;
   /** Livraison chez le client : ses frais s'ajoutent au ticket. */
   delivery?: DeliveryInput | null;
+  /** Vendeur qui a préparé le panier au rayon : la vente compte pour lui (commission). */
+  sellerId?: string | null;
 }
 
 export interface Sale {
@@ -198,6 +200,8 @@ export interface Sale {
   session_id: string;
   user_id: string;
   user_name: string;
+  /** Vendeur du panier préparé au rayon (sinon null : la vente compte pour le caissier). */
+  seller_id?: string | null;
   total_ttc: Fcfa;
   total_ht: Fcfa;
   total_tva: Fcfa;
@@ -272,6 +276,29 @@ export interface ZReport {
   emoneyDeposit: { centralName: string; number: string } | null;
   /** Tickets de cette caisse payés sur la caisse électronique ou banque du caissier. */
   elsewhere: { method: PaymentMethod; label: string; registerName: string; amount: Fcfa }[];
+  /** Relèves d'équipe de la journée, dans l'ordre. */
+  handovers: CashHandover[];
+  /** Ventes et écart de chaque caissier de la journée (plusieurs après une relève). */
+  byCashier: { user_id: string; name: string; tickets: number; net: Fcfa; difference: Fcfa | null }[];
+}
+
+/** Relève d'équipe : comptage du tiroir quand un caissier passe la main à un autre. */
+export interface CashHandover {
+  id: string;
+  store_id: string;
+  session_id: string;
+  register_id: string;
+  number: number;
+  from_user: string;
+  from_name: string;
+  to_user: string;
+  to_name: string;
+  at: string;
+  counted_detail: string;
+  expected: Fcfa;
+  counted: Fcfa;
+  /** Écart du caissier qui part, sans celui des relèves précédentes. */
+  difference: Fcfa;
 }
 
 /** Détail enregistré à la clôture d'une caisse électronique ou banque, par moyen de paiement. */
@@ -851,6 +878,10 @@ export class PosService extends Base {
           rounding,
           warehouse.is_sales_default ? null : warehouse.id,
         );
+      if (input.sellerId && input.sellerId !== ctx.userId) {
+        this.admin.getUser(input.sellerId);
+        this.db.prepare('UPDATE sales SET seller_id = ? WHERE id = ?').run(input.sellerId, saleId);
+      }
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id,
            pack_name, pack_units, pack_price)
@@ -1151,6 +1182,8 @@ export class PosService extends Base {
            VALUES (?, ?, 'return', ?, ?, ?, ?, 'completed', ?, ?, ?, 0, 0, ?, ?, ?, ?)`,
         )
         .run(id, number, ctx.storeId, ctx.registerId, session.id, ctx.userId, -total, -ht, -(total - ht), original.id, input.reason.trim(), original.customer_id, this.now());
+      // Retour d'un panier de vendeur : il se déduit de ses ventes (commission).
+      this.db.prepare('UPDATE sales SET seller_id = (SELECT seller_id FROM sales WHERE id = ?) WHERE id = ?').run(original.id, id);
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0)`,
@@ -1318,7 +1351,98 @@ export class PosService extends Base {
       cash: { ...cash, expected },
       counted: session.counted_cash,
       difference: session.difference,
+      ...this.shifts(session),
     };
+  }
+
+  /** Relèves de la journée et part de chaque caissier : ventes nettes et écart de son tour. */
+  private shifts(session: CashSession): Pick<ZReport, 'handovers' | 'byCashier'> {
+    const handovers = this.listHandovers(session.id);
+    const sales = this.db
+      .prepare(
+        `SELECT s.user_id, u.name, COALESCE(SUM(CASE WHEN s.kind = 'sale' THEN 1 END), 0) AS tickets, COALESCE(SUM(s.total_ttc), 0) AS net
+         FROM sales s JOIN users u ON u.id = s.user_id WHERE s.session_id = ? AND s.status = 'completed' GROUP BY s.user_id, u.name`,
+      )
+      .all(session.id) as { user_id: string; name: string; tickets: number; net: number }[];
+    const rows = new Map<string, ZReport['byCashier'][number]>();
+    const row = (id: string, name: string) => {
+      if (!rows.has(id)) rows.set(id, { user_id: id, name, tickets: 0, net: 0, difference: null });
+      return rows.get(id)!;
+    };
+    // Ordre de passage : celui qui ouvre, puis chaque relève.
+    row(session.user_id, session.user_name);
+    for (const h of handovers) {
+      const r = row(h.from_user, h.from_name);
+      r.difference = (r.difference ?? 0) + h.difference;
+      row(h.to_user, h.to_name);
+    }
+    if (handovers.length && session.difference !== null) {
+      // L'écart de la clôture revient au dernier caissier, moins ceux déjà comptés aux relèves.
+      const last = handovers[handovers.length - 1]!;
+      const before = last.counted - last.expected;
+      const r = rows.get(last.to_user)!;
+      r.difference = (r.difference ?? 0) + session.difference - before;
+    }
+    for (const s of sales) Object.assign(row(s.user_id, s.name), { tickets: s.tickets, net: s.net });
+    return { handovers, byCashier: handovers.length || rows.size > 1 ? [...rows.values()] : [] };
+  }
+
+  listHandovers(sessionId: string): CashHandover[] {
+    return this.db
+      .prepare(
+        `SELECT h.*, f.name AS from_name, t.name AS to_name FROM cash_handovers h JOIN users f ON f.id = h.from_user JOIN users t ON t.id = h.to_user
+         WHERE h.session_id = ? ORDER BY h.number`,
+      )
+      .all(sessionId) as CashHandover[];
+  }
+
+  getHandover(id: string): CashHandover {
+    const h = this.db
+      .prepare('SELECT h.*, f.name AS from_name, t.name AS to_name FROM cash_handovers h JOIN users f ON f.id = h.from_user JOIN users t ON t.id = h.to_user WHERE h.id = ?')
+      .get(id) as CashHandover | undefined;
+    if (!h) throw new AppError('Relève introuvable', 'NOT_FOUND');
+    return h;
+  }
+
+  /**
+   * Relève d'équipe : le caissier qui part (ctx.userId) compte le tiroir à
+   * l'aveugle et passe la main à `toUserId`. La journée continue : même fond,
+   * même Z ; l'écart de son tour est noté sur le bon de passation.
+   */
+  handover(ctx: Context, counted: DenominationCount, toUserId: string): CashHandover {
+    const session = this.requireOpenSession(ctx);
+    if (this.isStale(session)) throw new AppError("La journée précédente n'est pas clôturée : fermez d'abord la caisse", 'SESSION_OPEN');
+    const to = this.admin.getUser(toUserId);
+    if (!to.active || to.deleted_at) throw new AppError(`${to.name} ne peut pas se connecter`, 'INVALID');
+    if (to.id === ctx.userId) throw new AppError('La relève se fait entre deux caissiers différents', 'INVALID');
+    const result = closingDifference(this.zReport(session.id).cash, counted);
+    const previous = this.listHandovers(session.id).at(-1);
+    const id = newId();
+    this.tx(() => {
+      this.db
+        .prepare(
+          `INSERT INTO cash_handovers (id, store_id, session_id, register_id, number, from_user, to_user, at, counted_detail, expected, counted, difference)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          session.store_id,
+          session.id,
+          session.register_id,
+          (previous?.number ?? 0) + 1,
+          ctx.userId,
+          to.id,
+          this.now(),
+          JSON.stringify(counted),
+          result.expected,
+          result.counted,
+          result.difference - (previous ? previous.counted - previous.expected : 0),
+        );
+      const { from_name: _f, to_name: _t, ...row } = this.getHandover(id);
+      this.enqueue(ctx, 'cash_handover', id, 'upsert', row);
+      this.audit(ctx.userId, 'cash.handover', 'cash_session', session.id, { to: to.id, ...result });
+    });
+    return this.getHandover(id);
   }
 
   /** Moyens de paiement reçus par une caisse électronique ou banque. */

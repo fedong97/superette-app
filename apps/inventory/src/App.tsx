@@ -62,17 +62,27 @@ export function App() {
     setFileMode(on);
     remember('mode-fichier', on ? '1' : null);
   };
+  // Panier préparé au rayon (vendeur) : à la place des inventaires.
+  const [cartMode, setCartMode] = useState(() => recall('panier') === '1');
+  const cartOn = (on: boolean) => {
+    setCartMode(on);
+    remember('panier', on ? '1' : null);
+  };
   if (!s.ready) return <div className="splash">FEDONIX 360 Inventaire</div>;
   const connected = Boolean(s.config && s.session);
   const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
   const archive = s.archives.find((a) => a.inventory.id === recapId);
   const recapFile = s.files.find((f) => f.id === recapId);
+  const can = s.session?.can;
+  const cartOnly = Boolean(connected && can && can.cart && !can.count);
   let page: ReactNode;
-  if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
+  if (connected && can?.cart && (cartOnly || cartMode)) page = <ShelfCart onBack={cartOnly ? null : () => cartOn(false)} />;
+  else if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
   else if (recapFile) page = <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
   else if (inventory && recapId === inventory.id) page = <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
   else if (inventory && !(S.isFile(inventory) && inventory.closed)) page = <Count inventory={inventory} onBack={() => choose(null)} onRecap={() => setRecapId(inventory.id)} />;
-  else if (connected || fileMode) page = <Inventories onChoose={choose} onRecap={setRecapId} onLeaveFiles={connected ? undefined : () => files(false)} />;
+  else if (connected || fileMode)
+    page = <Inventories onChoose={choose} onRecap={setRecapId} onLeaveFiles={connected ? undefined : () => files(false)} onCart={connected && can?.cart ? () => cartOn(true) : undefined} />;
   else if (!s.config) page = <Pairing onFiles={() => files(true)} />;
   else page = <Login onFiles={() => files(true)} />;
   return (
@@ -404,7 +414,7 @@ function progress(inv: S.ServerInventory, counts: Record<string, PlaceCount>) {
   return counted.size;
 }
 
-function Inventories({ onChoose, onRecap, onLeaveFiles }: { onChoose: (id: string) => void; onRecap: (id: string) => void; onLeaveFiles?: () => void }) {
+function Inventories({ onChoose, onRecap, onLeaveFiles, onCart }: { onChoose: (id: string) => void; onRecap: (id: string) => void; onLeaveFiles?: () => void; onCart?: () => void }) {
   const s = useStore();
   const [menu, setMenu] = useState(false);
   const [filter, setFilter] = useState<'open' | 'closed'>('open');
@@ -454,6 +464,11 @@ function Inventories({ onChoose, onRecap, onLeaveFiles }: { onChoose: (id: strin
         </button>
       </header>
       <main>
+        {onCart ? (
+          <button className="big primary" onClick={onCart}>
+            Préparer un panier pour un client
+          </button>
+        ) : null}
         <div className="tabs">
           <button className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>
             En cours
@@ -518,6 +533,216 @@ function Inventories({ onChoose, onRecap, onLeaveFiles }: { onChoose: (id: strin
         ) : null}
       </main>
       {menu ? <Settings onClose={() => setMenu(false)} /> : null}
+    </div>
+  );
+}
+
+// ——— Panier préparé au rayon ———
+
+const fcfa = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
+
+/**
+ * Le vendeur accompagne le client au rayon, scanne ses produits, puis envoie
+ * le panier à la caisse : le caissier le retrouve dans « Tickets en attente »
+ * et l'encaisse ; la vente compte pour le vendeur.
+ */
+function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
+  const s = useStore();
+  const [camera, setCamera] = useState(false);
+  const [query, setQuery] = useState('');
+  const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState<number | null>(null);
+  const seen = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+  const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => void S.loadSentCarts(), []);
+
+  const show = (text: string, ok: boolean) => {
+    setFlash({ text, ok });
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), 2500);
+  };
+  const add = (a: Article, qty: number) => {
+    S.addToCart(a.id, qty);
+    setSent(null);
+    beepOk();
+    show(`${a.name} : +${formatQty(qty, a)}`, true);
+  };
+  const onCode = (raw: string, fromCamera: boolean) => {
+    const code = raw.trim();
+    const now = Date.now();
+    if (fromCamera && code === seen.current.code && now - seen.current.at < 2000) {
+      seen.current.at = now;
+      return;
+    }
+    seen.current = { code, at: now };
+    const hit = lookup(S.getState().index, code);
+    if (hit) return add(hit.article, hit.qty);
+    void S.findOnServer(code)
+      .catch(() => [] as Article[])
+      .then(() => {
+        const again = lookup(S.getState().index, code);
+        if (again) return add(again.article, again.qty);
+        beepError();
+        show(`Code ${code} inconnu : cherchez le produit par son nom`, false);
+      });
+  };
+  useCamera(
+    camera,
+    (c) => onCode(c, true),
+    (e) => {
+      setCamera(false);
+      show(message(e), false);
+    },
+  );
+  const wedge = useRef(onCode);
+  wedge.current = onCode;
+  useEffect(() => listenWedge((c) => wedge.current(c, false)), []);
+
+  const results = useMemo(() => (query.trim().length >= 2 ? search(s.catalog?.articles ?? [], query, 30) : []), [query, s.catalog]);
+  const lines = s.cart.map((l) => ({ ...l, article: s.articles.get(l.articleId) })).filter((l): l is S.CartLine & { article: Article } => Boolean(l.article));
+  const total = lines.reduce((t, l) => t + Math.round(((l.article.price ?? 0) * l.qty) / 1000), 0);
+  const step = (a: Article) => (a.unit === 'piece' ? 1000 : 500);
+
+  if (camera) {
+    return (
+      <CameraOverlay title="Panier" hint="Chaque scan ajoute le produit au panier" onStop={() => setCamera(false)}>
+        {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
+        <div className="flash ok">
+          {lines.length} produit(s) · {fcfa(total)}
+        </div>
+      </CameraOverlay>
+    );
+  }
+
+  return (
+    <div className="page">
+      <header className="bar">
+        {onBack ? (
+          <button className="ghost" onClick={onBack} aria-label="Retour">
+            ‹
+          </button>
+        ) : null}
+        <div className="grow">
+          <b>Panier au rayon</b>
+          <small>{s.session?.user.name}</small>
+        </div>
+        <Status />
+        {!onBack ? (
+          <button className="ghost" onClick={() => void S.logout()} aria-label="Changer d'utilisateur">
+            ⎋
+          </button>
+        ) : null}
+      </header>
+      <main>
+        <CatalogState />
+        {sent !== null ? (
+          <div className="notice info">
+            Panier n° {sent} envoyé à la caisse. Dites au client : « passez en caisse, panier n° {sent} de {s.session?.user.name} ».
+          </div>
+        ) : null}
+        <button className="scan" onClick={() => setCamera(true)}>
+          <span className="scan-icon">▥</span>
+          Scanner
+          <small>chaque scan ajoute 1</small>
+        </button>
+        {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
+        <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nom ou code du produit" enterKeyHint="search" />
+        {query.trim().length >= 2 ? (
+          <div className="list">
+            {results.map((a) => (
+              <div key={a.id} className="row item" onClick={() => (add(a, step(a)), setQuery(''))}>
+                <div className="grow">
+                  {a.name}
+                  <small>
+                    {a.code}
+                    {a.price ? ` · ${fcfa(a.price)}` : ''}
+                  </small>
+                </div>
+                <span className="small-btn">+</span>
+              </div>
+            ))}
+            {!results.length ? <div className="empty">Aucun produit trouvé.</div> : null}
+          </div>
+        ) : (
+          <>
+            <div className="list">
+              {lines.map((l) => (
+                <div key={l.articleId} className="row item">
+                  <div className="grow">
+                    {l.article.name}
+                    <small>
+                      {formatQty(l.qty, l.article)}
+                      {l.article.price ? ` · ${fcfa(Math.round((l.article.price * l.qty) / 1000))}` : ''}
+                    </small>
+                  </div>
+                  <button className="small-btn" onClick={() => S.setCartQty(l.articleId, l.qty - step(l.article))} aria-label="Moins">
+                    −
+                  </button>
+                  <button className="small-btn" onClick={() => S.setCartQty(l.articleId, l.qty + step(l.article))} aria-label="Plus">
+                    +
+                  </button>
+                </div>
+              ))}
+              {!lines.length ? <div className="empty">Scannez les produits du client ou cherchez-les par leur nom.</div> : null}
+            </div>
+            {lines.length ? (
+              <div className="card">
+                <label className="field">
+                  Client (facultatif)
+                  <input value={s.cartLabel} onChange={(e) => S.setCartLabel(e.target.value)} placeholder="Nom ou signe pour le reconnaître" />
+                </label>
+                <div className="row">
+                  <b className="grow">Total indicatif</b>
+                  <b>{fcfa(total)}</b>
+                </div>
+                <p className="muted small">La caisse refait le prix (promotions, tarif du client).</p>
+                <button
+                  className="big primary"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      setSent(await S.sendCart());
+                    } catch (e) {
+                      show(e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur : le panier reste sur le téléphone, réessayez.' : message(e), false);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? 'Envoi…' : 'Envoyer à la caisse'}
+                </button>
+                <button className="link" onClick={() => S.clearCart()}>
+                  Vider le panier
+                </button>
+              </div>
+            ) : null}
+            {s.sentCarts.length ? (
+              <>
+                <h3>Mes paniers du jour</h3>
+                <div className="list">
+                  {s.sentCarts.map((c) => (
+                    <div key={c.id} className="row item">
+                      <div className="grow">
+                        Panier n° {c.number}
+                        {c.label ? ` · ${c.label}` : ''}
+                        <small>
+                          {heure(c.at)} · {c.lines} ligne(s)
+                        </small>
+                      </div>
+                      <span className={`pill ${c.takenAt ? '' : 'wait'}`}>{c.takenAt ? `En caisse ${heure(c.takenAt)}` : 'En attente'}</span>
+                    </div>
+                  ))}
+                </div>
+                <button className="link" onClick={() => void S.loadSentCarts()}>
+                  Actualiser
+                </button>
+              </>
+            ) : null}
+          </>
+        )}
+      </main>
     </div>
   );
 }

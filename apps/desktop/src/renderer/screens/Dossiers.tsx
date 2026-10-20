@@ -11,6 +11,7 @@ export const FICHE_LABELS: Record<FicheKind, string> = {
   intervention: "Fiche d'intervention",
   comptable: 'Copie comptable',
   installation: 'Installation préparée',
+  formation: 'Mode formation',
 };
 
 const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(bytes / 1024))} Ko`);
@@ -117,11 +118,24 @@ export function DossierPicker({ onClose }: { onClose: () => void }) {
 }
 
 /** Bandeau des fiches emportées : on sait toujours qu'on ne travaille pas dans la boutique elle-même. */
-export function FicheBanner({ fiche, onSaveCopy }: { fiche: NonNullable<Result<'app.state'>['dossier']['fiche']>; onSaveCopy?: () => void }) {
+export function FicheBanner({
+  fiche,
+  onSaveCopy,
+  onStopTraining,
+}: {
+  fiche: NonNullable<Result<'app.state'>['dossier']['fiche']>;
+  onSaveCopy?: () => void;
+  onStopTraining?: () => void;
+}) {
   if (fiche.kind === 'installation') return null;
   return (
-    <div className="fiche-banner">
+    <div className={`fiche-banner ${fiche.kind === 'formation' ? 'training' : ''}`}>
       <span>{fiche.banner}</span>
+      {onStopTraining && fiche.kind === 'formation' && (
+        <button className="warn soft" onClick={onStopTraining}>
+          Quitter la formation
+        </button>
+      )}
       {onSaveCopy && fiche.kind === 'intervention' && (
         <button className="warn soft" onClick={onSaveCopy}>
           Remettre la fiche sur la clé USB

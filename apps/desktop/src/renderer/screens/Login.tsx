@@ -36,7 +36,28 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
         <p className="muted">{station?.register?.name ?? 'Poste de gestion'}</p>
         {fiche && fiche.kind !== 'installation' && <p className="warn-text">{fiche.banner}</p>}
         <Field label="Identifiant">
-          <input ref={loginRef} value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />
+          <input
+            ref={loginRef}
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
+            autoComplete="username"
+            placeholder="ou scannez votre badge"
+            onKeyDown={async (e) => {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              // Badge scanné : la douchette tape son code puis Entrée ; on le remplace par l'identifiant.
+              if (/^FX\d{8}$/i.test(login.trim())) {
+                const found = await call('auth.badge', login.trim()).catch(() => null);
+                if (!found) {
+                  setLogin('');
+                  toast.error(new Error('Badge inconnu ou désactivé'));
+                  return;
+                }
+                setLogin(found);
+              }
+              pinRef.current?.focus();
+            }}
+          />
         </Field>
         <Field label="Code secret">
           <input ref={pinRef} type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} autoComplete="current-password" />

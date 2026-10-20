@@ -1745,4 +1745,69 @@ ALTER TABLE staff_salaries ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE customers ADD COLUMN language TEXT NOT NULL DEFAULT 'fr';
 `,
   },
+  {
+    version: 47,
+    name: 'utilisateurs supprimés, badges et pointage',
+    sql: `
+-- Un utilisateur supprimé qui a déjà travaillé reste pour l'historique (son nom
+-- sur ses tickets), sans pouvoir se connecter ni apparaître dans les listes.
+ALTER TABLE users ADD COLUMN deleted_at TEXT;
+-- Code-barres imprimé sur le badge de l'employé : le scanner remplit l'identifiant.
+ALTER TABLE users ADD COLUMN badge TEXT;
+CREATE UNIQUE INDEX users_badge ON users(badge) WHERE badge IS NOT NULL;
+-- Pointage : une ligne par personne et par jour (id = utilisateur:AAAA-MM-JJ).
+CREATE TABLE attendance (
+  id TEXT PRIMARY KEY,
+  store_id TEXT,
+  user_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  arrived_at TEXT,
+  left_at TEXT,
+  corrected_by TEXT,
+  correction_reason TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX attendance_day ON attendance(day, user_id);
+`,
+  },
+  {
+    version: 48,
+    name: "relève d'équipe",
+    sql: `
+-- Relève d'équipe : le caissier qui part compte le tiroir, celui qui arrive
+-- continue la même journée. Attendu et compté au moment de la relève ;
+-- l'écart est celui du caissier qui part (sans ceux des relèves d'avant).
+CREATE TABLE cash_handovers (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  register_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  from_user TEXT NOT NULL,
+  to_user TEXT NOT NULL,
+  at TEXT NOT NULL,
+  counted_detail TEXT NOT NULL,
+  expected INTEGER NOT NULL,
+  counted INTEGER NOT NULL,
+  difference INTEGER NOT NULL
+);
+CREATE INDEX cash_handovers_session ON cash_handovers(session_id, at);
+`,
+  },
+  {
+    version: 49,
+    name: 'vendeur du panier préparé au rayon',
+    sql: `
+-- Panier préparé au rayon sur le téléphone : le caissier encaisse, la vente compte pour le vendeur.
+ALTER TABLE sales ADD COLUMN seller_id TEXT;
+`,
+  },
+  {
+    version: 50,
+    name: "photo de l'employé pour son badge",
+    sql: `
+-- Photo de l'employé (data URL réduite), imprimée sur son badge. Lue à part : les listes restent légères.
+ALTER TABLE users ADD COLUMN photo TEXT;
+`,
+  },
 ];

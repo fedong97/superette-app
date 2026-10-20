@@ -1,5 +1,5 @@
 import { computePayroll, type Fcfa, type Payroll } from '@superette/core';
-import type { AdminService } from './admin';
+import type { AdminService, Role, User, UserRegisters } from './admin';
 import type { Db } from './database';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 
@@ -144,6 +144,15 @@ export class StaffService extends Base {
     return rows.map((s) => ({ ...s, ...this.balance(s.id) }));
   }
 
+  /** Fiche collaborateur active rattachée à un utilisateur (matricule et poste du badge), null sans fiche. */
+  forUser(userId: string): Pick<Staff, 'id' | 'code' | 'name' | 'position' | 'phone' | 'hired_on'> | null {
+    return (
+      (this.db.prepare('SELECT id, code, name, position, phone, hired_on FROM staff WHERE user_id = ? AND active = 1 ORDER BY created_at LIMIT 1').get(userId) as
+        | Pick<Staff, 'id' | 'code' | 'name' | 'position' | 'phone' | 'hired_on'>
+        | undefined) ?? null
+    );
+  }
+
   get(id: string): Staff & StaffBalance {
     const s = this.query('s.id = ?').get(id) as Staff | undefined;
     if (!s) throw new AppError('Collaborateur introuvable', 'NOT_FOUND');
@@ -224,6 +233,29 @@ export class StaffService extends Base {
       )
       .run(id, label, now);
     this.enqueue(null, 'account', id, 'upsert', {});
+  }
+
+  /**
+   * Nouvel employé en une fois : son compte utilisateur (rôle, caisses), sa
+   * fiche collaborateur (poste, téléphone, salaire, sous-comptes) et son badge.
+   * Tout est créé ou rien.
+   */
+  hire(
+    ctx: Context,
+    input: {
+      user: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null };
+      staff?: Omit<StaffInput, 'name' | 'userId'> | null;
+      badge?: boolean;
+    },
+  ): { user: User; staff: (Staff & StaffBalance) | null } {
+    if (!this.admin) throw new AppError('Service des utilisateurs absent', 'INVALID');
+    const admin = this.admin;
+    return this.tx(() => {
+      let user = admin.createUser(ctx.userId, input.user);
+      if (input.badge) user = admin.newBadge(ctx.userId, user.id);
+      const staff = input.staff ? this.save(ctx, { ...input.staff, name: input.user.name, userId: user.id }) : null;
+      return { user, staff };
+    });
   }
 
   save(ctx: Context, input: StaffInput, id?: string): Staff & StaffBalance {

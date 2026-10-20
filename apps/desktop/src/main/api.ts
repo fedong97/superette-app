@@ -5,8 +5,16 @@ import {
   type LabelFormatId,
   barcodeLabelsHtml,
   loyaltyCardHtml,
+  badgesHtml,
+  badgeExpiry,
+  type BadgeCard,
+  type BadgeLayout,
   reminderMessage,
   whatsappLink,
+  ticketMessage,
+  purchaseOrderMessage,
+  PAYMENT_METHODS,
+  formatQty,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -44,8 +52,13 @@ import {
 } from '@superette/core';
 import {
   AppError,
+  approvalStatus,
+  requestApproval,
+  shelfCarts,
+  takeShelfCart,
   type AssetInput,
   ficheBanner,
+  FICHE_EXTENSION,
   type FicheKind,
   inspectDossier,
   installFiche,
@@ -90,6 +103,7 @@ import {
   type ReceptionLine,
   type Role,
   type UserRegisters,
+  ROLE_LABELS,
   type SaleLineInput,
   type Services,
   type PromotionInput,
@@ -173,6 +187,8 @@ export interface Printer {
   /** Tiroir d'une vente enregistrée sans ticket (F4) : il s'ouvre selon les réglages, comme avec le ticket. */
   saleDrawer(saleId: string): Promise<void>;
   zReport(sessionId: string): Promise<void>;
+  /** Bon de passation d'une relève d'équipe. */
+  handover(handoverId: string): Promise<void>;
   /** Bon de versement à la caisse centrale ou de remise de fond. */
   centralVoucher(movementId: string): Promise<void>;
   /** Bon d'un mouvement de caisse électronique : versement vers la centrale, transfert, banque… */
@@ -313,7 +329,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
     return { storeId: station.store.id, registerId: workRegister(u, station.store.id, station)?.id ?? null, userId: u.id };
   };
-  const supervisor = (pin: string) => s.admin.authorizeSupervisor(pin);
+  /** Accords donnés à distance par le gérant (téléphone) : valables 2 minutes sur ce PC. */
+  const remoteApprovals = new Map<string, { userId: string; until: number }>();
+  const supervisor = (pin: string): User => {
+    const remote = /^@accord:(.+)$/.exec(pin ?? '');
+    if (!remote) return s.admin.authorizeSupervisor(pin);
+    const a = remoteApprovals.get(remote[1]!);
+    if (!a || a.until < Date.now()) throw new AppError("L'accord du gérant a expiré : redemandez-le", 'SUPERVISOR_DENIED');
+    const u = s.admin.getUser(a.userId);
+    if (!u.active || u.deleted_at || (u.role !== 'admin' && u.role !== 'manager')) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    return u;
+  };
   /** L'écran agit sur la caisse qu'il affiche : refus si la caisse de travail a changé entre-temps. */
   const sameRegister = (c: Context, registerId?: string): Context => {
     if (registerId && registerId !== c.registerId) throw new AppError("Vous ne travaillez plus sur cette caisse : rouvrez l'écran", 'REGISTER_CHANGED');
@@ -331,6 +357,28 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const PRODUCTION: Permission[] = ['production', 'production_recipes', 'production_create', 'production_validate', 'production_cancel', ...STOCK];
   /** Paramètres du magasin de ce poste. */
   const settings = () => s.admin.storeSettings(ctx().storeId);
+  /** Ce qui s'imprime sur le badge d'un employé : fiche collaborateur, photo, couleurs et logo de son magasin. */
+  const badgeCard = (target: User): BadgeCard => {
+    const storeId = target.store_id ?? s.admin.station()?.store.id ?? ctx().storeId;
+    const set = s.admin.storeSettings(storeId);
+    const staff = s.staff.forUser(target.id);
+    return {
+      store: s.admin.getStore(storeId).name,
+      logo: set.logo || null,
+      // Le nom complet est celui de la fiche collaborateur quand elle existe.
+      name: staff && staff.name.length > target.name.length ? staff.name : target.name,
+      role: ROLE_LABELS[target.role],
+      position: staff?.position ?? null,
+      number: staff?.code ?? null,
+      phone: staff?.phone ?? null,
+      hiredOn: staff?.hired_on ?? null,
+      code: target.badge ?? '',
+      photo: s.admin.userPhoto(target.id),
+      expires: badgeExpiry(new Date(), set.badge.validityMonths),
+      color: set.brandColor,
+      color2: set.brandColor2,
+    };
+  };
   /** Code interne donné à l'enregistrement d'un article sans code, si le magasin l'a choisi. */
   const autoBarcode = () => (settings().barcodeAuto ? settings().barcodeKind : null);
   const codeByFamily = () => settings().articleCodeByFamily;
@@ -588,6 +636,31 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const info = await s.fiches.export(u, kind, dir, appVersion);
       return opts.send ? send(info, dir) : info;
     },
+    /**
+     * Mode formation : copie de la boutique ouverte où l'on vend pour s'entraîner.
+     * Elle remplace la copie précédente ; rien n'en sort (ni serveur, ni sauvegarde, ni retour).
+     */
+    'training.start': async () => {
+      const u = requireUser(['training']);
+      const open = s.fiches.current();
+      if (open?.kind === 'formation') throw new AppError('Vous êtes déjà en mode formation', 'INVALID');
+      if (open) throw new AppError('Ouvrez la boutique elle-même pour passer en mode formation', 'FICHE');
+      const d = dossiers();
+      const station = s.admin.station();
+      const slug = (station?.store.code ?? 'boutique').replace(/[^A-Za-z0-9]+/g, '-');
+      const dir = join(dirname(d.dir), 'Formation');
+      const info = await s.fiches.export(u, 'formation', dir, appVersion, { name: `Formation-${slug}.${FICHE_EXTENSION}`, log: false, origin: d.file });
+      d.open(info.file);
+      return info;
+    },
+    'training.stop': () => {
+      const meta = s.fiches.current();
+      if (meta?.kind !== 'formation') throw new AppError("Vous n'êtes pas en mode formation", 'INVALID');
+      const d = dossiers();
+      const back = meta.origin && d.list().find((x) => x.ok && x.file.toLowerCase() === meta.origin!.toLowerCase());
+      d.open(back ? back.file : (d.list().find((x) => x.main)?.file ?? meta.origin ?? d.file));
+      return true;
+    },
     'fiche.history': () => (requireUser(['accounting_export', 'backups']), s.fiches.history()),
     'fiche.chooseReturn': async () => {
       requireAdmin();
@@ -689,7 +762,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       }
       if (f.kind === 'ecritures' && !f.columns.length) throw new AppError('Choisissez les colonnes du fichier', 'INVALID');
       if ([...BUILTIN_IMPORT_FORMATS, ...BUILTIN_EXPORT_FORMATS].some((b) => b.id === f.id)) throw new AppError('Les formats livrés ne se modifient pas : enregistrez-en une copie', 'INVALID');
-      const saved = { ...f, name: f.name.trim(), id: f.id || `format-${Date.now()}`, builtin: undefined };
+      // Deux formats enregistrés dans la même milliseconde ne doivent pas avoir le même identifiant.
+      const newFormatId = () => {
+        const base = `format-${Date.now()}`;
+        const taken = new Set(userFormats().map((x) => x.id));
+        let id = base;
+        for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+        return id;
+      };
+      const saved = { ...f, name: f.name.trim(), id: f.id || newFormatId(), builtin: undefined };
       const list = userFormats().filter((x) => x.id !== saved.id);
       s.admin.setSetting('formats', JSON.stringify([...list, saved]));
       return saved;
@@ -739,8 +820,57 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'auth.login': (login: string, pin: string) => {
       chosenRegisterId = null;
-      return (user = s.admin.login(login, pin));
+      user = s.admin.login(login, pin);
+      // Pointage : la première connexion du jour note l'arrivée (pas dans une fiche emportée ni en formation).
+      const station = s.admin.station();
+      if (station && !s.fiches.current()) s.attendance.arrive(user.id, station.store.id);
+      return user;
     },
+    /** Accord du gérant demandé sur son téléphone (PC relié au serveur). */
+    'approval.request': async (action: string) => {
+      const u = requireUser();
+      return requestApproval(s, action, u.name);
+    },
+    /** Réponse du gérant ; accordée, elle sert de code pendant 2 minutes (« @accord:id »). */
+    'approval.poll': async (id: string) => {
+      requireUser();
+      const r = await approvalStatus(s, id);
+      if (r.status === 'approved' && r.decidedBy) {
+        // La fiche du gérant doit être sur ce PC (reçue du serveur) pour valoir code.
+        try {
+          s.admin.getUser(r.decidedBy);
+        } catch {
+          throw new AppError(`${r.decidedName ?? 'Le gérant'} a accepté, mais sa fiche n'est pas encore sur ce PC : synchronisez puis redemandez`, 'SUPERVISOR_DENIED');
+        }
+        remoteApprovals.set(id, { userId: r.decidedBy, until: Date.now() + 120_000 });
+        return { status: 'approved' as const, code: `@accord:${id}`, name: r.decidedName ?? null };
+      }
+      return { status: r.status, code: null, name: r.decidedName ?? null };
+    },
+    'approval.available': () => Boolean(s.sync.credentials()) && !s.fiches.current(),
+    /** Badge scanné sur l'écran de connexion : l'identifiant qu'il porte. */
+    'auth.badge': (code: string) => s.admin.loginForBadge(code),
+    /** « Je pars » : départ noté pour le pointage, puis déconnexion. */
+    'attendance.leave': () => {
+      const u = requireUser();
+      const station = s.admin.station();
+      const row = s.fiches.current() ? null : s.attendance.leave(u.id, station?.store.id ?? null);
+      user = null;
+      chosenRegisterId = null;
+      return row;
+    },
+    /** « Ma journée » sur l'accueil : seulement les chiffres de l'utilisateur connecté. */
+    'me.day': () => {
+      const c = ctx();
+      return s.commissions.myDay(c.storeId, c.userId);
+    },
+    'attendance.today': () => {
+      const u = requireUser();
+      return s.attendance.get(u.id);
+    },
+    'attendance.month': (period: string) => s.attendance.month(ctx(['staff_attendance']).storeId, period),
+    'attendance.correct': (userId: string, day: string, input: { arrived: string | null; left: string | null; reason: string }) =>
+      s.attendance.correct(requireUser(['staff_attendance']).id, userId, day, input),
     'auth.logout': () => {
       user = null;
       chosenRegisterId = null;
@@ -813,10 +943,73 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (input.role === 'admin' && u.role !== 'admin') throw new AppError("Seul l'administrateur crée un administrateur", 'FORBIDDEN');
       return s.admin.createUser(u.id, input);
     },
-    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null }) => {
+    'admin.updateUser': (id: string, patch: UserRegisters & { name?: string; login?: string; role?: Role; storeId?: string | null; active?: boolean; pin?: string; saleWarehouses?: string[] | null }) => {
       const u = requireUser(['users_manage']);
       if (u.role !== 'admin' && (patch.role === 'admin' || s.admin.getUser(id).role === 'admin')) throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
       return s.admin.updateUser(u.id, id, patch);
+    },
+    'admin.deleteUser': (id: string) => {
+      const u = requireUser(['users_manage']);
+      if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur supprime un administrateur", 'FORBIDDEN');
+      return s.admin.deleteUser(u.id, id);
+    },
+    'admin.newBadge': (id: string) => {
+      const u = requireUser(['users_manage']);
+      if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
+      return s.admin.newBadge(u.id, id);
+    },
+    /** Badges d'un ou plusieurs employés sur une planche A4, au format choisi dans Administration. */
+    'admin.printBadge': (id: string | string[], copies = 1) => {
+      requireUser(['users_manage']);
+      const ids = Array.isArray(id) ? id : Array.from({ length: Math.max(1, Math.min(10, Math.round(copies))) }, () => id);
+      const cards = ids.map((uid) => {
+        const target = s.admin.getUser(uid);
+        if (!target.badge) throw new AppError(`${target.name} n'a pas encore de badge`, 'INVALID');
+        return badgeCard(target);
+      });
+      return printer.a4(badgesHtml(cards, settings().badge));
+    },
+    /** Aperçu du badge (Administration) : celui d'un employé, ou un exemple, avec les réglages en cours de modification. */
+    'admin.badgePreview': (input: { userId?: string | null; layout?: BadgeLayout; color?: string; color2?: string }) => {
+      requireUser();
+      const set = settings();
+      const layout = { ...set.badge, ...(input.layout ?? {}) };
+      const card: BadgeCard = input.userId
+        ? badgeCard(s.admin.getUser(input.userId))
+        : {
+            store: s.admin.getStore(ctx().storeId).name,
+            logo: set.logo || null,
+            name: 'Thomas MBARGA',
+            role: 'Caissier',
+            position: 'Caisse principale',
+            number: 'COL-0012',
+            phone: '6 99 12 34 56',
+            hiredOn: '2024-03-01',
+            code: 'FX12345678',
+            photo: null,
+            expires: badgeExpiry(new Date(), layout.validityMonths),
+          };
+      return badgesHtml([{ ...card, color: input.color ?? card.color ?? set.brandColor, color2: input.color2 ?? card.color2 ?? set.brandColor2 }], layout);
+    },
+    'admin.userPhoto': (id: string) => (requireUser(), s.admin.userPhoto(id)),
+    'admin.setUserPhoto': (id: string, photo: string | null) => {
+      const u = requireUser(['users_manage']);
+      if (u.role !== 'admin' && s.admin.getUser(id).role === 'admin') throw new AppError("Seul l'administrateur modifie un administrateur", 'FORBIDDEN');
+      s.admin.setUserPhoto(u.id, id, photo);
+    },
+    /** Nouvel employé : utilisateur, fiche collaborateur et badge en une fois. */
+    'admin.hire': (input: {
+      user: UserRegisters & { name: string; login: string; pin: string; role: Role; storeId: string | null; saleWarehouses?: string[] | null };
+      staff?: Omit<StaffInput, 'name' | 'userId'> | null;
+      badge?: boolean;
+    }) => {
+      const u = requireUser(['users_manage']);
+      if (input.user.role === 'admin' && u.role !== 'admin') throw new AppError("Seul l'administrateur crée un administrateur", 'FORBIDDEN');
+      if (input.staff && !can(u, ['staff_edit'])) throw new AppError('Vous ne pouvez pas créer de fiche collaborateur', 'FORBIDDEN');
+      const station = s.admin.station();
+      const storeId = input.user.storeId ?? station?.store.id;
+      if (!storeId) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
+      return s.staff.hire({ storeId, registerId: null, userId: u.id }, input);
     },
     'admin.unlockUser': (id: string) => s.admin.unlockUser(requireUser(['users_manage']).id, id),
     'admin.vatRates': () => (requireUser(), s.admin.listVatRates()),
@@ -883,7 +1076,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.saveStoreSettings': (patch: Partial<StoreSettings>) => {
       const c = ctx(['settings_edit']);
       if (patch.posLayout !== undefined) requireAdmin();
-      return s.admin.saveStoreSettings(c.userId, c.storeId, patch);
+      // Les couleurs de l'entreprise et le badge valent pour tous ses magasins.
+      const shared = Object.fromEntries(Object.entries(patch).filter(([k]) => k === 'brandColor' || k === 'brandColor2' || k === 'badge'));
+      const saved = s.admin.saveStoreSettings(c.userId, c.storeId, patch);
+      if (Object.keys(shared).length) for (const st of s.admin.listStores()) if (st.id !== c.storeId) s.admin.saveStoreSettings(c.userId, st.id, shared);
+      return saved;
     },
     'admin.audit': () => (requireUser(['audit']), s.admin.auditLog()),
     'admin.printers': () => (requireUser(), printer.list()),
@@ -1145,6 +1342,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     ) => s.purchases.updateOrder(ctx(['purchase_orders']), id, input),
     'purchases.setOrderStatus': (id: string, status: 'sent' | 'closed' | 'cancelled') => s.purchases.setOrderStatus(ctx(['order_close']), id, status),
     'purchases.receiveOrder': (id: string, input: Parameters<Services['purchases']['receiveOrder']>[2]) => s.purchases.receiveOrder(ctx(['order_receive']), id, input),
+    /** Bon de commande envoyé au fournisseur par WhatsApp (au numéro de sa fiche, ou celui tapé). */
+    'purchases.whatsappOrder': (id: string, phone?: string | null) => {
+      requireUser(['purchase_orders']);
+      const order = s.purchases.getOrder(id);
+      const supplier = s.purchases.getSupplier(order.supplier_id);
+      const store = s.admin.getStore(order.store_id);
+      const text = purchaseOrderMessage({
+        store: store.name,
+        storePhone: store.phone,
+        supplier: supplier.name,
+        number: order.number,
+        expected: order.expected_date,
+        lines: order.lines.map((l) => ({ label: l.article_name, qty: formatQty(l.qty, l.unit), reference: l.supplier_ref })),
+        total: order.total_ht || null,
+      });
+      const link = whatsappLink(phone?.trim() || supplier.phone, text);
+      if (!link) throw new AppError('Tapez le numéro WhatsApp du fournisseur (9 chiffres)', 'NO_PHONE');
+      return { link, text, phone: phone?.trim() || supplier.phone };
+    },
     'purchases.printOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (requireUser(), printer.purchaseOrder(id, opts)),
     'purchases.previewOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => (
       requireUser(), { ...printer.previewPurchaseOrder(id, opts), doc: 'purchaseOrder' as const, variant: 'order' as DocVariant }
@@ -1217,6 +1433,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       delivery?: DeliveryInput | null;
       /** Facture modifiée : elle est annulée et remplacée par celle-ci ; `payments` ne porte que la différence. */
       replacesId?: string | null;
+      /** Vendeur du panier préparé au rayon. */
+      sellerId?: string | null;
     }) => {
       const c = ctx(POS);
       s.license.assertCanSell();
@@ -1245,6 +1463,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         priceLevel: input.priceLevel ?? null,
         warehouseId: input.warehouseId ?? null,
         delivery: input.delivery ?? null,
+        sellerId: input.sellerId ?? null,
       };
       if (input.replacesId) {
         const original = s.pos.getSale(input.replacesId);
@@ -1298,6 +1517,43 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx();
       return can(user!, ['sales']) ? s.pos.listSales({ ...opts, storeId: c.storeId }) : ownRecent(user!);
     },
+    /**
+     * Ticket envoyé au client par WhatsApp : le message rempli et le lien qui
+     * ouvre WhatsApp au numéro du client (celui de sa fiche, ou celui tapé).
+     */
+    'pos.whatsappTicket': (saleId: string, phone?: string | null) => {
+      requireSaleAccess(saleId);
+      const sale = s.pos.getSale(saleId);
+      const store = s.admin.getStore(sale.store_id);
+      const customer = sale.customer_id ? s.customers.getCustomer(sale.customer_id) : null;
+      const number = phone?.trim() || customer?.phone || '';
+      const text = ticketMessage({
+        store: store.name,
+        storePhone: store.phone,
+        number: sale.number,
+        date: sale.created_at,
+        kind: sale.kind,
+        customer: customer?.name ?? sale.customer_name,
+        lines: sale.lines.map((l) => ({
+          label: l.pack_name ? `${l.label} (${l.pack_name})` : l.label,
+          qty: l.pack_units ? formatQty(Math.round((l.qty * 1000) / l.pack_units), 'piece') : formatQty(l.qty, l.unit),
+          total: Math.abs(l.total_ttc),
+        })),
+        total: Math.abs(sale.total_ttc),
+        discount: sale.total_discount + sale.total_promo,
+        payments: sale.payments.map((p) => ({ label: PAYMENT_METHODS[p.method], amount: Math.abs(p.amount) })),
+        change: sale.change_given,
+      });
+      const link = whatsappLink(number, text);
+      if (!link) throw new AppError('Tapez le numéro WhatsApp du client (9 chiffres)', 'NO_PHONE');
+      return { link, text, phone: number };
+    },
+    /** Téléphone du client du ticket (proposé avant l'envoi par WhatsApp). */
+    'pos.ticketPhone': (saleId: string) => {
+      requireSaleAccess(saleId);
+      const sale = s.pos.getSale(saleId);
+      return sale.customer_id ? (s.customers.getCustomer(sale.customer_id).phone ?? null) : null;
+    },
     'pos.hold': (label: string, lines: SaleLineInput[]) => {
       const c = ctx(['sale_hold']);
       const max = settings().maxHeld;
@@ -1311,6 +1567,34 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return c.registerId ? s.pos.listHeld(c.registerId) : [];
     },
     'pos.resume': (id: string) => (requireUser(['sale_resume']), s.pos.resumeHeld(id)),
+    /** Paniers préparés au rayon par les vendeurs (téléphone), en attente d'une caisse. */
+    'pos.shelfCarts': async () => {
+      ctx(POS);
+      if (s.fiches.current() || !s.sync.credentials()) return [];
+      const carts = await shelfCarts(s).catch(() => []);
+      return carts.map((c) => ({ id: c.id, number: c.number, label: c.label, sellerName: c.sellerName, at: c.at, lines: c.lines.length }));
+    },
+    /** Prend le panier : ses lignes arrivent sur la fiche, la vente comptera pour le vendeur. */
+    'pos.takeShelfCart': async (id: string) => {
+      const c = ctx(['sale_resume']);
+      const cart = await takeShelfCart(s, id);
+      const known = (articleId: string) => {
+        try {
+          s.catalogue.getArticle(articleId, c.storeId);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const lines: SaleLineInput[] = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null }));
+      let sellerId: string | null = null;
+      try {
+        sellerId = s.admin.getUser(cart.sellerId).id;
+      } catch {
+        sellerId = null;
+      }
+      return { lines, sellerId, sellerName: cart.sellerName, label: cart.label, number: cart.number, missing: cart.lines.length - lines.length };
+    },
     'pos.zReport': (sessionId: string) => (requireAmounts(), requireUser(['cash_z']), s.pos.zReport(sessionId)),
     'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(['cash_history']).storeId)),
     /** Ticket d'une vente qui vient d'être faite (autant d'exemplaires que réglé), ou réimpression avec le droit. */
@@ -1495,7 +1779,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireAmounts();
       // Sans code du gérant : un motif saisi par un gérant à la clôture vaut justification, sinon l'écart reste à justifier.
       const approvedBy = can(user!, ['cash_open']) ? user!.id : null;
-      return s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
+      const closed = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
+      if (!s.fiches.current()) s.attendance.leave(c.userId, c.storeId);
+      return closed;
     },
     /**
      * Clôture par le caissier sans le droit des montants : ni Z ni attendu en
@@ -1505,9 +1791,34 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.closeBlind': (counted: DenominationCount, opts: { floatLeft: Fcfa; registerId?: string }) => {
       const c = sameRegister(ctx(TREASURY), opts.registerId);
       const se = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft }).session;
+      if (!s.fiches.current()) s.attendance.leave(c.userId, c.storeId);
       const voucher = s.treasury.sessionMovements(se.id).find((m) => m.kind === 'DEPOSIT' && !m.cash_operation_id);
       return { sessionId: se.id, counted: se.counted_cash ?? 0, floatLeft: se.float_left ?? 0, deposit: se.deposit ?? 0, voucherId: voucher?.id ?? null, voucherNumber: voucher?.number ?? null };
     },
+    /**
+     * Relève d'équipe : le caissier qui part compte le tiroir à l'aveugle, celui
+     * qui arrive tape son identifiant et son code. Le bon de passation s'imprime,
+     * la journée continue au nom du nouveau caissier (même fond, même Z).
+     */
+    'treasury.handover': async (counted: DenominationCount, login: string, pin: string, registerId?: string) => {
+      const c = sameRegister(ctx(TREASURY), registerId);
+      const station = s.admin.station()!;
+      const next = s.admin.login(login, pin);
+      if (!can(next, TREASURY)) throw new AppError(`${next.name} n'a pas accès à la caisse`, 'FORBIDDEN');
+      const own = s.admin.getUser(next.id).register_id;
+      if (own && own !== c.registerId) throw new AppError(`${next.name} travaille sur une autre caisse : attribuez-lui ${s.admin.getRegister(c.registerId!).name} dans sa fiche`, 'INVALID');
+      if (!own && !isSupervisor(next)) throw new AppError(`Aucune caisse n'est attribuée à ${next.name}`, 'INVALID');
+      const h = s.pos.handover(c, counted, next.id);
+      if (!s.fiches.current()) {
+        s.attendance.leave(c.userId, c.storeId);
+        s.attendance.arrive(next.id, station.store.id);
+      }
+      user = next;
+      chosenRegisterId = own ? null : c.registerId;
+      await printer.handover(h.id).catch(() => undefined);
+      return { id: h.id, number: h.number, from: h.from_name, to: h.to_name, counted: h.counted };
+    },
+    'treasury.printHandover': (id: string) => (requireUser(TREASURY), printer.handover(id)),
     /** Écarts de clôture qui attendent le motif du gérant. */
     'treasury.pendingGaps': () => {
       const u = requireUser();
@@ -1727,6 +2038,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           niu: store.taxpayer_number,
           rccm: set.rccm,
           logo: set.logo,
+          color: set.brandColor,
           message: set.ticketHeader,
           thanks: s.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
           vatEnabled: store.vat_enabled === 1,
@@ -1777,7 +2089,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'loyalty.printCard': (customerId: string, copies?: number) => {
       const storeId = ctx(['customers']).storeId;
       const c = s.customers.getCustomer(customerId);
-      return printer.a4(loyaltyCardHtml({ store: s.admin.getStore(storeId).name, customer: c.name, code: c.code, phone: c.phone, logo: settings().logo || null }, copies));
+      return printer.a4(loyaltyCardHtml({ store: s.admin.getStore(storeId).name, customer: c.name, code: c.code, phone: c.phone, logo: settings().logo || null, color: settings().brandColor }, copies));
     },
     /** Carte scannée à la caisse : code du client ou numéro de téléphone. */
     'loyalty.findCustomer': (code: string) => (requireUser(), s.customers.findByCard(code)),

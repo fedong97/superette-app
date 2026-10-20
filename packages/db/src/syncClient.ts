@@ -154,3 +154,42 @@ export async function joinStore(s: Services, url: string, activationCode: string
   s.admin.activateRegister(activationCode);
   return s.admin.station();
 }
+
+/** Accord du gérant demandé au serveur : il répond depuis la page du gérant sur son téléphone. */
+export async function requestApproval(s: Services, action: string, requestedBy: string): Promise<{ id: string; expiresInSeconds: number }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : le gérant ne peut pas répondre de son téléphone", 'SYNC_NOT_CONFIGURED');
+  return request(creds.url, '/api/v1/approvals', { token: creds.token, body: { action, requestedBy } });
+}
+
+/** Réponse du gérant : en attente, accordée (une seule lecture), refusée ou expirée. */
+export async function approvalStatus(s: Services, id: string): Promise<{ status: 'pending' | 'approved' | 'refused' | 'expired' | 'used'; decidedBy?: string; decidedName?: string | null }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
+  return request(creds.url, `/api/v1/approvals/${encodeURIComponent(id)}`, { token: creds.token });
+}
+
+/** Panier préparé au rayon par un vendeur, en attente d'une caisse. */
+export interface ShelfCart {
+  id: string;
+  number: number;
+  label: string | null;
+  sellerId: string;
+  sellerName: string;
+  lines: { articleId: string; qty: number; packId: string | null }[];
+  at: string;
+}
+
+/** Paniers des vendeurs du magasin qui attendent une caisse. */
+export async function shelfCarts(s: Services): Promise<ShelfCart[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ carts: ShelfCart[] }>(creds.url, '/api/v1/carts', { token: creds.token })).carts;
+}
+
+/** Prend le panier pour cette caisse (une seule caisse l'obtient). */
+export async function takeShelfCart(s: Services, id: string): Promise<ShelfCart> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
+  return request<ShelfCart>(creds.url, `/api/v1/carts/${encodeURIComponent(id)}/take`, { token: creds.token, body: {} });
+}

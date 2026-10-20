@@ -128,6 +128,7 @@ export class ReceiptService extends Base {
       niu: store.taxpayer_number,
       rccm: set.rccm,
       logo: set.logo,
+      color: set.brandColor,
       message: set.ticketHeader,
       thanks: this.admin.getSetting('ticket.footer') ?? 'Merci de votre visite !',
       vatEnabled: store.vat_enabled === 1,
@@ -460,6 +461,15 @@ export class ReceiptService extends Base {
     if (z.counted !== null) r.push(row('Compté', z.counted), { ...row('Écart', z.difference ?? 0), bold: true });
     if (z.session.gap_reason) r.push({ t: 'text', text: `Motif de l'écart : ${z.session.gap_reason}` });
     if (z.session.deposit !== null) r.push({ t: 'rule' }, row('Versé à la caisse centrale', z.session.deposit), row('Fond laissé dans le tiroir', z.session.float_left ?? 0));
+    if (z.byCashier.length) {
+      // Relève d'équipe : la part de chaque caissier dans la même journée.
+      r.push({ t: 'rule' }, title('Par caissier'));
+      for (const c of z.byCashier) {
+        r.push(row(`${c.name} (${c.tickets} t.)`.slice(0, 32), c.net));
+        if (c.difference !== null) r.push({ t: 'row', left: 'Écart de son tour', right: money(c.difference), indent: 2 });
+      }
+      for (const h of z.handovers) r.push({ t: 'text', text: `Relève ${dateFr(h.at).slice(-5)} : ${h.from_name} > ${h.to_name}` });
+    }
     return r;
   }
 
@@ -495,6 +505,33 @@ export class ReceiptService extends Base {
     }
     r.push({ t: 'rule' }, { t: 'feed' }, { t: 'row', left: 'Compté par', right: 'Signature' }, { t: 'feed' }, { t: 'feed' }, { t: 'row', left: '................', right: '................' });
     return r;
+  }
+
+  /** Bon de passation d'une relève d'équipe : à signer par le caissier qui part et celui qui arrive. */
+  handoverSlip(handoverId: string): Receipt {
+    const h = this.pos.getHandover(handoverId);
+    const register = this.admin.getRegister(h.register_id);
+    const row = (left: string, v: number, bold = false) => ({ t: 'row' as const, left, right: money(v), bold });
+    return [
+      ...this.header(),
+      { t: 'text', text: "BON DE PASSATION (RELÈVE D'ÉQUIPE)", align: 'center', bold: true },
+      { t: 'text', text: `${register.name} · relève n° ${h.number}` },
+      { t: 'text', text: dateFr(h.at) },
+      { t: 'rule' },
+      { t: 'text', text: `Part : ${h.from_name}` },
+      { t: 'text', text: `Arrive : ${h.to_name}` },
+      { t: 'rule' },
+      row('Espèces attendues', h.expected),
+      row('Espèces comptées', h.counted),
+      row(`Écart de ${h.from_name}`.slice(0, 32), h.difference, true),
+      { t: 'text', text: 'La journée continue : même fond, même Z.' },
+      { t: 'rule' },
+      { t: 'feed' },
+      { t: 'row', left: 'Remis par', right: 'Reçu par' },
+      { t: 'feed' },
+      { t: 'feed' },
+      { t: 'row', left: '................', right: '................' },
+    ];
   }
 
   centralVoucher(movementId: string): Receipt {

@@ -9,6 +9,7 @@
  * par défaut pour chaque emplacement. Le rendu est pur (sans base ni
  * Electron) : le même code imprime et affiche l'aperçu.
  */
+import { isHexColor, mixColors } from './brand';
 import { formatFcfa } from './money';
 import { formatRate, splitTtc } from './tax';
 import { numberToWordsFr } from './words';
@@ -342,6 +343,8 @@ export interface DocData {
     rccm: string;
     /** Logo en data URL, ou vide. */
     logo: string;
+    /** Couleur de l'entreprise (#rrggbb) : fond des en-têtes de tableau des documents A4. */
+    color?: string;
     /** Message d'en-tête du ticket (paramètres). */
     message: string;
     /** Message de pied du ticket (paramètres du poste). */
@@ -1020,9 +1023,11 @@ const TICKET_CSS = `
   img { display: inline-block; }
 `;
 
-function documentCss(t: DocTemplate): string {
+function documentCss(t: DocTemplate, color?: string): string {
   const listing = t.format === 'listing';
   const b = t.page.borders;
+  // En-têtes de tableau teintés aux couleurs de l'entreprise (très clair : le texte reste noir).
+  const tint = isHexColor(color) ? mixColors(color, '#ffffff', 0.86) : '#e8eef7';
   return `
   h1 { font-size: 1.6em; margin: 0 0 2px; }
   h2 { font-size: 1.45em; margin: 10px 0 2px; }
@@ -1036,7 +1041,7 @@ function documentCss(t: DocTemplate): string {
   table { width: 100%; border-collapse: collapse; }
   table.lines { table-layout: fixed; margin-top: 6px; }
   table.lines th, table.lines td { padding: ${listing ? '1px 4px' : '4px 6px'}; text-align: left; vertical-align: top; overflow-wrap: anywhere; ${b ? 'border: 1px solid #bbb;' : ''} }
-  table.lines th { ${b ? 'background: #e8eef7;' : 'border-bottom: 1px solid #000;'} font-weight: bold; }
+  table.lines th { ${b ? `background: ${tint};` : 'border-bottom: 1px solid #000;'} font-weight: bold; }
   ${listing && !b ? 'table.lines tbody tr td { border-bottom: 1px dotted #bbb; }' : ''}
   ${t.page.lineHeight ? `table.lines tbody td { height: ${t.page.lineHeight}mm; }` : ''}
   table.lines thead { display: table-header-group; }
@@ -1045,7 +1050,7 @@ function documentCss(t: DocTemplate): string {
   .bottom .left { flex: 1; }
   table.totals { width: 45%; }
   table.totals td { padding: 2px 6px; ${b ? 'border: 1px solid #bbb;' : ''} }
-  table.totals tr.total td { font-weight: bold; ${b ? 'background: #e8eef7;' : 'border-top: 1px solid #000;'} }
+  table.totals tr.total td { font-weight: bold; ${b ? `background: ${tint};` : 'border-top: 1px solid #000;'} }
   .dup { font-weight: bold; letter-spacing: 2px; color: #a00; }
   footer { margin-top: 14px; break-inside: avoid; ${t.page.footerHeight ? `min-height: ${t.page.footerHeight}mm;` : ''} }
   .sign { margin-top: 10px; display: flex; justify-content: space-between; min-height: 22mm; }
@@ -1171,7 +1176,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
   ].join('');
 
   return wrap(
-    documentCss(t),
+    documentCss(t, d.store.color),
     arrangeHtml(t, {
       header: head,
       title: `${titleLine}${meta.length ? `<div class="meta"${al('seller')}>${meta.join(' · ')}</div>` : ''}`,

@@ -241,6 +241,34 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Entièrement traduits : connexion, caisse, trésorerie, clients, ventes, commandes et livraisons, avec les messages d'erreur. Écrans du gérant et de la comptabilité : menus et titres.
 - Langue du client (fiche client) pour ses tickets, factures, devis, bons de livraison, reçus et relevés, montant en lettres compris ; bons de caisse et rapport Z dans la langue de l'utilisateur.
 
+**Employés, badge et pointage (0.68.0)**
+- Fiche utilisateur : identifiant modifiable (unique, `a-z 0-9 . _ -`) ; suppression : effacé s'il n'a aucune opération et que le PC n'est pas relié au serveur, sinon retiré des listes (connexion impossible, nom gardé sur l'historique, identifiant libéré). Un administrateur actif reste toujours.
+- « Ajouter un employé » : utilisateur, collaborateur (poste, téléphone, salaire) et badge en une transaction.
+- Badge `FX` + 8 chiffres (Code128, format carte) : scanné à la connexion, il remplit l'identifiant.
+- Pointage (droit « Pointage du personnel ») : arrivée à la première connexion du jour, départ à la clôture de caisse ou « Je pars » ; rapport du mois (heures, retards au-delà de la tolérance, absences sur les jours travaillés) ; correction avec motif. Synchronisé : première arrivée et dernier départ entre PC.
+
+**Ma journée et mode formation (0.69.0)**
+- Tuile « Ma journée » à l'accueil : ventes, retours, tickets, panier moyen, objectif du jour et du mois, commission.
+- Mode formation (droit dédié) : copie de la boutique (fiche de type formation), bandeau orange, en-tête de ticket « FORMATION », aucune synchronisation ni sauvegarde ; ne se rapporte pas dans la boutique.
+
+**WhatsApp (0.70.0)**
+- Ticket envoyé au client (son numéro ou celui saisi), facture A4 en PDF en option ; bon de commande envoyé au fournisseur avec le PDF.
+
+**Relève d'équipe (0.71.0)**
+- Comptage à l'aveugle du caissier sortant, connexion du caissier entrant, bon de passation (attendu, compté, écart du tour). Table `cash_handovers` synchronisée ; le Z détaille chaque caissier (ventes nettes, tickets, écart de son tour).
+
+**Téléphone du gérant (0.72.0)**
+- Accord à distance : `POST /api/v1/approvals` (PC), réponse sur la page `/gerant` avec le code d'un gérant ou administrateur (vérifié sur la fiche synchronisée), lecture unique par le PC ; valable 2 minutes sur le PC, 3 minutes pour répondre.
+- Alertes : écarts, remises au-delà du seuil, annulations, ruptures, PC muets, demandes d'accord. Son sur la page ouverte ; notifications Web Push (VAPID, sans bibliothèque) avec un serveur en HTTPS.
+
+**Panier préparé au rayon (0.73.0)**
+- Application Android : onglet panier pour un utilisateur qui a le droit « Préparer un panier au rayon » (prix indicatif du catalogue) ; envoi à `POST /api/v1/mobile/carts`, sans doublon.
+- Caisse : « Rappeler » liste les paniers du magasin (`GET /api/v1/carts`), une seule caisse prend un panier ; la vente porte `seller_id` et compte pour le vendeur dans ses objectifs et commissions.
+
+**Couleurs de l'entreprise et badge du personnel (0.74.0)**
+- Administration › Couleurs et badges : couleur principale et secondaire (`brandColor`, `brandColor2` dans les paramètres, copiés dans tous les magasins). L'écran réécrit ses variables CSS (`--brand`, `--brand-soft`…), le texte posé dessus passe en noir ou blanc selon le contraste ; les documents A4 et les cartes de fidélité suivent.
+- Badge : trois modèles (Bandeau, Arcs, Angles), carte bancaire, grand badge ou format libre, horizontal ou vertical, éléments au choix et verso (règles, dates, signature). Photo de l'employé dans la fiche utilisateur (caméra ou image), matricule, poste, téléphone et date d'entrée pris dans la fiche collaborateur.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

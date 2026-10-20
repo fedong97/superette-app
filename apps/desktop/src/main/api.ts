@@ -47,6 +47,7 @@ import {
   AppError,
   type AssetInput,
   ficheBanner,
+  FICHE_EXTENSION,
   type FicheKind,
   inspectDossier,
   installFiche,
@@ -590,6 +591,31 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const info = await s.fiches.export(u, kind, dir, appVersion);
       return opts.send ? send(info, dir) : info;
     },
+    /**
+     * Mode formation : copie de la boutique ouverte où l'on vend pour s'entraîner.
+     * Elle remplace la copie précédente ; rien n'en sort (ni serveur, ni sauvegarde, ni retour).
+     */
+    'training.start': async () => {
+      const u = requireUser(['training']);
+      const open = s.fiches.current();
+      if (open?.kind === 'formation') throw new AppError('Vous êtes déjà en mode formation', 'INVALID');
+      if (open) throw new AppError('Ouvrez la boutique elle-même pour passer en mode formation', 'FICHE');
+      const d = dossiers();
+      const station = s.admin.station();
+      const slug = (station?.store.code ?? 'boutique').replace(/[^A-Za-z0-9]+/g, '-');
+      const dir = join(dirname(d.dir), 'Formation');
+      const info = await s.fiches.export(u, 'formation', dir, appVersion, { name: `Formation-${slug}.${FICHE_EXTENSION}`, log: false, origin: d.file });
+      d.open(info.file);
+      return info;
+    },
+    'training.stop': () => {
+      const meta = s.fiches.current();
+      if (meta?.kind !== 'formation') throw new AppError("Vous n'êtes pas en mode formation", 'INVALID');
+      const d = dossiers();
+      const back = meta.origin && d.list().find((x) => x.ok && x.file.toLowerCase() === meta.origin!.toLowerCase());
+      d.open(back ? back.file : (d.list().find((x) => x.main)?.file ?? meta.origin ?? d.file));
+      return true;
+    },
     'fiche.history': () => (requireUser(['accounting_export', 'backups']), s.fiches.history()),
     'fiche.chooseReturn': async () => {
       requireAdmin();
@@ -757,6 +783,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       user = null;
       chosenRegisterId = null;
       return row;
+    },
+    /** « Ma journée » sur l'accueil : seulement les chiffres de l'utilisateur connecté. */
+    'me.day': () => {
+      const c = ctx();
+      return s.commissions.myDay(c.storeId, c.userId);
     },
     'attendance.today': () => {
       const u = requireUser();

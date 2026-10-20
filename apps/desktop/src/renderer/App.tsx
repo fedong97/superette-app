@@ -83,7 +83,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'leave' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
+  action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -162,6 +162,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Personnaliser la barre latérale', action: 'rail' },
       { label: "Changer d'utilisateur", action: 'logout' },
       { label: 'Je pars (fin de journée)', action: 'leave' },
+      { label: 'Mode formation (caisse d’entraînement)…', action: 'training', perm: 'training' },
       { label: 'Ouvrir une boutique…', action: 'dossiers', adminOnly: true },
       { label: 'Quitter', action: 'quit' },
     ],
@@ -476,7 +477,7 @@ function licenseLabel(l: AppState['license']): string {
     case 'grace':
       return `Licence expirée : ventes arrêtées dans ${l.daysLeft} j`;
     case 'fiche':
-      return 'Fiche emportée : pas de vente';
+      return l.canSell ? 'Mode formation' : 'Fiche emportée : pas de vente';
     default:
       return 'Licence : ventes bloquées';
   }
@@ -697,6 +698,18 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
   const visibleMenus = MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep));
 
+  const startTraining = async () => {
+    if (state.dossier.fiche?.kind === 'formation') return toast.ok('Vous êtes déjà en mode formation');
+    const ok = await askConfirm(
+      "Ouvrir le mode formation ? FEDONIX 360 redémarre sur une copie de la boutique : on y vend pour s'entraîner, avec les vrais articles et les vrais comptes, mais rien ne compte dans la boutique (ni stock, ni caisse, ni comptabilité, ni serveur). « Quitter la formation » ramène à la boutique.",
+    );
+    if (!ok) return;
+    try {
+      await call('training.start');
+    } catch (e) {
+      toast.error(e);
+    }
+  };
   const leave = async () => {
     if (!(await askConfirm('Noter votre départ (pointage) et vous déconnecter ?'))) return;
     try {
@@ -714,6 +727,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'leave') return leave();
+    if (item.action === 'training') return startTraining();
     if (item.action === 'dossiers') return setDossiers(true);
     if (item.action === 'quit') return window.close();
     if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail') return setHelp(item.action);
@@ -902,7 +916,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           ?
         </button>
       </header>
-      {state.dossier.fiche && <FicheBanner fiche={state.dossier.fiche} onSaveCopy={() => void saveFicheCopy(toast)} />}
+      {state.dossier.fiche && (
+        <FicheBanner
+          fiche={state.dossier.fiche}
+          onSaveCopy={() => void saveFicheCopy(toast)}
+          onStopTraining={() => call('training.stop').catch(toast.error)}
+        />
+      )}
       <main className="windows" ref={areaRef}>
         {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
         <section className={`home ${showHome ? 'front' : ''}`}>
@@ -915,6 +935,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             <p className="home-sub">
               Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
             </p>
+            {(can('cash') || can('credit')) && showHome && <MyDay />}
             <div className="role-tiles">
               {tiles.map((t) => (
                 <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
@@ -1307,4 +1328,63 @@ function Clock() {
     return () => clearInterval(t);
   }, []);
   return <span className="top-clock">{now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>;
+}
+
+/**
+ * « Ma journée » : ce que le vendeur ou le caissier a fait aujourd'hui, son
+ * objectif et sa commission du mois. Il ne voit que ses propres chiffres.
+ */
+function MyDay() {
+  const day = useLoad(() => call('me.day'), []);
+  useEffect(() => {
+    const t = setInterval(day.reload, 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const d = day.data;
+  if (!d) return null;
+  const bar = (label: string, done: number, target: number, rate: number | null) =>
+    target > 0 && (
+      <div className="myday-goal">
+        <span>{label}</span>
+        <span className="myday-bar">
+          <i style={{ width: `${Math.min(100, rate ?? 0)}%` }} className={(rate ?? 0) >= 100 ? 'ok' : ''} />
+        </span>
+        <small>
+          {fcfa(done)} / {fcfa(target)} ({String(rate ?? 0).replace('.', ',')} %)
+        </small>
+      </div>
+    );
+  return (
+    <div className="myday">
+      <h2>Ma journée</h2>
+      <div className="myday-figures">
+        <div>
+          <b>{fcfa(d.net)}</b>
+          <small>ventes{d.returns ? ` (retours ${fcfa(-d.returns)})` : ''}</small>
+        </div>
+        <div>
+          <b>{d.tickets}</b>
+          <small>tickets</small>
+        </div>
+        <div>
+          <b>{fcfa(d.average)}</b>
+          <small>panier moyen</small>
+        </div>
+        {d.target && (
+          <div>
+            <b>{fcfa(d.target.commission)}</b>
+            <small>commission du mois</small>
+          </div>
+        )}
+        {d.open_orders > 0 && (
+          <div>
+            <b>{d.open_orders}</b>
+            <small>commande(s) client en cours</small>
+          </div>
+        )}
+      </div>
+      {d.target && bar('Objectif du jour', d.target.day_sales, d.target.day_target, d.target.day_rate)}
+      {d.target && bar('Objectif du mois', d.target.month_sales, d.target.month_target, d.target.month_rate)}
+    </div>
+  );
 }

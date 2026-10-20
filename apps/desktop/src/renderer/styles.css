@@ -1127,6 +1127,8 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 /* Fiche boutique emportée (intervention, copie comptable) : on sait qu'on n'est pas dans la boutique. */
 .desk:has(> .fiche-banner) { grid-template-rows: auto auto 1fr auto; }
 .fiche-banner { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 6px 14px; background: var(--warn-soft); color: var(--warn); font-weight: 600; border-bottom: 1px solid var(--line); }
+.fiche-banner.training { background: #ff8f00; color: #fff; font-size: 15px; }
+.fiche-banner.training button { background: #fff; color: #e65100; border-color: #fff; }
 .fiche-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 14px 0 22px; }
 .fiche-actions .card { display: flex; flex-direction: column; gap: 8px; }
 .fiche-actions .card button { margin-top: auto; align-self: flex-start; }
@@ -1147,3 +1149,15 @@ p.substitute { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; b
 .target-bar i { display: inline-block; height: 8px; border-radius: 4px; background: var(--warn, #d08a00); max-width: 80px; }
 .target-bar i.ok { background: var(--brand); }
 .target-bar::before { content: ''; }
+
+/* Ma journée (accueil du vendeur et du caissier) */
+.myday { margin-top: 18px; padding: 14px 18px; border-radius: 14px; background: #f3faf7; border: 1px solid #cfe3dc; text-align: left; }
+.myday h2 { margin: 0 0 8px; font-size: 16px; color: #0f4f49; }
+.myday-figures { display: flex; flex-wrap: wrap; gap: 18px; }
+.myday-figures div { display: flex; flex-direction: column; }
+.myday-figures b { font-size: 20px; color: #0f4f49; }
+.myday-figures small { color: var(--muted); font-weight: 600; }
+.myday-goal { display: grid; grid-template-columns: 130px 1fr auto; align-items: center; gap: 10px; margin-top: 8px; font-weight: 600; }
+.myday-bar { height: 10px; border-radius: 5px; background: #e2ece8; overflow: hidden; }
+.myday-bar i { display: block; height: 100%; background: var(--warn, #d08a00); }
+.myday-bar i.ok { background: var(--brand); }

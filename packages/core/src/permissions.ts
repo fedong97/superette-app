@@ -219,6 +219,7 @@ export const PERMISSIONS = {
 
   // --- Paramétrage du système ----------------------------------------------------
   admin: { label: 'Administration (consulter caisses, dépôts, utilisateurs)', group: 'Paramétrage du système', type: 'Menu', roles: MANAGE },
+  training: { label: 'Ouvrir le mode formation (caisse d’entraînement sur une copie de la boutique)', group: 'Paramétrage du système', type: 'Fonction', roles: MANAGE },
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   warehouses_manage: { label: 'Créer, modifier et désactiver les dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },

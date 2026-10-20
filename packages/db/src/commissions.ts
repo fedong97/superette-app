@@ -156,6 +156,46 @@ export class CommissionService extends Base {
     });
   }
 
+  /**
+   * « Ma journée » du vendeur ou du caissier : ses propres ventes du jour,
+   * ses tickets, son objectif et sa commission du mois, ses commandes en cours.
+   */
+  myDay(storeId: string, userId: string) {
+    const today = this.today();
+    const sums = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN kind = 'sale' THEN total_ttc ELSE 0 END), 0) AS sales,
+                COALESCE(SUM(CASE WHEN kind <> 'sale' THEN -ABS(total_ttc) ELSE 0 END), 0) AS returns,
+                COALESCE(SUM(CASE WHEN kind = 'sale' THEN 1 ELSE 0 END), 0) AS tickets
+         FROM sales WHERE store_id = ? AND user_id = ? AND status = 'completed' AND date(created_at, 'localtime') = ?`,
+      )
+      .get(storeId, userId, today) as { sales: Fcfa; returns: Fcfa; tickets: number };
+    const staffId = this.db.prepare('SELECT id FROM staff WHERE user_id = ? AND active = 1').pluck().get(userId) as string | undefined;
+    const target = staffId ? (this.month(storeId, today.slice(0, 7)).find((r) => r.staff_id === staffId) ?? null) : null;
+    const orders = this.db
+      .prepare("SELECT COUNT(*) FROM customer_orders WHERE store_id = ? AND user_id = ? AND status IN ('new', 'prepared')")
+      .pluck()
+      .get(storeId, userId) as number;
+    return {
+      day: today,
+      sales: sums.sales,
+      returns: sums.returns,
+      net: sums.sales + sums.returns,
+      tickets: sums.tickets,
+      average: sums.tickets ? Math.round(sums.sales / sums.tickets) : 0,
+      target: target && {
+        month_target: target.month_target,
+        day_target: target.day_target,
+        month_sales: target.month_sales,
+        day_sales: target.day_sales,
+        month_rate: target.month_rate,
+        day_rate: target.day_rate,
+        commission: target.commission,
+      },
+      open_orders: orders,
+    };
+  }
+
   /** Commission du mois de chaque collaborateur, pour la feuille des salaires. */
   commissions(storeId: string, period: string): Record<string, Fcfa> {
     return Object.fromEntries(this.month(storeId, period).filter((r) => r.commission > 0).map((r) => [r.staff_id, r.commission]));

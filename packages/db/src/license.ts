@@ -210,6 +210,8 @@ export class LicenseService extends Base {
     const base = { machineCode, license: null as LicensePayload | null, daysLeft: null as number | null };
     // Fiche emportée (technicien, comptable) : on y travaille sans licence, mais on n'y vend jamais.
     const fiche = readFicheMeta(this.db);
+    // Mode formation : on vend pour s'entraîner, rien ne sort de la copie.
+    if (fiche?.kind === 'formation') return { ...base, state: 'fiche', canSell: true, warn: true, message: ficheBanner(fiche) };
     if (fiche && fiche.kind !== 'installation') return { ...base, state: 'fiche', canSell: false, warn: true, message: ficheBanner(fiche) };
     // Date reculée : on refuse de vendre plutôt que de prolonger une licence.
     const now = this.clock().getTime();

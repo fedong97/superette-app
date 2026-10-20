@@ -93,7 +93,10 @@ function CustomerList({ user }: { user: User }) {
             {(list.data ?? []).map((c) => (
               <tr key={c.id} className={`clickable ${c.active ? '' : 'inactive'}`} onClick={() => setOpen(c)}>
                 <td>{c.code}</td>
-                <td>{c.name}</td>
+                <td>
+                  {c.name}
+                  {c.no_cheque === 1 && <span className="tag rupture" style={{ marginLeft: 6 }}>Interdit de chèque</span>}
+                </td>
                 <td>{c.phone}</td>
                 <td className="r">{c.payment_terms_days} j</td>
                 <td className="r">{c.credit_limit ? fcfa(c.credit_limit) : '—'}</td>
@@ -295,6 +298,11 @@ function Account({ customer }: { customer: Customer }) {
   const a = acc.data;
   return (
     <>
+      {a.customer.no_cheque === 1 && (
+        <p>
+          <span className="tag rupture">Interdit de chèque</span> <span className="muted">Ce client ne peut plus payer par chèque (case à décocher dans sa fiche).</span>
+        </p>
+      )}
       <div className="kpis">
         <div>
           <small>Doit</small>

@@ -79,6 +79,9 @@ export function CustomerFields({
           <input value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
       </div>
+      <label className="check" title={canSetCredit ? 'Le client ne peut plus payer par chèque, ni en caisse ni en règlement' : 'Fixé par le gérant ou le comptable'}>
+        <input type="checkbox" checked={value.noCheque} disabled={!canSetCredit} onChange={(e) => set({ noCheque: e.target.checked })} /> Interdit de chèque
+      </label>
       {canSetLevel && <FamilyDiscountFields value={value.discounts} onChange={(discounts) => set({ discounts })} />}
     </>
   );
@@ -152,6 +155,8 @@ export interface CustomerDraft {
   language: DocLang;
   /** Remise en % (texte saisi) par famille. */
   discounts: Record<string, string>;
+  /** Le client ne peut plus payer par chèque (chèque revenu impayé). */
+  noCheque: boolean;
 }
 
 /** Brouillon de la fiche ; un nouveau client prend le plafond et le délai des paramètres du magasin. */
@@ -168,6 +173,7 @@ export const draftOf = (c: Customer | null, defaults?: { creditDefaultLimit: num
   active: c ? c.active === 1 : true,
   priceLevel: c?.price_level ?? 'retail',
   language: c?.language ?? 'fr',
+  noCheque: c ? c.no_cheque === 1 : false,
   discounts: Object.fromEntries(Object.entries(parseFamilyDiscounts(c?.family_discounts)).map(([k, bp]) => [k, String(bp / 100).replace('.', ',')])),
 });
 
@@ -188,6 +194,7 @@ export function inputOf(d: CustomerDraft) {
     active: d.active,
     priceLevel: d.priceLevel,
     language: d.language,
+    noCheque: d.noCheque,
     familyDiscounts: Object.fromEntries(
       Object.entries(d.discounts)
         .filter(([, v]) => v.trim())

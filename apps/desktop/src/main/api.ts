@@ -62,6 +62,8 @@ import {
   requestApproval,
   shelfCarts,
   takeShelfCart,
+  takeWebOrder,
+  webOrders,
   type AssetInput,
   ficheBanner,
   FICHE_EXTENSION,
@@ -136,6 +138,7 @@ import {
   type MtnConfig,
   type OrangeConfig,
 } from '@superette/db';
+import { createCloudBackup } from './cloudBackup';
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -371,6 +374,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const PRODUCTION: Permission[] = ['production', 'production_recipes', 'production_create', 'production_validate', 'production_cancel', ...STOCK];
   /** Paramètres du magasin de ce poste. */
   const settings = () => s.admin.storeSettings(ctx().storeId);
+  const cloud = createCloudBackup(s);
   /** Ce qui s'imprime sur le badge d'un employé : fiche collaborateur, photo, couleurs et logo de son magasin. */
   const badgeCard = (target: User): BadgeCard => {
     const storeId = target.store_id ?? s.admin.station()?.store.id ?? ctx().storeId;
@@ -1088,7 +1092,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Paramètres du magasin de ce poste (Administration › Paramètres). */
     'admin.storeSettings': () => s.admin.storeSettings(ctx().storeId),
     'admin.saveStoreSettings': (patch: Partial<StoreSettings>) => {
-      const c = ctx(['settings_edit']);
+      // Boutique en ligne et vérificateur de prix : le droit « online_shop » suffit pour ces réglages-là.
+      const shopOnly = Object.keys(patch).length > 0 && Object.keys(patch).every((k) => k.startsWith('onlineShop') || k === 'priceChecker');
+      const c = ctx(shopOnly ? ['settings_edit', 'online_shop'] : ['settings_edit']);
       if (patch.posLayout !== undefined) requireAdmin();
       // Les couleurs de l'entreprise et le badge valent pour tous ses magasins.
       const shared = Object.fromEntries(Object.entries(patch).filter(([k]) => k === 'brandColor' || k === 'brandColor2' || k === 'badge'));
@@ -2088,6 +2094,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Remises par famille : un prix convenu, comme le tarif. Sans le droit, la fiche garde les siennes.
       if (!can(u, ['customer_price_level'])) input = { ...input, familyDiscounts: undefined };
       if (!can(u, ['customer_deactivate']) && (input.active ?? active) !== active) throw new AppError("Vous n'avez pas le droit de désactiver un client", 'FORBIDDEN');
+      // Interdit de chèque : décidé par le gérant ou le comptable, comme le crédit.
+      if (!can(u, ['receivables', 'cheque_rejections']) && input.noCheque !== undefined && input.noCheque !== Boolean(before?.no_cheque)) {
+        throw new AppError("Vous n'avez pas le droit d'autoriser ou d'interdire les chèques à un client", 'FORBIDDEN');
+      }
       const fiche = (a: { name: string; phone?: string | null; contact?: string | null; email?: string | null; address?: string | null; notes?: string | null }) =>
         [a.name.trim(), a.phone ?? '', a.contact ?? '', a.email ?? '', a.address ?? '', a.notes ?? ''].join('|');
       if (!id && !can(u, ['customer_create'])) throw new AppError("Vous n'avez pas le droit de créer un client", 'FORBIDDEN');
@@ -2200,6 +2210,27 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'orders.list': (opts?: { status?: OrderStatus | 'open'; search?: string; date?: string }) => s.orders.list(ctx(['customer_orders', ...POS]).storeId, opts),
     'orders.get': (id: string) => (requireUser(), s.orders.get(id)),
     'orders.save': (input: OrderInput, id?: string | null) => s.orders.save(ctx(['customer_orders']), input, id ?? undefined),
+    /** Commandes de la boutique en ligne qui attendent d'être prises par un PC du magasin. */
+    'orders.webOrders': async () => {
+      ctx(['customer_orders']);
+      if (s.fiches.current() || !s.sync.credentials()) return [];
+      return webOrders(s).catch(() => []);
+    },
+    /** Prend la commande en ligne (un seul PC l'obtient) : elle devient une commande client « Boutique en ligne ». */
+    'orders.takeWeb': async (id: string) => {
+      const c = ctx(['customer_orders']);
+      const w = await takeWebOrder(s, id);
+      return s.orders.importWeb(c, {
+        ref: w.id,
+        customerName: w.customerName,
+        phone: w.phone,
+        address: w.address,
+        slot: w.slot,
+        note: [`Boutique en ligne ${w.number}`, w.note].filter(Boolean).join(' · '),
+        deliveryFee: w.deliveryFee,
+        lines: w.lines.map((l) => ({ articleId: l.articleId, qty: l.qty, name: l.name })),
+      });
+    },
     'orders.prepare': (id: string) => s.orders.prepare(ctx(['customer_orders']), id),
     'orders.backOrderNeeds': (id: string) => s.purchases.backOrderNeeds(ctx(['back_orders']).storeId, id),
     'orders.backOrder': (id: string, opts?: { supplierId?: string | null; warehouseId?: string | null }) => s.purchases.backOrder(ctx(['back_orders']), id, opts),
@@ -2330,6 +2361,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.agent.record(ctx(need), input);
     },
     'agent.cancel': (id: string, reason: string) => s.agent.cancel(ctx(['agent_cancel']), id, reason),
+    /** Reçu d'une opération : une pièce de caisse par mouvement d'espèces (montant, frais). */
+    'agent.print': async (id: string) => {
+      const c = ctx(['agent_point', 'agent_accounts']);
+      const op = s.agent.get(id);
+      if (op.store_id !== c.storeId) throw new AppError("Cette opération est d'un autre magasin", 'FORBIDDEN');
+      const ids = JSON.parse((s.db.prepare('SELECT entry_ids FROM agent_operations WHERE id = ?').pluck().get(id) as string | undefined) ?? '[]') as string[];
+      if (!ids.length) throw new AppError("Cette opération n'a pas de reçu : elle ne passe pas par la caisse", 'INVALID');
+      for (const e of ids) await printer.officeVoucher(e);
+    },
     'agent.list': (opts?: Parameters<Services['agent']['list']>[1]) => s.agent.list(ctx(['agent_point', 'agent_accounts']).storeId, opts),
     'agent.summary': (from: string, to: string) => s.agent.summary(ctx(['agent_accounts']).storeId, from, to),
 
@@ -2414,6 +2454,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),
     'backup.now': () => s.backups.saveNow(requireUser(['backups']).id),
+    // --- Sauvegarde en ligne (chiffrée sur ce PC, gardée par le serveur) ---------
+    'backup.cloudStatus': () => (requireUser(['backups']), cloud.status()),
+    'backup.cloudSetKey': (passphrase: string) => (requireAdmin(), cloud.setKey(passphrase)),
+    'backup.cloudNow': () => cloud.now(requireUser(['backups']).id),
+    'backup.cloudList': () => (requireUser(['backups']), cloud.list()),
+    'backup.cloudDownload': (id: string, passphrase: string) => (requireAdmin(), cloud.download(id, passphrase)),
     'backup.toFolder': async () => {
       const u = requireUser(['backups']);
       const dir = await system.chooseFolder('Choisir la clé USB ou le dossier de la copie');

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, askText, dateFr, Empty, fcfa, Field, has, Modal, parseAmount, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, askText, dateFr, dateTime, Empty, fcfa, Field, has, Modal, parseAmount, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker, SupplierSelect } from './pickers';
 
@@ -60,6 +60,14 @@ export function Orders({ user }: { user: User }) {
           Nouvelle commande
         </button>
       </div>
+      {has(user, 'customer_orders') && (
+        <WebOrders
+          onTaken={(o) => {
+            list.reload();
+            setOpen(o.id);
+          }}
+        />
+      )}
       {rows.length === 0 ? (
         <Empty action={has(user, 'customer_orders') ? { label: 'Nouvelle commande', onClick: () => setEditing('new') } : undefined}>
           Aucune commande. Un client appelle ou écrit sur WhatsApp : saisissez sa commande, préparez-la (la marchandise est mise de côté), puis chargez-la à la caisse
@@ -124,6 +132,93 @@ export function Orders({ user }: { user: User }) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Commandes passées sur la boutique en ligne du magasin : elles attendent sur le
+ * serveur qu'un PC les prenne ; prises, elles deviennent des commandes clients.
+ */
+function WebOrders({ onTaken }: { onTaken: (o: Order) => void }) {
+  const toast = useToast();
+  const web = useLoad(() => call('orders.webOrders'), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  // Nouvelles commandes en ligne : on regarde toutes les minutes, seulement quand l'écran est visible.
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') web.reload();
+    }, 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const rows = web.data ?? [];
+  if (!rows.length) return null;
+  const take = async (id: string) => {
+    setBusy(id);
+    try {
+      const r = await call('orders.takeWeb', id);
+      toast.ok(`Commande ${r.order.number} enregistrée`);
+      if (r.skipped.length) toast.error(`Articles non repris (inconnus ou inactifs) : ${r.skipped.join(', ')}`);
+      web.reload();
+      onTaken(r.order);
+    } catch (e) {
+      toast.error(e);
+      web.reload();
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <section className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div className="filters">
+        <h3>Commandes en ligne ({rows.length})</h3>
+        <button className="ghost" style={{ marginLeft: 'auto' }} onClick={web.reload}>
+          Actualiser
+        </button>
+      </div>
+      <table className="list compact">
+        <thead>
+          <tr>
+            <th>Reçue le</th>
+            <th>N°</th>
+            <th>Client</th>
+            <th>Livraison</th>
+            <th>Articles</th>
+            <th className="r">Montant</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((w) => (
+            <tr key={w.id}>
+              <td className="nowrap">{dateTime(w.at)}</td>
+              <td className="nowrap">{w.number}</td>
+              <td>
+                {w.customerName} <span className="muted">· {w.phone}</span>
+              </td>
+              <td>
+                {w.address ?? <span className="muted">retrait au magasin</span>}
+                {w.slot && <span className="muted"> · {w.slot}</span>}
+                {w.note && <small className="muted dl-note">{w.note}</small>}
+              </td>
+              <td>
+                {w.lines.map((l) => (
+                  <div key={l.articleId}>
+                    {qty(l.qty)} × {l.name}
+                  </div>
+                ))}
+              </td>
+              <td className="r">{fcfa(w.total)}</td>
+              <td>
+                <button className="primary" disabled={busy !== null} onClick={() => void take(w.id)}>
+                  Prendre
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted">« Prendre » enregistre la commande dans ce magasin, avec le canal Boutique en ligne : un seul PC peut la prendre.</p>
+    </section>
   );
 }
 

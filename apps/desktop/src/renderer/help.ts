@@ -689,6 +689,21 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'orders', title: 'Ordre de fabrication', steps: ['« Nouvel ordre » : recette et quantité, puis « Fabriquer » : les composants sortent du stock, le produit fini entre.'] },
     ],
   },
+  containers: {
+    title: 'Emballages consignés',
+    intro: 'Casiers et bouteilles consignés : la consigne encaissée, les vides au magasin, chez les clients et à rendre aux brasseries.',
+    sections: [],
+  },
+  agent: {
+    title: 'Point Mobile Money',
+    intro: 'Dépôts, retraits, crédit de communication et factures pour les clients, avec la flotte de chaque compte agent.',
+    sections: [],
+  },
+  control: {
+    title: 'Contrôle des caissiers',
+    intro: 'Pour chaque caissier : annulations, retours, remises, prix modifiés, tiroir ouvert sans vente et manquants, comparés à la moyenne de l’équipe.',
+    sections: [],
+  },
   staff: {
     title: 'Collaborateurs et salaires',
     intro: 'Vos employés, leurs sous-comptes en comptabilité, leurs salaires et leurs avances.',

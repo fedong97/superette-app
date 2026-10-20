@@ -27,6 +27,9 @@ import { Staff, type StaffTab } from './screens/Staff';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
+import { Containers, type ContainersTab } from './screens/Containers';
+import { AgentPoint, type AgentTab } from './screens/AgentPoint';
+import { CashierControl } from './screens/CashierControl';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
 import { AskHost, askConfirm, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
@@ -61,9 +64,9 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   articles: { label: 'Produits', perm: ['articles', 'article_create'] },
   stock: {
     label: 'Stock',
-    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count'],
+    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count'],
   },
-  purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns'] },
+  purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns', 'group_orders'] },
   suppliers: { label: 'Fournisseurs', perm: ['suppliers', 'supplier_statement'] },
   customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement', 'summary_invoices'] },
   expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
@@ -73,12 +76,15 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
-  accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'journal_edit', 'chart_accounts', 'fiscal_years', 'cash_forecast', 'budgets', 'analytics', 'cheque_deposits'] },
+  accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'journal_edit', 'chart_accounts', 'fiscal_years', 'cash_forecast', 'budgets', 'analytics', 'cheque_deposits', 'cheque_rejections'] },
   treasury: { label: 'Opérations de trésorerie', perm: ['treasury', 'cash_history', 'central_cash'] },
   dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
-  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets', 'staff_attendance'] },
+  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets', 'staff_attendance', 'staff_leaves'] },
+  containers: { label: 'Emballages consignés', perm: ['containers', 'containers_counter'] },
+  agent: { label: 'Point Mobile Money', perm: ['agent_point', 'agent_accounts'] },
+  control: { label: 'Contrôle des caissiers', perm: ['cashier_control'] },
 };
 
 interface MenuItem {
@@ -177,6 +183,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Devis et factures proforma', open: ['quotes'] },
       { label: 'Commandes clients (téléphone, WhatsApp)', open: ['orders'], perm: 'customer_orders' },
       { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
+      { label: 'Point Mobile Money (dépôts, retraits, factures)', open: ['agent', 'counter'], perm: 'agent_point' },
+      { label: 'Emballages consignés', open: ['containers', 'situation'], perm: ['containers', 'containers_counter'] },
       { label: 'Mes factures', open: ['sales', 'tickets'] },
       { label: 'Registre (clôtures Z)', open: ['sales', 'z'] },
     ],
@@ -198,6 +206,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
+      { label: 'Contrôle des caissiers', open: ['control'], perm: 'cashier_control' },
       SEP,
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       { label: 'Situation des ventes', open: ['reports', 'department'], perm: 'reports' },
@@ -220,6 +229,7 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Bons de commande', open: ['purchases', 'orders'], perm: ['purchases', 'purchase_orders', 'order_receive'] },
       { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
+      { label: 'Commandes groupées (plusieurs magasins)', open: ['purchases', 'group'], perm: 'group_orders' },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Marchandises non encore reçues', open: ['purchases', 'pending'] },
@@ -254,7 +264,12 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Registre de caisse (Z)', open: ['sales', 'z'], perm: 'cash_z' },
       { label: 'Rapprochement bancaire', open: ['accounting', 'bank'], perm: 'bank_reconciliation' },
       { label: 'Remises de chèques en banque', open: ['accounting', 'cheques'], perm: 'cheque_deposits' },
+      { label: 'Chèques revenus impayés', open: ['accounting', 'unpaid'], perm: 'cheque_rejections' },
       { label: 'Trésorerie prévisionnelle', open: ['accounting', 'forecast'], perm: 'cash_forecast' },
+      SEP,
+      { label: 'Point Mobile Money', open: ['agent', 'counter'], perm: 'agent_point' },
+      { label: 'Point Mobile Money : comptes et bilan', open: ['agent', 'accounts'], perm: 'agent_accounts' },
+      { label: 'Contrôle des caissiers', open: ['control'], perm: 'cashier_control' },
     ],
   ],
   [
@@ -279,6 +294,10 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count', 'inventory_close', 'inventory_print'] },
       { label: 'Déstockages (pertes et casse)', open: ['stock', 'loss'], perm: 'stock_loss' },
+      { label: 'Inventaire tournant de la semaine', open: ['stock', 'cycle'], perm: 'cycle_count' },
+      { label: 'Déstockage avant péremption', open: ['stock', 'clearance'], perm: 'clearance' },
+      { label: 'Démarque (pertes par rayon)', open: ['stock', 'losses'], perm: 'clearance' },
+      { label: 'Emballages consignés', open: ['containers', 'situation'], perm: 'containers' },
       SEP,
       { label: 'Stocks critiques', open: ['stock', 'critical'], perm: 'stock' },
       { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
@@ -335,6 +354,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
       { label: 'Objectifs et commissions des vendeurs', open: ['staff', 'targets'], perm: 'staff_targets' },
       { label: 'Pointage du personnel', open: ['staff', 'attendance'], perm: 'staff_attendance' },
+      { label: 'Congés du personnel', open: ['staff', 'leaves'], perm: 'staff_leaves' },
+      { label: 'Planning de la semaine', open: ['staff', 'planning'], perm: 'staff_leaves' },
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
@@ -354,6 +375,9 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Pertes et casse', open: ['stock', 'loss'], perm: 'stock_loss' },
       { label: 'Inventaires', open: ['stock', 'inventory'], perm: ['inventory', 'inventory_count', 'inventory_close', 'inventory_print'] },
       { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
+      { label: 'Déstockage avant péremption', open: ['stock', 'clearance'], perm: 'clearance' },
+      { label: 'Inventaire tournant de la semaine', open: ['stock', 'cycle'], perm: 'cycle_count' },
+      { label: 'Emballages consignés', open: ['containers', 'situation'], perm: 'containers' },
       { label: 'Étiquettes et codes-barres', open: ['labels'] },
     ],
   ],
@@ -372,6 +396,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Budgets', open: ['accounting', 'budgets'], perm: 'budgets' },
       { label: 'Analytique par rayon et par magasin', open: ['accounting', 'analytics'], perm: 'analytics' },
       { label: 'Remises de chèques en banque', open: ['accounting', 'cheques'], perm: 'cheque_deposits' },
+      { label: 'Chèques revenus impayés', open: ['accounting', 'unpaid'], perm: 'cheque_rejections' },
       SEP,
       { label: 'Export des ventes (CSV)', open: ['sales', 'export'], perm: 'accounting_export' },
     ],
@@ -1024,6 +1049,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'staff' && <Staff user={user} initialTab={w.tab as StaffTab | undefined} />}
+            {w.kind === 'containers' && <Containers initialTab={w.tab as ContainersTab | undefined} />}
+            {w.kind === 'agent' && <AgentPoint initialTab={w.tab as AgentTab | undefined} />}
+            {w.kind === 'control' && <CashierControl />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}

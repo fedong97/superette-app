@@ -16,7 +16,7 @@ const STATUS: Record<Status, [string, string]> = {
   invoiced: ['facturée', 'surstock'],
   cancelled: ['annulée', ''],
 };
-const CHANNELS: Record<Channel, string> = { phone: 'Téléphone', whatsapp: 'WhatsApp', shop: 'Au magasin' };
+const CHANNELS: Record<Channel, string> = { phone: 'Téléphone', whatsapp: 'WhatsApp', shop: 'Au magasin', web: 'Boutique en ligne' };
 const SLOTS = ['Matin', 'Midi', 'Après-midi', 'Soir'];
 
 function StatusTag({ status }: { status: Status }) {
@@ -198,7 +198,7 @@ function OrderEditor({ user, order, onClose, onSaved }: { user: User; order: Ord
   return (
     <Modal title={order ? `Modifier ${order.number}` : 'Nouvelle commande client'} onClose={onClose} wide>
       <div className="methods">
-        {(Object.keys(CHANNELS) as Channel[]).map((c) => (
+        {(Object.keys(CHANNELS) as Channel[]).filter((c) => c !== 'web').map((c) => (
           <button type="button" key={c} className={f.channel === c ? 'active' : ''} onClick={() => setF({ ...f, channel: c })}>
             {CHANNELS[c]}
           </button>

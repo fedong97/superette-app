@@ -65,13 +65,16 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
         nextResendTry = Date.now() + 3_600_000;
       }
     }
+    // Opérations refusées par un serveur plus ancien : elles restent en attente, les autres partent quand même.
+    let refused: { id: string; reason: string }[] = [];
     for (;;) {
       const batch = s.sync.pending(500);
       if (batch.length === 0) break;
-      const { accepted } = await request<{ accepted: string[] }>(creds.url, '/api/v1/sync/push', { token: creds.token, body: { events: batch } });
-      s.sync.markSent(accepted);
-      sent += accepted.length;
-      if (accepted.length < batch.length) break;
+      const r = await request<{ accepted: string[]; rejected?: { id: string; reason: string }[] }>(creds.url, '/api/v1/sync/push', { token: creds.token, body: { events: batch } });
+      s.sync.markSent(r.accepted);
+      sent += r.accepted.length;
+      refused = r.rejected ?? [];
+      if (r.accepted.length === 0 || r.accepted.length + refused.length < batch.length || batch.length < 500) break;
     }
     // Licence activée sur ce PC : le serveur la garde et la donne aux autres PC du magasin.
     const key = s.license.pendingUpload();
@@ -97,7 +100,12 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
       conflicts += result.conflicts;
       if (!page.hasMore) break;
     }
-    s.sync.recordResult(null);
+    s.sync.recordResult(
+      refused.length
+        ? `${refused.length} opération(s) refusée(s) par le serveur central (${refused[0]!.reason}) : mettez à jour le serveur central, elles partiront ensuite.`
+        : null,
+      true,
+    );
   } catch (e) {
     s.sync.recordResult(e instanceof Error ? e.message : String(e));
     throw e;

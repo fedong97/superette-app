@@ -31,7 +31,7 @@ export const GLOBAL_ENTITIES = [
   'loyalty_move',
 ];
 
-const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder', 'customer_order', 'sales_target', 'supplier_return', 'summary_invoice', 'cheque_deposit', 'budget']);
+export const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder', 'customer_order', 'sales_target', 'supplier_return', 'summary_invoice', 'cheque_deposit', 'budget', 'attendance', 'cash_handover', 'fixed_asset', 'opening_balance']);
 
 export interface SyncEvent {
   id: string;
@@ -165,16 +165,24 @@ export class SyncService {
     return rows[0];
   }
 
-  /** Enregistre les opérations d'un poste. Une opération déjà reçue est ignorée. */
-  async push(device: Device, events: SyncEvent[]): Promise<{ accepted: string[] }> {
+  /**
+   * Enregistre les opérations d'un poste. Une opération déjà reçue est ignorée.
+   * Une opération refusée (donnée qu'un serveur plus ancien ne connaît pas) ne
+   * bloque pas les autres : elle reste en attente sur le PC jusqu'à la mise à jour du serveur.
+   */
+  async push(device: Device, events: SyncEvent[]): Promise<{ accepted: string[]; rejected: { id: string; reason: string }[] }> {
     if (!Array.isArray(events) || events.length > 2000) throw new BadRequestException('Lot d’opérations invalide (2000 maximum)');
+    const valid: SyncEvent[] = [];
+    const rejected: { id: string; reason: string }[] = [];
     for (const e of events) {
-      if (typeof e?.id !== 'string' || typeof e.entityId !== 'string' || !KNOWN_ENTITIES.has(e.entity) || !['upsert', 'delete'].includes(e.op)) {
+      if (typeof e?.id !== 'string' || typeof e.entityId !== 'string' || !['upsert', 'delete'].includes(e.op)) {
         throw new BadRequestException(`Opération invalide : ${JSON.stringify(e).slice(0, 200)}`);
       }
+      if (KNOWN_ENTITIES.has(e.entity)) valid.push(e);
+      else rejected.push({ id: e.id, reason: `Donnée inconnue du serveur : ${String(e.entity).slice(0, 50)}` });
     }
     await this.pg.transaction(async (tx) => {
-      for (const e of events) {
+      for (const e of valid) {
         await tx.query(
           `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
@@ -182,7 +190,7 @@ export class SyncService {
         );
       }
     });
-    return { accepted: events.map((e) => e.id) };
+    return { accepted: valid.map((e) => e.id), rejected };
   }
 
   /**

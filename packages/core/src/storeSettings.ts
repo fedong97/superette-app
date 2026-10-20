@@ -125,6 +125,20 @@ export interface StoreSettings {
   /** Inventaire tournant : nombre de produits proposés à compter chaque semaine. */
   cycleCountPerWeek: number;
 
+  /** Boutique en ligne : page internet du magasin sur le serveur, les commandes arrivent dans « Commandes clients ». */
+  onlineShop: boolean;
+  /** Livraison proposée sur la boutique en ligne, et ses frais TTC (0 : à convenir). */
+  onlineShopDelivery: boolean;
+  onlineShopDeliveryFee: number;
+  /** Montant minimal d'une commande en ligne (0 : sans minimum). */
+  onlineShopMinOrder: number;
+  /** Message affiché en haut de la boutique (horaires, zone de livraison…). */
+  onlineShopMessage: string;
+  /** Vérificateur de prix : page du serveur ouverte sur un téléphone ou une tablette au rayon. */
+  priceChecker: boolean;
+  /** Sauvegarde en ligne : copie chiffrée de la base envoyée au serveur après chaque sauvegarde. */
+  cloudBackup: boolean;
+
   /** Paie : retenues légales (CNPS, IRPP, CAC, CFC, RAV, TDL) et charges patronales. */
   payroll: PayrollRules;
 
@@ -194,6 +208,13 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   advanceMaxPct: 0,
   clearanceRules: '14:10,7:20,3:30',
   cycleCountPerWeek: 30,
+  onlineShop: false,
+  onlineShopDelivery: true,
+  onlineShopDeliveryFee: 0,
+  onlineShopMinOrder: 0,
+  onlineShopMessage: '',
+  priceChecker: false,
+  cloudBackup: false,
   payroll: DEFAULT_PAYROLL,
   printTemplates: [],
   printDefaults: {},
@@ -223,8 +244,10 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   leaveDaysPerMonth: [0, 50],
   advanceMaxPct: [0, 100],
   cycleCountPerWeek: [5, 500],
+  onlineShopDeliveryFee: [0, 1e7],
+  onlineShopMinOrder: [0, 1e8],
 };
-const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
+const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500, onlineShopMessage: 300 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
 
 /**

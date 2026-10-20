@@ -83,6 +83,8 @@ export const PERMISSIONS = {
   sale_tariff: { label: 'Changer le tarif d’une fiche à la caisse (détail, gros, super gros) sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   sale_warehouse: { label: 'Vendre depuis un autre dépôt que la surface de vente sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   deliveries: { label: 'Livraisons du jour (préparer, partir, livrée)', group: 'Facturation', type: 'Menu', parent: 'cash' },
+  courier_returns: { label: 'Retour des livreurs : encaisser ce qu’ils rapportent, feuille de route', group: 'Facturation', type: 'Bouton', parent: 'deliveries' },
+  containers_counter: { label: 'Encaisser ou rendre la consigne des emballages à la caisse', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sales_alerts: { label: 'Alertes sur les ventes (remises, annulations, retours)', group: 'Facturation', type: 'Menu', parent: 'sales' },
 
   // --- Trésorerie --------------------------------------------------------------
@@ -96,6 +98,10 @@ export const PERMISSIONS = {
   cash_in: { label: "Faire une entrée d'espèces en caisse", group: 'Trésorerie', type: 'Bouton', parent: 'cash' },
   cash_withdraw: { label: 'Faire un prélèvement en caisse (avec le code du gérant)', group: 'Trésorerie', type: 'Bouton', parent: 'cash' },
   cashout: { label: 'Prélèvement et dépense en caisse sans le code du gérant', group: 'Trésorerie', type: 'Fonction', roles: MANAGE },
+  agent_point: { label: 'Point Mobile Money : dépôts, retraits, crédit, factures', group: 'Trésorerie', type: 'Menu', roles: POS },
+  agent_accounts: { label: 'Comptes agent Mobile Money : créer, taux de commission', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
+  agent_cancel: { label: 'Annuler une opération du point Mobile Money', group: 'Trésorerie', type: 'Bouton', parent: 'agent_accounts' },
+  cashier_control: { label: 'Contrôle des caissiers (annulations, remises, retours, manquants)', group: 'Trésorerie', type: 'Menu', roles: MANAGE },
   cash_operations: { label: 'Consulter toutes les opérations de caisse (listing, recherche)', group: 'Trésorerie', type: 'Menu', parent: 'sales' },
   central_cash: { label: 'Caisse centrale : apports, dépôts en banque, sorties', group: 'Trésorerie', type: 'Menu', roles: MANAGE },
   cash_desk: { label: 'Encaisser et décaisser dans une caisse ouverte (une sortie demande le code du gérant)', group: 'Trésorerie', type: 'Bouton', parent: 'treasury' },
@@ -126,6 +132,7 @@ export const PERMISSIONS = {
   reorder: { label: 'Proposition de commande', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_orders' },
   order_receive: { label: 'Réceptionner un bon de commande', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_orders' },
   order_close: { label: 'Envoyer, clôturer ou annuler un bon de commande', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_orders' },
+  group_orders: { label: 'Commandes groupées pour plusieurs magasins', group: 'Achat de marchandises', type: 'Bouton', roles: MANAGE },
   purchase_invoices: { label: 'Saisir les factures fournisseurs (à partir des bons de réception)', group: 'Achat de marchandises', type: 'Fonction', roles: [...ACCOUNTING, 'buyer'] },
   supplier_pay: { label: 'Payer une facture fournisseur', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   purchase_due: { label: 'Échéancier des fournisseurs', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
@@ -151,6 +158,8 @@ export const PERMISSIONS = {
   stock_monitoring: { label: "Monitoring de l'évolution des stocks", group: 'Gestion des stocks', type: 'Menu', parent: 'stock' },
   stock_receive: { label: 'Saisir une réception sans commande', group: 'Gestion des stocks', type: 'Bouton', parent: 'stock' },
   stock_loss: { label: 'Déstocker des marchandises (pertes, casse, périmés)', group: 'Gestion des stocks', type: 'Bouton', parent: 'stock' },
+  containers: { label: 'Emballages consignés : types, vides, fournisseurs', group: 'Gestion des stocks', type: 'Menu', roles: STOCK },
+  clearance: { label: 'Déstockage avant péremption et rapport de démarque', group: 'Gestion des stocks', type: 'Menu', roles: MANAGE },
   stock_adjust: { label: 'Corriger directement le stock (sans demande)', group: 'Gestion des stocks', type: 'Fonction', parent: 'inventory' },
   stock_request: { label: 'Demander une correction de stock', group: 'Gestion des stocks', type: 'Fonction', parent: 'inventory_count' },
   stock_decide: { label: 'Valider ou refuser les demandes de correction de stock', group: 'Gestion des stocks', type: 'Bouton', parent: 'inventory' },
@@ -170,6 +179,7 @@ export const PERMISSIONS = {
   inventory_edit: { label: 'Retirer des produits d’un inventaire', group: 'Inventaire', type: 'Fonction', parent: 'inventory' },
   inventory_close: { label: 'Clôturer un inventaire (corrige le stock)', group: 'Inventaire', type: 'Bouton', parent: 'inventory' },
   inventory_cancel: { label: 'Annuler un inventaire', group: 'Inventaire', type: 'Bouton', parent: 'inventory' },
+  cycle_count: { label: 'Inventaire tournant de la semaine', group: 'Inventaire', type: 'Bouton', parent: 'inventory' },
   inventory_import: { label: 'Importer les quantités comptées (CSV)', group: 'Inventaire', type: 'Bouton', parent: 'inventory_count' },
   inventory_print: { label: 'Imprimer les fiches de comptage et le résultat', group: 'Inventaire', type: 'Bouton', parent: 'inventory_count' },
 
@@ -198,6 +208,7 @@ export const PERMISSIONS = {
   staff_salaries: { label: 'Constater les salaires du mois et les payer au bureau', group: 'Personnel', type: 'Menu', parent: 'staff' },
   staff_targets: { label: 'Objectifs de vente et commissions des vendeurs', group: 'Personnel', type: 'Menu', parent: 'staff' },
   staff_attendance: { label: 'Pointage du personnel : état du mois, retards, absences et corrections', group: 'Personnel', type: 'Menu', roles: MANAGE },
+  staff_leaves: { label: 'Congés et planning du personnel', group: 'Personnel', type: 'Menu', parent: 'staff_attendance' },
 
   // --- Fiscalité ---------------------------------------------------------------
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
@@ -218,6 +229,7 @@ export const PERMISSIONS = {
   budgets: { label: 'Budgets par compte et suivi du réel', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   analytics: { label: 'Analytique : résultat par rayon et par magasin', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   cheque_deposits: { label: 'Bordereaux de remise de chèques en banque', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  cheque_rejections: { label: 'Chèques revenus impayés', group: 'Comptabilité', type: 'Menu', parent: 'cheque_deposits' },
   fixed_asset_edit: { label: 'Ajouter, modifier, sortir ou supprimer une immobilisation', group: 'Comptabilité', type: 'Bouton', parent: 'journal_entry' },
 
   // --- Divers ------------------------------------------------------------------
@@ -233,6 +245,7 @@ export const PERMISSIONS = {
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   print_templates: { label: "Modifier les modèles d'impression (factures, tickets)", group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   backups: { label: 'Faire une sauvegarde et consulter les sauvegardes', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
+  online_shop: { label: 'Boutique en ligne et vérificateur de prix : réglages', group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   data_takeover: { label: 'Reprendre les données d’un magasin existant (clients, fournisseurs, stock de départ)', group: 'Paramétrage du système', type: 'Fonction', roles: MANAGE },
   audit: { label: "Consulter le journal d'audit", group: 'Paramétrage du système', type: 'Menu', parent: 'admin' },
 } satisfies Record<string, PermissionDef>;

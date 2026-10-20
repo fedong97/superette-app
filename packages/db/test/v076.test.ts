@@ -87,7 +87,7 @@ describe('chèques impayés', () => {
     const [ch] = s.cheques.received(ctx.storeId);
     expect(ch).toMatchObject({ amount: 6_500, deposited: false });
     s.cheques.reject(ctx, { paymentId: ch!.payment_id, date: '2026-10-12', fees: 2_500, reason: 'Sans provision', blockCheques: true });
-    expect(s.customers.ledger(ctx.storeId, c.id).balance).toBe(9_000);
+    expect(s.customers.account(ctx.storeId, c.id).balance).toBe(9_000);
     expect(s.cheques.pending(ctx.storeId).some((p) => p.payment_id === ch!.payment_id)).toBe(false);
     expect(s.customers.getCustomer(c.id).no_cheque).toBe(1);
     expect(() =>
@@ -218,9 +218,22 @@ describe('retour du livreur', () => {
     const r = s.couriers.settle(ctx, { courier: 'Paul', deliveries: [{ id: d.id, collected: 6_500 }], returned: 6_000 });
     expect(r).toMatchObject({ expected: 6_500, returned: 6_000 });
     expect(s.couriers.list(ctx.storeId)[0]).toMatchObject({ collected: 6_500, difference: -500, deliveries: 1 });
-    expect(s.customers.ledger(ctx.storeId, c.id).balance).toBe(0);
+    expect(s.customers.account(ctx.storeId, c.id).balance).toBe(0);
     expect(expectedCash()).toBe(before + 6_500);
     expect(s.couriers.pending(ctx.storeId, 'Paul')).toHaveLength(0);
     expect(() => s.couriers.settle(ctx, { courier: 'Paul', deliveries: [{ id: d.id, collected: 0 }], returned: 0 })).toThrow(/déjà rendue/);
+  });
+});
+
+describe('boutique en ligne', () => {
+  it('reprend une commande en ligne une seule fois, sans les articles inconnus', () => {
+    const web = { ref: 'W-1', customerName: 'Mme Ekane', phone: '699000000', address: 'Bonapriso', deliveryFee: 1_000, lines: [{ articleId: castel, qty: 6_000 }, { articleId: 'inconnu', qty: 1_000, name: 'Savon' }] };
+    const first = s.orders.importWeb(ctx, web);
+    expect(first).toMatchObject({ created: true, skipped: ['Savon'] });
+    expect(first.order).toMatchObject({ channel: 'web', web_ref: 'W-1', total_ttc: 4_900, delivery_fee: 1_000 });
+    expect(first.order.note).toMatch(/Non repris : Savon/);
+    const again = s.orders.importWeb(ctx, web);
+    expect(again).toMatchObject({ created: false });
+    expect(again.order.id).toBe(first.order.id);
   });
 });

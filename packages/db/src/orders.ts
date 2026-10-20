@@ -4,7 +4,7 @@ import type { CatalogueService, Unit } from './catalogue';
 import { AppError, Base, type Context, newId } from './util';
 
 /** D'où vient la commande : appel, message WhatsApp, ou client passé au magasin. */
-export type OrderChannel = 'phone' | 'whatsapp' | 'shop';
+export type OrderChannel = 'phone' | 'whatsapp' | 'shop' | 'web';
 /**
  * Nouvelle (à préparer), Préparée (marchandise mise de côté : le stock est réservé),
  * Facturée (chargée et validée à la caisse), Annulée.
@@ -12,7 +12,7 @@ export type OrderChannel = 'phone' | 'whatsapp' | 'shop';
 export type OrderStatus = 'new' | 'prepared' | 'invoiced' | 'cancelled';
 
 export const ORDER_STATUS: Record<OrderStatus, string> = { new: 'À préparer', prepared: 'Préparée', invoiced: 'Facturée', cancelled: 'Annulée' };
-export const ORDER_CHANNELS: Record<OrderChannel, string> = { phone: 'Téléphone', whatsapp: 'WhatsApp', shop: 'Au magasin' };
+export const ORDER_CHANNELS: Record<OrderChannel, string> = { phone: 'Téléphone', whatsapp: 'WhatsApp', shop: 'Au magasin', web: 'Boutique en ligne' };
 
 export interface OrderLine {
   id: string;
@@ -39,6 +39,8 @@ export interface CustomerOrder {
   phone: string | null;
   address: string | null;
   channel: OrderChannel;
+  /** Commande de la boutique en ligne : sa référence sur le serveur. */
+  web_ref: string | null;
   planned_date: string;
   slot: string | null;
   delivery_fee: Fcfa;
@@ -176,6 +178,47 @@ export class OrderService extends Base {
     });
   }
 
+  /**
+   * Commande passée sur la boutique en ligne : elle devient une commande client
+   * « Boutique en ligne », une seule fois même si elle est reçue deux fois. Les
+   * articles inconnus ou désactivés sont laissés de côté (et signalés dans la note).
+   */
+  importWeb(
+    ctx: Context,
+    web: { ref: string; customerName: string; phone: string; address?: string | null; slot?: string | null; note?: string | null; deliveryFee?: Fcfa; lines: { articleId: string; qty: Milli; name?: string }[] },
+  ): { order: CustomerOrder; created: boolean; skipped: string[] } {
+    const ref = web.ref?.trim();
+    if (!ref) throw new AppError('Référence de commande en ligne manquante', 'INVALID');
+    const existing = this.db.prepare('SELECT id FROM customer_orders WHERE web_ref = ?').pluck().get(ref) as string | undefined;
+    if (existing) return { order: this.get(existing), created: false, skipped: [] };
+    const skipped: string[] = [];
+    const lines = web.lines.filter((l) => {
+      try {
+        if (this.catalogue.getArticle(l.articleId, ctx.storeId).active && l.qty > 0) return true;
+      } catch {
+        // Article inconnu sur ce poste.
+      }
+      skipped.push(l.name ?? l.articleId);
+      return false;
+    });
+    if (!lines.length) throw new AppError('Aucun article de cette commande en ligne ne se vend ici', 'EMPTY');
+    const note = [web.note?.trim(), skipped.length ? `Non repris : ${skipped.join(', ')}` : ''].filter(Boolean).join(' · ');
+    return this.tx(() => {
+      const order = this.save(ctx, {
+        customerName: web.customerName,
+        phone: web.phone,
+        address: web.address ?? null,
+        channel: 'web',
+        slot: web.slot ?? null,
+        deliveryFee: web.address ? (web.deliveryFee ?? 0) : 0,
+        note: note || null,
+        lines: lines.map((l) => ({ articleId: l.articleId, qty: l.qty })),
+      });
+      this.db.prepare('UPDATE customer_orders SET web_ref = ? WHERE id = ?').run(ref, order.id);
+      return { order: this.get(order.id), created: true, skipped };
+    });
+  }
+
   /** Marchandise mise de côté : à partir de là, la caisse ne la vend plus à un autre client. */
   prepare(ctx: Context, id: string): CustomerOrder {
     const o = this.get(id);
@@ -299,7 +342,7 @@ export class OrderService extends Base {
 
   private query(where: string, limit = 1) {
     return this.db.prepare(
-      `SELECT o.id, o.number, o.store_id, o.customer_id, COALESCE(c.name, o.customer_name) AS customer_name, o.phone, o.address, o.channel,
+      `SELECT o.id, o.number, o.store_id, o.customer_id, COALESCE(c.name, o.customer_name) AS customer_name, o.phone, o.address, o.channel, o.web_ref,
               o.planned_date, o.slot, o.delivery_fee, o.courier, o.note, o.status, o.sale_id, s.number AS sale_number, o.total_ttc,
               u.name AS user_name, o.prepared_at, o.created_at
        FROM customer_orders o LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN sales s ON s.id = o.sale_id LEFT JOIN users u ON u.id = o.user_id

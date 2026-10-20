@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BANK_METHODS, DENOMINATIONS_FCFA, ELECTRONIC_METHODS, PAYMENT_METHODS, type PaymentMethod, type RegisterKind, countedTotal } from '@superette/core';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast, PhoneApproval } from '../ui';
 import { CashInDialog, CashOutDialog, DeskActions, type DeskProps, type DeskRow, NatureTotals } from './CashDesk';
 import { EmoneyCentral } from './EmoneyCentral';
 import { ZView } from './PosDialogs';
@@ -862,6 +862,7 @@ function OpenDialog({ register, canOpen, onClose, onDone }: { register: Register
             <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
           </Field>
         )}
+        {needsPin && <PhoneApproval action={`Compléter le fond de ${register.name} de ${fcfa(delta)} pris dans la caisse centrale`} onCode={setPin} />}
         <div className="actions">
           {value !== null && <span className="big-total">{fcfa(value)}</span>}
           <button type="submit" className="primary" disabled={value === null || (needsPin && !pin)}>

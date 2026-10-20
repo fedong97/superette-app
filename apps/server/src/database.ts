@@ -253,6 +253,38 @@ CREATE TABLE mobile_guests (
 CREATE INDEX mobile_guests_code ON mobile_guests (code) WHERE revoked_at IS NULL;
 `,
   },
+  {
+    version: 7,
+    sql: `
+-- Accord du gérant à distance : une caisse demande, le gérant accepte avec son code
+-- sur son téléphone (ou refuse). La caisse lit la réponse une seule fois.
+CREATE TABLE approvals (
+  id UUID PRIMARY KEY,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  store_id TEXT NOT NULL,
+  register_id TEXT,
+  action TEXT NOT NULL,
+  requested_by TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  decided_by TEXT,
+  decided_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at TIMESTAMPTZ,
+  fetched_at TIMESTAMPTZ
+);
+CREATE INDEX approvals_pending ON approvals (created_at) WHERE status = 'pending';
+-- Téléphones abonnés aux alertes (notifications du navigateur) et ce qu'ils veulent recevoir.
+CREATE TABLE push_subscriptions (
+  endpoint TEXT PRIMARY KEY,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  kinds JSONB NOT NULL,
+  discount_pct INT NOT NULL DEFAULT 20,
+  origin TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

@@ -1161,3 +1161,9 @@ p.substitute { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; b
 .myday-bar { height: 10px; border-radius: 5px; background: #e2ece8; overflow: hidden; }
 .myday-bar i { display: block; height: 100%; background: var(--warn, #d08a00); }
 .myday-bar i.ok { background: var(--brand); }
+
+/* Accord du gérant demandé sur son téléphone */
+.phone-approval { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.phone-approval small { flex-basis: 100%; }
+.phone-approval .spinner-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent, #1f7a4d); animation: phone-pulse 1s ease-in-out infinite alternate; }
+@keyframes phone-pulse { from { opacity: .3; } to { opacity: 1; } }

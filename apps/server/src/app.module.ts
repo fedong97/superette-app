@@ -1,6 +1,8 @@
 import { type DynamicModule, Inject, Module, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { AlertsService } from './alerts.service';
+import { ApprovalsService } from './approvals.service';
 import { BackupService } from './backup.service';
 import { ManagerService } from './manager.service';
 import { MobileController } from './mobile.controller';
@@ -17,6 +19,7 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
   constructor(
     @Inject(PG) private readonly pg: Db,
     @Inject(BackupService) private readonly backups: BackupService,
+    @Inject(AlertsService) private readonly alerts: AlertsService,
   ) {}
 
   static forConfig(config: ServerConfig): DynamicModule {
@@ -32,16 +35,20 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
         UpdatesService,
         ManagerService,
         MobileService,
+        AlertsService,
+        ApprovalsService,
       ],
     };
   }
 
   onApplicationBootstrap() {
     this.backups.start();
+    this.alerts.start();
   }
 
   async onApplicationShutdown() {
     this.backups.stop();
+    this.alerts.stop();
     await this.pg.close();
   }
 }

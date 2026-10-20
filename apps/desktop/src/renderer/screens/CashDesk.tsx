@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PAYMENT_METHODS } from '@superette/core';
 import { type Result, call } from '../api';
-import { Field, Modal, fcfa, parseAmount, useLoad, useToast } from '../ui';
+import { Field, Modal, fcfa, parseAmount, useLoad, useToast, PhoneApproval } from '../ui';
 
 type Options = Result<'cashdesk.options'>;
 type Method = 'CASH' | 'MTN_MOMO' | 'ORANGE_MONEY';
@@ -450,9 +450,12 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
         )}
         <Tail method={method} reference={reference} setReference={setReference} piece={piece} setPiece={setPiece} pieceLabel="N° reçu" label={label} setLabel={setLabel} labelRequired={type === 'other' || type === 'expense'} />
         {o.needsPin && (
-          <Field label="Code du gérant">
-            <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
-          </Field>
+          <>
+            <Field label="Code du gérant">
+              <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+            </Field>
+            <PhoneApproval action="Autoriser une sortie de caisse" onCode={setPin} />
+          </>
         )}
         <label className="check">
           <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} /> Imprimer le bon de sortie
@@ -624,9 +627,12 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
           </Field>
         )}
         {!o.canEdit && (
-          <Field label="Code du gérant">
-            <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
-          </Field>
+          <>
+            <Field label="Code du gérant">
+              <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+            </Field>
+            <PhoneApproval action="Autoriser une opération de caisse" onCode={setPin} />
+          </>
         )}
         <div className="actions">
           <button type="button" onClick={onClose}>

@@ -154,3 +154,17 @@ export async function joinStore(s: Services, url: string, activationCode: string
   s.admin.activateRegister(activationCode);
   return s.admin.station();
 }
+
+/** Accord du gérant demandé au serveur : il répond depuis la page du gérant sur son téléphone. */
+export async function requestApproval(s: Services, action: string, requestedBy: string): Promise<{ id: string; expiresInSeconds: number }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : le gérant ne peut pas répondre de son téléphone", 'SYNC_NOT_CONFIGURED');
+  return request(creds.url, '/api/v1/approvals', { token: creds.token, body: { action, requestedBy } });
+}
+
+/** Réponse du gérant : en attente, accordée (une seule lecture), refusée ou expirée. */
+export async function approvalStatus(s: Services, id: string): Promise<{ status: 'pending' | 'approved' | 'refused' | 'expired' | 'used'; decidedBy?: string; decidedName?: string | null }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
+  return request(creds.url, `/api/v1/approvals/${encodeURIComponent(id)}`, { token: creds.token });
+}

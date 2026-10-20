@@ -49,6 +49,8 @@ import {
 } from '@superette/core';
 import {
   AppError,
+  approvalStatus,
+  requestApproval,
   type AssetInput,
   ficheBanner,
   FICHE_EXTENSION,
@@ -322,7 +324,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
     return { storeId: station.store.id, registerId: workRegister(u, station.store.id, station)?.id ?? null, userId: u.id };
   };
-  const supervisor = (pin: string) => s.admin.authorizeSupervisor(pin);
+  /** Accords donnés à distance par le gérant (téléphone) : valables 2 minutes sur ce PC. */
+  const remoteApprovals = new Map<string, { userId: string; until: number }>();
+  const supervisor = (pin: string): User => {
+    const remote = /^@accord:(.+)$/.exec(pin ?? '');
+    if (!remote) return s.admin.authorizeSupervisor(pin);
+    const a = remoteApprovals.get(remote[1]!);
+    if (!a || a.until < Date.now()) throw new AppError("L'accord du gérant a expiré : redemandez-le", 'SUPERVISOR_DENIED');
+    const u = s.admin.getUser(a.userId);
+    if (!u.active || u.deleted_at || (u.role !== 'admin' && u.role !== 'manager')) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    return u;
+  };
   /** L'écran agit sur la caisse qu'il affiche : refus si la caisse de travail a changé entre-temps. */
   const sameRegister = (c: Context, registerId?: string): Context => {
     if (registerId && registerId !== c.registerId) throw new AppError("Vous ne travaillez plus sur cette caisse : rouvrez l'écran", 'REGISTER_CHANGED');
@@ -779,6 +791,28 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (station && !s.fiches.current()) s.attendance.arrive(user.id, station.store.id);
       return user;
     },
+    /** Accord du gérant demandé sur son téléphone (PC relié au serveur). */
+    'approval.request': async (action: string) => {
+      const u = requireUser();
+      return requestApproval(s, action, u.name);
+    },
+    /** Réponse du gérant ; accordée, elle sert de code pendant 2 minutes (« @accord:id »). */
+    'approval.poll': async (id: string) => {
+      requireUser();
+      const r = await approvalStatus(s, id);
+      if (r.status === 'approved' && r.decidedBy) {
+        // La fiche du gérant doit être sur ce PC (reçue du serveur) pour valoir code.
+        try {
+          s.admin.getUser(r.decidedBy);
+        } catch {
+          throw new AppError(`${r.decidedName ?? 'Le gérant'} a accepté, mais sa fiche n'est pas encore sur ce PC : synchronisez puis redemandez`, 'SUPERVISOR_DENIED');
+        }
+        remoteApprovals.set(id, { userId: r.decidedBy, until: Date.now() + 120_000 });
+        return { status: 'approved' as const, code: `@accord:${id}`, name: r.decidedName ?? null };
+      }
+      return { status: r.status, code: null, name: r.decidedName ?? null };
+    },
+    'approval.available': () => Boolean(s.sync.credentials()) && !s.fiches.current(),
     /** Badge scanné sur l'écran de connexion : l'identifiant qu'il porte. */
     'auth.badge': (code: string) => s.admin.loginForBadge(code),
     /** « Je pars » : départ noté pour le pointage, puis déconnexion. */

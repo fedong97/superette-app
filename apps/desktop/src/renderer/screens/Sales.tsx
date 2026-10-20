@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PAYMENT_METHODS } from '@superette/core';
 import { type Result, call } from '../api';
-import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
+import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast, PhoneApproval } from '../ui';
 import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
 import { WhatsappTicketDialog, ZView } from './PosDialogs';
 import { InvoicePreview } from './docPreview';
@@ -340,9 +340,12 @@ function VoidSaleDialog({ sale, hide, needsPin, onClose, onDone }: { sale: Resul
         <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Erreur de saisie, client parti…" />
       </Field>
       {needsPin && (
-        <Field label="Code du gérant">
-          <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
-        </Field>
+        <>
+          <Field label="Code du gérant">
+            <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
+          </Field>
+          <PhoneApproval action={`Annuler la facture ${sale.number} (${fcfa(sale.total_ttc)})${reason.trim() ? ` : ${reason.trim()}` : ''}`} onCode={setPin} />
+        </>
       )}
       <div className="actions">
         <button onClick={onClose}>Retour</button>

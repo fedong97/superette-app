@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Ip, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Ip, Param, Post, Query } from '@nestjs/common';
+import { ApprovalsService } from './approvals.service';
 import { type SyncEvent, SyncService } from './sync.service';
 
 /** Limite les essais de code d'activation (6 chiffres) : 10 échecs par heure et par adresse. */
@@ -6,7 +7,10 @@ const failures = new Map<string, { count: number; until: number }>();
 
 @Controller('api/v1')
 export class SyncController {
-  constructor(@Inject(SyncService) private readonly sync: SyncService) {}
+  constructor(
+    @Inject(SyncService) private readonly sync: SyncService,
+    @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
+  ) {}
 
   @Get('health')
   health() {
@@ -53,6 +57,18 @@ export class SyncController {
   async license(@Headers('authorization') auth: string | undefined, @Body() body: { key: string }) {
     await this.sync.authenticate(auth);
     return this.sync.uploadLicense(body?.key);
+  }
+
+  /** Accord du gérant demandé depuis la caisse : il répond sur son téléphone. */
+  @Post('approvals')
+  @HttpCode(200)
+  async requestApproval(@Headers('authorization') auth: string | undefined, @Body() body: { action: string; requestedBy?: string }) {
+    return this.approvals.request(await this.sync.authenticate(auth), body);
+  }
+
+  @Get('approvals/:id')
+  async approvalStatus(@Headers('authorization') auth: string | undefined, @Param('id') id: string) {
+    return this.approvals.status(await this.sync.authenticate(auth), id);
   }
 
   @Get('sync/pull')

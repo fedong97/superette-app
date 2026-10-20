@@ -6,7 +6,7 @@ import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa,
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
 type MonthRow = Result<'staff.month'>[number];
-export type StaffTab = 'list' | 'salaries' | 'statement';
+export type StaffTab = 'list' | 'salaries' | 'targets' | 'statement';
 
 const OFFICE_METHODS = { CASH: 'Espèces (caisse centrale)', MTN_MOMO: 'MTN MoMo (caisse électronique centrale)', ORANGE_MONEY: 'Orange Money (caisse électronique centrale)', BANK_TRANSFER: 'Virement', CHEQUE: 'Chèque' } as const;
 type OfficeMethod = keyof typeof OFFICE_METHODS;
@@ -18,7 +18,8 @@ const periodFr = (p: string) => new Date(`${p}-15T12:00:00`).toLocaleDateString(
  */
 export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: StaffTab }) {
   const pay = has(user, 'staff_salaries');
-  const [tab, setTab] = useState<StaffTab>(initialTab === 'salaries' && !pay ? 'list' : initialTab);
+  const targets = has(user, 'staff_targets');
+  const [tab, setTab] = useState<StaffTab>((initialTab === 'salaries' && !pay) || (initialTab === 'targets' && !targets) ? 'list' : initialTab);
   const [shown, setShown] = useState<string | null>(null);
   return (
     <div className="page">
@@ -28,7 +29,12 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
       <Tabs
         value={tab}
         onChange={setTab}
-        tabs={[['list', 'Collaborateurs'], ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []), ['statement', 'Extrait de compte']]}
+        tabs={[
+          ['list', 'Collaborateurs'],
+          ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []),
+          ...(targets ? ([['targets', 'Objectifs et commissions']] as [StaffTab, string][]) : []),
+          ['statement', 'Extrait de compte'],
+        ]}
       />
       {tab === 'list' && (
         <StaffList
@@ -40,6 +46,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
         />
       )}
       {tab === 'salaries' && pay && <Salaries />}
+      {tab === 'targets' && targets && <Targets />}
       {tab === 'statement' && <Statement initial={shown} />}
     </div>
   );
@@ -387,6 +394,8 @@ function Salaries() {
   const toast = useToast();
   const [period, setPeriod] = useState(today().slice(0, 7));
   const month = useLoad(() => call('staff.month', period), [period]);
+  // Commission du mois sur les ventes (Objectifs et commissions), ajoutée au salaire de base.
+  const commissions = useLoad(() => call('staff.commissions', period), [period]);
   const [lines, setLines] = useState<Record<string, { gross: string; deducted: string }>>({});
   const [paying, setPaying] = useState<MonthRow | null>(null);
   const rules = useStoreSettings().payroll;
@@ -403,13 +412,13 @@ function Salaries() {
       Object.fromEntries(
         rows
           .filter((r) => !r.salary)
-          .map((r) => [
-            r.staff.id,
-            { gross: String(r.staff.base_salary || ''), deducted: String(Math.min(Math.max(0, r.staff.advances), r.staff.base_salary - legalFor(r, r.staff.base_salary)) || '') },
-          ]),
+          .map((r) => {
+            const gross = r.staff.base_salary + (commissions.data?.[r.staff.id] ?? 0);
+            return [r.staff.id, { gross: String(gross || ''), deducted: String(Math.min(Math.max(0, r.staff.advances), gross - legalFor(r, gross)) || '') }];
+          }),
       ),
     );
-  }, [month.data]);
+  }, [month.data, commissions.data]);
   const todo = rows.filter((r) => !r.salary);
   const amount = (v?: string) => parseAmount(v ?? '') ?? 0;
   return (
@@ -427,7 +436,10 @@ function Salaries() {
                 const done = await call(
                   'staff.recordSalaries',
                   period,
-                  todo.map((r) => ({ staffId: r.staff.id, gross: amount(lines[r.staff.id]?.gross), deducted: amount(lines[r.staff.id]?.deducted) })),
+                  todo.map((r) => {
+                    const gross = amount(lines[r.staff.id]?.gross);
+                    return { staffId: r.staff.id, gross, deducted: amount(lines[r.staff.id]?.deducted), commission: Math.min(gross, commissions.data?.[r.staff.id] ?? 0) };
+                  }),
                 );
                 toast.ok(`${done.length} salaire(s) de ${periodFr(period)} constaté(s)`);
                 month.reload();
@@ -473,6 +485,7 @@ function Salaries() {
               <th>Collaborateur</th>
               <th className="r">Salaire de base</th>
               <th className="r">Avances à rembourser</th>
+              <th className="r">Commission</th>
               <th className="r">Brut du mois</th>
               <th className="r">Retenues légales</th>
               <th className="r">Avances retenues</th>
@@ -495,6 +508,7 @@ function Salaries() {
                   </td>
                   <td className="r">{fcfa(r.staff.base_salary)}</td>
                   <td className="r">{r.staff.advances > 0 ? fcfa(r.staff.advances) : ''}</td>
+                  <td className="r">{x ? (x.commission ? fcfa(x.commission) : '') : commissions.data?.[r.staff.id] ? fcfa(commissions.data[r.staff.id]!) : ''}</td>
                   <td className="r">
                     {x ? (
                       fcfa(x.gross)
@@ -669,5 +683,179 @@ function Statement({ initial }: { initial: string | null }) {
         </>
       )}
     </>
+  );
+}
+
+type TargetRow = Result<'staff.targets'>[number];
+const pct = (bp: number) => `${String(bp / 100).replace('.', ',')} %`;
+
+/**
+ * Objectifs de vente et commissions : les ventes de chaque collaborateur relié à un
+ * utilisateur (ventes validées moins ses retours), le taux atteint et la commission du mois.
+ */
+function Targets() {
+  const [period, setPeriod] = useState(today().slice(0, 7));
+  const rows = useLoad(() => call('staff.targets', period), [period]);
+  const [editing, setEditing] = useState<TargetRow | null>(null);
+  const list = rows.data ?? [];
+  const total = list.reduce((t, r) => t + r.commission, 0);
+  return (
+    <>
+      <div className="toolbar">
+        <Field label="Mois">
+          <input type="month" value={period} max={today().slice(0, 7)} onChange={(e) => setPeriod(e.target.value || today().slice(0, 7))} />
+        </Field>
+        <span className="spacer" />
+        <button onClick={() => window.print()} disabled={!list.length}>
+          Imprimer l’état
+        </button>
+      </div>
+      <p className="muted">
+        Les ventes comptées sont celles faites sous le compte utilisateur du collaborateur (fiche collaborateur), au comptant ou à crédit, moins ses retours ; les frais de
+        livraison ne comptent pas. La commission du mois s’ajoute au brut dans Salaires du mois.
+      </p>
+      {list.length ? (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Collaborateur</th>
+              <th className="r">Objectif du mois</th>
+              <th className="r">Ventes du mois</th>
+              <th>Atteint</th>
+              <th className="r">Objectif du jour</th>
+              <th className="r">Ventes du jour</th>
+              <th className="r">Tickets</th>
+              <th className="r">Taux</th>
+              <th className="r">Commission</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((r) => (
+              <tr key={r.staff_id}>
+                <td>
+                  <b>{r.staff_name}</b>
+                  {r.user_name ? <small className="muted"> · {r.user_name}</small> : <small className="neg"> · aucun utilisateur relié</small>}
+                </td>
+                <td className="r">{r.month_target ? fcfa(r.month_target) : ''}</td>
+                <td className="r">{fcfa(r.month_sales)}</td>
+                <td>
+                  {r.month_rate !== null && (
+                    <span className="target-bar" title={`${r.month_rate} %`}>
+                      <i style={{ width: `${Math.min(100, r.month_rate)}%` }} className={r.month_rate >= 100 ? 'ok' : ''} />
+                      <small>{String(r.month_rate).replace('.', ',')} %</small>
+                    </span>
+                  )}
+                </td>
+                <td className="r">{r.day_target ? fcfa(r.day_target) : ''}</td>
+                <td className={`r ${r.day_target && r.day_sales >= r.day_target ? 'pos' : ''}`}>{fcfa(r.day_sales)}</td>
+                <td className="r">{r.tickets}</td>
+                <td className="r">
+                  {r.rate_bp ? pct(r.rate_bp) : ''}
+                  {Object.keys(r.family_rates).length > 0 && <small className="muted"> + familles</small>}
+                </td>
+                <td className="r">
+                  <b>{r.commission ? fcfa(r.commission) : ''}</b>
+                </td>
+                <td>
+                  <button className="link" onClick={() => setEditing(r)}>
+                    Régler…
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td colSpan={8}>Total des commissions</td>
+              <td className="r">{fcfa(total)}</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      ) : (
+        <Empty>Aucun vendeur : reliez chaque collaborateur à son compte utilisateur dans l’onglet Collaborateurs (fiche › Utilisateur).</Empty>
+      )}
+      {editing && (
+        <TargetEditor
+          row={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            rows.reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function TargetEditor({ row, onClose, onSaved }: { row: TargetRow; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const deps = useLoad(() => call('catalogue.departments'), []);
+  const families = (deps.data ?? []).flatMap((d) => d.families.map((f) => ({ ...f, dep: d.name })));
+  const toPct = (bp: number) => (bp ? String(bp / 100).replace('.', ',') : '');
+  const [month, setMonth] = useState(row.month_target ? String(row.month_target) : '');
+  const [day, setDay] = useState(row.day_target ? String(row.day_target) : '');
+  const [rate, setRate] = useState(toPct(row.rate_bp));
+  const [famRates, setFamRates] = useState<[string, string][]>(Object.entries(row.family_rates).map(([k, v]) => [k, toPct(v)]));
+  const bp = (v: string) => {
+    const n = Number((v || '0').replace(',', '.'));
+    return Number.isFinite(n) ? Math.round(n * 100) : NaN;
+  };
+  const save = async () => {
+    try {
+      await call('staff.setTarget', row.staff_id, {
+        monthTarget: parseAmount(month || '0') ?? NaN,
+        dayTarget: parseAmount(day || '0') ?? NaN,
+        rateBp: bp(rate),
+        familyRates: Object.fromEntries(famRates.filter(([k]) => k).map(([k, v]) => [k, bp(v)])),
+      });
+      toast.ok(`Objectif de ${row.staff_name} enregistré`);
+      onSaved();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  return (
+    <Modal title={`Objectif et commission · ${row.staff_name}`} onClose={onClose}>
+      <div className="grid2">
+        <Field label="Objectif du mois (FCFA)">
+          <input inputMode="numeric" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="0" />
+        </Field>
+        <Field label="Objectif du jour (FCFA)">
+          <input inputMode="numeric" value={day} onChange={(e) => setDay(e.target.value)} placeholder="0" />
+        </Field>
+      </div>
+      <Field label="Commission sur toutes les ventes (%)" hint="Exemple : 1 pour 1 %, 0,5 pour 0,5 %">
+        <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0" />
+      </Field>
+      <h4>Taux propre à une famille</h4>
+      {famRates.map(([fam, v], i) => (
+        <div className="inline" key={i}>
+          <select value={fam} onChange={(e) => setFamRates(famRates.map((x, n) => (n === i ? [e.target.value, x[1]] : x)))}>
+            <option value="">Choisir une famille</option>
+            {families.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.dep} › {f.name}
+              </option>
+            ))}
+          </select>
+          <input className="narrow" inputMode="decimal" value={v} onChange={(e) => setFamRates(famRates.map((x, n) => (n === i ? [x[0], e.target.value] : x)))} placeholder="%" />
+          <button type="button" className="link" onClick={() => setFamRates(famRates.filter((_, n) => n !== i))}>
+            Retirer
+          </button>
+        </div>
+      ))}
+      <button type="button" className="link" onClick={() => setFamRates([...famRates, ['', '']])}>
+        + Ajouter une famille
+      </button>
+      <div className="actions">
+        <button type="button" onClick={onClose}>
+          Annuler
+        </button>
+        <button type="button" className="primary" onClick={() => void save()}>
+          Enregistrer
+        </button>
+      </div>
+    </Modal>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Droits d'utilisateur, rangés par groupe comme dans KONTROL. Chaque rôle
+ * Droits d'utilisateur, rangés par groupe. Chaque rôle
  * reçoit une liste de droits que l'administrateur règle dans Administration ›
  * Droits par rôle ; un utilisateur peut en plus recevoir ou perdre des droits
  * à titre personnel (Administration › Privilèges par utilisateur).
@@ -65,6 +65,8 @@ export const PERMISSIONS = {
   quotes: { label: 'Devis et proformas', group: 'Facturation', type: 'Menu', roles: COUNTER },
   quote_save: { label: 'Créer ou modifier un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },
   quote_cancel: { label: 'Annuler un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },
+  customer_orders: { label: 'Commandes clients (téléphone, WhatsApp) : prendre, préparer', group: 'Facturation', type: 'Menu', roles: COUNTER },
+  customer_order_cancel: { label: 'Annuler une commande client', group: 'Facturation', type: 'Bouton', parent: 'customer_orders' },
   price: { label: 'Appliquer un prix négocié à la saisie (jamais sous le revient)', group: 'Facturation', type: 'Fonction', roles: POS },
   discount: { label: 'Accorder une remise sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   sale_hold: { label: 'Mettre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
@@ -133,7 +135,10 @@ export const PERMISSIONS = {
   article_deactivate: { label: 'Désactiver ou réactiver un produit', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   article_families: { label: 'Créer les rayons et les familles', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   store_price: { label: 'Prix propre au magasin', group: 'Configuration des produits', type: 'Fonction', roles: MANAGE },
-  import: { label: 'Importer le catalogue (CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  import: { label: 'Importer le catalogue (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  article_export: { label: 'Exporter la liste des produits (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
+  price_update: { label: 'Mettre à jour les prix en masse (hausse en %, coefficient)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  stock_location: { label: 'Noter l’emplacement des produits dans les dépôts', group: 'Configuration des produits', type: 'Fonction', parent: 'article_edit' },
   labels: { label: 'Étiquettes de rayon', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
 
   // --- Gestion des stocks ------------------------------------------------------
@@ -187,6 +192,7 @@ export const PERMISSIONS = {
   staff: { label: 'Collaborateurs : fiches et extraits de compte', group: 'Personnel', type: 'Menu', roles: ACCOUNTING },
   staff_edit: { label: 'Ajouter ou modifier un collaborateur', group: 'Personnel', type: 'Bouton', parent: 'staff' },
   staff_salaries: { label: 'Constater les salaires du mois et les payer au bureau', group: 'Personnel', type: 'Menu', parent: 'staff' },
+  staff_targets: { label: 'Objectifs de vente et commissions des vendeurs', group: 'Personnel', type: 'Menu', parent: 'staff' },
 
   // --- Fiscalité ---------------------------------------------------------------
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
@@ -213,7 +219,7 @@ export const PERMISSIONS = {
   // --- Paramétrage du système ----------------------------------------------------
   admin: { label: 'Administration (consulter caisses, dépôts, utilisateurs)', group: 'Paramétrage du système', type: 'Menu', roles: MANAGE },
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
-  warehouses_manage: { label: 'Créer des dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
+  warehouses_manage: { label: 'Créer, modifier et désactiver les dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   print_templates: { label: "Modifier les modèles d'impression (factures, tickets)", group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   backups: { label: 'Faire une sauvegarde et consulter les sauvegardes', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },

@@ -109,7 +109,7 @@ export interface AccountMovement {
 export type CreditStatus = 'over' | 'near' | 'ok' | 'no_limit';
 
 /**
- * Registres et contrôles transverses, rangés comme les menus de KONTROL :
+ * Registres et contrôles transverses :
  * registre des ventes, alertes, achats par produit, marchandises non reçues,
  * opérations de caisse, stock par dépôt, comptes fournisseurs et clients.
  * Tout se calcule à partir des documents ; rien n'est stocké ici.

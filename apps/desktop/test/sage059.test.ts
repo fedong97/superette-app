@@ -83,7 +83,7 @@ describe('nouveautés tirées de Sage dans l’application', () => {
     const out = a.api['accounting.exportFormatted']!({ from: '2026-03-01', to: '2026-03-31' }, mine.id) as string;
     expect(out).toMatch(/^02032026\t\d+\t5000\t\+/);
     const imp = a.api['formats.save']!({ id: '', name: 'Brasseries', kind: 'articles', separator: ';', skipRows: 2, decimal: ',', columns: { name: 1, salePrice: 3 } }) as { id: string };
-    expect((a.api['formats.list']!() as { id: string }[]).map((f) => f.id)).toEqual(['fedonix', 'sage100', 'debit-credit', mine.id, imp.id]);
+    expect((a.api['formats.list']!() as { id: string }[]).map((f) => f.id)).toEqual(['sage100-articles', 'fedonix', 'sage100', 'debit-credit', mine.id, imp.id]);
     a.api['formats.delete']!(imp.id);
     expect(() => a.api['formats.delete']!('sage100')).toThrow(/introuvable/);
 

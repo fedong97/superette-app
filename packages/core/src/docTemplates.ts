@@ -1,6 +1,6 @@
 /**
  * Modèles d'impression des documents, comme les « variantes des états » de
- * Sage Saari ou KONTROL : pour chaque document (facture client…), chaque
+ * Pour chaque document (facture client…), chaque
  * format (ticket de caisse, A4, listing) et chaque variante (comptant, à
  * terme), un ou plusieurs modèles réglables champ par champ.
  *

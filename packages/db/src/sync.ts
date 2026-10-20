@@ -68,6 +68,7 @@ const TABLES: Record<string, string> = {
   customer_reminder: 'customer_reminders',
   opening_balance: 'opening_balances',
   fixed_asset: 'fixed_assets',
+  sales_target: 'sales_targets',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -89,6 +90,7 @@ const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> =
   reception: { table: 'receptions', lines: 'reception_lines', fk: 'reception_id' },
   manual_entry: { table: 'manual_entries', lines: 'manual_entry_lines', fk: 'entry_id' },
   quote: { table: 'quotes', lines: 'quote_lines', fk: 'quote_id' },
+  customer_order: { table: 'customer_orders', lines: 'customer_order_lines', fk: 'order_id' },
 };
 
 /**
@@ -594,10 +596,15 @@ export class SyncService extends Base {
         const local = this.db.prepare('SELECT status FROM quotes WHERE id = ?').pluck().get(event.entityId);
         if (local && local !== 'open') return;
       }
+      // Une commande facturée ou annulée ne revient pas en arrière.
+      if (event.entity === 'customer_order') {
+        const local = this.db.prepare('SELECT status FROM customer_orders WHERE id = ?').pluck().get(event.entityId) as string | undefined;
+        if (local === 'invoiced' || local === 'cancelled') return;
+      }
       this.upsert(doc.table, p);
       // Un bon de commande brouillon, un devis ou une écriture saisie peuvent être réécrits : on remplace leurs lignes.
       // Les lignes d'une réception ne changent jamais.
-      const rewritable = event.entity === 'purchase_order' || event.entity === 'quote' || event.entity === 'manual_entry';
+      const rewritable = event.entity === 'purchase_order' || event.entity === 'quote' || event.entity === 'customer_order' || event.entity === 'manual_entry';
       if (rewritable) this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
       for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], !rewritable);
       return;

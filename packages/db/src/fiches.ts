@@ -12,7 +12,7 @@ import { AppError, Base, type Clock, newId } from './util';
 
 /**
  * Fiche boutique : une copie du dossier d'une boutique dans un seul fichier
- * `.fedonix`, comme les fichiers de gestion de Sage 100.
+ * `.fedonix`.
  *
  * - intervention : le technicien l'emporte, y travaille sur son PC et la rapporte ;
  * - comptable : le comptable l'emporte pour ses états, la rapporter est facultatif ;

@@ -17,7 +17,7 @@ const startOf = (d: string) => new Date(`${d}T00:00:00`).toISOString();
 const endOf = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
 
 /**
- * Monitoring de l'évolution du stock d'un produit, comme dans KONTROL :
+ * Monitoring de l'évolution du stock d'un produit :
  * les demandes de modification (validées par le gérant) et les
  * modifications effectives avec le stock avant et après.
  */

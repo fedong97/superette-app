@@ -116,7 +116,7 @@ export interface DeskResult {
 const isTreasuryAccount = (id: string) => id.startsWith('5');
 
 /**
- * « Encaisser » et « Décaisser » des Opérations de trésorerie (comme dans KONTROL),
+ * « Encaisser » et « Décaisser » des Opérations de trésorerie,
  * et les pièces qu'ils créent quand ce n'est ni une vente, ni un règlement client
  * ou fournisseur, ni une dépense : avances et salaires du personnel, remboursement
  * d'un client, autre entrée ou sortie. Une sortie d'espèces ou de MoMo/OM compte

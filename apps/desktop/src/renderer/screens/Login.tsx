@@ -3,9 +3,11 @@ import { type Result, call } from '../api';
 import logo from '../assets/logo.png';
 import { Field, useToast } from '../ui';
 import { DossierPicker } from './Dossiers';
+import { type Lang, currentLang, setLang } from '../i18n';
 
 export function Login({ station, fiche, onDone }: { station: Result<'app.state'>['station']; fiche: Result<'app.state'>['dossier']['fiche']; onDone: () => void }) {
   const [dossiers, setDossiers] = useState(false);
+  const [lang, setLangState] = useState<Lang>(currentLang);
   const toast = useToast();
   const [login, setLogin] = useState('');
   const [pin, setPin] = useState('');
@@ -44,6 +46,18 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
         </button>
         <button type="button" className="link" onClick={() => setDossiers(true)}>
           Changer de boutique
+        </button>
+        <button
+          type="button"
+          className="link"
+          translate="no"
+          onClick={() => {
+            const next: Lang = lang === 'en' ? 'fr' : 'en';
+            setLang(next);
+            setLangState(next);
+          }}
+        >
+          {lang === 'en' ? 'Français' : 'English'}
         </button>
       </form>
       {dossiers && <DossierPicker onClose={() => setDossiers(false)} />}

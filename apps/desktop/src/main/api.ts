@@ -31,11 +31,16 @@ import {
   type ExportFormat,
   type FileFormat,
   type ImportFormat,
+  type ArticleImportRow,
+  type ArticleColumn,
+  ARTICLE_COLUMNS,
+  BUILTIN_IMPORT_FORMATS,
   formatEntries,
   type TakeoverKind,
   type CustomerDisplayMode,
   type CustomerDisplayState,
   CUSTOMER_DISPLAY_MODES,
+  type DocLang,
 } from '@superette/core';
 import {
   AppError,
@@ -58,6 +63,10 @@ import {
   inspectBackup,
   STAFF_CATEGORIES,
   type ArticleInput,
+  type WarehouseInput,
+  type ExportFilter,
+  type ImportMode,
+  type PriceUpdateInput,
   type AttentionKey,
   type BootstrapInput,
   type Context,
@@ -71,6 +80,9 @@ import {
   type SalesRegisterFilter,
   type QuoteInput,
   type QuoteState,
+  type OrderInput,
+  type SalesTargetInput,
+  type OrderStatus,
   type AccountRole,
   type JournalCode,
   type LabelItem,
@@ -321,6 +333,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const settings = () => s.admin.storeSettings(ctx().storeId);
   /** Code interne donné à l'enregistrement d'un article sans code, si le magasin l'a choisi. */
   const autoBarcode = () => (settings().barcodeAuto ? settings().barcodeKind : null);
+  const codeByFamily = () => settings().articleCodeByFamily;
   const SALES: Permission[] = ['sales', 'reports', 'receivables'];
   /** Montants de la caisse : attendu, entrées, ventes de la journée, historique des journées et Z. */
   const AMOUNTS: Permission[] = ['cash_amounts'];
@@ -425,7 +438,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return [];
     }
   };
-  const allFormats = (): FileFormat[] => [...BUILTIN_EXPORT_FORMATS, ...userFormats()];
+  const exportModels = (): { id: string; name: string; columns: ArticleColumn[] }[] => {
+    try {
+      const v = JSON.parse(s.admin.getSetting('exportModels') ?? '[]') as { id: string; name: string; columns: ArticleColumn[] }[];
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  };
+  const allFormats = (): FileFormat[] => [...BUILTIN_IMPORT_FORMATS, ...BUILTIN_EXPORT_FORMATS, ...userFormats()];
   const chooseOpenFile = async (title: string, name: string, extensions: string[]) => {
     if (!system.chooseOpenFile) throw new AppError('Indisponible sur ce poste', 'UNAVAILABLE');
     return system.chooseOpenFile(title, name, extensions);
@@ -488,6 +509,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
     }),
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
+    /** Langue de l'utilisateur connecté : celle de ses bons de caisse et rapports imprimés. */
+    'prefs.lang': (): DocLang => (user && s.admin.prefs(user.id).lang === 'en' ? 'en' : 'fr'),
     /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */
     'setup.bootstrap': (input: BootstrapInput & { template?: string | null }) => {
       const { template, ...rest } = input;
@@ -510,7 +533,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return info;
     },
 
-    // --- Boutiques de ce PC (comme les fichiers de Sage) ----------------------
+    // --- Boutiques de ce PC ----------------------
     // Ouvrir une boutique se fait aussi avant la connexion : chaque boutique a ses propres utilisateurs.
     'dossier.list': () => dossiers().list(),
     'dossier.dir': () => dossiers().dir,
@@ -609,11 +632,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return opts.send ? send(info, dir) : info;
     },
 
-    // --- Réparation (comme la Maintenance de Sage) ---------------------------
+    // --- Réparation ---------------------------
     'repair.check': () => (requireAdmin(), s.repair.check()),
     'repair.run': () => s.repair.repair(requireAdmin().id),
 
-    // --- Modèles de boutique (comme les fichiers modèles de Sage) ------------
+    // --- Modèles de boutique ------------
     // La liste se lit aussi avant la création de la boutique (premier démarrage).
     'template.list': () => [...BUILTIN_TEMPLATES, ...templateFiles()].map(templateSummary),
     'template.apply': (idOrFile: string) => {
@@ -665,7 +688,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         throw new AppError('Indiquez au moins les colonnes de la désignation et du prix de vente', 'INVALID');
       }
       if (f.kind === 'ecritures' && !f.columns.length) throw new AppError('Choisissez les colonnes du fichier', 'INVALID');
-      if (BUILTIN_EXPORT_FORMATS.some((b) => b.id === f.id)) throw new AppError('Les formats livrés ne se modifient pas : enregistrez-en une copie', 'INVALID');
+      if ([...BUILTIN_IMPORT_FORMATS, ...BUILTIN_EXPORT_FORMATS].some((b) => b.id === f.id)) throw new AppError('Les formats livrés ne se modifient pas : enregistrez-en une copie', 'INVALID');
       const saved = { ...f, name: f.name.trim(), id: f.id || `format-${Date.now()}`, builtin: undefined };
       const list = userFormats().filter((x) => x.id !== saved.id);
       s.admin.setSetting('formats', JSON.stringify([...list, saved]));
@@ -761,8 +784,23 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.registers': (storeId: string) => (requireUser(ADMIN), s.admin.listRegisters(storeId)),
     'admin.createRegister': (storeId: string, name?: string, kind?: RegisterKind) => s.admin.createRegister(requireAdmin().id, storeId, name, kind),
     'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean }) => s.admin.updateRegister(requireAdmin().id, id, patch),
-    'admin.warehouses': () => s.admin.listWarehouses(ctx().storeId),
+    'admin.warehouses': (opts?: { includeInactive?: boolean }) => s.admin.listWarehouses(ctx().storeId, opts),
     'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(['warehouses_manage']).storeId, name, kind),
+    'admin.updateWarehouse': (id: string, input: WarehouseInput) => {
+      const c = ctx(['warehouses_manage']);
+      if (s.admin.getWarehouse(id).store_id !== c.storeId) throw new AppError("Ce dépôt n'est pas dans ce magasin", 'FORBIDDEN');
+      return s.admin.updateWarehouse(c.userId, id, input);
+    },
+    'admin.setWarehouseActive': (id: string, active: boolean) => {
+      const c = ctx(['warehouses_manage']);
+      if (s.admin.getWarehouse(id).store_id !== c.storeId) throw new AppError("Ce dépôt n'est pas dans ce magasin", 'FORBIDDEN');
+      return s.admin.setWarehouseActive(c.userId, id, active);
+    },
+    'admin.setSalesWarehouse': (id: string) => {
+      const c = ctx(['warehouses_manage']);
+      if (s.admin.getWarehouse(id).store_id !== c.storeId) throw new AppError("Ce dépôt n'est pas dans ce magasin", 'FORBIDDEN');
+      return s.admin.setSalesWarehouse(c.userId, id);
+    },
     'admin.users': () => {
       requireUser(ADMIN);
       const locked = new Set(s.admin.lockedUsers());
@@ -907,7 +945,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const noVat = s.admin.vatDisabled(ctx().storeId);
       if (!id) {
         if (!can(u, ['article_create', 'sale_new_article'])) throw new AppError("Vous n'avez pas le droit d'ajouter des produits", 'FORBIDDEN');
-        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id, { autoBarcode: autoBarcode() });
+        return s.catalogue.saveArticle(u.id, noVat ? { ...input, vatRateId: s.admin.exemptRateId() } : input, id, { autoBarcode: autoBarcode(), codeByFamily: codeByFamily() });
       }
       const cur = s.catalogue.getArticle(id, ctx().storeId);
       if (noVat) input = { ...input, vatRateId: cur.vat_rate_id };
@@ -926,7 +964,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         input.vatRateId !== cur.vat_rate_id ||
         (input.minQty ?? null) !== cur.min_qty ||
         (input.alertQty ?? null) !== cur.alert_qty ||
-        (input.maxQty ?? null) !== cur.max_qty;
+        (input.maxQty ?? null) !== cur.max_qty ||
+        (input.substituteId !== undefined && (input.substituteId || null) !== cur.substitute_id);
       if (otherChanged && !can(u, ['article_edit'])) throw new AppError("Vous n'avez pas le droit de modifier la fiche d'un produit", 'FORBIDDEN');
       return s.catalogue.saveArticle(u.id, input, id, { autoBarcode: autoBarcode() });
     },
@@ -943,8 +982,41 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'barcode.info': () => (requireUser(), s.catalogue.internalBarcodeInfo(settings().barcodeKind)),
     'catalogue.quickKeys': () => s.catalogue.quickKeys(ctx().storeId),
     'catalogue.scan': (code: string) => s.catalogue.scan(code, ctx().storeId),
-    'catalogue.import': (rows: Parameters<Services['catalogue']['importArticles']>[1]) =>
-      s.catalogue.importArticles(requireUser(['import']).id, rows, { noVat: s.admin.vatDisabled(ctx().storeId) }),
+    /** `preview` : l'import est fait puis annulé, pour montrer ce qui serait créé, mis à jour ou refusé. */
+    'catalogue.import': (rows: ArticleImportRow[], opts: { mode?: ImportMode; preview?: boolean } = {}) =>
+      s.catalogue.importArticles(requireUser(['import']).id, rows, {
+        noVat: s.admin.vatDisabled(ctx().storeId),
+        mode: opts.mode,
+        preview: opts.preview,
+        autoBarcode: autoBarcode(),
+        codeByFamily: codeByFamily(),
+      }),
+    'catalogue.exportList': (filter: ExportFilter = {}) => s.catalogue.listForExport(ctx(['article_export']).storeId, filter),
+    'catalogue.setLocation': (articleId: string, warehouseId: string, location: string) => {
+      const c = ctx(['article_edit', 'stock_location']);
+      if (s.admin.getWarehouse(warehouseId).store_id !== c.storeId) throw new AppError("Ce dépôt n'est pas dans ce magasin", 'FORBIDDEN');
+      return s.catalogue.setLocation(c.userId, articleId, warehouseId, location);
+    },
+    /** Modèles d'export personnalisés de la liste des produits (colonnes choisies), gardés sur ce PC. */
+    'catalogue.exportModels': () => (requireUser(['article_export']), exportModels()),
+    'catalogue.saveExportModel': (m: { id?: string; name: string; columns: ArticleColumn[] }) => {
+      requireUser(['article_export']);
+      if (!m.name?.trim()) throw new AppError('Donnez un nom au modèle', 'INVALID');
+      const columns = (m.columns ?? []).filter((c) => c in ARTICLE_COLUMNS);
+      if (!columns.length) throw new AppError('Choisissez au moins une colonne', 'INVALID');
+      const saved = { id: m.id || `modele-${Date.now()}`, name: m.name.trim(), columns };
+      s.admin.setSetting('exportModels', JSON.stringify([...exportModels().filter((x) => x.id !== saved.id), saved]));
+      return saved;
+    },
+    'catalogue.deleteExportModel': (id: string) => {
+      requireUser(['article_export']);
+      s.admin.setSetting('exportModels', JSON.stringify(exportModels().filter((x) => x.id !== id)));
+    },
+    'catalogue.pricePlan': (input: PriceUpdateInput) => s.catalogue.planPriceUpdate(ctx(['price_update']).storeId, input),
+    'catalogue.priceApply': (input: PriceUpdateInput) => {
+      const c = ctx(['price_update']);
+      return s.catalogue.applyPriceUpdate(c.userId, c.storeId, input);
+    },
 
     // --- Stock --------------------------------------------------------------
     'stock.list': (opts?: { warehouseId?: string; search?: string; level?: StockLevel }) => s.stock.list(ctx().storeId, opts),
@@ -1136,6 +1208,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       customerId?: string | null;
       creditPin?: string;
       quoteId?: string | null;
+      orderId?: string | null;
       clientName?: string | null;
       priceLevel?: PriceLevel | null;
       warehouseId?: string | null;
@@ -1167,6 +1240,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         customerId: input.customerId ?? null,
         creditAuthorizedBy: creditBy,
         quoteId: input.quoteId ?? null,
+        orderId: input.orderId ?? null,
         clientName: input.clientName ?? null,
         priceLevel: input.priceLevel ?? null,
         warehouseId: input.warehouseId ?? null,
@@ -1567,7 +1641,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'staff.statement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), s.staff.statement(id, { from: from ?? undefined, to: to ?? undefined })),
     'staff.printStatement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), printer.staffStatement(id, from, to)),
     'staff.month': (period: string) => s.staff.month(ctx(['staff_salaries']).storeId, period),
-    'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa }[]) => s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
+    'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa; commission?: Fcfa }[]) => s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
+    'staff.targets': (period: string) => s.commissions.month(ctx(['staff_targets']).storeId, period),
+    'staff.setTarget': (staffId: string, input: SalesTargetInput) => s.commissions.setTarget(ctx(['staff_targets']), staffId, input),
+    'staff.commissions': (period: string) => s.commissions.commissions(ctx(['staff_salaries']).storeId, period),
     'staff.cancelSalary': (id: string, reason: string) => s.staff.cancelSalary(ctx(['staff_salaries']), id, reason),
     'staff.salaries': (opts?: { period?: string | null; staffId?: string | null; unpaid?: boolean }) => s.staff.salaries(ctx(STAFF).storeId, opts ?? {}),
     'staff.declarations': (period: string) => s.staff.declarations(ctx(['staff_salaries']).storeId, period),
@@ -1778,6 +1855,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     /** Lignes à charger dans la fiche de facturation, aux prix garantis par le devis. */
     'quotes.saleLines': (id: string) => s.quotes.saleLines(ctx(POS).storeId, id),
+    'orders.list': (opts?: { status?: OrderStatus | 'open'; search?: string; date?: string }) => s.orders.list(ctx(['customer_orders', ...POS]).storeId, opts),
+    'orders.get': (id: string) => (requireUser(), s.orders.get(id)),
+    'orders.save': (input: OrderInput, id?: string | null) => s.orders.save(ctx(['customer_orders']), input, id ?? undefined),
+    'orders.prepare': (id: string) => s.orders.prepare(ctx(['customer_orders']), id),
+    'orders.unprepare': (id: string) => s.orders.unprepare(ctx(['customer_orders']), id),
+    'orders.cancel': (id: string, reason: string) => s.orders.cancel(ctx(['customer_order_cancel']), id, reason),
+    'orders.saleLines': (id: string) => s.orders.saleLines(ctx(POS).storeId, id),
+    'orders.reserved': () => Object.fromEntries(s.orders.reserved(ctx().storeId)),
+    'orders.confirmation': (id: string) => {
+      const c = ctx(['customer_orders']);
+      return s.orders.confirmationText(id, s.admin.getStore(c.storeId).name);
+    },
 
     // --- Dépenses -------------------------------------------------------------
     'expenses.categories': (includeInactive?: boolean) => (requireUser(), s.expenses.listCategories(includeInactive)),
@@ -1841,7 +1930,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.treasury': (to?: string) => s.accounting.treasury(ctx(ACCOUNTING).storeId, to),
     'accounting.vatReturn': (month: string) => s.accounting.vatReturn(ctx(['vat_return']).storeId, month),
     'accounting.exportCsv': (opts: { from?: string; to?: string }) => s.accounting.exportCsv(ctx(['accounting_export']).storeId, opts),
-    /** Écritures dans le format du logiciel du cabinet (Sage 100, Ciel, EBP ou format enregistré). */
+    /** Écritures dans le format du logiciel du cabinet. */
     'accounting.exportFormatted': (opts: { from?: string; to?: string }, formatId: string) => {
       const storeId = ctx(['accounting_export']).storeId;
       const f = allFormats().find((x) => x.id === formatId);
@@ -1911,7 +2000,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Rapports -----------------------------------------------------------
-    // --- Registres et contrôles (menus KONTROL) ------------------------------------
+    // --- Registres et contrôles ------------------------------------
     'controls.salesRegister': (f: SalesRegisterFilter) => s.controls.salesRegister(ctx(SALES).storeId, f),
     'controls.salesAlerts': (p: Period & { discountRate?: number }) => s.controls.salesAlerts(ctx(['sales_alerts']).storeId, p, p),
     'controls.purchasesByProduct': (p: Period & { supplierId?: string | null }) => s.controls.purchasesByProduct(ctx(SUPPLIERS).storeId, p),
@@ -1972,6 +2061,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.attention.list(c.storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
     },
     'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['reports', 'sales']).storeId, input),
+    'reports.unsold': (from: string, to: string) => s.reports.unsold(ctx(['reports', 'sales']).storeId, from, to),
     /** Classeur .xlsx : octets envoyés tels quels à l'écran, qui propose l'enregistrement. */
     'reports.salesXlsx': (input: SalesReportInput) => xlsxWorkbook(s.reports.salesWorkbook(ctx(['report_export']).storeId, input)),
     'reports.salesCsv': (from: string, to: string) => s.reports.salesExportCsv(ctx(['accounting_export', 'report_export']).storeId, from, to),

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
+import { Empty, Modal, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
+import { saveXlsx } from './Controls';
 import { tx } from '../tax';
 
 type Report = Result<'reports.sales'>;
@@ -23,6 +24,7 @@ const DIMENSIONS: [Dimension, string][] = [
   ['payment', 'Paiement'],
 ];
 const TIME = new Set<Dimension>(['day', 'week', 'month', 'hour', 'weekday']);
+const RANKED = new Set<Dimension>(['department', 'family', 'article']);
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -114,6 +116,21 @@ export function Reports({ view }: { view?: string }) {
     });
   }, [r, sort]);
   const maxTtc = Math.max(1, ...rows.map((x) => Math.abs(x.revenueTtc)));
+  // Palmarès : rang au chiffre d'affaires et classe ABC (A : 80 % du CA, B : 15 %, C : le reste).
+  const ranked = RANKED.has(dimension);
+  const abc = useMemo(() => {
+    const out = new Map<string, { rank: number; cls: 'A' | 'B' | 'C' }>();
+    const list = [...(r?.rows ?? [])].sort((a, b) => b.revenueTtc - a.revenueTtc);
+    const total = list.reduce((t, x) => t + Math.max(0, x.revenueTtc), 0);
+    let cumul = 0;
+    list.forEach((x, i) => {
+      const before = total ? cumul / total : 1;
+      cumul += Math.max(0, x.revenueTtc);
+      out.set(x.key, { rank: i + 1, cls: before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C' });
+    });
+    return out;
+  }, [r]);
+  const [unsold, setUnsold] = useState(false);
 
   const th = (key: SortKey, label: string, right = true) => (
     <th
@@ -217,13 +234,19 @@ export function Reports({ view }: { view?: string }) {
         </div>
       )}
 
-      <div className="seg dims">
-        {DIMENSIONS.map(([d, label]) => (
-          <button key={d} className={dimension === d ? 'active' : ''} onClick={() => (setDimension(d), setSort(null))}>
-            {label}
-          </button>
-        ))}
+      <div className="filters">
+        <div className="seg dims">
+          {DIMENSIONS.map(([d, label]) => (
+            <button key={d} className={dimension === d ? 'active' : ''} onClick={() => (setDimension(d), setSort(null))}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <button style={{ marginLeft: 'auto' }} onClick={() => setUnsold(true)} title="Articles actifs qui ne se sont pas vendus sur la période">
+          Produits sans vente
+        </button>
       </div>
+      {unsold && <UnsoldDialog from={period.from} to={period.to} onClose={() => setUnsold(false)} />}
 
       {r && rows.length === 0 ? (
         <Empty>Aucune vente sur cette période. Choisissez une autre période en haut.</Empty>
@@ -231,6 +254,8 @@ export function Reports({ view }: { view?: string }) {
         <table className="list compact report">
           <thead>
             <tr>
+              {ranked && <th className="r" title="Rang au chiffre d'affaires">N°</th>}
+              {ranked && <th title="A : les ventes qui font 80 % du chiffre d'affaires ; B : les 15 % suivants ; C : le reste">Classe</th>}
               {dimension === 'article' && <th>Code</th>}
               {th('label', DIMENSIONS.find(([d]) => d === dimension)![1], false)}
               {th('tickets', 'Tickets')}
@@ -247,6 +272,8 @@ export function Reports({ view }: { view?: string }) {
           <tbody>
             {rows.map((x) => (
               <tr key={x.key}>
+                {ranked && <td className="r muted">{abc.get(x.key)?.rank}</td>}
+                {ranked && <td><span className={`tag abc-${abc.get(x.key)?.cls}`}>{abc.get(x.key)?.cls}</span></td>}
                 {dimension === 'article' && <td className="muted">{x.code}</td>}
                 <td>{x.label}</td>
                 <td className="r">{isPayment && !x.tickets ? '' : x.tickets}</td>
@@ -271,6 +298,8 @@ export function Reports({ view }: { view?: string }) {
           {t && (
             <tfoot>
               <tr>
+                {ranked && <td />}
+                {ranked && <td />}
                 {dimension === 'article' && <td />}
                 <td>Total</td>
                 <td className="r">{isPayment ? '' : t.tickets}</td>
@@ -291,5 +320,73 @@ export function Reports({ view }: { view?: string }) {
         Marge = {tx('CA HT')} − coût d'achat moyen (CMUP) des articles au moment de la vente. Les retours sont déduits au coût de la vente d'origine.
       </p>
     </div>
+  );
+}
+
+/** Produits sans vente sur la période : le stock qui dort, du plus cher au moins cher. */
+function UnsoldDialog({ from, to, onClose }: { from: string; to: string; onClose: () => void }) {
+  const list = useLoad(() => call('reports.unsold', from, to), [from, to]);
+  const rows = list.data ?? [];
+  const value = rows.reduce((t, x) => t + x.value, 0);
+  const fr = (d: string) => d.split('-').reverse().join('/');
+  return (
+    <Modal title={`Produits sans vente du ${fr(from)} au ${fr(to)}`} onClose={onClose} wide>
+      {list.data && (
+        <p>
+          {rows.length} produit{rows.length > 1 ? 's' : ''} actif{rows.length > 1 ? 's' : ''} sans vente ; stock immobilisé : <b>{fcfa(value)}</b> au coût moyen.
+        </p>
+      )}
+      <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Article</th>
+              <th>Rayon</th>
+              <th className="r">Stock</th>
+              <th className="r">Valeur</th>
+              <th>Dernière vente</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((x) => (
+              <tr key={x.id}>
+                <td className="muted">{x.code}</td>
+                <td>{x.name}</td>
+                <td>{x.department ?? ''}</td>
+                <td className="r">{qty(x.qty, x.unit as 'piece' | 'kg' | 'litre')}</td>
+                <td className="r">{fcfa(x.value)}</td>
+                <td>{x.last_sale ? fr(x.last_sale) : <small className="muted">jamais vendu</small>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="actions">
+        <button
+          onClick={() =>
+            saveXlsx(`produits-sans-vente-${from}-au-${to}.xlsx`, {
+              name: 'Sans vente',
+              title: [`Produits sans vente du ${fr(from)} au ${fr(to)}`],
+              columns: [
+                { header: 'Code', width: 14 },
+                { header: 'Article', width: 36 },
+                { header: 'Rayon', width: 18 },
+                { header: 'Stock', format: 'qty' },
+                { header: 'Valeur', format: 'money', width: 14 },
+                { header: 'Dernière vente', width: 14 },
+              ],
+              rows: rows.map((x) => [x.code, x.name, x.department, x.qty / 1000, x.value, x.last_sale ? fr(x.last_sale) : 'jamais']),
+            })
+          }
+          disabled={!rows.length}
+        >
+          Exporter vers Excel
+        </button>
+        <button className="primary" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </Modal>
   );
 }

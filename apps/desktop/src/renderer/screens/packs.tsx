@@ -5,7 +5,7 @@ import { fcfa, parseAmount, parseQty } from '../ui';
 import { tx } from '../tax';
 
 /**
- * Fiche article à la KONTROL. Bloc 1 : le conditionnement d'achat (PALETTE)
+ * Fiche article. Bloc 1 : le conditionnement d'achat (PALETTE)
  * avec ses prix d'achat, de revient et de vente. Blocs 2 à 4 : les
  * conditionnements de vente, du plus grand au plus petit, chacun avec son
  * diviseur par rapport au conditionnement d'achat (CANETTE : 24). Leur achat
@@ -137,8 +137,8 @@ export function levelsToInput(levels: LevelDraft[], buy: BuyDraft, piece: boolea
 }
 
 /**
- * Grille des conditionnements : une ligne par bloc, comme sur la fiche KONTROL.
- * En plus de KONTROL : la marge sur le revient, et une alerte quand un grand
+ * Grille des conditionnements : une ligne par bloc.
+ * En plus : la marge sur le revient, et une alerte quand un grand
  * conditionnement revient plus cher que les petits vendus séparément.
  */
 export function LevelGrid({

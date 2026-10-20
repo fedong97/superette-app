@@ -7,7 +7,7 @@ type Incoming = NonNullable<Result<'relay.choose'>>;
 const KIND_LABELS = { remontee: 'Remontée du poste distant', miseajour: 'Mise à jour de la boutique' } as const;
 
 /**
- * Postes distants, comme la saisie de caisse décentralisée de Sage : un dépôt sans
+ * Postes distants : un dépôt sans
  * réseau vend sur son PC, envoie chaque soir un fichier de sa journée (clé USB,
  * e-mail, WhatsApp) que la boutique intègre, et reçoit en retour les prix et le catalogue.
  */

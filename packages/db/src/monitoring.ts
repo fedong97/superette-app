@@ -41,7 +41,7 @@ export interface StockRequest {
 }
 
 /**
- * Monitoring de l'évolution du stock d'un produit (KONTROL) : chaque
+ * Monitoring de l'évolution du stock d'un produit : chaque
  * modification effective avec le stock avant et après, et les demandes de
  * correction du magasinier, que le gérant valide avant que le stock bouge.
  */

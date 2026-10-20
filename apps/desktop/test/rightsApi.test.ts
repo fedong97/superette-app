@@ -23,7 +23,7 @@ beforeEach(() => {
   const tva = s.admin.listVatRates()[0]!.id;
   riz = s.catalogue.saveArticle(admin.id, { name: 'Riz 5 kg', unit: 'piece', vatRateId: tva, purchasePrice: 3_000, salePrice: 5_000 }).id;
   shop = s.admin.salesWarehouse(store.id).id;
-  reserve = s.admin.createWarehouse(store.id, 'Réserve', 'reserve').id;
+  reserve = s.admin.createWarehouse(store.id, 'Réserve 2', 'reserve').id;
   const ctx = { storeId: store.id, registerId: register.id, userId: admin.id };
   s.stock.receive(ctx, { warehouseId: shop, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });
   s.stock.receive(ctx, { warehouseId: reserve, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });

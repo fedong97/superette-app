@@ -1,4 +1,4 @@
-import { PRICE_LEVELS, type PriceLevel } from '@superette/core';
+import { DOC_LANGS, DOC_LANG_LABELS, type DocLang, PRICE_LEVELS, type PriceLevel } from '@superette/core';
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Field, Modal, fcfa, has, parseAmount, useLoad, useStoreSettings, useToast } from '../ui';
@@ -66,6 +66,15 @@ export function CustomerFields({
             ))}
           </select>
         </Field>
+        <Field label="Langue des tickets et factures">
+          <select translate="no" value={value.language} onChange={(e) => set({ language: e.target.value as DocLang })}>
+            {DOC_LANGS.map((k) => (
+              <option key={k} value={k}>
+                {DOC_LANG_LABELS[k]}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Notes">
           <input value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
@@ -86,6 +95,7 @@ export interface CustomerDraft {
   notes: string;
   active: boolean;
   priceLevel: PriceLevel;
+  language: DocLang;
 }
 
 /** Brouillon de la fiche ; un nouveau client prend le plafond et le délai des paramètres du magasin. */
@@ -101,6 +111,7 @@ export const draftOf = (c: Customer | null, defaults?: { creditDefaultLimit: num
   notes: c?.notes ?? '',
   active: c ? c.active === 1 : true,
   priceLevel: c?.price_level ?? 'retail',
+  language: c?.language ?? 'fr',
 });
 
 export function inputOf(d: CustomerDraft) {
@@ -119,6 +130,7 @@ export function inputOf(d: CustomerDraft) {
     notes: d.notes || null,
     active: d.active,
     priceLevel: d.priceLevel,
+    language: d.language,
   };
 }
 

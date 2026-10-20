@@ -112,7 +112,7 @@ export function SaleRowList({ s, onPick }: { s: ReturnType<typeof useSaleRows>; 
 }
 
 /**
- * « Rechercher/Facturer des marchandises » (KONTROL) : chaque conditionnement
+ * « Rechercher/Facturer des marchandises » : chaque conditionnement
  * sur sa ligne, avec stock, dépôt, prix au tarif du client et dernier prix.
  * Les boutons du bas créent l'article ou le conditionnement qui manque.
  */
@@ -271,6 +271,7 @@ export function QtyPrompt({
   ignoreStock = false,
   onClose,
   onDone,
+  onSubstitute,
 }: {
   row: SaleRow;
   initial?: string;
@@ -281,6 +282,8 @@ export function QtyPrompt({
   ignoreStock?: boolean;
   onClose: () => void;
   onDone: (qtyMilli: number, price: number | null) => void;
+  /** Article épuisé : vendre son article de remplacement à la place. */
+  onSubstitute?: (code: string) => void;
 }) {
   const piece = row.unit === 'piece';
   const [value, setValue] = useState(initial ?? (piece ? '1' : ''));
@@ -321,7 +324,19 @@ export function QtyPrompt({
           </p>
         )}
         {out ? (
-          <p className="danger-text">Stock épuisé : ce {row.pack_name.toLowerCase()} ne peut pas être vendu.</p>
+          <>
+            <p className="danger-text">Stock épuisé : ce {row.pack_name.toLowerCase()} ne peut pas être vendu.</p>
+            {row.substitute && (
+              <p className="substitute">
+                Remplacé par <b>{row.substitute.name}</b> <small className="muted">({row.substitute.code})</small>
+                {onSubstitute && (
+                  <button type="button" className="primary" autoFocus onClick={() => onSubstitute(row.substitute!.code)}>
+                    Vendre celui-ci à la place
+                  </button>
+                )}
+              </p>
+            )}
+          </>
         ) : (
           <div className="grid2">
             <Field label={`Quantité (${row.pack_name.toLowerCase()})`}>

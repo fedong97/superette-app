@@ -346,53 +346,201 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
   );
 }
 
+type WarehouseRow = Result<'admin.warehouses'>[number];
+const WAREHOUSE_KINDS = { shop: 'Surface de vente', reserve: 'Réserve', cold: 'Chambre froide' } as const;
+
+/**
+ * Dépôts du magasin : créer, modifier (nom, type, responsable), désactiver ou
+ * réactiver, et choisir le dépôt d'où sortent les ventes. Un dépôt désactivé
+ * garde son historique ; il faut d'abord le vider de son stock.
+ */
 function Warehouses({ canCreate }: { canCreate: boolean }) {
   const toast = useToast();
-  const wh = useLoad(() => call('admin.warehouses'));
+  const [showInactive, setShowInactive] = useState(false);
+  const wh = useLoad(() => call('admin.warehouses', { includeInactive: true }));
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'shop' | 'reserve' | 'cold'>('reserve');
-  const KIND = { shop: 'Surface de vente', reserve: 'Réserve', cold: 'Chambre froide' };
+  const [kind, setKind] = useState<WarehouseRow['kind']>('reserve');
+  const [editing, setEditing] = useState<WarehouseRow | null>(null);
+  const all = wh.data ?? [];
+  const inactive = all.filter((w) => !w.active).length;
+  const shown = all.filter((w) => showInactive || w.active);
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    try {
+      await fn();
+      toast.ok(done);
+      wh.reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   return (
     <>
+      <div className="filters">
+        <span className="muted">
+          {all.length - inactive} dépôt{all.length - inactive > 1 ? 's' : ''} actif{all.length - inactive > 1 ? 's' : ''}
+          {inactive ? ` · ${inactive} désactivé${inactive > 1 ? 's' : ''}` : ''}
+        </span>
+        {inactive > 0 && (
+          <label className="inline">
+            <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Afficher les dépôts désactivés
+          </label>
+        )}
+      </div>
       <table className="list">
+        <thead>
+          <tr>
+            <th>Dépôt</th>
+            <th>Type</th>
+            <th>Responsable</th>
+            <th>Téléphone</th>
+            <th />
+            {canCreate && <th />}
+          </tr>
+        </thead>
         <tbody>
-          {(wh.data ?? []).map((w) => (
-            <tr key={w.id}>
-              <td>{w.name}</td>
-              <td>{KIND[w.kind]}</td>
-              <td>{w.is_sales_default ? <span className="tag normal">Dépôt des ventes</span> : ''}</td>
+          {shown.map((w) => (
+            <tr key={w.id} className={w.active ? '' : 'inactive'}>
+              <td>
+                <b>{w.name}</b>
+                {w.address && <small className="muted block">{w.address}</small>}
+              </td>
+              <td>{WAREHOUSE_KINDS[w.kind]}</td>
+              <td>{w.manager ?? ''}</td>
+              <td>{w.phone ?? ''}</td>
+              <td>
+                {w.is_sales_default ? <span className="tag normal">Dépôt des ventes</span> : ''}
+                {!w.active && <span className="tag">désactivé</span>}
+              </td>
+              {canCreate && (
+                <td className="r nowrap">
+                  {w.active ? (
+                    <>
+                      <button onClick={() => setEditing(w)}>Modifier</button>
+                      {!w.is_sales_default && (
+                        <button
+                          title="Les ventes de la caisse sortiront de ce dépôt"
+                          onClick={async () => {
+                            if (!(await askConfirm(`Faire de « ${w.name} » le dépôt des ventes ? Les ventes de la caisse sortiront désormais de ce dépôt.`))) return;
+                            void act(() => call('admin.setSalesWarehouse', w.id), `${w.name} est le dépôt des ventes`);
+                          }}
+                        >
+                          Dépôt des ventes
+                        </button>
+                      )}
+                      {!w.is_sales_default && (
+                        <button
+                          className="ghost"
+                          onClick={async () => {
+                            if (!(await askConfirm(`Désactiver « ${w.name} » ? Il n'apparaîtra plus dans les ventes, achats, transferts ni inventaires ; son historique est gardé.`))) return;
+                            void act(() => call('admin.setWarehouseActive', w.id, false), `${w.name} désactivé`);
+                          }}
+                        >
+                          Désactiver
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <button onClick={() => void act(() => call('admin.setWarehouseActive', w.id, true), `${w.name} réactivé`)}>Réactiver</button>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
       {canCreate && (
+        <form
+          className="inline"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              await call('admin.createWarehouse', name, kind);
+              setName('');
+              wh.reload();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du dépôt" />
+          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+            {Object.entries(WAREHOUSE_KINDS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+          <button type="submit" disabled={!name.trim()}>
+            Ajouter
+          </button>
+        </form>
+      )}
+      {editing && (
+        <WarehouseForm
+          warehouse={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            wh.reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function WarehouseForm({ warehouse, onClose, onSaved }: { warehouse: WarehouseRow; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [f, setF] = useState({ name: warehouse.name, kind: warehouse.kind, manager: warehouse.manager ?? '', phone: warehouse.phone ?? '', address: warehouse.address ?? '' });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Modal title={`Modifier le dépôt « ${warehouse.name} »`} onClose={onClose}>
       <form
-        className="inline"
         onSubmit={async (e) => {
           e.preventDefault();
           try {
-            await call('admin.createWarehouse', name, kind);
-            setName('');
-            wh.reload();
+            await call('admin.updateWarehouse', warehouse.id, f);
+            toast.ok('Dépôt enregistré');
+            onSaved();
           } catch (err) {
             toast.error(err);
           }
         }}
       >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du dépôt" />
-        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-          {Object.entries(KIND).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-        <button type="submit" disabled={!name.trim()}>
-          Ajouter
-        </button>
+        <div className="grid2">
+          <Field label="Nom du dépôt">
+            <input autoFocus value={f.name} onChange={set('name')} required maxLength={60} />
+          </Field>
+          <Field label="Type">
+            <select value={f.kind} onChange={set('kind')}>
+              {Object.entries(WAREHOUSE_KINDS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Responsable">
+            <input value={f.manager} onChange={set('manager')} />
+          </Field>
+          <Field label="Téléphone">
+            <input value={f.phone} onChange={set('phone')} inputMode="tel" />
+          </Field>
+        </div>
+        <Field label="Adresse">
+          <input value={f.address} onChange={set('address')} />
+        </Field>
+        <p className="muted small">Le nouveau nom s'affiche aussi dans l'historique : mouvements, transferts et inventaires passés.</p>
+        <div className="actions">
+          <button type="button" className="ghost" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!f.name.trim()}>
+            Enregistrer
+          </button>
+        </div>
       </form>
-      )}
-    </>
+    </Modal>
   );
 }
 
@@ -1088,6 +1236,10 @@ const ACTION_LABELS: Record<string, string> = {
   'user.create': 'Création utilisateur',
   'user.update': 'Modification utilisateur',
   'store.create': 'Création magasin',
+  'warehouse.update': 'Modification dépôt',
+  'warehouse.disable': 'Dépôt désactivé',
+  'warehouse.enable': 'Dépôt réactivé',
+  'warehouse.sales_default': 'Dépôt des ventes changé',
   'store.update': 'Modification magasin',
   'register.create': 'Création caisse',
 };

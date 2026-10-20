@@ -29,7 +29,7 @@ const pct = (bp: number) => `${(bp / 100).toLocaleString('fr-FR', { maximumFract
 
 /**
  * Ristournes des clients spécifiques, comme le menu Client › Ristournes &
- * Autres de KONTROL : état, reports à nouveau, réglages de base et des
+ * Autres : état, reports à nouveau, réglages de base et des
  * clients, régularisations.
  */
 export function Rebates({ user, initialTab = 'state' }: { user: User; initialTab?: RebatesTab }) {

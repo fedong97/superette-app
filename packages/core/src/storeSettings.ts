@@ -74,6 +74,8 @@ export interface StoreSettings {
   prefixQuote: string;
   prefixProforma: string;
   prefixOrder: string;
+  /** Commandes clients (prises par téléphone ou WhatsApp). */
+  prefixCustomerOrder: string;
 
   /** Présentation de l'écran de caisse pour tout le magasin ; un poste peut avoir son exception (Paramètres). */
   posLayout: PosLayout;
@@ -82,6 +84,8 @@ export interface StoreSettings {
   barcodeAuto: boolean;
   /** Format des codes internes : EAN-8 (2xxxxxxx), court, ou EAN-13 (20xxxxxxxxxxx). */
   barcodeKind: BarcodeKind;
+  /** Codification des nouveaux articles par famille (BOI-DLA11-0012) au lieu du seul numéro du poste. */
+  articleCodeByFamily: boolean;
   /** Étiquettes produit : format et contenu proposés par défaut. */
   labelFormat: BarcodeLabelFormatId;
   labelName: boolean;
@@ -144,9 +148,11 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   prefixQuote: 'DV',
   prefixProforma: 'PF',
   prefixOrder: 'BC',
+  prefixCustomerOrder: 'CC',
   posLayout: 'modern',
   barcodeAuto: true,
   barcodeKind: 'ean8',
+  articleCodeByFamily: false,
   labelFormat: 'roll_30x20',
   labelName: true,
   labelPrice: true,
@@ -183,7 +189,7 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   loyaltyMinRedeem: [0, 1e7],
 };
 const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
-const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder'];
+const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
 
 /**
  * Valide un changement de paramètres et renvoie les paramètres complets.

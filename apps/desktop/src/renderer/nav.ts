@@ -1,4 +1,4 @@
-/** Fenêtres de travail, ouvertes côte à côte comme dans KONTROL (une seule visible à la fois). */
+/** Fenêtres de travail, ouvertes côte à côte (une seule visible à la fois). */
 export type WinKind =
   | 'cash1'
   | 'cash2'
@@ -12,6 +12,7 @@ export type WinKind =
   | 'expenses'
   | 'quotes'
   | 'deliveries'
+  | 'orders'
   | 'promotions'
   | 'labels'
   | 'reports'

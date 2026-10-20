@@ -25,6 +25,8 @@ import { LicenseService } from './license';
 import { PromotionService } from './promotions';
 import { PurchaseService } from './purchases';
 import { ReceiptService } from './receipts';
+import { CommissionService } from './commissions';
+import { OrderService } from './orders';
 import { QuoteService } from './quotes';
 import { ReportService } from './reports';
 import { ReconciliationService } from './reconciliation';
@@ -77,6 +79,8 @@ export * from './rebates';
 export * from './promotions';
 export * from './purchases';
 export * from './receipts';
+export * from './commissions';
+export * from './orders';
 export * from './quotes';
 export * from './reports';
 export * from './reconciliation';
@@ -112,6 +116,8 @@ export interface Services {
   charges: ChargeService;
   controls: ControlService;
   quotes: QuoteService;
+  orders: OrderService;
+  commissions: CommissionService;
   pos: PosService;
   deliveries: DeliveryService;
   treasury: TreasuryService;
@@ -154,6 +160,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const charges = new ChargeService(db, clock);
   const controls = new ControlService(db, clock, customers);
   const quotes = new QuoteService(db, clock, admin, catalogue);
+  const orders = new OrderService(db, clock, admin, catalogue);
+  const commissions = new CommissionService(db, clock);
   const promotions = new PromotionService(db, clock, catalogue);
   const backups = new BackupService(db, clock);
   const labels = new LabelService(db, clock, catalogue, promotions);
@@ -163,7 +171,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const deliveries = new DeliveryService(db, clock);
   const loyalty = new LoyaltyService(db, clock, admin);
   const mobilePay = new MobilePayService(db, clock);
-  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty);
+  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty, orders);
   const purchases = new PurchaseService(db, clock, stock);
   const receipts = new ReceiptService(db, clock, admin, pos, customers, expenses, treasury, inventories, rebates, quotes, purchases);
   const staff = new StaffService(db, clock, admin);
@@ -186,7 +194,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const templates = new TemplateService(db, clock, admin, catalogue);
   const opening = new OpeningService(db, clock, catalogue, customers, purchases, stock);
   const assets = new AssetService(db, clock);
-  return { db, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  return { db, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

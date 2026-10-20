@@ -86,3 +86,34 @@ jobs:
           path: apps/inventory/release/*.apk
           if-no-files-found: error
           retention-days: 30
+
+  serveur-internet:
+    name: Serveur sur internet (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image du serveur
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          docker build -f deploy/Dockerfile -t "fedonix360-serveur:$version" .
+      - name: Essai de l'image
+        run: |
+          docker run -d --name essai -p 3000:3000 -e ADMIN_PASSWORD=essai-du-serveur "fedonix360-serveur:$VERSION"
+          for i in $(seq 1 30); do curl -fs http://localhost:3000/ >/dev/null && break; sleep 1; done
+          curl -fs http://localhost:3000/gerant >/dev/null
+          docker rm -f essai
+      - name: Paquet à copier sur le serveur
+        run: |
+          dir="FEDONIX-360-serveur-internet-$VERSION"
+          mkdir "$dir"
+          cp deploy/docker-compose.yml deploy/Caddyfile deploy/installer.sh deploy/env.exemple docs/serveur-internet.md "$dir/"
+          docker save "fedonix360-serveur:$VERSION" | gzip > "$dir/fedonix360-serveur-$VERSION.tar.gz"
+          echo "DIR=$dir" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DIR }}
+          path: ${{ env.DIR }}
+          if-no-files-found: error
+          retention-days: 30

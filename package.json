@@ -1,7 +1,7 @@
 {
   "name": "superette-app",
   "private": true,
-  "version": "0.62.0",
+  "version": "0.67.0",
   "description": "Logiciel de gestion de superette (caisse, stock, achats, comptabilité) — Cameroun, SYSCOHADA, FCFA",
   "workspaces": [
     "packages/*",
@@ -13,9 +13,11 @@
     "dev": "npm run dev -w @superette/desktop",
     "build:win": "npm run build:win -w @superette/desktop",
     "pretest": "npm rebuild better-sqlite3 --silent",
-    "build:serveur": "npm run build:win -w @superette/server-app"
+    "build:serveur": "npm run build:win -w @superette/server-app",
+    "test:ecrans": "npm run build -w @superette/desktop && playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/node": "^22.10.0",
     "typescript": "~5.9.0",
     "vitest": "^3.2.0"

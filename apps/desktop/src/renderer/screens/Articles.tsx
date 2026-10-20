@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { IMPORT_FIELDS, type ImportField, type ImportFormat, type Separator, guessSeparator, parseArticlesWith, splitDelimited, splitTtc } from '@superette/core';
+import { splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, readTextFile, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
+import { ExportDialog, ImportDialog, type ListFilter, PriceUpdateDialog } from './articleFiles';
+import { useArticleSuggestions, SuggestionList } from './pickers';
 import { Shelving } from './Controls';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 import { type ArticlePhoto, PhotoField } from './photo';
@@ -37,22 +39,54 @@ export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesV
 
 function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: boolean; focusSearch: boolean }) {
   const [search, setSearch] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [status, setStatus] = useState<ListFilter['status']>('all');
   const [editing, setEditing] = useState<Article | 'new' | null>(startNew ? 'new' : null);
-  const [importing, setImporting] = useState(false);
-  const articles = useLoad(() => call('catalogue.search', search, { includeInactive: true }), [search]);
+  const [dialog, setDialog] = useState<'import' | 'xlsx' | 'csv' | 'prices' | null>(null);
+  const departments = useLoad(() => call('catalogue.departments'), []);
+  const app = useLoad(() => call('app.state'), []);
+  const noVat = app.data?.station?.store.vat_enabled === 0;
+  const loaded = useLoad(() => call('catalogue.search', search, { includeInactive: status !== 'active' }), [search, status]);
+  const families = new Set(departments.data?.find((d) => d.id === departmentId)?.families.map((f) => f.id) ?? []);
+  const articles = {
+    ...loaded,
+    data: loaded.data?.filter((a) => (status !== 'inactive' || !a.active) && (!departmentId || (a.family_id !== null && families.has(a.family_id)))),
+  };
+  const filter: ListFilter = { query: search, departmentId, familyId: '', status };
   return (
     <>
       <div className="filters">
         <input className="search" autoFocus={focusSearch} placeholder="Rechercher (nom, code, code-barres, marque)" value={search} onChange={(e) => setSearch(e.target.value)} />
-        {has(user, 'import') && (
-          <button onClick={() => setImporting(true)}>Importer (CSV)</button>
+        <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} title="Rayon">
+          <option value="">Tous les rayons</option>
+          {(departments.data ?? []).map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        <select value={status} onChange={(e) => setStatus(e.target.value as ListFilter['status'])} title="État">
+          <option value="all">Actifs et en sommeil</option>
+          <option value="active">Actifs</option>
+          <option value="inactive">En sommeil</option>
+        </select>
+        {has(user, 'import') && <button onClick={() => setDialog('import')}>Importer (Excel, CSV)</button>}
+        {has(user, 'article_export') && (
+          <>
+            <button onClick={() => setDialog('xlsx')} title="Catalogue, liste de prix, codes-barres, fiche de comptage, stock valorisé">
+              Exporter Excel
+            </button>
+            <button onClick={() => setDialog('csv')}>Exporter CSV</button>
+          </>
         )}
+        {has(user, 'price_update') && <button onClick={() => setDialog('prices')}>Mise à jour des prix…</button>}
         {has(user, 'article_create') && (
           <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>
             Nouvel article
           </button>
         )}
       </div>
+      {loaded.data?.length === 200 && <p className="muted small">Les 200 premiers produits sont affichés : affinez la recherche. L'export, lui, prend tous les produits.</p>}
       {articles.data?.length === 0 ? (
         <Empty>Aucun article. Créez-en un ou importez votre catalogue.</Empty>
       ) : (
@@ -96,7 +130,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
                     {a.unit !== 'piece' && <small> /{a.unit === 'kg' ? 'kg' : 'L'}</small>}
                   </td>
                   <td className={`r ${margin !== null && margin < 0 ? 'neg' : ''}`}>{margin === null ? '—' : `${margin} %`}</td>
-                  <td>{!a.active && <span className="tag">inactif</span>}</td>
+                  <td>{!a.active && <span className="tag">en sommeil</span>}</td>
                 </tr>
               );
             })}
@@ -110,15 +144,25 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            articles.reload();
+            loaded.reload();
           }}
         />
       )}
-      {importing && (
+      {dialog === 'import' && (
         <ImportDialog
           onClose={() => {
-            setImporting(false);
-            articles.reload();
+            setDialog(null);
+            loaded.reload();
+          }}
+        />
+      )}
+      {(dialog === 'xlsx' || dialog === 'csv') && <ExportDialog kind={dialog} filter={filter} noVat={noVat} onClose={() => setDialog(null)} />}
+      {dialog === 'prices' && (
+        <PriceUpdateDialog
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            loaded.reload();
           }}
         />
       )}
@@ -127,7 +171,7 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
 }
 
 /**
- * Fiche article (« Ajouter/Paramétrer une marchandise » de KONTROL). Depuis la
+ * Fiche article (« Ajouter/Paramétrer une marchandise »). Depuis la
  * caisse, `addLevel` ouvre la fiche avec un conditionnement à compléter :
  * plus grand (nouveau conditionnement d'achat) ou plus petit.
  */
@@ -213,6 +257,18 @@ export function ArticleForm({
     setLevels(next);
   };
   const [photo, setPhoto] = useState<ArticlePhoto | null | undefined>(undefined);
+  const [substitute, setSubstitute] = useState<{ id: string; label: string } | null>(
+    article?.substitute_id ? { id: article.substitute_id, label: `${article.substitute_code ?? ''} · ${article.substitute_name ?? ''}` } : null,
+  );
+  const warehouses = useLoad(() => call('admin.warehouses'), []);
+  const initialLocations = (() => {
+    try {
+      return article?.locations ? (JSON.parse(article.locations) as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const [locations, setLocations] = useState<Record<string, string>>(initialLocations);
   const [newDept, setNewDept] = useState('');
   const [storePrice, setStorePrice] = useState(article && article.store_price !== article.sale_price ? String(article.store_price) : '');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -268,9 +324,14 @@ export function ArticleForm({
           wholesalePrice: lv.wholesalePrice,
           superWholesalePrice: lv.superWholesalePrice,
           packs: lv.packs,
+          substituteId: substitute?.id ?? null,
         },
         article?.id,
       );
+      for (const w of warehouses.data ?? []) {
+        const v = (locations[w.id] ?? '').trim().toUpperCase();
+        if (v !== (initialLocations[w.id] ?? '')) await call('catalogue.setLocation', saved.id, w.id, v);
+      }
       if (canSetStorePrice) {
         const sp = storePrice.trim() ? parseAmount(storePrice) : null;
         const current = article && article.store_price !== article.sale_price ? article.store_price : null;
@@ -400,6 +461,14 @@ export function ArticleForm({
           <Field label="Stock maximum">
             <input inputMode="decimal" value={f.maxQty} onChange={set('maxQty')} />
           </Field>
+          <Field label="Article de remplacement" hint="Proposé en caisse quand celui-ci est épuisé">
+            <SubstituteInput value={substitute} exclude={article?.id ?? null} onChange={setSubstitute} />
+          </Field>
+          {(warehouses.data ?? []).map((w) => (
+            <Field key={w.id} label={`Emplacement · ${w.name}`} hint="Allée, étagère (ex. A3-2)">
+              <input value={locations[w.id] ?? ''} maxLength={20} disabled={!can('article_edit', 'stock_location')} onChange={(e) => setLocations({ ...locations, [w.id]: e.target.value })} />
+            </Field>
+          ))}
         </div>
         <div className="checks">
           <label>
@@ -410,6 +479,7 @@ export function ArticleForm({
           </label>
           <label>
             <input type="checkbox" checked={f.active} disabled={!can('article_deactivate')} onChange={set('active')} /> Actif
+            {!f.active && <small className="muted"> · en sommeil : il garde son historique mais ne se vend plus et ne se commande plus</small>}
           </label>
         </div>
         <h3>{piece && lastOn > 0 ? `Codes-barres de l'unité de détail (${unitName})` : 'Codes-barres'}</h3>
@@ -518,251 +588,39 @@ export function ArticleForm({
   );
 }
 
-const IMPORT_HELP = `Colonnes attendues (séparateur point-virgule, première ligne = en-têtes) :
-designation;code_barres;prix_vente;prix_achat;tva;unite;rayon;famille
-Riz parfumé 5 kg;6111234567890;4500;3800;0;piece;Épicerie;Riz
-Bière 65 cl;6009876543210;650;450;19,25;piece;Boissons;Bières`;
-
-function parseCsv(text: string) {
-  const rows = text
-    .replace(/^﻿/, '')
-    .split(/\r?\n/)
-    .filter((l) => l.trim());
-  const sep = rows[0]?.includes(';') ? ';' : ',';
-  const head = rows[0]!.split(sep).map((h) => h.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''));
-  const col = (r: string[], ...names: string[]) => {
-    const i = head.findIndex((h) => names.includes(h));
-    return i >= 0 ? r[i]?.trim() ?? '' : '';
+/** Choix de l'article de remplacement dans la fiche (sans formulaire imbriqué). */
+function SubstituteInput({ value, exclude, onChange }: { value: { id: string; label: string } | null; exclude: string | null; onChange: (v: { id: string; label: string } | null) => void }) {
+  const [q, setQ] = useState('');
+  const s = useArticleSuggestions(q);
+  const pick = (a: Article) => {
+    if (a.id === exclude) return;
+    onChange({ id: a.id, label: `${a.code} · ${a.name}` });
+    setQ('');
   };
-  return rows.slice(1).map((line) => {
-    const r = line.split(sep);
-    const unit = col(r, 'unite', 'unit').toLowerCase();
-    const tva = col(r, 'tva', 'taux_tva');
-    return {
-      name: col(r, 'designation', 'nom', 'libelle'),
-      barcode: col(r, 'code_barres', 'codebarre', 'ean') || undefined,
-      salePrice: Number(col(r, 'prix_vente', 'prix').replace(/\s/g, '')),
-      purchasePrice: col(r, 'prix_achat') ? Number(col(r, 'prix_achat').replace(/\s/g, '')) : undefined,
-      vatRateBp: tva ? Math.round(Number(tva.replace(',', '.').replace('%', '')) * 100) : undefined,
-      unit: (unit === 'kg' ? 'kg' : unit.startsWith('l') ? 'litre' : 'piece') as 'piece' | 'kg' | 'litre',
-      department: col(r, 'rayon') || undefined,
-      family: col(r, 'famille') || undefined,
-    };
-  });
-}
-
-const SEPARATORS: [Separator, string][] = [
-  [';', 'Point-virgule'],
-  [',', 'Virgule'],
-  ['\t', 'Tabulation'],
-];
-
-/**
- * Import du catalogue : au format FEDONIX (en-têtes reconnus) ou selon un format
- * enregistré, comme les formats paramétrables de Sage. Le catalogue d'un fournisseur
- * se décrit une fois (quelle colonne est le prix, le code-barres…) et se réimporte en un clic.
- */
-function ImportDialog({ onClose }: { onClose: () => void }) {
-  const toast = useToast();
-  const formats = useLoad(() => call('formats.list').then((l) => l.filter((f): f is ImportFormat => f.kind === 'articles')));
-  const [formatId, setFormatId] = useState('');
-  const [text, setText] = useState('');
-  const [draft, setDraft] = useState<ImportFormat | null>(null);
-  const [result, setResult] = useState<Result<'catalogue.import'> | null>(null);
-  const format = draft ?? formats.data?.find((f) => f.id === formatId) ?? null;
-  const rows = (() => {
-    if (!text) return [];
-    try {
-      return format ? parseArticlesWith(text, format) : parseCsv(text);
-    } catch {
-      return [];
-    }
-  })();
-  const newFormat = () => {
-    setFormatId('');
-    setDraft({ id: '', name: '', kind: 'articles', separator: text ? guessSeparator(text) : ';', skipRows: 1, decimal: ',', columns: {} });
-  };
-  const saveDraft = async () => {
-    if (!draft) return;
-    try {
-      const saved = (await call('formats.save', draft)) as ImportFormat;
-      formats.reload();
-      setDraft(null);
-      setFormatId(saved.id);
-      toast.ok(`Format « ${saved.name} » enregistré`);
-    } catch (err) {
-      toast.error(err);
-    }
-  };
-  const removeFormat = async () => {
-    try {
-      await call('formats.delete', formatId);
-      setFormatId('');
-      formats.reload();
-    } catch (err) {
-      toast.error(err);
-    }
-  };
-  return (
-    <Modal title="Importer le catalogue" onClose={onClose} wide>
-      <div className="row">
-        <Field label="Format du fichier">
-          <select
-            value={draft ? 'new' : formatId}
-            onChange={(e) => {
-              if (e.target.value === 'new') return newFormat();
-              setDraft(null);
-              setFormatId(e.target.value);
-            }}
-          >
-            <option value="">FEDONIX 360 (en-têtes de colonnes)</option>
-            {(formats.data ?? []).map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-            <option value="new">Nouveau format (catalogue d'un fournisseur)…</option>
-          </select>
-        </Field>
-        {formatId && !draft && <button onClick={() => void removeFormat()}>Supprimer ce format</button>}
-      </div>
-      {!format && (
-        <>
-          <p>Depuis Excel : Fichier, Enregistrer sous, CSV (séparateur point-virgule).</p>
-          <pre className="help">{IMPORT_HELP}</pre>
-        </>
-      )}
-      <input
-        type="file"
-        accept=".csv,.txt,text/csv,text/plain"
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          try {
-            const content = await readTextFile(file);
-            setText(content);
-            if (draft && !draft.columns.name) setDraft({ ...draft, separator: guessSeparator(content) });
-            setResult(null);
-          } catch (err) {
-            toast.error(err);
-          }
-        }}
-      />
-      {draft && <FormatEditor draft={draft} text={text} onChange={setDraft} onSave={() => void saveDraft()} onCancel={() => setDraft(null)} />}
-      {rows.length > 0 && !result && (
-        <div className="actions">
-          <span>
-            {rows.length} ligne(s) lue(s){rows[0] ? ` ; première : ${rows[0].name}, ${fcfa(rows[0].salePrice || 0)}` : ''}
-          </span>
-          <button
-            className="primary"
-            onClick={async () => {
-              try {
-                setResult(await call('catalogue.import', rows));
-              } catch (err) {
-                toast.error(err);
-              }
-            }}
-          >
-            Importer
-          </button>
-        </div>
-      )}
-      {result && (
-        <div>
-          <p>
-            {result.created} article(s) créé(s), {result.updated} mis à jour, {result.errors.length} erreur(s).
-          </p>
-          {result.errors.length > 0 && (
-            <ul className="errors">
-              {result.errors.map((e) => (
-                <li key={e.row}>
-                  Ligne {e.row + 1} : {e.message}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-/** Description d'un fichier fournisseur : à chaque colonne sa donnée, vue sur les premières lignes du fichier. */
-function FormatEditor({ draft, text, onChange, onSave, onCancel }: { draft: ImportFormat; text: string; onChange: (f: ImportFormat) => void; onSave: () => void; onCancel: () => void }) {
-  const sample = text ? splitDelimited(text, draft.separator).slice(0, draft.skipRows + 3) : [];
-  const width = Math.max(0, ...sample.map((r) => r.length));
-  const fieldAt = (i: number) => (Object.entries(draft.columns).find(([, c]) => c === i)?.[0] ?? '') as ImportField | '';
-  const setColumn = (i: number, field: ImportField | '') => {
-    const columns = Object.fromEntries(Object.entries(draft.columns).filter(([k, c]) => c !== i && k !== field)) as ImportFormat['columns'];
-    if (field) columns[field] = i;
-    onChange({ ...draft, columns });
-  };
-  return (
-    <section className="card">
-      <h3>Nouveau format</h3>
-      <div className="grid2">
-        <Field label="Nom du format" hint="Ex. Catalogue Brasseries">
-          <input value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} />
-        </Field>
-        <Field label="Séparateur">
-          <select value={draft.separator} onChange={(e) => onChange({ ...draft, separator: e.target.value as Separator })}>
-            {SEPARATORS.map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Lignes à sauter" hint="En-têtes, titre du fournisseur">
-          <input type="number" min={0} value={draft.skipRows} onChange={(e) => onChange({ ...draft, skipRows: Math.max(0, Number(e.target.value) || 0) })} />
-        </Field>
-        <Field label="Virgule des prix">
-          <select value={draft.decimal} onChange={(e) => onChange({ ...draft, decimal: e.target.value as ',' | '.' })}>
-            <option value=",">1 250,50</option>
-            <option value=".">1,250.50</option>
-          </select>
-        </Field>
-      </div>
-      {!text ? (
-        <p className="muted">Choisissez un fichier du fournisseur pour indiquer ce que contient chaque colonne.</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table className="list">
-            <thead>
-              <tr>
-                {Array.from({ length: width }, (_, i) => (
-                  <th key={i}>
-                    <select value={fieldAt(i)} onChange={(e) => setColumn(i, e.target.value as ImportField | '')}>
-                      <option value="">Colonne {i + 1} : ignorée</option>
-                      {(Object.keys(IMPORT_FIELDS) as ImportField[]).map((k) => (
-                        <option key={k} value={k}>
-                          {IMPORT_FIELDS[k]}
-                        </option>
-                      ))}
-                    </select>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sample.map((r, ri) => (
-                <tr key={ri} className={ri < draft.skipRows ? 'muted' : undefined}>
-                  {Array.from({ length: width }, (_, i) => (
-                    <td key={i}>{r[i] ?? ''}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <div className="actions">
-        <button onClick={onCancel}>Annuler</button>
-        <button className="primary" disabled={!draft.name.trim() || draft.columns.name === undefined || draft.columns.salePrice === undefined} onClick={onSave}>
-          Enregistrer le format
+  if (value) {
+    return (
+      <div className="inline">
+        <span>{value.label}</span>
+        <button type="button" className="ghost" onClick={() => onChange(null)} title="Retirer">
+          ✕
         </button>
       </div>
-    </section>
+    );
+  }
+  return (
+    <div className="picker">
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (s.onKeyDown(e, pick)) return;
+          if (e.key === 'Enter') e.preventDefault();
+        }}
+        onBlur={s.close}
+        placeholder="Taper le début du nom"
+        autoComplete="off"
+      />
+      <SuggestionList s={s} onPick={pick} query={q} />
+    </div>
   );
 }

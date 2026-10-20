@@ -794,6 +794,9 @@ export class PosService extends Base {
     if (input.lines.length === 0) throw new AppError('Ticket vide', 'EMPTY');
     if (input.lines.some((l) => l.qty < 0)) throw new AppError('Quantité négative : utilisez le retour client', 'INVALID');
     const level = input.priceLevel ?? (input.customerId ? this.customers.getCustomer(input.customerId).price_level : 'retail');
+    if (input.customerId && input.payments.some((p) => p.method === 'CHEQUE' && p.amount > 0) && this.customers.getCustomer(input.customerId).no_cheque) {
+      throw new AppError('Ce client est interdit de chèque (chèque revenu impayé) : choisissez un autre moyen de paiement', 'NO_CHEQUE');
+    }
     const set = this.admin.storeSettings(ctx.storeId);
     const warehouse = this.saleWarehouse(ctx.storeId, input.warehouseId);
     const lines = this.priceLines(ctx.storeId, input.lines, level, input.customerId ?? null);

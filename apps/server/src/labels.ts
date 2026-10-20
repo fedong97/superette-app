@@ -55,12 +55,20 @@ export const ENTITY_LABELS: Record<string, string> = {
   summary_invoice: 'Facture récapitulative',
   cheque_deposit: 'Remise de chèques',
   budget: 'Budget',
+  container: 'Emballage consigné',
+  container_move: 'Mouvement de consigne',
+  agent_account: 'Compte Mobile Money (point)',
+  agent_operation: 'Opération Mobile Money (point)',
+  staff_leave: 'Congé',
+  staff_schedule: 'Horaires',
+  cheque_rejection: 'Chèque impayé',
+  courier_return: 'Retour de livreur',
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
-  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice'] },
-  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense'] },
+  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return'] },
+  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'agent_operation', 'agent_account'] },
   {
     key: 'stock',
     label: 'Stock',
@@ -70,13 +78,13 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
   {
     key: 'catalogue',
     label: 'Articles et prix',
-    entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules'],
+    entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules', 'container'],
   },
-  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'expense_category'] },
+  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'staff_leave', 'staff_schedule', 'expense_category'] },
   {
     key: 'compta',
     label: 'Comptabilité',
-    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'budget'],
+    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'cheque_rejection', 'budget'],
   },
 ];
 

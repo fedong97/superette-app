@@ -64,12 +64,16 @@ export interface EmoneyLedgerRow extends EmoneyRow {
 }
 
 /** Natures des pièces d'« Encaisser » et « Décaisser » qui ne sont ni vente, ni règlement, ni dépense. */
-export type EntryKind = 'staff_advance' | 'staff_salary' | 'staff_repayment' | 'customer_refund' | 'other';
+export type EntryKind = 'staff_advance' | 'staff_salary' | 'staff_repayment' | 'customer_refund' | 'container_deposit' | 'container_refund' | 'agent_in' | 'agent_out' | 'other';
 export const ENTRY_KINDS: Record<EntryKind, string> = {
   staff_advance: 'Avance au personnel',
   staff_salary: 'Salaire',
   staff_repayment: 'Remboursement du personnel',
   customer_refund: 'Remboursement client',
+  container_deposit: 'Consigne encaissée',
+  container_refund: 'Consigne rendue',
+  agent_in: 'Point Mobile Money (entrée)',
+  agent_out: 'Point Mobile Money (sortie)',
   other: 'Autre',
 };
 

@@ -1,4 +1,4 @@
-import { type Fcfa, PAYMENT_METHODS } from '@superette/core';
+import { type Fcfa, PAYMENT_METHODS, parseStoreSettings } from '@superette/core';
 import type { CustomerPaymentMethod, CustomerService } from './customers';
 import { ENTRY_KINDS, EmoneyService, type EntryKind, isPayout } from './emoney';
 import type { ExpenseService } from './expenses';
@@ -7,6 +7,7 @@ import type { PurchaseService, SupplierPaymentMethod } from './purchases';
 import { type StaffService, periodLabel } from './staff';
 import type { TreasuryService } from './treasury';
 import { AppError, Base, type Clock, type Context, newId } from './util';
+import { CONTAINER_ACCOUNT } from './containers';
 import type { Db } from './database';
 
 
@@ -16,6 +17,10 @@ const ENTRY_DIRECTION: Record<EntryKind, 'IN' | 'OUT' | null> = {
   staff_salary: 'OUT',
   staff_repayment: 'IN',
   customer_refund: 'OUT',
+  container_deposit: 'IN',
+  container_refund: 'OUT',
+  agent_in: 'IN',
+  agent_out: 'OUT',
   other: null,
 };
 
@@ -208,6 +213,15 @@ export class CashDeskService extends Base {
       staffId = s.id;
       if (kind === 'staff_advance') {
         if (!s.active) throw new AppError(`${s.name} ne fait plus partie du personnel`, 'INVALID');
+        // Plafond des avances (paramètre du magasin) : au-delà, il faut le code d'un gérant.
+        const maxPct = parseStoreSettings((this.db.prepare('SELECT settings FROM stores WHERE id = ?').pluck().get(ctx.storeId) as string | null) ?? null).advanceMaxPct;
+        if (maxPct > 0 && s.base_salary > 0) {
+          const ceiling = Math.floor((s.base_salary * maxPct) / 100);
+          const after = Math.max(0, s.advances) + input.amount;
+          if (after > ceiling && !input.authorizedBy) {
+            throw new AppError(`Avances de ${s.name} limitées à ${ceiling} FCFA (${maxPct} % du salaire) : il en doit déjà ${Math.max(0, s.advances)}. Code du gérant nécessaire`, 'SUPERVISOR_REQUIRED');
+          }
+        }
         label ||= `Avance à ${s.name}`;
       } else if (kind === 'staff_repayment') {
         if (input.amount > s.advances) throw new AppError(`${s.name} ne doit que ${Math.max(0, s.advances)} FCFA d'avances`, 'INVALID');
@@ -224,6 +238,18 @@ export class CashDeskService extends Base {
       if (input.amount > credit) throw new AppError(credit ? `Le client n'a que ${credit} FCFA d'avoir` : "Ce client n'a pas d'avoir à rembourser", 'INVALID');
       customerId = acc.customer.id;
       label ||= `Avoir remboursé à ${acc.customer.name}`;
+    } else if (kind === 'container_deposit' || kind === 'container_refund') {
+      // Consigne d'emballages : dette envers les clients (4194), pas une vente.
+      if (method !== 'CASH') throw new AppError('La consigne se paie en espèces', 'INVALID');
+      accountId = CONTAINER_ACCOUNT;
+      label ||= ENTRY_KINDS[kind];
+    } else if (kind === 'agent_in' || kind === 'agent_out') {
+      // Point Mobile Money : les espèces contre la flotte de l'agent (55xx) ou les frais (7072).
+      if (method !== 'CASH') throw new AppError('Le point Mobile Money se paie en espèces', 'INVALID');
+      const account = this.db.prepare('SELECT id FROM accounts WHERE id = ?').pluck().get(input.accountId ?? '') as string | undefined;
+      if (!account) throw new AppError('Compte de la flotte introuvable', 'INVALID');
+      accountId = account;
+      if (!label) throw new AppError('Indiquez le motif', 'INVALID');
     } else {
       const account = this.db.prepare('SELECT id FROM accounts WHERE id = ? AND active = 1').pluck().get(input.accountId ?? '') as string | undefined;
       if (!account) throw new AppError('Choisissez le compte de cette opération', 'INVALID');

@@ -1916,4 +1916,194 @@ CREATE TABLE cheque_deposit_lines (
 CREATE INDEX cheque_deposit_lines_payment ON cheque_deposit_lines(payment_id);
 `,
   },
+  {
+    version: 52,
+    name: 'consignes, point Mobile Money, congés et planning, chèques impayés, tournées, commandes groupées et en ligne',
+    rebuild: true,
+    sql: `
+-- Emballages consignés (casier, bouteille) : la consigne n'est pas une vente,
+-- elle passe au compte 4194 « Clients, dettes pour emballages consignés ».
+INSERT OR IGNORE INTO accounts (id, label, role, updated_at) VALUES ('4194', 'Clients, dettes pour emballages et matériels consignés', NULL, '');
+CREATE TABLE containers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  deposit INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
+-- Emballage d'un article et nombre d'emballages par unité vendue (1 bouteille ; 1/12 de casier…).
+ALTER TABLE articles ADD COLUMN container_id TEXT;
+ALTER TABLE articles ADD COLUMN container_units INTEGER NOT NULL DEFAULT 1000;
+-- Mouvements d'emballages : sortis chez le client, vides rapportés, reçus du fournisseur,
+-- vides rendus au fournisseur, casse ou comptage.
+CREATE TABLE container_moves (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  container_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('customer_out', 'customer_in', 'supplier_in', 'supplier_out', 'adjust')),
+  qty INTEGER NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 0,
+  customer_id TEXT,
+  client_name TEXT,
+  supplier_id TEXT,
+  sale_id TEXT,
+  treasury_entry_id TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX container_moves_store ON container_moves(store_id, created_at);
+CREATE INDEX container_moves_customer ON container_moves(customer_id);
+
+-- Point Mobile Money et services : comptes agent (flotte), opérations des clients.
+INSERT OR IGNORE INTO accounts (id, label, role, updated_at) VALUES ('5523', 'Flotte agent MTN Mobile Money', NULL, '');
+INSERT OR IGNORE INTO accounts (id, label, role, updated_at) VALUES ('5524', 'Flotte agent Orange Money', NULL, '');
+INSERT OR IGNORE INTO accounts (id, label, role, updated_at) VALUES ('5525', 'Flotte autres services (crédit, factures)', NULL, '');
+INSERT OR IGNORE INTO accounts (id, label, role, updated_at) VALUES ('7072', 'Commissions et courtages', NULL, '');
+CREATE TABLE agent_accounts (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  name TEXT NOT NULL,
+  operator TEXT NOT NULL CHECK (operator IN ('MTN', 'ORANGE', 'OTHER')),
+  account TEXT NOT NULL,
+  -- Commissions en points de base par opération : { "deposit": 50, "airtime": 300… }.
+  rates TEXT NOT NULL DEFAULT '{}',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE agent_operations (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  agent_account_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('deposit', 'withdrawal', 'airtime', 'bill', 'float_in', 'float_out', 'commission')),
+  amount INTEGER NOT NULL,
+  fee INTEGER NOT NULL DEFAULT 0,
+  commission INTEGER NOT NULL DEFAULT 0,
+  phone TEXT,
+  reference TEXT,
+  biller TEXT,
+  session_id TEXT,
+  register_id TEXT,
+  -- Pièces d'espèces de la caisse (montant, frais) : JSON des identifiants.
+  entry_ids TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX agent_operations_store ON agent_operations(store_id, created_at);
+CREATE INDEX agent_operations_session ON agent_operations(session_id);
+
+-- Congés du personnel, et semaine type de chacun (heures prévues par jour).
+CREATE TABLE staff_leaves (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  staff_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('paid', 'sick', 'unpaid', 'permission')),
+  date_from TEXT NOT NULL,
+  date_to TEXT NOT NULL,
+  days INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('requested', 'approved', 'refused', 'cancelled')),
+  reason TEXT,
+  decided_by TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX staff_leaves_staff ON staff_leaves(staff_id, date_from);
+-- id = celui du collaborateur ; days : { "1": { "start": "08:00", "end": "17:00" }, … } (0 = dimanche).
+CREATE TABLE staff_schedules (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  days TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Chèques revenus impayés : remis au débit du client, avec les frais de la banque.
+CREATE TABLE cheque_rejections (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('sale', 'customer_payment')),
+  payment_id TEXT NOT NULL,
+  doc_number TEXT NOT NULL,
+  reference TEXT,
+  amount INTEGER NOT NULL,
+  fees INTEGER NOT NULL DEFAULT 0,
+  -- Chèque déjà remis en banque (1 : la banque le reprend) ou encore au 513 (0).
+  deposited INTEGER NOT NULL,
+  rejected_on TEXT NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX cheque_rejections_customer ON cheque_rejections(customer_id);
+CREATE INDEX cheque_rejections_payment ON cheque_rejections(payment_id);
+ALTER TABLE customers ADD COLUMN no_cheque INTEGER NOT NULL DEFAULT 0;
+
+-- Retour du livreur : ce qu'il rapporte des livraisons à encaisser.
+CREATE TABLE courier_returns (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  courier TEXT NOT NULL,
+  expected INTEGER NOT NULL,
+  returned INTEGER NOT NULL,
+  session_id TEXT,
+  note TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE sale_deliveries ADD COLUMN collected INTEGER;
+ALTER TABLE sale_deliveries ADD COLUMN courier_return_id TEXT;
+
+-- Commande groupée : un bon de commande par magasin, sous un même numéro.
+ALTER TABLE purchase_orders ADD COLUMN group_ref TEXT;
+
+-- Commandes passées sur la page internet du magasin : canal « web ».
+-- La contrainte du canal ne se modifie pas en SQLite : la table est reconstruite.
+CREATE TABLE customer_orders_new (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT,
+  customer_name TEXT NOT NULL,
+  phone TEXT,
+  address TEXT,
+  channel TEXT NOT NULL DEFAULT 'phone' CHECK (channel IN ('phone', 'whatsapp', 'shop', 'web')),
+  planned_date TEXT NOT NULL,
+  slot TEXT,
+  delivery_fee INTEGER NOT NULL DEFAULT 0,
+  courier TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'prepared', 'invoiced', 'cancelled')),
+  cancel_reason TEXT,
+  sale_id TEXT,
+  total_ttc INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  prepared_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  web_ref TEXT
+);
+INSERT INTO customer_orders_new (id, number, store_id, customer_id, customer_name, phone, address, channel, planned_date, slot, delivery_fee, courier, note, status,
+  cancel_reason, sale_id, total_ttc, user_id, prepared_at, created_at, updated_at)
+  SELECT id, number, store_id, customer_id, customer_name, phone, address, channel, planned_date, slot, delivery_fee, courier, note, status,
+    cancel_reason, sale_id, total_ttc, user_id, prepared_at, created_at, updated_at FROM customer_orders;
+DROP TABLE customer_orders;
+ALTER TABLE customer_orders_new RENAME TO customer_orders;
+CREATE INDEX customer_orders_store ON customer_orders(store_id, status, planned_date);
+CREATE UNIQUE INDEX customer_orders_web ON customer_orders(web_ref) WHERE web_ref IS NOT NULL;
+`,
+  },
 ];

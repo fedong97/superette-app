@@ -1,0 +1,5 @@
+# Certificat HTTPS automatique pour le nom de domaine du fichier .env.
+{$DOMAINE} {
+	encode gzip
+	reverse_proxy fedonix:3000
+}

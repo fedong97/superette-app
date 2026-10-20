@@ -7,7 +7,7 @@ type Template = Result<'template.list'>[number];
 const contents = (t: Template) => `${t.departments} rayons, ${t.families} familles${t.articles ? `, ${t.articles} articles` : ''}`;
 
 /**
- * Modèles de boutique, comme les fichiers modèles de Sage : un métier tout prêt
+ * Modèles de boutique : un métier tout prêt
  * (rayons, familles, réglages, droits) à appliquer, ou la boutique ouverte
  * enregistrée comme modèle pour les prochaines installations.
  */

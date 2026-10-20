@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from 'react';
+import { Component, type ReactNode, useRef, useState } from 'react';
 
 /** Place et taille d'une fenêtre dans la zone de travail (en pixels), ou plein écran. */
 export interface Geo {
@@ -117,8 +117,34 @@ export function MdiWindow({
           ✕
         </button>
       </header>
-      <div className="window">{children}</div>
+      <div className="window">
+        <ScreenGuard>{children}</ScreenGuard>
+      </div>
       {!g.max && <span className="mdi-grip" title="Tirer pour agrandir" onPointerDown={(e) => drag(e, 'size')} />}
     </section>
   );
+}
+
+/**
+ * Une erreur dans un écran n'emporte plus toute l'application (écran blanc) :
+ * seule sa fenêtre affiche le message, les autres restent utilisables.
+ */
+class ScreenGuard extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="screen-error">
+        <h3>Cet écran a rencontré un problème</h3>
+        <p className="muted">Les autres fenêtres continuent de fonctionner. Fermez celle-ci et rouvrez-la ; si le problème revient, notez le message ci-dessous pour le support.</p>
+        <pre>{this.state.error.message}</pre>
+        <button onClick={() => this.setState({ error: null })}>Réessayer</button>
+      </div>
+    );
+  }
 }

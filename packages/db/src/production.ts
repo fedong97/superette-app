@@ -75,7 +75,7 @@ export interface ProductionOrder {
 }
 
 /**
- * Fabrication (menu Fabrication, comme KONTROL) : une recette décrit un
+ * Fabrication (menu Fabrication : une recette décrit un
  * produit fini fait de composants (panier garni, jus maison, lot promo…).
  * Un ordre de fabrication sort les composants du stock et entre le produit
  * fini au coût de revient (somme des CMUP des composants sortis).

@@ -112,7 +112,7 @@ export function SaleRowList({ s, onPick }: { s: ReturnType<typeof useSaleRows>; 
 }
 
 /**
- * « Rechercher/Facturer des marchandises » (KONTROL) : chaque conditionnement
+ * « Rechercher/Facturer des marchandises » : chaque conditionnement
  * sur sa ligne, avec stock, dépôt, prix au tarif du client et dernier prix.
  * Les boutons du bas créent l'article ou le conditionnement qui manque.
  */

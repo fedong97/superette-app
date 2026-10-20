@@ -2,7 +2,7 @@ import { type Fcfa } from './money';
 import { type Milli } from './quantity';
 
 /**
- * Coût moyen unitaire pondéré (CMUP) après une entrée, comme Sage 100.
+ * Coût moyen unitaire pondéré (CMUP) après une entrée.
  * Un stock négatif ou nul avant l'entrée prend le coût de l'entrée.
  */
 export function weightedAverageCost(

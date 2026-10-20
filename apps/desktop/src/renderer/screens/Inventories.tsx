@@ -13,7 +13,7 @@ type Line = Detail['lines'][number];
 const STATUS = { open: 'En cours', closed: 'Clôturé', cancelled: 'Annulé' } as const;
 const KIND = { global: 'Global', partial: 'Partiel' } as const;
 
-/** « L'inventaire est déficitaire de … », comme dans KONTROL. */
+/** « L'inventaire est déficitaire de … ». */
 const observation = (gap: number) => (gap < 0 ? `Déficitaire de ${fcfa(-gap)}` : gap > 0 ? `Excédentaire de ${fcfa(gap)}` : 'Sans écart');
 
 /**
@@ -750,7 +750,7 @@ const SHEET_OUTPUTS: [SheetOutput, string, string][] = [
   ['excel', 'Fichier Excel à remplir', 'À remplir sur un autre PC puis à réimporter avec « Importer »'],
 ];
 
-/** Choix du modèle et de la sortie de la fiche de comptage, comme dans KONTROL. */
+/** Choix du modèle et de la sortie de la fiche de comptage. */
 function SheetFormatDialog({ onClose, onChoose }: { onClose: () => void; onChoose: (model: SheetModel, output: SheetOutput) => void }) {
   const [model, setModel] = useState<SheetModel>('blind');
   const [output, setOutput] = useState<SheetOutput>('a4');

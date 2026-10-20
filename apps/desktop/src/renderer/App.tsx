@@ -5,6 +5,7 @@ import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';
+import { Orders } from './screens/Orders';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
@@ -31,6 +32,7 @@ import { AskHost, askConfirm, Field, Modal, RefreshCtx, RightsProvider, StoreSet
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
+import { type Lang, currentLang, setLang, storedLang } from './i18n';
 
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
@@ -66,6 +68,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
   quotes: { label: 'Devis et proformas', perm: ['quotes', 'quote_save'] },
   deliveries: { label: 'Livraisons du jour', perm: ['deliveries'] },
+  orders: { label: 'Commandes clients', perm: ['customer_orders'] },
   promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
@@ -74,14 +77,14 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
-  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries'] },
+  staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets'] },
 };
 
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
   action?: 'logout' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
-  /** Trait de séparation entre deux groupes, comme dans KONTROL. */
+  /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
   soon?: boolean;
@@ -169,6 +172,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Vente au comptant 2', open: ['cash2'] },
       { label: 'Vente à crédit', open: ['credit'] },
       { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Commandes clients (téléphone, WhatsApp)', open: ['orders'], perm: 'customer_orders' },
       { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Mes factures', open: ['sales', 'tickets'] },
       { label: 'Registre (clôtures Z)', open: ['sales', 'z'] },
@@ -187,6 +191,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Tickets et factures annulés', open: ['sales', 'cancelled'] },
       SEP,
       { label: 'Devis et factures proforma', open: ['quotes'] },
+      { label: 'Commandes clients (téléphone, WhatsApp)', open: ['orders'], perm: 'customer_orders' },
       { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
@@ -321,6 +326,7 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Collaborateurs (fiches, comptes tiers)', open: ['staff', 'list'] },
       { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
+      { label: 'Objectifs et commissions des vendeurs', open: ['staff', 'targets'], perm: 'staff_targets' },
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
@@ -435,6 +441,8 @@ export function App() {
   const refresh = () =>
     call('app.state').then((s) => {
       setVatOn(s.station?.store.vat_enabled !== 0);
+      // Langue de l'utilisateur connecté ; avant la connexion, la dernière choisie sur ce PC.
+      setLang(s.user && s.prefs.lang ? (s.prefs.lang as Lang) : storedLang());
       setState(s);
     });
   useEffect(() => void refresh(), []);
@@ -516,6 +524,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => clearInterval(t);
   }, []);
 
+  const [lang, setLangState] = useState<Lang>(currentLang);
   const savePref = (key: string, value: unknown) => {
     setPrefs((p) => ({ ...p, [key]: value }));
     call('prefs.set', key, value).catch(toast.error);
@@ -673,7 +682,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
 
   /**
    * Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double.
-   * Comme dans KONTROL, ce qui n'est pas permis ne s'affiche pas du tout (pas de ligne grisée).
+   * Ce qui n'est pas permis ne s'affiche pas du tout (pas de ligne grisée).
    */
   const supervisor = user.role === 'admin' || user.role === 'manager';
   const visibleItems = (items: MenuItem[]) =>
@@ -777,7 +786,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
           <img src={logo} alt="" />
         </button>
-        <div className="rail-scroll" onWheel={() => menu && setMenu(null)}>
+        {/* Faire défiler la barre ferme le menu ouvert ; la roulette dans le menu lui-même le fait défiler. */}
+        <div className="rail-scroll" onWheel={(e) => menu && !(e.target as HTMLElement).closest('.menu-drop') && setMenu(null)}>
           {railMenus.map(([name, items]) => (
             <div key={name} className="menu">
               <button
@@ -959,6 +969,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
             {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
+            {w.kind === 'orders' && <Orders user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}
@@ -1028,6 +1039,19 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {gaps.data!.length === 1 ? '1 écart à justifier' : `${gaps.data!.length} écarts à justifier`}
           </button>
         )}
+        <button
+          className="link"
+          translate="no"
+          title={lang === 'en' ? 'Afficher les écrans en français' : 'Show the screens in English'}
+          onClick={() => {
+            const next: Lang = lang === 'en' ? 'fr' : 'en';
+            setLang(next);
+            setLangState(next);
+            savePref('lang', next);
+          }}
+        >
+          {lang === 'en' ? 'Français' : 'English'}
+        </button>
         <button className="link" onClick={() => call('auth.logout').then(refresh)}>
           Changer d'utilisateur
         </button>

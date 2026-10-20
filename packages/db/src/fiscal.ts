@@ -141,7 +141,7 @@ export class FiscalYearService extends Base {
   }
 
   /**
-   * Contrôle avant clôture, comme la Maintenance de Sage : ce qui bloque la clôture
+   * Contrôle avant clôture : ce qui bloque la clôture
    * (pièces déséquilibrées, journées de caisse ouvertes…) et ce qui mérite d'être vu
    * (fiches d'intervention pas rapportées, opérations pas encore envoyées au serveur).
    */

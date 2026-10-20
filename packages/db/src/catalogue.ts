@@ -276,7 +276,7 @@ export class CatalogueService extends Base {
 
   /**
    * Code d'un nouvel article : numéro du poste (DLA11-00012), ou, codification
-   * par famille comme dans Sage, trois lettres de la famille devant (BOI-DLA11-0012).
+   * par famille, trois lettres de la famille devant (BOI-DLA11-0012).
    */
   private nextArticleCode(familyId: string | null = null): string {
     if (familyId) {
@@ -418,7 +418,7 @@ export class CatalogueService extends Base {
             `INSERT INTO article_packs (id, article_id, position, name, contains, units, sale_price, wholesale_price, super_wholesale_price, barcode, is_purchase)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           );
-          // Comme sur KONTROL, on achète dans le plus grand conditionnement.
+          // On achète dans le plus grand conditionnement.
           packs.forEach((p, i) =>
             insertPack.run(newId(), articleId, i + 1, p.name, p.contains, units[i], p.salePrice, p.wholesalePrice ?? null, p.superWholesalePrice ?? null, p.barcode, i === 0 ? 1 : 0),
           );
@@ -714,7 +714,7 @@ export class CatalogueService extends Base {
     const familyId = (dep?: string, fam?: string): string | null => {
       if (!dep && !fam) return null;
       if (!dep) {
-        // Famille sans rayon (Sage, EBP) : la famille de ce nom, sinon un rayon du même nom.
+        // Famille sans rayon : la famille de ce nom, sinon un rayon du même nom.
         const known = this.db.prepare('SELECT id FROM families WHERE fold(name) = fold(?) ORDER BY id LIMIT 1').pluck().get(fam!.trim()) as string | undefined;
         if (known) return known;
         dep = fam;
@@ -919,7 +919,7 @@ export class CatalogueService extends Base {
     });
   }
 
-  // --- Mise à jour des prix en masse (assistant de Sage) ------------------------
+  // --- Mise à jour des prix en masse ------------------------
 
   private priceTargets(storeId: string, input: PriceUpdateInput): Article[] {
     if (input.articleIds?.length) return input.articleIds.map((id) => this.getArticle(id, storeId));

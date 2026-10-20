@@ -1,6 +1,5 @@
 /**
- * Formats d'import et d'export paramétrables, comme les « formats paramétrables »
- * de Sage : on décrit une fois les colonnes d'un fichier (catalogue d'un
+ * Formats d'import et d'export paramétrables : on décrit une fois les colonnes d'un fichier (catalogue d'un
  * fournisseur, écritures pour le logiciel du cabinet comptable) puis on le
  * réutilise en un clic.
  */
@@ -114,14 +113,14 @@ export interface ExportFormat {
 export type FileFormat = ImportFormat | ExportFormat;
 
 /**
- * Formats d'import livrés : le « format paramétrable » des articles de Sage 100
- * et d'EBP (sans en-têtes : référence, désignation, famille, prix d'achat,
+ * Formats d'import livrés : le « format paramétrable » des articles des logiciels
+ * de gestion courants (sans en-têtes : référence, désignation, famille, prix d'achat,
  * coefficient, prix de vente, unité).
  */
 export const BUILTIN_IMPORT_FORMATS: ImportFormat[] = [
   {
     id: 'sage100-articles',
-    name: "Sage 100 / EBP (référence ; désignation ; famille ; prix d'achat ; coefficient ; prix de vente ; unité)",
+    name: "Colonnes fixes sans en-têtes (référence ; désignation ; famille ; prix d'achat ; coefficient ; prix de vente ; unité)",
     kind: 'articles',
     separator: ';',
     skipRows: 0,
@@ -146,7 +145,7 @@ export const BUILTIN_EXPORT_FORMATS: ExportFormat[] = [
   },
   {
     id: 'sage100',
-    name: 'Sage 100 Comptabilité (format paramétrable : journal, date JJMMAA, pièce, compte, tiers, libellé, sens, montant)',
+    name: 'Logiciel comptable, une colonne sens (journal, date JJMMAA, pièce, compte, tiers, libellé, sens, montant)',
     kind: 'ecritures',
     separator: ';',
     dateFormat: 'ddmmyy',
@@ -158,7 +157,7 @@ export const BUILTIN_EXPORT_FORMATS: ExportFormat[] = [
   },
   {
     id: 'debit-credit',
-    name: 'Ciel, EBP et tableurs (date, journal, compte, pièce, libellé, débit, crédit)',
+    name: 'Logiciel comptable ou tableur, colonnes débit et crédit (date, journal, compte, pièce, libellé, débit, crédit)',
     kind: 'ecritures',
     separator: ';',
     dateFormat: 'dd/mm/yyyy',

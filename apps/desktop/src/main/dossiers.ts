@@ -19,7 +19,7 @@ interface Poste {
 const MAX_RECENT = 12;
 
 /**
- * Les boutiques connues de ce PC, comme la liste des fichiers de Sage :
+ * Les boutiques connues de ce PC :
  * chaque boutique est un fichier, le PC retient la dernière ouverte et les récentes.
  * Les réglages du PC (licence, imprimante…) restent dans chaque fichier, côté poste.
  */

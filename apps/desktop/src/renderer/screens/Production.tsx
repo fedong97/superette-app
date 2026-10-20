@@ -15,7 +15,7 @@ const STATUS_TAG = { draft: 'alerte', done: 'normal', cancelled: 'rupture' } as 
 const units = (v: number) => String(v / 1000).replace('.', ',');
 
 /**
- * Fabrication, comme le menu Fabrication de KONTROL : des recettes (un
+ * Fabrication : des recettes (un
  * produit fini fait de composants) et des ordres de fabrication qui sortent
  * les composants du stock et entrent le produit fini au coût de revient.
  */

@@ -6,7 +6,7 @@ import type { SyncEvent, SyncService } from './sync';
 import { AppError, Base, type Clock, newId } from './util';
 
 /**
- * Remontée des postes distants, comme la « saisie de caisse décentralisée » de Sage :
+ * Remontée des postes distants :
  * un dépôt sans réseau ni serveur produit chaque jour un petit fichier de ses
  * opérations, que la boutique intègre ; la boutique lui renvoie de la même façon
  * le catalogue, les prix et les utilisateurs. Le fichier voyage par clé USB,

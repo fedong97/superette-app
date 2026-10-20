@@ -43,7 +43,7 @@ export function Treasury(props: TreasuryProps) {
 }
 
 /**
- * Opérations de trésorerie, comme dans KONTROL : ouverture de la journée avec
+ * Opérations de trésorerie : ouverture de la journée avec
  * son fond, entrées et sorties d'espèces, clôture avec comptage à l'aveugle et
  * versement à la caisse centrale, historique des journées et livre de la centrale.
  */
@@ -366,7 +366,7 @@ function Day({
       closing: r.closing,
     }));
   const [eview, setEview] = useState<'journal' | 'z'>('journal');
-  // Encaisser, Décaisser et le bouton Action de chaque volet, comme dans KONTROL.
+  // Encaisser, Décaisser et le bouton Action de chaque volet.
   const desk: DeskProps | null = can('cash_desk') ? { sessionId: se.id, open: se.status === 'open', onChanged: onJustified } : null;
   const [totals, setTotals] = useState(false);
   return (

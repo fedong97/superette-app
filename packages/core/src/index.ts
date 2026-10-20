@@ -10,6 +10,7 @@ export * from './cashClose';
 export * from './purchase';
 export * from './credit';
 export * from './words';
+export * from './docLang';
 export * from './bankStatement';
 export * from './escpos';
 export * from './packs';

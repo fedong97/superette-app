@@ -3,7 +3,7 @@ import type { Milli } from './quantity';
 
 /**
  * Conditionnements d'un article, du plus grand au plus petit, sur le modèle de
- * KONTROL : un carton contient 10 paquets, un paquet contient 10 ampoules.
+ * Exemple : un carton contient 10 paquets, un paquet contient 10 ampoules.
  * L'unité de détail (l'ampoule) est l'article lui-même : le stock est toujours
  * tenu dans cette unité, les conditionnements n'en sont que des multiples.
  */
@@ -86,7 +86,7 @@ export function describeInPacks(qty: Milli, packs: readonly { name: string; unit
 }
 
 /**
- * Fiche KONTROL : chaque conditionnement de vente donne son diviseur par rapport
+ * Fiche article : chaque conditionnement de vente donne son diviseur par rapport
  * au conditionnement d'achat (PALETTE 1, PACK 4, CANETTE 24). Renvoie ce que
  * contient chaque niveau sauf le dernier (PALETTE 4 PACK, PACK 6 CANETTE), ou le
  * message d'erreur.

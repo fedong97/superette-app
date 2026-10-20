@@ -94,7 +94,7 @@ export interface RebateEntry {
 const dayFr = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('fr-FR');
 
 /**
- * Ristournes des clients spécifiques (KONTROL : Client › Ristournes & Autres).
+ * Ristournes des clients spécifiques.
  * Un réglage de base par famille d'articles (taux, montant par unité,
  * quantité minimale, frais d'enlèvement) vaut pour les clients cochés « à
  * ristourne » ; un réglage propre à un client le remplace. Le compte de

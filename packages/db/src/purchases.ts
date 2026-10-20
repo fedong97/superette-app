@@ -226,7 +226,7 @@ export interface ReorderRow {
 }
 
 /**
- * Fournisseurs et achats, sur la chaîne documentaire de Sage : fiche
+ * Fournisseurs et achats, en chaîne documentaire : fiche
  * fournisseur et articles référencés, bon de commande, bon de réception,
  * facture ou avoir, règlements, et proposition de commande automatique.
  */

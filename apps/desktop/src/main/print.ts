@@ -951,6 +951,36 @@ export function createPrinter(s: Services): Printer {
         <tbody>${rows}<tr class="total"><td colspan="2">Totaux (FCFA)</td>${cell(tb.totals.opening)}${cell(tb.totals.debit)}${cell(tb.totals.credit)}${cell(closingD)}${cell(closingC)}</tr></tbody></table>`);
     },
 
+    async assets(storeId, at, id) {
+      const store = s.admin.getStore(storeId);
+      const list = s.assets.list(storeId, { at, includeDisposed: true }).filter((a) => !id || a.id === id);
+      const cell = (v: number) => `<td class="r">${v ? money(v) : '-'}</td>`;
+      const register = list
+        .map(
+          (a) =>
+            `<tr><td>${esc(a.code)}</td><td>${esc(a.label)}${a.disposed_on ? ` <em>(sorti le ${dayFr(a.disposed_on)})</em>` : ''}</td><td>${esc(a.account)}</td><td>${dayFr(a.in_service_on)}</td>` +
+            `<td class="r">${a.duration_months ? `${a.duration_months / 12 === Math.round(a.duration_months / 12) ? `${a.duration_months / 12} ans` : `${a.duration_months} mois`}` : '-'}</td>${cell(a.cost)}${cell(a.year_charge)}${cell(a.cumulated)}${cell(a.net)}</tr>`,
+        )
+        .join('');
+      const sum = (k: 'cost' | 'year_charge' | 'cumulated' | 'net') => list.reduce((t, a) => t + a[k], 0);
+      const plans = list
+        .map((a) => {
+          const rows = s.assets.schedule(a.id);
+          if (!rows.length) return '';
+          return `<h3>${esc(a.code)} · ${esc(a.label)}</h3>
+            <div>Valeur d'origine ${money(a.cost)} FCFA · mise en service le ${dayFr(a.in_service_on)} · linéaire sur ${a.duration_months} mois · comptes ${esc(a.account)} / ${esc(a.depreciation_account)}</div>
+            <table><thead><tr><th>Exercice</th><th class="r">Base</th><th class="r">Dotation</th><th class="r">Cumul</th><th class="r">Valeur nette</th></tr></thead><tbody>${rows
+              .map((r) => `<tr><td>${dayFr(r.from)} au ${dayFr(r.to)}${r.prior ? ' <em>(avant la reprise)</em>' : ''}</td>${cell(r.opening)}${cell(r.charge)}${cell(r.cumulated)}${cell(r.net)}</tr>`)
+              .join('')}</tbody></table>`;
+        })
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Registre des immobilisations</h1><div>Au ${dayFr(at)} · montants en FCFA · amortissement linéaire au prorata des jours</div>
+        <table><thead><tr><th>Code</th><th>Bien</th><th>Compte</th><th>Mise en service</th><th class="r">Durée</th><th class="r">Valeur d'origine</th><th class="r">Dotation de l'exercice</th><th class="r">Amort. cumulés</th><th class="r">Valeur nette</th></tr></thead>
+        <tbody>${register}<tr class="total"><td colspan="5">Totaux</td>${cell(sum('cost'))}${cell(sum('year_charge'))}${cell(sum('cumulated'))}${cell(sum('net'))}</tr></tbody></table>
+        ${plans ? `<div style="page-break-before: always"></div><h2>Plans d'amortissement</h2>${plans}` : ''}`);
+    },
+
     async statements(storeId, from, to) {
       const store = s.admin.getStore(storeId);
       const st = s.statements.statements(storeId, { from, to });

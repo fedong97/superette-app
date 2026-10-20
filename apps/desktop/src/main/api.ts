@@ -32,9 +32,14 @@ import {
   type FileFormat,
   type ImportFormat,
   formatEntries,
+  type TakeoverKind,
+  type CustomerDisplayMode,
+  type CustomerDisplayState,
+  CUSTOMER_DISPLAY_MODES,
 } from '@superette/core';
 import {
   AppError,
+  type AssetInput,
   ficheBanner,
   type FicheKind,
   inspectDossier,
@@ -103,6 +108,7 @@ import {
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { CustomerDisplay } from './customerDisplay';
 import type { DossierEntry } from './dossiers';
 import type { SyncRunner } from './sync';
 import type { Updater } from './updater';
@@ -133,6 +139,8 @@ export interface SystemHooks {
     /** Ferme la base vide de ce PC, la remplace par l'installation préparée et relance. */
     install(file: string): void;
   };
+  /** Afficheur client branché au PC de caisse (absent dans les tests). */
+  customerDisplay?: CustomerDisplay;
   /** Fenêtre de choix d'un fichier d'un type donné (modèle de boutique, fichier de journée). */
   chooseOpenFile?(title: string, name: string, extensions: string[]): Promise<string | null>;
 }
@@ -174,6 +182,8 @@ export interface Printer {
   customerReceipt(paymentId: string): Promise<void>;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
+  /** Registre des immobilisations à une date, puis le plan d'amortissement de chaque bien. */
+  assets(storeId: string, at: string, id?: string | null): Promise<void>;
   statements(storeId: string, from: string, to: string): Promise<void>;
   reconciliation(storeId: string, accountId: string, date: string, statementBalance: number | null): Promise<void>;
   taxAssessment(storeId: string, year: number): Promise<void>;
@@ -233,6 +243,12 @@ const LOCAL_SETTINGS = [
   'drawer.mode',
   'ticket.footer',
   'display.size',
+  'display.customer',
+  'display.customerScreen',
+  'display.customerPort',
+  'display.customerBaud',
+  'display.customerColumns',
+  'display.customerMessage',
   'pos.layout',
   'printer.listing',
   'printer.labels',
@@ -626,6 +642,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       await system.openFolder(templatesDir());
     },
 
+    // --- Reprise des données d'un magasin existant ----------------------------
+    'takeover.summary': () => (requireUser(['data_takeover']), s.opening.summary(ctx().storeId)),
+    /** Le fichier arrive en cellules texte (CSV ou Excel lu par l'écran) ; `preview` ne fait que montrer ce qui serait repris. */
+    'takeover.run': (kind: TakeoverKind, cells: string[][], opts: { preview: boolean; warehouseId?: string | null }) =>
+      s.opening.run(ctx(['data_takeover']), kind, cells, opts),
+
+    // --- Registre des immobilisations -----------------------------------------
+    'assets.list': (opts: { at?: string; includeDisposed?: boolean } = {}) => (requireUser(['fixed_assets']), s.assets.list(ctx().storeId, opts)),
+    'assets.schedule': (id: string) => (requireUser(['fixed_assets']), s.assets.schedule(id)),
+    'assets.save': (input: AssetInput, id?: string) => s.assets.save(ctx(['fixed_asset_edit']), input, id),
+    'assets.dispose': (id: string, input: Parameters<Services['assets']['dispose']>[2]) => s.assets.dispose(ctx(['fixed_asset_edit']), id, input),
+    'assets.remove': (id: string) => s.assets.remove(ctx(['fixed_asset_edit']), id),
+    'assets.print': (at: string, id?: string | null) => (requireUser(['fixed_assets']), printer.assets(ctx().storeId, at, id)),
+
     // --- Formats d'import et d'export paramétrables ---------------------------
     'formats.list': () => (requireUser(), allFormats()),
     'formats.save': (f: ImportFormat | ExportFormat) => {
@@ -772,6 +802,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         else s.admin.setSetting(k, v);
       }
     },
+    /** Afficheur client : l'écran de caisse envoie le ticket en cours, ce PC le dessine. Jamais d'erreur pour la vente. */
+    'display.show': (state: CustomerDisplayState) => {
+      const station = s.admin.station();
+      if (!system.customerDisplay || !user || !station) return;
+      const mode = (s.admin.getSetting('display.customer') ?? 'off') as CustomerDisplayMode;
+      if (!(mode in CUSTOMER_DISPLAY_MODES)) return;
+      const storeId = station.store.id;
+      system.customerDisplay.show(state, {
+        mode,
+        screen: Number(s.admin.getSetting('display.customerScreen')) || 2,
+        port: (s.admin.getSetting('display.customerPort') ?? '').trim(),
+        baud: Number(s.admin.getSetting('display.customerBaud')) || 9600,
+        columns: Number(s.admin.getSetting('display.customerColumns')) || 20,
+        welcome: s.admin.getSetting('display.customerMessage') ?? '',
+        storeName: s.admin.getStore(storeId).name,
+        logo: mode === 'screen' ? s.admin.storeSettings(storeId).logo || null : null,
+      });
+    },
+    /** Écrans branchés à ce PC, pour choisir celui qui fait face au client. */
+    'display.screens': () => (requireUser(), system.customerDisplay?.screens() ?? []),
     /** Nom, adresse, téléphone et NIU du magasin de ce poste. */
     'admin.updateStoreIdentity': (patch: { name?: string; address?: string | null; phone?: string | null; taxpayer_number?: string | null }) => {
       const c = ctx(['settings_edit']);

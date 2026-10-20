@@ -574,7 +574,7 @@ export class PurchaseService extends Base {
          FROM receptions r JOIN warehouses w ON w.id = r.warehouse_id
          LEFT JOIN suppliers s ON s.id = r.supplier_id LEFT JOIN purchase_orders o ON o.id = r.order_id
          LEFT JOIN supplier_invoices i ON i.id = r.invoice_id LEFT JOIN users u ON u.id = r.user_id
-         WHERE r.store_id = @storeId AND (@supplierId IS NULL OR r.supplier_id = @supplierId) AND (@uninvoiced = 0 OR r.invoice_id IS NULL)
+         WHERE r.store_id = @storeId AND (@supplierId IS NULL OR r.supplier_id = @supplierId) AND (@uninvoiced = 0 OR (r.invoice_id IS NULL AND r.opening = 0))
          ORDER BY r.received_at DESC LIMIT @limit`,
       )
       .all({ storeId, supplierId: opts.supplierId ?? null, uninvoiced: opts.uninvoiced ? 1 : 0, limit: opts.limit ?? 200 }) as Omit<

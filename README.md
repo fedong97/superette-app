@@ -197,6 +197,20 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Postes distants (`.fedonix-journee`, gzip, table `relay_log`) : l'installation d'un poste distant est une installation préparée sur la caisse du dépôt ; la remontée porte les opérations de son outbox depuis la précédente et s'intègre comme une synchronisation (la plus récente l'emporte) ; la mise à jour renvoie les opérations de la boutique sauf celles des autres magasins. Un fichier ne s'intègre qu'une fois.
 - Contrôle avant clôture : exercice terminé, exercices précédents et pièces équilibrées bloquent ; journées de caisse ouvertes, fiches d'intervention pas rapportées, stock et lots à recalculer, opérations pas envoyées au serveur sont signalés sans bloquer.
 
+**Reprise d'un magasin existant (0.60.0)**
+- Administration › Reprise des données : clients et ce qu'ils doivent, fournisseurs et ce qu'on leur doit, stock de départ, un fichier Excel ou CSV par sujet (modèle téléchargeable, en-têtes reconnus avec ou sans accents). Aperçu ligne par ligne avant import ; une seule ligne en erreur et rien n'est importé.
+- À-nouveaux passés seuls au journal AN contre le compte d'attente 4711 (411 / 4711, 4711 / 401, 311 / 4711). Les dettes et le stock repris ne sont ni des achats ni de la TVA déductible, et sortent des registres d'achats et des réceptions à facturer.
+- Test automatique de la journée complète (`packages/db/test/journee.test.ts`) : commande, réception, ouverture de caisse, ventes en espèces, Mobile Money et à crédit, retour, règlement client, dépense, retrait vers le coffre, clôture Z, facture fournisseur, puis stock, caisse centrale, écritures et synchronisation vérifiés.
+
+**Immobilisations (0.61.0)**
+- Comptabilité › Immobilisations : registre des biens (catégories SYSCOHADA avec compte et durée proposés), amortissement linéaire au prorata des jours, plan d'amortissement imprimable.
+- Écritures automatiques : acquisition (481, 521 ou à-nouveau 4711 avec amortissements antérieurs), dotation 681x / 28xx à chaque fin d'exercice, sortie (vente ou mise au rebut) avec 812, 485 et 822.
+
+**Afficheur client (0.62.0)**
+- Administration › Paramètres, section « Afficheur client (ce PC de caisse) », désactivé par défaut.
+- Deuxième écran : fenêtre plein écran sur l'écran choisi, avec le logo, le dernier article scanné, le total, puis la monnaie rendue.
+- Afficheur VFD à deux lignes (ESC/POS, Epson DM-D, CD5220…) sur un port COM. Une panne de l'afficheur ne bloque jamais la vente.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

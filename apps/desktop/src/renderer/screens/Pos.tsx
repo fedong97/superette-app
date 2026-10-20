@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, type Permission, type PosLayout, type PriceLevel, type Tariff, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
+import { type CartLine, type CustomerDisplayState, type Permission, type PosLayout, type PriceLevel, type Tariff, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -224,6 +224,25 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const underMax = settings.maxDiscountPct > 0 && totals.totalDiscount * 100 <= settings.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
   const discountNeedsCode = totals.totalDiscount > 0 && !has(user, 'discount') && !underMax;
 
+  /** Afficheur client : le ticket en cours, puis la monnaie rendue jusqu'au client suivant. */
+  const [displayPaid, setDisplayPaid] = useState<{ total: number; paid: number; change: number } | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    if (lines.length && displayPaid) return setDisplayPaid(null);
+    const show = (l: (typeof priced)[number]) => ({ name: l.label, qty: lineQty(l), amount: lineTotal(l) });
+    const last = priced.reduce<(typeof priced)[number] | null>((m, l) => (!m || l.key > m.key ? l : m), null);
+    const state: CustomerDisplayState = lines.length
+      ? { kind: 'cart', last: last && show(last), lines: priced.map(show), total: toPay, savings: totals.totalDiscount + totals.totalPromo }
+      : displayPaid
+        ? { kind: 'paid', ...displayPaid }
+        : { kind: 'idle' };
+    call('display.show', state).catch(() => undefined);
+    if (state.kind !== 'paid') return;
+    // Retour à l'accueil une minute après la vente.
+    const t = setTimeout(() => setDisplayPaid(null), 60_000);
+    return () => clearTimeout(t);
+  }, [active, lines.length, priced, toPay, totals.totalDiscount, totals.totalPromo, displayPaid]);
+
   const focusScan = useCallback(() => setTimeout(() => scanRef.current?.focus(), 0), []);
   useEffect(() => {
     if (!dialog && active) focusScan();
@@ -402,6 +421,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     setSelected(null);
     // La fiche repart vierge ; la vente reste en mémoire pour Réimprimer et Facture A4.
     setLastSale(sale);
+    setDisplayPaid({ total: sale.total_ttc, paid: sale.total_ttc + sale.change_given, change: sale.change_given });
     setDialog(null);
     setCustomer(null);
     setClientName('');

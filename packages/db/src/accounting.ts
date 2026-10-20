@@ -1,5 +1,7 @@
 import { type Fcfa, splitTtc } from '@superette/core';
 import { PAYROLL_ACCOUNTS, STAFF_WAGES_ACCOUNT } from './staff';
+import { assetEntries } from './assets';
+import { OPENING_ACCOUNT } from './opening';
 import { AppError, Base, type Context, newId } from './util';
 
 export const JOURNALS = {
@@ -198,6 +200,8 @@ export class AccountingService extends Base {
       ...this.staffSalaryEntries(storeId, opts),
       ...this.treasuryPieceEntries(storeId, r, opts),
       ...this.manualEntries(storeId, opts),
+      ...this.openingEntries(storeId, r, opts),
+      ...this.assetEntries(storeId, opts),
     ].filter(
       (e) =>
         (!opts.journal || e.journal === opts.journal) &&
@@ -407,7 +411,7 @@ export class AccountingService extends Base {
     const rows = this.db
       .prepare(
         `SELECT i.number, i.kind, i.supplier_number, i.invoice_date AS d, i.total_ht, i.total_tva, i.total_ttc, f.code, f.name
-         FROM supplier_invoices i JOIN suppliers f ON f.id = i.supplier_id WHERE i.store_id = ?`,
+         FROM supplier_invoices i JOIN suppliers f ON f.id = i.supplier_id WHERE i.store_id = ? AND i.opening = 0`,
       )
       .all(storeId) as { number: string; kind: 'invoice' | 'credit_note'; supplier_number: string; d: string; total_ht: number; total_tva: number; total_ttc: number; code: string; name: string }[];
     return rows
@@ -601,6 +605,76 @@ export class AccountingService extends Base {
           lines: [side(treasury, sign * e.amount, label), other],
         };
       });
+  }
+
+  /**
+   * Reprise d'un magasin existant (Administration › Reprise des données) : ce que
+   * doivent les clients, ce qu'on doit aux fournisseurs et le stock de départ, en
+   * à-nouveaux contre le compte d'attente 4711. Les à-nouveaux saisis ensuite
+   * (capital, banque, caisse) soldent ce compte.
+   */
+  private openingEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const label = (what: string) => `Reprise : ${what}`;
+    const customers = (
+      this.db
+        .prepare(
+          `SELECT o.number, o.doc_date AS d, o.doc_ref, o.amount, c.code, c.name FROM opening_balances o JOIN customers c ON c.id = o.customer_id WHERE o.store_id = ?`,
+        )
+        .all(storeId) as { number: string; d: string; doc_ref: string | null; amount: number; code: string; name: string }[]
+    )
+      .filter((o) => inRange(o.d, opts.from, opts.to))
+      .map((o) => {
+        const l = label(`${o.amount > 0 ? 'créance' : 'avoir'} ${o.name}${o.doc_ref ? ` n° ${o.doc_ref}` : ''}`);
+        return {
+          journal: 'AN' as const,
+          date: o.d,
+          ref: o.number,
+          label: l,
+          source: 'auto' as const,
+          lines: [side(r.customers, o.amount, l, { code: o.code, name: o.name }), side(OPENING_ACCOUNT, -o.amount, l)],
+        };
+      });
+    const suppliers = (
+      this.db
+        .prepare(
+          `SELECT i.number, i.kind, i.supplier_number, i.invoice_date AS d, i.total_ttc, f.code, f.name
+           FROM supplier_invoices i JOIN suppliers f ON f.id = i.supplier_id WHERE i.store_id = ? AND i.opening = 1`,
+        )
+        .all(storeId) as { number: string; kind: 'invoice' | 'credit_note'; supplier_number: string; d: string; total_ttc: number; code: string; name: string }[]
+    )
+      .filter((i) => inRange(i.d, opts.from, opts.to))
+      .map((i) => {
+        const amount = i.kind === 'invoice' ? i.total_ttc : -i.total_ttc;
+        const l = label(`${amount > 0 ? 'dette' : 'avoir'} ${i.name} n° ${i.supplier_number}`);
+        return {
+          journal: 'AN' as const,
+          date: i.d,
+          ref: i.number,
+          label: l,
+          source: 'auto' as const,
+          lines: [side(OPENING_ACCOUNT, amount, l), side(r.suppliers, -amount, l, { code: i.code, name: i.name })],
+        };
+      });
+    const stock = (
+      this.db
+        .prepare(
+          `SELECT r.number, date(r.received_at, 'localtime') AS d, w.name AS warehouse,
+                  COALESCE((SELECT SUM(COALESCE(l.amount, ROUND(l.qty * l.unit_cost / 1000.0))) FROM reception_lines l WHERE l.reception_id = r.id), 0) AS value
+           FROM receptions r JOIN warehouses w ON w.id = r.warehouse_id WHERE r.store_id = ? AND r.opening = 1`,
+        )
+        .all(storeId) as { number: string; d: string; warehouse: string; value: number }[]
+    )
+      .filter((s) => inRange(s.d, opts.from, opts.to))
+      .map((s) => {
+        const l = label(`stock de départ, ${s.warehouse}`);
+        return { journal: 'AN' as const, date: s.d, ref: s.number, label: l, source: 'auto' as const, lines: [side(r.stock, s.value, l), side(OPENING_ACCOUNT, -s.value, l)] };
+      });
+    return [...customers, ...suppliers, ...stock].map((e) => ({ ...e, lines: e.lines.filter((x) => x.debit || x.credit) }));
+  }
+
+  /** Registre des immobilisations : acquisitions, dotations de fin d'exercice, sorties. */
+  private assetEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
+    return assetEntries(this.db, this.clock, storeId, opts);
   }
 
   private manualEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
@@ -841,7 +915,7 @@ export class AccountingService extends Base {
         `SELECT COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_ht ELSE -total_ht END), 0) AS ht,
                 COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_tva ELSE -total_tva END), 0) AS tva,
                 COUNT(*) AS n
-         FROM supplier_invoices WHERE store_id = ? AND substr(invoice_date, 1, 7) = ?`,
+         FROM supplier_invoices WHERE store_id = ? AND opening = 0 AND substr(invoice_date, 1, 7) = ?`,
       )
       .get(storeId, month) as { ht: number; tva: number; n: number };
     const expenses = this.db

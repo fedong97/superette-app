@@ -3,13 +3,14 @@ import { type DateFormat, EXPORT_FIELDS, type ExportField, type ExportFormat, ty
 import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, askConfirm, dateFr, dateTime, downloadText, fcfa, parseAmount, readTextFile, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
+import { Assets } from './Assets';
 import { AccountPicker } from './accountPicker';
 import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal' | 'assets';
 type Entry = Result<'accounting.entries'>[number];
 type FiscalYear = Result<'fiscal.list'>[number];
 
@@ -65,6 +66,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
     bank: can('bank_reconciliation'),
     accounts: true,
     fiscal: can('accounting', 'fiscal_years'),
+    assets: can('fixed_assets'),
   };
   const [tab, setTab] = useState<AccountingTab>(allowed[initialTab] ? initialTab : ((Object.keys(allowed) as AccountingTab[]).find((k) => allowed[k]) ?? 'accounts'));
   const [ledgerAccount, setLedgerAccount] = useState('571');
@@ -92,6 +94,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
             ['tax', 'Impôt sur le résultat'],
             ['treasury', 'Trésorerie'],
             ['bank', 'Rapprochement bancaire'],
+            ['assets', 'Immobilisations'],
             ['accounts', 'Plan comptable'],
             ['fiscal', 'Exercices'],
           ] as [AccountingTab, string][]
@@ -109,6 +112,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'bank' && allowed.bank && <BankReconciliation />}
       {tab === 'accounts' && <Accounts user={user} />}
       {tab === 'fiscal' && allowed.fiscal && <FiscalYears />}
+      {tab === 'assets' && allowed.assets && <Assets />}
     </div>
   );
 }

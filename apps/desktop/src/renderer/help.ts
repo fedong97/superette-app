@@ -318,6 +318,16 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'vat', title: 'Déclaration de TVA', steps: ['Le mois à déclarer : CA par taux, TVA collectée et déductible, crédit reporté, plus l’acompte d’impôt. Imprimez pour la DGI.'] },
       { tab: 'statements', title: 'États financiers', steps: ['Bilan, compte de résultat et flux de trésorerie de l’exercice, avec les références de la DSF.'] },
       { tab: 'bank', title: 'Rapprochement bancaire', steps: ['Importez le relevé CSV de la banque ou de l’opérateur ; le pointage se fait tout seul, le reste à la main.'] },
+      {
+        tab: 'assets',
+        title: 'Immobilisations',
+        perm: 'fixed_assets',
+        steps: [
+          '« Nouvelle immobilisation » : choisissez la catégorie (elle propose le compte et la durée), le nom du bien, sa valeur HT et sa date de mise en service.',
+          'Un bien que le magasin avait déjà avant FEDONIX 360 se saisit en « Bien repris » : ses amortissements d’avant la reprise sont comptés, sans dotation en double.',
+          'La dotation de chaque exercice se passe toute seule à sa date de fin. Cliquez un bien pour son plan d’amortissement ; « Vendre ou mettre au rebut » le sort du registre.',
+        ],
+      },
     ],
   },
   treasury: {
@@ -434,6 +444,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Modifier » ouvre l’éditeur : papier, marges, police, hauteurs de l’en-tête, du pied et des lignes, champs du magasin et du client, colonnes du tableau (afficher, renommer, largeur, ordre), totaux et mentions. L’aperçu à droite suit chaque changement.',
           '« Copier » crée un autre modèle à partir de celui choisi ; « Rétablir l’original » remet un modèle du logiciel tel qu’il était livré.',
           'Dans Ventes ou la fiche d’un client, « Facture… » ouvre l’aperçu avant impression : changez de modèle (facture ou bon de livraison), imprimez ou enregistrez en PDF. Dans la fiche d’un devis, d’une commande fournisseur ou d’une facture d’achat, « Aperçu et impression… » fait de même.',
+        ],
+      },
+      {
+        tab: 'takeover',
+        title: 'Reprise des données',
+        perm: 'data_takeover',
+        steps: [
+          'Pour un magasin qui passe à FEDONIX 360 : choisissez le fichier à reprendre (clients, fournisseurs ou stock de départ) et téléchargez le modèle Excel.',
+          'Remplissez-le (ou exportez la liste de l’ancien logiciel avec les mêmes en-têtes), puis « Choisir le fichier rempli » : l’aperçu montre ce qui sera fait et les lignes à corriger.',
+          '« Importer » enregistre tout d’un bloc et passe les à-nouveaux contre le compte 4711. S’il reste une erreur, rien n’est importé : corrigez le fichier et recommencez.',
         ],
       },
       { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },

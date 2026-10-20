@@ -286,12 +286,12 @@ export class FinancialStatementsService extends Base {
     const received = this.db
       .prepare(
         `SELECT COALESCE(SUM(COALESCE((SELECT SUM(ROUND(l.qty * l.unit_cost / 1000.0)) FROM reception_lines l WHERE l.reception_id = r.id), 0) - r.discount), 0)
-         FROM receptions r WHERE r.store_id = ? AND date(r.received_at, 'localtime') <= ?`,
+         FROM receptions r WHERE r.store_id = ? AND r.opening = 0 AND date(r.received_at, 'localtime') <= ?`,
       )
       .pluck()
       .get(storeId, to) as number;
     const invoiced = this.db
-      .prepare(`SELECT COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_ht ELSE -total_ht END), 0) FROM supplier_invoices WHERE store_id = ? AND invoice_date <= ?`)
+      .prepare(`SELECT COALESCE(SUM(CASE WHEN kind = 'invoice' THEN total_ht ELSE -total_ht END), 0) FROM supplier_invoices WHERE store_id = ? AND opening = 0 AND invoice_date <= ?`)
       .pluck()
       .get(storeId, to) as number;
     return { amount: Math.max(0, received - invoiced) };

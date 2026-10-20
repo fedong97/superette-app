@@ -16,6 +16,7 @@ const CASHIER_FILES = [
   'screens/CashDesk.tsx',
   'screens/Customers.tsx',
   'screens/customerDialogs.tsx',
+  'screens/SummaryInvoices.tsx',
   'screens/Sales.tsx',
   'screens/SaleSearch.tsx',
   'screens/Orders.tsx',

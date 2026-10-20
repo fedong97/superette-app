@@ -109,6 +109,21 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.76.0',
+    items: [
+      'Emballages consignés : Vente › Emballages consignés. La consigne des casiers et bouteilles s’encaisse et se rend à la caisse (au compte 4194, pas comme une vente) ; le logiciel suit les vides au magasin, ce que gardent les clients et ce qu’il faut rendre aux brasseries.',
+      'Point Mobile Money : dépôts, retraits, crédit de communication et factures (ENEO, CAMWATER…) pour les clients, avec la flotte de chaque compte agent, les espèces dans le Z et les commissions en comptabilité.',
+      'Contrôle des caissiers : annulations, retours, remises, prix modifiés, tiroir ouvert sans vente et manquants de chaque caissier, comparés à la moyenne de l’équipe.',
+      'Boutique en ligne et vérificateur de prix : une page internet du magasin sur le serveur (les commandes arrivent dans Commandes clients) et une page de prix à ouvrir sur un téléphone ou une tablette au rayon. À activer dans Administration › Paramètres.',
+      'Proposition de commande « saison » : elle tient compte des ventes de l’an dernier à la même période et de la tendance, avec une majoration au choix. Commandes groupées : un fournisseur, plusieurs magasins, un bon par magasin.',
+      'Sauvegarde en ligne : chaque jour, une copie chiffrée de la base part sur le serveur (Administration › Sauvegardes). Gardez bien la phrase secrète : sans elle, personne ne peut relire les copies.',
+      'Stock : déstockage avant péremption (remise proposée par palier, promotion en un clic), rapport de démarque par rayon et inventaire tournant de la semaine.',
+      'Personnel : congés (soldes, demandes, accords), planning de la semaine et horaires par collaborateur, pris en compte dans le pointage ; plafond des avances sur salaire au-delà duquel le code du gérant est demandé.',
+      'Livraisons : feuille de route du livreur, message WhatsApp « en route » au client, et retour du livreur à la caisse (ce qu’il a encaissé, ce qu’il remet, l’écart).',
+      'Chèques revenus impayés : le chèque et les frais de banque reviennent au compte du client, qui peut être interdit de chèque.',
+    ],
+  },
+  {
     version: '0.75.0',
     items: [
       'Retours fournisseur : Achats › Retours fournisseur et avoirs attendus. La marchandise rendue (casse, périmés, erreur) sort du stock, le bon s’imprime, et l’avoir du fournisseur se saisit depuis le bon pour venir en déduction de sa dette.',

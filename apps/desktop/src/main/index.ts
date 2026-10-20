@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { AppError, defaultBackupDir, inspectBackup, installFiche, latestGoodBackup, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
+import { createCloudBackup } from './cloudBackup';
 import { createCustomerDisplay } from './customerDisplay';
 import { createDigestMailer } from './digest';
 import { createDossiers } from './dossiers';
@@ -140,11 +141,16 @@ void app.whenReady().then(() => {
   }
   setSyncClientVersion(app.getVersion());
   const sync = createSyncRunner(services);
+  const cloudBackup = createCloudBackup(services);
   const updater = createUpdater(services);
 
   // Sauvegarde automatique : peu après le démarrage, puis selon la fréquence réglée.
   const autoBackup = () => {
-    void services.backups.runAutomatic().catch((e) => console.warn('[backup]', e));
+    void services.backups
+      .runAutomatic()
+      // Puis la copie chiffrée sur le serveur, une fois par jour si elle est activée.
+      .then(() => cloudBackup.maybeUpload())
+      .catch((e) => console.warn('[backup]', e));
     // Copie du comptable dans le dossier partagé, à la fréquence réglée.
     void services.fiches.autoShare(app.getVersion()).catch((e) => console.warn('[partage]', e));
   };

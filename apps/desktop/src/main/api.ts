@@ -737,7 +737,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       }
       if (f.kind === 'ecritures' && !f.columns.length) throw new AppError('Choisissez les colonnes du fichier', 'INVALID');
       if ([...BUILTIN_IMPORT_FORMATS, ...BUILTIN_EXPORT_FORMATS].some((b) => b.id === f.id)) throw new AppError('Les formats livrés ne se modifient pas : enregistrez-en une copie', 'INVALID');
-      const saved = { ...f, name: f.name.trim(), id: f.id || `format-${Date.now()}`, builtin: undefined };
+      // Deux formats enregistrés dans la même milliseconde ne doivent pas avoir le même identifiant.
+      const newFormatId = () => {
+        const base = `format-${Date.now()}`;
+        const taken = new Set(userFormats().map((x) => x.id));
+        let id = base;
+        for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+        return id;
+      };
+      const saved = { ...f, name: f.name.trim(), id: f.id || newFormatId(), builtin: undefined };
       const list = userFormats().filter((x) => x.id !== saved.id);
       s.admin.setSetting('formats', JSON.stringify([...list, saved]));
       return saved;

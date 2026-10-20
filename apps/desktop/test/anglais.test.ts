@@ -21,11 +21,13 @@ const CASHIER_FILES = [
   'screens/SaleSearch.tsx',
   'screens/Orders.tsx',
   'screens/Deliveries.tsx',
+  'screens/Containers.tsx',
+  'screens/AgentPoint.tsx',
   'screens/docPreview.tsx',
   'screens/pickers.tsx',
 ];
 /** Textes identiques en anglais, ou laissés en français exprès (le choix « Français »). */
-const SAME = new Set(['Administration', 'Session', 'Correction', 'Action ▾', 'Français', 'Afficher les écrans en français']);
+const SAME = new Set(['Administration', 'Session', 'Situation', 'Commission', 'Correction', 'Action ▾', 'Français', 'Afficher les écrans en français']);
 const FRENCH = /[éèêàçùôîûœÉÀ]|\b(le|la|les|des|du|un|une|et|pour|sur|avec|aucun|aucune|est|dans|par|de|au|aux|en|ou|ce|cette|ses|son|sa|d|l|qu)\b|^[A-Z][a-z]+(er|ez|é|ée|és|ées|ion|eur|ure|ment|ité|té)\b/i;
 const CODE = /^[a-z][a-zA-Z0-9_.:-]*$|^[A-Z_0-9.]+$|[{}<>;=]|^\.|^#|^\w+\(|px\b|^--|^https?:|^[a-z-]+(\s[a-z-]+)+$/;
 /** Appels dont les textes ne s'affichent pas (noms d'API, réglages, classes). */

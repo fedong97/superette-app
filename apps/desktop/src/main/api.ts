@@ -24,6 +24,7 @@ import {
   type PaymentMethod,
   type Permission,
   type PriceLevel,
+  type QtyTier,
   type StatementLine,
   type StockLevel,
   type RegisterKind,
@@ -247,6 +248,12 @@ export interface Printer {
   inventoryResult(inventoryId: string): Promise<void>;
   /** Bon de transfert A4 : bon de route (expédition) ou bon de réception. */
   transferNote(transferId: string): Promise<void>;
+  /** Bon de retour au fournisseur. */
+  supplierReturn(returnId: string): Promise<void>;
+  /** Facture récapitulative d'un client (ventes de la période). */
+  summaryInvoice(invoiceId: string): Promise<void>;
+  /** Bordereau de remise de chèques en banque. */
+  chequeDeposit(depositId: string): Promise<void>;
   productionNote(orderId: string): Promise<void>;
   /** Facture fournisseur A4 : en-tête, lignes (prix, remise, gratuits, net) et règlements. */
   purchaseInvoice(invoiceId: string, opts?: InvoicePrintOptions): Promise<boolean>;
@@ -1189,6 +1196,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         codeByFamily: codeByFamily(),
       }),
     'catalogue.exportList': (filter: ExportFilter = {}) => s.catalogue.listForExport(ctx(['article_export']).storeId, filter),
+    'catalogue.setQtyTiers': (articleId: string, tiers: QtyTier[]) => s.catalogue.setQtyTiers(requireUser(['article_price', 'article_edit']).id, articleId, tiers),
     'catalogue.setLocation': (articleId: string, warehouseId: string, location: string) => {
       const c = ctx(['article_edit', 'stock_location']);
       if (s.admin.getWarehouse(warehouseId).store_id !== c.storeId) throw new AppError("Ce dépôt n'est pas dans ce magasin", 'FORBIDDEN');
@@ -1369,6 +1377,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'purchases.reception': (id: string) => (requireUser(), s.purchases.getReception(id)),
     'purchases.invoicePreview': (receptionIds: string[]) => (requireUser(), s.purchases.invoicePreview(receptionIds)),
     'purchases.createInvoice': (input: Parameters<Services['purchases']['createInvoice']>[1]) => s.purchases.createInvoice(ctx(['purchase_invoices']), input),
+    'supplierReturns.list': (opts?: { supplierId?: string | null; open?: boolean }) => s.supplierReturns.list(ctx(['supplier_returns']).storeId, opts),
+    'supplierReturns.pending': () => s.supplierReturns.pending(ctx(['supplier_returns']).storeId),
+    'supplierReturns.get': (id: string) => (ctx(['supplier_returns']), s.supplierReturns.get(id)),
+    'supplierReturns.create': (input: Parameters<Services['supplierReturns']['create']>[1]) => s.supplierReturns.create(ctx(['supplier_returns']), input),
+    'supplierReturns.credit': (id: string, input: Parameters<Services['supplierReturns']['credit']>[2]) => s.supplierReturns.credit(ctx(['supplier_returns', 'purchase_invoices']), id, input),
+    'supplierReturns.print': (id: string) => (ctx(['supplier_returns']), printer.supplierReturn(id)),
     'purchases.invoices': (opts?: { supplierId?: string; unpaid?: boolean }) => s.purchases.listInvoices(ctx(['purchase_invoices', 'supplier_pay', 'purchase_due']).storeId, opts),
     'purchases.invoice': (id: string) => {
       requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']);
@@ -1411,7 +1425,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       s.pos.searchForSale(ctx().storeId, query, { ...opts, userId: user?.id ?? null }),
     /** Dépôts où l'utilisateur vend sans code du gérant ; la vente s'y complète. */
     'pos.saleWarehouses': () => s.admin.saleWarehousesFor(ctx().storeId, ctx().userId).map((w) => w.id),
-    'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail'),
+    'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel, customerId?: string | null) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail', customerId ?? null),
     /** Promotions en vigueur aujourd'hui dans ce magasin : la caisse les affiche avant l'encaissement. */
     'promotions.active': () => s.promotions.activeRules(ctx().storeId),
     'promotions.list': () => s.promotions.list(ctx(['promotions', 'promotion_save', 'promotion_stop']).storeId),
@@ -2063,6 +2077,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         throw new AppError("Vous n'avez pas le droit de fixer le plafond de crédit ou le délai de paiement", 'FORBIDDEN');
       }
       if (!can(u, ['customer_price_level']) && (input.priceLevel ?? level) !== level) throw new AppError("Vous n'avez pas le droit de fixer le tarif du client", 'FORBIDDEN');
+      // Remises par famille : un prix convenu, comme le tarif. Sans le droit, la fiche garde les siennes.
+      if (!can(u, ['customer_price_level'])) input = { ...input, familyDiscounts: undefined };
       if (!can(u, ['customer_deactivate']) && (input.active ?? active) !== active) throw new AppError("Vous n'avez pas le droit de désactiver un client", 'FORBIDDEN');
       const fiche = (a: { name: string; phone?: string | null; contact?: string | null; email?: string | null; address?: string | null; notes?: string | null }) =>
         [a.name.trim(), a.phone ?? '', a.contact ?? '', a.email ?? '', a.address ?? '', a.notes ?? ''].join('|');
@@ -2106,6 +2122,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
+    'summaryInvoices.candidates': (customerId: string, from: string, to: string) => s.summaryInvoices.candidates(ctx(['summary_invoices']).storeId, customerId, from, to),
+    'summaryInvoices.create': (input: { customerId: string; from: string; to: string; saleIds?: string[] }) => s.summaryInvoices.create(ctx(['summary_invoices']), input),
+    'summaryInvoices.cancel': (id: string) => s.summaryInvoices.cancel(ctx(['summary_invoices']), id),
+    'summaryInvoices.list': (customerId?: string | null) => s.summaryInvoices.list(ctx(['summary_invoices']).storeId, { customerId }),
+    'summaryInvoices.get': (id: string) => (ctx(['summary_invoices']), s.summaryInvoices.get(id)),
+    'summaryInvoices.print': (id: string) => (ctx(['summary_invoices']), printer.summaryInvoice(id)),
     'customers.printStatement': (id: string, from?: string | null, to?: string | null) => printer.statement(ctx(['customer_statement', 'receivables']).storeId, id, from, to),
     /** Relance d'un client en retard : message WhatsApp prêt à envoyer, montants et dernière relance. */
     'customers.reminder': (id: string) => {
@@ -2171,6 +2193,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'orders.get': (id: string) => (requireUser(), s.orders.get(id)),
     'orders.save': (input: OrderInput, id?: string | null) => s.orders.save(ctx(['customer_orders']), input, id ?? undefined),
     'orders.prepare': (id: string) => s.orders.prepare(ctx(['customer_orders']), id),
+    'orders.backOrderNeeds': (id: string) => s.purchases.backOrderNeeds(ctx(['back_orders']).storeId, id),
+    'orders.backOrder': (id: string, opts?: { supplierId?: string | null; warehouseId?: string | null }) => s.purchases.backOrder(ctx(['back_orders']), id, opts),
     'orders.unprepare': (id: string) => s.orders.unprepare(ctx(['customer_orders']), id),
     'orders.cancel': (id: string, reason: string) => s.orders.cancel(ctx(['customer_order_cancel']), id, reason),
     'orders.saleLines': (id: string) => s.orders.saleLines(ctx(POS).storeId, id),
@@ -2258,6 +2282,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'tax.book': (year: number) => s.tax.book(ctx(['tax_settings']), year),
     'tax.print': (year: number) => printer.taxAssessment(ctx(['tax', 'tax_settings']).storeId, year),
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(['vat_return']).storeId, month),
+    'planning.forecast': (opts?: { weeks?: number; estimates?: boolean }) => s.planning.forecast(ctx(['cash_forecast']).storeId, opts),
+    'planning.budgetReport': (year: number, month: number) => s.planning.budgetReport(ctx(['budgets']).storeId, year, month),
+    'planning.saveBudget': (input: { year: number; account: string; months: number[] }) => s.planning.saveBudget(ctx(['budgets']), input),
+    'planning.analyticByDepartment': (from: string, to: string) => s.planning.analyticByDepartment(ctx(['analytics']).storeId, from, to),
+    'planning.analyticByStore': (from: string, to: string) => (ctx(['analytics']), s.planning.analyticByStore(from, to)),
+    'cheques.pending': () => s.cheques.pending(ctx(['cheque_deposits']).storeId),
+    'cheques.list': () => s.cheques.list(ctx(['cheque_deposits']).storeId),
+    'cheques.get': (id: string) => (ctx(['cheque_deposits']), s.cheques.get(id)),
+    'cheques.create': (input: { date: string; bank?: string | null; paymentIds?: string[] }) => s.cheques.create(ctx(['cheque_deposits']), input),
+    'cheques.cancel': (id: string) => s.cheques.cancel(ctx(['cheque_deposits']), id),
+    'cheques.print': (id: string) => (ctx(['cheque_deposits']), printer.chequeDeposit(id)),
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(['statements']).storeId, opts),
     'accounting.cashFlow': (opts: { from: string; to: string }) => s.statements.cashFlow(ctx(['statements']).storeId, opts),
     'accounting.notes': (year: number) => s.notes.notes(ctx(['tax', 'statements']).storeId, year),

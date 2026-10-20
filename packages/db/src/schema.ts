@@ -1810,4 +1810,110 @@ ALTER TABLE sales ADD COLUMN seller_id TEXT;
 ALTER TABLE users ADD COLUMN photo TEXT;
 `,
   },
+  {
+    version: 51,
+    name: 'retours fournisseur, tarifs par quantité, récapitulatives, contremarque, budgets et remises de chèques',
+    sql: `
+-- Bon de retour au fournisseur : la marchandise sort du stock, l'avoir est attendu
+-- (ouvert) puis rattaché quand le fournisseur l'envoie (avoir reçu).
+CREATE TABLE supplier_returns (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'credited')),
+  total_ht INTEGER NOT NULL DEFAULT 0,
+  total_tva INTEGER NOT NULL DEFAULT 0,
+  credit_note_id TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX supplier_returns_supplier ON supplier_returns(supplier_id, created_at);
+-- Sans clé étrangère vers les articles : ils arrivent des autres PC dans n'importe quel ordre.
+CREATE TABLE supplier_return_lines (
+  id TEXT PRIMARY KEY,
+  return_id TEXT NOT NULL REFERENCES supplier_returns(id),
+  line_no INTEGER NOT NULL,
+  article_id TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  unit_cost INTEGER NOT NULL,
+  vat_rate_bp INTEGER NOT NULL DEFAULT 0,
+  lot_number TEXT,
+  expiry TEXT
+);
+CREATE INDEX supplier_return_lines_return ON supplier_return_lines(return_id);
+
+-- Prix par quantité de l'unité de détail : [{ "minQty": millièmes, "price": FCFA }].
+ALTER TABLE articles ADD COLUMN qty_tiers TEXT;
+-- Remises du client par famille d'articles : { "familleId": points de base }.
+ALTER TABLE customers ADD COLUMN family_discounts TEXT;
+
+-- Facture récapitulative : les ventes d'un client sur une période, regroupées.
+CREATE TABLE summary_invoices (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT NOT NULL,
+  period_from TEXT NOT NULL,
+  period_to TEXT NOT NULL,
+  sale_ids TEXT NOT NULL,
+  total_ht INTEGER NOT NULL,
+  total_tva INTEGER NOT NULL,
+  total_ttc INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX summary_invoices_customer ON summary_invoices(customer_id, period_to);
+
+-- Contremarque : la ligne de commande client commandée au fournisseur.
+ALTER TABLE customer_order_lines ADD COLUMN purchase_order_id TEXT;
+
+-- Budget mensuel d'un compte (charges ou produits) : id = magasin:année:compte, 12 montants.
+CREATE TABLE budgets (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  year INTEGER NOT NULL,
+  account TEXT NOT NULL,
+  months TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX budgets_year ON budgets(store_id, year);
+
+-- Chèques reçus depuis cette version : au 513 « Chèques à encaisser » jusqu'à leur remise en banque.
+ALTER TABLE sale_payments ADD COLUMN clearing INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE customer_payments ADD COLUMN clearing INTEGER NOT NULL DEFAULT 0;
+INSERT OR IGNORE INTO accounts (id, label, role, updated_at) VALUES ('513', 'Chèques à encaisser', NULL, '');
+UPDATE accounts SET role = 'cheques' WHERE id = '513' AND role IS NULL AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = 'cheques');
+-- Bordereau de remise de chèques : une écriture 521 / 513 à la date de remise.
+CREATE TABLE cheque_deposits (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  deposit_date TEXT NOT NULL,
+  bank TEXT,
+  total INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE cheque_deposit_lines (
+  id TEXT PRIMARY KEY,
+  deposit_id TEXT NOT NULL REFERENCES cheque_deposits(id),
+  line_no INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('sale', 'customer_payment')),
+  payment_id TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  reference TEXT,
+  drawer TEXT,
+  received_at TEXT NOT NULL
+);
+CREATE INDEX cheque_deposit_lines_payment ON cheque_deposit_lines(payment_id);
+`,
+  },
 ];

@@ -466,6 +466,72 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         <div class="sign"><span>Expédié par : ……………………</span><span>Transporté par : ……………………</span><span>Reçu par : ……………………</span></div>`);
     },
 
+    async supplierReturn(returnId) {
+      const r = s.supplierReturns.get(returnId);
+      const store = s.admin.getStore(r.store_id);
+      const rows = r.lines
+        .map(
+          (l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.name)}${l.lot_number ? ` · lot ${esc(l.lot_number)}` : ''}${l.expiry ? ` · DLC ${dayFr(l.expiry)}` : ''}</td>
+            <td class="r">${formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_cost)}</td><td class="r">${formatRate(l.vat_rate_bp)}</td><td class="r">${money(l.total_ht)}</td></tr>`,
+        )
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Bon de retour fournisseur n° ${esc(r.number)}</h1>
+        <p>Fournisseur : <b>${esc(r.supplier_name)}</b> · dépôt ${esc(r.warehouse_name)} · le ${new Date(r.created_at).toLocaleDateString('fr-FR')}${r.user_name ? ` par ${esc(r.user_name)}` : ''}</p>
+        <p>Motif : ${esc(r.reason)}</p>
+        <table><thead><tr><th>Code</th><th>Produit</th><th class="r">Quantité</th><th class="r">Prix HT</th><th class="r">TVA</th><th class="r">Total HT</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+        <table class="totals"><tbody><tr><td>Total HT</td><td class="r">${money(r.total_ht)}</td></tr><tr><td>TVA</td><td class="r">${money(r.total_tva)}</td></tr>
+        <tr class="total"><td>Avoir attendu (FCFA)</td><td class="r">${money(r.total_ttc)}</td></tr></tbody></table>
+        ${r.credit_note_number ? `<p>Avoir reçu : ${esc(r.credit_note_number)} pour ${money(r.credit_note_ttc ?? 0)} FCFA</p>` : ''}
+        <div class="sign"><span>Remis par : ……………………</span><span>Reçu par le fournisseur : ……………………</span></div>`);
+    },
+
+    async summaryInvoice(invoiceId) {
+      const inv = s.summaryInvoices.get(invoiceId);
+      lang = customerLang(inv.customer_id);
+      const store = s.admin.getStore(inv.store_id);
+      const c = s.customers.getCustomer(inv.customer_id);
+      const sales = inv.sales
+        .map((sale) => {
+          const lines = sale.lines
+            .map(
+              (l) => `<tr><td></td><td>${esc(l.label)}</td><td class="r">${l.pack_name && l.pack_units && l.qty % l.pack_units === 0 ? `${l.qty / l.pack_units} ${esc(l.pack_name)}` : formatQty(l.qty, l.unit)}</td><td class="r">${money(l.unit_price)}</td><td class="r">${money(l.total_ttc)}</td></tr>`,
+            )
+            .join('');
+          return `<tr class="total"><td>${dayFr(sale.date)}</td><td>${sale.kind === 'return' ? 'Retour' : 'Vente'} n° ${esc(sale.number)}</td><td></td><td></td><td class="r">${money(sale.total_ttc)}</td></tr>${lines}`;
+        })
+        .join('');
+      const vat = inv.vat.map((v) => `<tr><td>${formatRate(v.rate_bp)}</td><td class="r">${money(v.ht)}</td><td class="r">${money(v.tva)}</td></tr>`).join('');
+      await printA4(`<div class="head">
+          <div><h1>${esc(store.name)}</h1>${[store.address, store.phone].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
+          <div class="box"><b>${esc(c.name)}</b><br>${[c.address, c.phone, `Compte ${c.code}`].filter(Boolean).map((v) => esc(v!)).join('<br>')}</div>
+        </div>
+        <h1>Facture récapitulative n° ${esc(inv.number)}${inv.status === 'cancelled' ? ' (annulée)' : ''}</h1>
+        <p>Du ${dayFr(inv.period_from)} au ${dayFr(inv.period_to)} · ${inv.sale_count} ventes</p>
+        <table><thead><tr><th>Date</th><th>Pièce et article</th><th class="r">Quantité</th><th class="r">Prix unitaire</th><th class="r">Montant TTC</th></tr></thead>
+        <tbody>${sales}</tbody></table>
+        <table><thead><tr><th>Taux de TVA</th><th class="r">Base HT</th><th class="r">TVA</th></tr></thead><tbody>${vat}</tbody></table>
+        <table class="totals"><tbody><tr><td>Total HT</td><td class="r">${money(inv.total_ht)}</td></tr><tr><td>TVA</td><td class="r">${money(inv.total_tva)}</td></tr>
+        <tr class="total"><td>Total TTC (FCFA)</td><td class="r">${money(inv.total_ttc)}</td></tr>
+        ${inv.on_credit ? `<tr><td>Dont passé au compte du client</td><td class="r">${money(inv.on_credit)}</td></tr>` : ''}</tbody></table>
+        <p class="muted">Facture récapitulative des tickets et factures de la période : chaque vente a déjà été enregistrée à sa date.</p>`);
+    },
+
+    async chequeDeposit(depositId) {
+      const d = s.cheques.get(depositId);
+      const store = s.admin.getStore(d.store_id);
+      const rows = d.lines
+        .map((l) => `<tr><td>${l.line_no}</td><td>${esc(l.reference ?? '')}</td><td>${esc(l.drawer ?? '')}</td><td>${dayFr(l.received_at)}</td><td class="r">${money(l.amount)}</td></tr>`)
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Bordereau de remise de chèques n° ${esc(d.number)}${d.status === 'cancelled' ? ' (annulé)' : ''}</h1>
+        <p>Remis le ${dayFr(d.deposit_date)}${d.bank ? ` à ${esc(d.bank)}` : ''} · ${d.count} chèques</p>
+        <table><thead><tr><th>N°</th><th>N° du chèque</th><th>Tireur</th><th>Reçu le</th><th class="r">Montant</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="4">Total remis (FCFA)</td><td class="r">${money(d.total)}</td></tr></tbody></table>
+        <div class="sign"><span>Remis par : ……………………</span><span>Cachet de la banque : ……………………</span></div>`);
+    },
+
     async reorderSheet(storeId, lines) {
       const store = s.admin.getStore(storeId);
       const art = s.db.prepare('SELECT code, name, unit, unit_name FROM articles WHERE id = ?');

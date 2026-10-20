@@ -6,9 +6,10 @@ import { Rebates, type RebatesTab } from './Rebates';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
 import { tx } from '../tax';
 import { InvoicePreview } from './docPreview';
+import { SummaryInvoices } from './SummaryInvoices';
 
 type User = NonNullable<Result<'app.state'>['user']>;
-export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | `rebates-${RebatesTab}`;
+export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | 'summary' | `rebates-${RebatesTab}`;
 
 /** Clients : fiches, comptes à crédit, balance âgée et règlements reçus. */
 export function Customers({ user, initialTab = 'list' }: { user: User; initialTab?: CustomersTab }) {
@@ -26,6 +27,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       : []),
     ['recent', 'Soldes qui ont bougé'],
     ['payments', 'Règlements reçus'],
+    ...(has(user, 'summary_invoices') ? ([['summary', 'Factures récapitulatives']] as [CustomersTab, string][]) : []),
     ...(has(user, 'rebates') ? ([['rebates', 'Ristournes']] as [CustomersTab, string][]) : []),
   ];
   return (
@@ -40,6 +42,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       {tab === 'limits' && accounting && <CreditControl />}
       {tab === 'recent' && <RecentAccounts party="customer" />}
       {tab === 'payments' && <Payments />}
+      {tab === 'summary' && has(user, 'summary_invoices') && <SummaryInvoices />}
       {tab === 'rebates' && has(user, 'rebates') && <Rebates user={user} initialTab={rebateTab} />}
     </div>
   );

@@ -51,18 +51,22 @@ export const ENTITY_LABELS: Record<string, string> = {
   treasury_entry: 'Encaissement / décaissement',
   sale_delivery: 'Livraison',
   fiscal_year: 'Exercice comptable',
+  supplier_return: 'Retour fournisseur',
+  summary_invoice: 'Facture récapitulative',
+  cheque_deposit: 'Remise de chèques',
+  budget: 'Budget',
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
-  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer'] },
+  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice'] },
   { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense'] },
   {
     key: 'stock',
     label: 'Stock',
     entities: ['stock_movement', 'lot', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'stock_level', 'reception', 'production_order'],
   },
-  { key: 'achats', label: 'Achats', entities: ['purchase_order', 'supplier_invoice', 'supplier_payment', 'supplier', 'supplier_article'] },
+  { key: 'achats', label: 'Achats', entities: ['purchase_order', 'supplier_invoice', 'supplier_payment', 'supplier', 'supplier_article', 'supplier_return'] },
   {
     key: 'catalogue',
     label: 'Articles et prix',
@@ -72,7 +76,7 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
   {
     key: 'compta',
     label: 'Comptabilité',
-    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry'],
+    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'budget'],
   },
 ];
 

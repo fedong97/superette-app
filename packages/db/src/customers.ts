@@ -4,6 +4,7 @@ import {
   type DocLang,
   DOC_LANGS,
   type Fcfa,
+  type FamilyDiscounts,
   type PriceLevel,
   PRICE_LEVELS,
   agingBucket,
@@ -32,6 +33,8 @@ export interface Customer {
   price_level: PriceLevel;
   /** Langue de ses tickets, factures et relevés. */
   language: DocLang;
+  /** Remises convenues par famille d'articles (JSON : {"<famille>": 300} = 3 %). */
+  family_discounts: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +52,8 @@ export interface CustomerInput {
   active?: boolean;
   priceLevel?: PriceLevel;
   language?: DocLang;
+  /** Remises par famille (points de base) ; absent = inchangées. */
+  familyDiscounts?: FamilyDiscounts;
 }
 
 export const CUSTOMER_PAYMENT_METHODS = {
@@ -175,6 +180,18 @@ export class CustomerService extends Base {
     return found.length === 1 ? found[0]! : null;
   }
 
+  /** Remises par famille contrôlées (famille connue, entre 0,01 % et 50 %), en JSON ; null sans remise. */
+  private discountsJson(discounts: FamilyDiscounts): string | null {
+    const clean: FamilyDiscounts = {};
+    for (const [familyId, bp] of Object.entries(discounts)) {
+      if (!bp) continue;
+      if (!Number.isSafeInteger(bp) || bp < 0 || bp > 5_000) throw new AppError('Remise par famille invalide : entre 0 et 50 %', 'INVALID');
+      if (!this.db.prepare('SELECT 1 FROM families WHERE id = ?').get(familyId)) throw new AppError('Famille inconnue', 'INVALID');
+      clean[familyId] = bp;
+    }
+    return Object.keys(clean).length ? JSON.stringify(clean) : null;
+  }
+
   saveCustomer(userId: string, input: CustomerInput, id?: string): Customer {
     const name = input.name.trim();
     if (!name) throw new AppError('Le nom du client est obligatoire', 'INVALID');
@@ -196,6 +213,7 @@ export class CustomerService extends Base {
       active: input.active === false ? 0 : 1,
       price_level: input.priceLevel ?? (id ? this.getCustomer(id).price_level : 'retail'),
       language: input.language ?? (id ? this.getCustomer(id).language : 'fr'),
+      family_discounts: input.familyDiscounts === undefined ? (id ? this.getCustomer(id).family_discounts : null) : this.discountsJson(input.familyDiscounts),
       updated_at: now,
     };
     if (!(values.price_level in PRICE_LEVELS)) throw new AppError('Tarif inconnu', 'INVALID');
@@ -208,18 +226,22 @@ export class CustomerService extends Base {
           .prepare(
             `UPDATE customers SET name = @name, contact = @contact, phone = @phone, email = @email, address = @address,
                taxpayer_number = @taxpayer_number, credit_limit = @credit_limit, payment_terms_days = @payment_terms_days,
-               notes = @notes, active = @active, price_level = @price_level, language = @language, updated_at = @updated_at WHERE id = @id`,
+               notes = @notes, active = @active, price_level = @price_level, language = @language, family_discounts = @family_discounts,
+               updated_at = @updated_at WHERE id = @id`,
           )
           .run({ ...values, id: customerId });
         if (before.credit_limit !== limit) this.audit(userId, 'customer.credit_limit', 'customer', customerId, { from: before.credit_limit, to: limit });
+        if ((before.family_discounts ?? null) !== values.family_discounts) {
+          this.audit(userId, 'customer.family_discounts', 'customer', customerId, { from: before.family_discounts, to: values.family_discounts });
+        }
       } else {
         customerId = newId();
         this.db
           .prepare(
             `INSERT INTO customers (id, code, name, contact, phone, email, address, taxpayer_number, credit_limit, payment_terms_days,
-               notes, active, price_level, language, created_at, updated_at)
+               notes, active, price_level, language, family_discounts, created_at, updated_at)
              VALUES (@id, @code, @name, @contact, @phone, @email, @address, @taxpayer_number, @credit_limit, @payment_terms_days,
-               @notes, @active, @price_level, @language, @created_at, @updated_at)`,
+               @notes, @active, @price_level, @language, @family_discounts, @created_at, @updated_at)`,
           )
           .run({ ...values, id: customerId, code: this.number('CLI', 'customer.code'), created_at: now });
       }
@@ -401,8 +423,8 @@ export class CustomerService extends Base {
       const id = newId();
       this.db
         .prepare(
-          `INSERT INTO customer_payments (id, number, customer_id, store_id, register_id, session_id, method, amount, reference, notes, paid_at, user_id, from_central)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO customer_payments (id, number, customer_id, store_id, register_id, session_id, method, amount, reference, notes, paid_at, user_id, from_central, clearing)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -419,6 +441,8 @@ export class CustomerService extends Base {
           ctx.userId,
           // Espèces reçues au bureau : elles entrent dans la caisse centrale.
           input.method === 'CASH' && !input.sessionId ? 1 : 0,
+          // Chèque : au 513 jusqu'à sa remise en banque (bordereau).
+          input.method === 'CHEQUE' ? 1 : 0,
         );
       this.enqueue(ctx, 'customer_payment', id, 'upsert', {});
       this.audit(ctx.userId, 'customer.payment', 'customer', input.customerId, { amount: input.amount, method: input.method });

@@ -83,6 +83,7 @@ export const MOVEMENT_TYPES = {
   REGULARIZATION: 'Régularisation (vendu sans stock)',
   PRODUCTION_OUT: 'Consommé en fabrication',
   PRODUCTION_IN: 'Produit fabriqué',
+  SUPPLIER_RETURN: 'Retour au fournisseur',
 } as const;
 
 export type MovementType = keyof typeof MOVEMENT_TYPES;

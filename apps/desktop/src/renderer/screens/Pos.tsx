@@ -1,5 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CartLine, type CustomerDisplayState, type Permission, type PosLayout, type PriceLevel, type Tariff, PRICE_LEVELS, applyPromotions, computeTotals, formatFcfa, lineTotal, roundCash, tariffPrice } from '@superette/core';
+import {
+  type CartLine,
+  type CustomerDisplayState,
+  type Permission,
+  type PosLayout,
+  type PriceLevel,
+  type QtyTier,
+  type Tariff,
+  PRICE_LEVELS,
+  agreedPrices,
+  applyPromotions,
+  computeTotals,
+  formatFcfa,
+  lineTotal,
+  parseFamilyDiscounts,
+  parseQtyTiers,
+  roundCash,
+  tariffPrice,
+} from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
@@ -35,6 +53,9 @@ export interface PosLine extends CartLine {
   packId: string | null;
   /** Prix saisi à la caisse pour ce conditionnement (sinon le tarif du client). */
   price?: number;
+  /** Prix par quantité de l'unité de détail et famille (remise du client par famille). */
+  tiers: QtyTier[];
+  familyId: string | null;
 }
 
 let keySeq = 0;
@@ -57,6 +78,8 @@ function toLine(article: Article, qtyMilli: number, barcode: string | null, fixe
     barcode,
     tariff: { retail: article.store_price, wholesale: article.wholesale_price, superWholesale: article.super_wholesale_price },
     packs,
+    tiers: parseQtyTiers(article.qty_tiers),
+    familyId: article.family_id,
     packId: pack?.id ?? null,
     ...(pack ? { packPrice: pack.tariff.retail, packUnits: pack.units } : {}),
     ...(price !== undefined ? { price } : {}),
@@ -218,8 +241,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const usualLevel = customer?.price_level ?? 'retail';
   const level = levelChoice ?? usualLevel;
   const priced = useMemo(
-    () => applyPromotions(lines.map((l) => atLevel(l, level)), level === 'retail' ? (promoRules.data ?? []) : []),
-    [lines, promoRules.data, level],
+    () => {
+      // Prix convenus, comme à l'enregistrement : paliers de quantité et remises du client par famille.
+      const discounts = parseFamilyDiscounts(customer?.family_discounts);
+      return applyPromotions(
+        lines.map((l) => agreedPrices(atLevel(l, level), l, discounts)),
+        level === 'retail' ? (promoRules.data ?? []) : [],
+      );
+    },
+    [lines, promoRules.data, level, customer],
   );
   /** Frais de livraison : une ligne de service ajoutée au ticket par le serveur à la validation. */
   const fee = delivery.on ? (parseAmount(delivery.fee) ?? 0) : 0;

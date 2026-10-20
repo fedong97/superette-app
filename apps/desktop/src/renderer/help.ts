@@ -146,6 +146,12 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
       {
         tab: 'list',
+        title: 'Prix par quantité',
+        perm: 'article_price',
+        steps: ['Dans la fiche d’un produit vendu à la pièce, « Prix par quantité » : à partir de N pièces, le prix unitaire baisse (jusqu’à 3 paliers, prix décroissants). La caisse l’applique toute seule selon la quantité de la ligne.'],
+      },
+      {
+        tab: 'list',
         title: 'Importer des produits (Excel, CSV)',
         perm: 'import',
         steps: [
@@ -249,6 +255,16 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'reorder', title: 'Proposition de commande', perm: 'purchase_orders', steps: ['Les quantités à commander d’après les ventes des 4 dernières semaines et le stock d’alerte ; un bon par fournisseur en un clic.'] },
       { tab: 'invoices', title: 'Factures fournisseurs', perm: 'purchase_invoices', steps: ['Saisissez la facture à partir des bons de réception, puis enregistrez les paiements.'] },
       { tab: 'due', title: 'Échéancier', perm: 'purchase_invoices', steps: ['Ce qui reste à payer à chaque fournisseur, avec les retards en rouge.'] },
+      {
+        tab: 'returns',
+        title: 'Retours fournisseur',
+        perm: 'supplier_returns',
+        steps: [
+          '« Nouveau retour fournisseur » : fournisseur, dépôt, motif (casse, périmés, erreur de livraison), puis les articles et quantités rendus. La marchandise sort du stock dès l’enregistrement ; imprimez le bon pour le livreur.',
+          'Le retour reste « Avoir attendu » : le haut de l’écran montre ce que chaque fournisseur vous doit en avoirs.',
+          'Quand l’avoir arrive, ouvrez le retour et « Saisir l’avoir reçu » (n°, date, montant accordé) : il vient en déduction de ce que vous devez au fournisseur.',
+        ],
+      },
     ],
   },
   suppliers: {
@@ -283,6 +299,22 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Ce que doit chaque client, par ancienneté du retard, avec la date de sa dernière relance.',
           '« Relancer » (ou « Relancer les clients en retard ») : le message rempli s’ouvre, modifiable ; « Ouvrir WhatsApp » l’envoie au téléphone du client, « Relevé en PDF » prépare le relevé à joindre. Chaque relance est notée.',
+        ],
+      },
+      {
+        tab: 'list',
+        title: 'Remises par famille',
+        perm: 'customer_price_level',
+        steps: ['Dans la fiche du client, « Remises par famille » : un pourcentage par famille d’articles (0 à 50 %). La caisse l’applique toute seule à ce client, sans code du gérant, après les prix par quantité.'],
+      },
+      {
+        tab: 'summary',
+        title: 'Factures récapitulatives',
+        perm: 'summary_invoices',
+        steps: [
+          'Choisissez le client et la période (le mois dernier par défaut) : ses tickets et factures pas encore regroupés s’affichent, cochés.',
+          '« Créer la facture récapitulative » puis « Imprimer » : une seule facture avec le détail de chaque vente, la TVA par taux et ce qui est passé à son compte.',
+          'Les ventes sont déjà comptabilisées à leur date : la récapitulative ne passe pas d’écriture. Une vente ne figure que sur une récapitulative ; « Annuler la facture » la libère.',
         ],
       },
       { tab: 'rebates-state', title: 'Ristournes', perm: 'rebates', steps: ['Réglez les taux par famille, puis chaque mois « Constater » et « Accorder » en avoir ou en bon.', 'Payée : en espèces depuis la caisse centrale, ou par MTN MoMo / Orange Money depuis une caisse électronique (la centrale par défaut), avec la référence du transfert.'] },
@@ -328,6 +360,13 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           '« Nouvelle commande » : origine (téléphone, WhatsApp, au magasin), client et téléphone, adresse (vide si le client vient la chercher), jour et créneau, frais de livraison, articles.',
           '« Confirmer par WhatsApp » ouvre WhatsApp avec le récapitulatif de la commande pour le client.',
+        ],
+      },
+      {
+        title: 'Commander ce qui manque (contremarque)',
+        steps: [
+          'Si le stock ne couvre pas la commande, « Commander au fournisseur ce qui manque » : les quantités manquantes partent sur le bon de commande en préparation du fournisseur habituel, ou sur un nouveau bon.',
+          'La colonne « Chez le fournisseur » montre le n° du bon et ce qui est déjà reçu.',
         ],
       },
       {
@@ -388,6 +427,39 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'vat', title: 'Déclaration de TVA', steps: ['Le mois à déclarer : CA par taux, TVA collectée et déductible, crédit reporté, plus l’acompte d’impôt. Imprimez pour la DGI.'] },
       { tab: 'statements', title: 'États financiers', steps: ['Bilan, compte de résultat et flux de trésorerie de l’exercice, avec les références de la DSF.'] },
       { tab: 'bank', title: 'Rapprochement bancaire', steps: ['Importez le relevé CSV de la banque ou de l’opérateur ; le pointage se fait tout seul, le reste à la main.'] },
+      {
+        tab: 'cheques',
+        title: 'Remises de chèques',
+        perm: 'cheque_deposits',
+        steps: [
+          'Les chèques reçus en caisse ou en règlement d’un client restent au compte 513 « Chèques à encaisser ».',
+          'Cochez les chèques portés à la banque, la date et la banque, puis « Créer et imprimer le bordereau » : une seule écriture 521 / 513, facile à retrouver sur le relevé.',
+        ],
+      },
+      {
+        tab: 'forecast',
+        title: 'Trésorerie prévisionnelle',
+        perm: 'cash_forecast',
+        steps: [
+          'Semaine par semaine : la trésorerie d’aujourd’hui, les échéances des clients, les factures fournisseurs et les charges fixes à payer. Ce qui est déjà en retard compte la première semaine.',
+          'Cochez « Ajouter les ventes et achats comptant habituels » pour une prévision complète (moyenne des 4 dernières semaines). Une semaine en rouge annonce un manque d’argent.',
+        ],
+      },
+      {
+        tab: 'budgets',
+        title: 'Budgets',
+        perm: 'budgets',
+        steps: [
+          '« Ajouter un budget » : un compte de charges (6) ou de produits (7) et un montant par mois (ou le même pour les 12 mois).',
+          'Chaque mois : budget, réel et écart, pour le mois et depuis janvier. Un écart positif est favorable.',
+        ],
+      },
+      {
+        tab: 'analytics',
+        title: 'Analytique',
+        perm: 'analytics',
+        steps: ['Par rayon ou par magasin : chiffre d’affaires HT, marge et résultat après les charges réparties au prorata du chiffre d’affaires.'],
+      },
       {
         tab: 'assets',
         title: 'Immobilisations',

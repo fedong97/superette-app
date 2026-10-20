@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { splitTtc } from '@superette/core';
+import { parseQtyTiers, splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
 import { ExportDialog, ImportDialog, type ListFilter, PriceUpdateDialog } from './articleFiles';
@@ -269,6 +269,11 @@ export function ArticleForm({
     }
   })();
   const [locations, setLocations] = useState<Record<string, string>>(initialLocations);
+  // Prix par quantité de l'unité de détail : trois paliers au plus à l'écran.
+  const initialTiers = parseQtyTiers(article?.qty_tiers);
+  const [tiers, setTiers] = useState(
+    [0, 1, 2].map((i) => ({ qty: initialTiers[i] ? String(initialTiers[i]!.minQty / 1000) : '', price: initialTiers[i] ? String(initialTiers[i]!.price) : '' })),
+  );
   const [newDept, setNewDept] = useState('');
   const [storePrice, setStorePrice] = useState(article && article.store_price !== article.sale_price ? String(article.store_price) : '');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -332,6 +337,10 @@ export function ArticleForm({
         const v = (locations[w.id] ?? '').trim().toUpperCase();
         if (v !== (initialLocations[w.id] ?? '')) await call('catalogue.setLocation', saved.id, w.id, v);
       }
+      const nextTiers = tiers
+        .filter((t) => t.qty.trim() && t.price.trim())
+        .map((t) => ({ minQty: Math.round(Number(t.qty.replace(',', '.')) * 1000), price: parseAmount(t.price) ?? 0 }));
+      if (JSON.stringify(nextTiers) !== JSON.stringify(initialTiers)) await call('catalogue.setQtyTiers', saved.id, nextTiers);
       if (canSetStorePrice) {
         const sp = storePrice.trim() ? parseAmount(storePrice) : null;
         const current = article && article.store_price !== article.sale_price ? article.store_price : null;
@@ -464,6 +473,15 @@ export function ArticleForm({
           <Field label="Article de remplacement" hint="Proposé en caisse quand celui-ci est épuisé">
             <SubstituteInput value={substitute} exclude={article?.id ?? null} onChange={setSubstitute} />
           </Field>
+          {piece &&
+            tiers.map((t, i) => (
+              <Field key={`tier${i}`} label={`Prix par quantité ${i + 1}`} hint={i === 0 ? 'À partir de combien d’unités, et le prix de l’unité' : undefined}>
+                <span className="inline">
+                  <input inputMode="numeric" placeholder="À partir de" value={t.qty} onChange={(e) => setTiers(tiers.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} />
+                  <input inputMode="numeric" placeholder="Prix unitaire" value={t.price} onChange={(e) => setTiers(tiers.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} />
+                </span>
+              </Field>
+            ))}
           {(warehouses.data ?? []).map((w) => (
             <Field key={w.id} label={`Emplacement · ${w.name}`} hint="Allée, étagère (ex. A3-2)">
               <input value={locations[w.id] ?? ''} maxLength={20} disabled={!can('article_edit', 'stock_location')} onChange={(e) => setLocations({ ...locations, [w.id]: e.target.value })} />

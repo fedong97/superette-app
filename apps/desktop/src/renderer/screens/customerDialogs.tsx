@@ -1,4 +1,4 @@
-import { DOC_LANGS, DOC_LANG_LABELS, type DocLang, PRICE_LEVELS, type PriceLevel } from '@superette/core';
+import { DOC_LANGS, DOC_LANG_LABELS, type DocLang, PRICE_LEVELS, type PriceLevel, parseFamilyDiscounts } from '@superette/core';
 import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Field, Modal, fcfa, has, parseAmount, useLoad, useStoreSettings, useToast } from '../ui';
@@ -79,7 +79,61 @@ export function CustomerFields({
           <input value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
       </div>
+      {canSetLevel && <FamilyDiscountFields value={value.discounts} onChange={(discounts) => set({ discounts })} />}
     </>
+  );
+}
+
+/** Remises convenues par famille d'articles (catégorie tarifaire) : appliquées en caisse sans code du gérant. */
+function FamilyDiscountFields({ value, onChange }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+  const departments = useLoad(() => call('catalogue.departments'), []);
+  const [adding, setAdding] = useState('');
+  const families = (departments.data ?? []).flatMap((d) => d.families.map((f) => ({ id: f.id, label: `${d.name} › ${f.name}` })));
+  const rows = Object.keys(value);
+  return (
+    <div className="family-discounts">
+      <h4>Remises par famille</h4>
+      <p className="muted">Pourcentage retiré du prix en caisse sur les articles de la famille, sans code du gérant.</p>
+      {rows.map((id) => (
+        <div key={id} className="inline">
+          <span>{families.find((f) => f.id === id)?.label ?? 'Famille'}</span>
+          <input inputMode="decimal" style={{ width: 70 }} value={value[id]} onChange={(e) => onChange({ ...value, [id]: e.target.value })} /> %
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              const next = { ...value };
+              delete next[id];
+              onChange(next);
+            }}
+          >
+            Retirer
+          </button>
+        </div>
+      ))}
+      <div className="inline">
+        <select value={adding} onChange={(e) => setAdding(e.target.value)}>
+          <option value="">Ajouter une famille…</option>
+          {families
+            .filter((f) => !rows.includes(f.id))
+            .map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+        </select>
+        <button
+          type="button"
+          disabled={!adding}
+          onClick={() => {
+            onChange({ ...value, [adding]: '' });
+            setAdding('');
+          }}
+        >
+          Ajouter
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -96,6 +150,8 @@ export interface CustomerDraft {
   active: boolean;
   priceLevel: PriceLevel;
   language: DocLang;
+  /** Remise en % (texte saisi) par famille. */
+  discounts: Record<string, string>;
 }
 
 /** Brouillon de la fiche ; un nouveau client prend le plafond et le délai des paramètres du magasin. */
@@ -112,6 +168,7 @@ export const draftOf = (c: Customer | null, defaults?: { creditDefaultLimit: num
   active: c ? c.active === 1 : true,
   priceLevel: c?.price_level ?? 'retail',
   language: c?.language ?? 'fr',
+  discounts: Object.fromEntries(Object.entries(parseFamilyDiscounts(c?.family_discounts)).map(([k, bp]) => [k, String(bp / 100).replace('.', ',')])),
 });
 
 export function inputOf(d: CustomerDraft) {
@@ -131,6 +188,15 @@ export function inputOf(d: CustomerDraft) {
     active: d.active,
     priceLevel: d.priceLevel,
     language: d.language,
+    familyDiscounts: Object.fromEntries(
+      Object.entries(d.discounts)
+        .filter(([, v]) => v.trim())
+        .map(([k, v]) => {
+          const pct = Number(v.replace(',', '.'));
+          if (!Number.isFinite(pct) || pct <= 0 || pct > 50) throw new Error('Remise par famille invalide : entre 0 et 50 %');
+          return [k, Math.round(pct * 100)];
+        }),
+    ),
   };
 }
 

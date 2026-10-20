@@ -71,6 +71,8 @@ const TABLES: Record<string, string> = {
   opening_balance: 'opening_balances',
   fixed_asset: 'fixed_assets',
   sales_target: 'sales_targets',
+  summary_invoice: 'summary_invoices',
+  budget: 'budgets',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -84,6 +86,9 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   stock_requests: { pending: 0, approved: 1, rejected: 1 },
   production_orders: { draft: 0, done: 1, cancelled: 1 },
   sale_deliveries: { pending: 0, out: 1, delivered: 2, cancelled: 2 },
+  supplier_returns: { open: 0, credited: 1 },
+  summary_invoices: { active: 0, cancelled: 1 },
+  cheque_deposits: { active: 0, cancelled: 1 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
@@ -93,6 +98,8 @@ const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> =
   manual_entry: { table: 'manual_entries', lines: 'manual_entry_lines', fk: 'entry_id' },
   quote: { table: 'quotes', lines: 'quote_lines', fk: 'quote_id' },
   customer_order: { table: 'customer_orders', lines: 'customer_order_lines', fk: 'order_id' },
+  supplier_return: { table: 'supplier_returns', lines: 'supplier_return_lines', fk: 'return_id' },
+  cheque_deposit: { table: 'cheque_deposits', lines: 'cheque_deposit_lines', fk: 'deposit_id' },
 };
 
 /**

@@ -269,6 +269,14 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Administration › Couleurs et badges : couleur principale et secondaire (`brandColor`, `brandColor2` dans les paramètres, copiés dans tous les magasins). L'écran réécrit ses variables CSS (`--brand`, `--brand-soft`…), le texte posé dessus passe en noir ou blanc selon le contraste ; les documents A4 et les cartes de fidélité suivent.
 - Badge : trois modèles (Bandeau, Arcs, Angles), carte bancaire, grand badge ou format libre, horizontal ou vertical, éléments au choix et verso (règles, dates, signature). Photo de l'employé dans la fiche utilisateur (caméra ou image), matricule, poste, téléphone et date d'entrée pris dans la fiche collaborateur.
 
+**Gestion commerciale et pilotage, d'après Sage (0.75.0)**
+- Retours fournisseur `RF-` : sortie de stock (mouvement « Retour au fournisseur », lot rendu noté), bon imprimable, avoir attendu par fournisseur ; l'avoir reçu est saisi depuis le bon (facture fournisseur de type avoir).
+- Prix par quantité (`articles.qty_tiers`, 3 paliers décroissants, articles à la pièce) et remises client par famille (`customers.family_discounts`, 0 à 50 %) appliqués par la caisse et vérifiés à l'enregistrement (`agreedPrices` de `@superette/core`).
+- Factures récapitulatives `FR-` : ventes d'un client sur une période, TVA par taux ; pas d'écriture (les ventes sont déjà comptabilisées), une vente sur une seule récapitulative active.
+- Contremarque : les quantités manquantes d'une commande client vont sur le bon de commande brouillon du fournisseur habituel (ou un nouveau) ; la ligne garde le lien `purchase_order_id`.
+- Trésorerie prévisionnelle par semaine (clients, fournisseurs, charges fixes, moyennes comptant en option), budgets mensuels par compte 6/7 avec écarts du mois et cumulés, analytique par rayon et par magasin (charges réparties au prorata du CA HT).
+- Chèques à encaisser : compte 513 (rôle `cheques`) pour les chèques reçus à partir de 0.75.0 ; bordereau de remise `RCH-` = écriture BQ 521 / 513. Les chèques plus anciens restent passés en banque comme avant.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

@@ -28,6 +28,7 @@ export const ACCOUNT_ROLES = {
   central_cash: 'Caisse centrale',
   owner: "Compte de l'exploitant",
   bank: 'Banque (virements, chèques)',
+  cheques: 'Chèques à encaisser',
   card: 'Cartes bancaires',
   mtn: 'MTN Mobile Money',
   orange: 'Orange Money',
@@ -193,6 +194,7 @@ export class AccountingService extends Base {
       ...this.centralEntries(storeId, r, opts),
       ...this.emoneyEntries(storeId, r, opts),
       ...this.customerPaymentEntries(storeId, r, opts),
+      ...this.chequeDepositEntries(storeId, r, opts),
       ...this.rebateEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
@@ -232,11 +234,11 @@ export class AccountingService extends Base {
       .all(params) as { session_id: string; d: string; ht: number; tva: number; change: number; n: number; register: string; z: number | null }[];
     const pays = this.db
       .prepare(
-        `SELECT s.session_id, date(s.created_at, 'localtime') AS d, p.method, c.code, c.name, SUM(p.amount) AS amount
+        `SELECT s.session_id, date(s.created_at, 'localtime') AS d, p.method, c.code, c.name, SUM(p.amount) AS amount, p.clearing
          FROM sales s JOIN sale_payments p ON p.sale_id = s.id LEFT JOIN customers c ON c.id = s.customer_id AND p.method = 'CUSTOMER_CREDIT'
-         WHERE ${where} GROUP BY s.session_id, d, p.method, c.code ORDER BY p.method, c.name`,
+         WHERE ${where} GROUP BY s.session_id, d, p.method, p.clearing, c.code ORDER BY p.method, c.name`,
       )
-      .all(params) as { session_id: string; d: string; method: string; code: string | null; name: string | null; amount: number }[];
+      .all(params) as { session_id: string; d: string; method: string; code: string | null; name: string | null; amount: number; clearing: number }[];
     return groups.map((g) => {
       const label = `Ventes ${g.register} du ${g.d.split('-').reverse().join('/')}`;
       const lines: EntryLine[] = [];
@@ -244,7 +246,9 @@ export class AccountingService extends Base {
         const amount = p.method === 'CASH' ? p.amount - g.change : p.amount;
         if (!amount) continue;
         const aux = p.method === 'CUSTOMER_CREDIT' && p.code ? { code: p.code, name: p.name ?? '' } : null;
-        lines.push(side(r[METHOD_ROLE[p.method] ?? 'cash'], amount, aux ? `Vente à crédit ${aux.name}` : label, aux));
+        // Chèque reçu : au 513 jusqu'à sa remise en banque (bordereau).
+        const account = p.clearing ? r.cheques : r[METHOD_ROLE[p.method] ?? 'cash'];
+        lines.push(side(account, amount, aux ? `Vente à crédit ${aux.name}` : label, aux));
       }
       lines.push(side(r.sales, -g.ht, label));
       lines.push(side(r.vat_collected, -g.tva, `TVA collectée, ${label.toLowerCase()}`));
@@ -388,10 +392,10 @@ export class AccountingService extends Base {
   private customerPaymentEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT p.number, p.method, p.amount, p.reference, p.from_central, date(p.paid_at, 'localtime') AS d, c.code, c.name
+        `SELECT p.number, p.method, p.amount, p.reference, p.from_central, p.clearing, date(p.paid_at, 'localtime') AS d, c.code, c.name
          FROM customer_payments p JOIN customers c ON c.id = p.customer_id WHERE p.store_id = ?`,
       )
-      .all(storeId) as { number: string; method: string; amount: number; reference: string | null; from_central: number; d: string; code: string; name: string }[];
+      .all(storeId) as { number: string; method: string; amount: number; reference: string | null; from_central: number; clearing: number; d: string; code: string; name: string }[];
     return rows
       .filter((p) => inRange(p.d, opts.from, opts.to))
       .map((p) => {
@@ -402,8 +406,24 @@ export class AccountingService extends Base {
           ref: p.number,
           label,
           source: 'auto' as const,
-          lines: [side(p.from_central ? r.central_cash : r[METHOD_ROLE[p.method] ?? 'bank'], p.amount, label), side(r.customers, -p.amount, label, { code: p.code, name: p.name })],
+          lines: [
+            side(p.from_central ? r.central_cash : p.clearing ? r.cheques : r[METHOD_ROLE[p.method] ?? 'bank'], p.amount, label),
+            side(r.customers, -p.amount, label, { code: p.code, name: p.name }),
+          ],
         };
+      });
+  }
+
+  /** Bordereau de remise de chèques : les chèques passent du 513 à la banque, en une écriture. */
+  private chequeDepositEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare("SELECT number, deposit_date AS d, total, bank FROM cheque_deposits WHERE store_id = ? AND status = 'active'")
+      .all(storeId) as { number: string; d: string; total: number; bank: string | null }[];
+    return rows
+      .filter((x) => inRange(x.d, opts.from, opts.to))
+      .map((x) => {
+        const label = `Remise de chèques n° ${x.number}${x.bank ? ` (${x.bank})` : ''}`;
+        return { journal: 'BQ' as const, date: x.d, ref: x.number, label, source: 'auto' as const, lines: [side(r.bank, x.total, label), side(r.cheques, -x.total, label)] };
       });
   }
 
@@ -880,7 +900,7 @@ export class AccountingService extends Base {
   /** Soldes de trésorerie (caisse, banque, mobile money) à une date. */
   treasury(storeId: string, to?: string) {
     const r = this.roles();
-    const accounts = (['cash', 'central_cash', 'bank', 'card', 'mtn', 'orange', 'transfer'] as AccountRole[]).map((role) => r[role]);
+    const accounts = (['cash', 'central_cash', 'bank', 'cheques', 'card', 'mtn', 'orange', 'transfer'] as AccountRole[]).map((role) => r[role]);
     const tb = this.trialBalance(storeId, { to });
     return accounts.map((id) => {
       const row = tb.rows.find((x) => x.account === id);

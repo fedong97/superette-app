@@ -68,6 +68,7 @@ export const PERMISSIONS = {
   quote_cancel: { label: 'Annuler un devis ou une proforma', group: 'Facturation', type: 'Bouton', parent: 'quotes' },
   customer_orders: { label: 'Commandes clients (téléphone, WhatsApp) : prendre, préparer', group: 'Facturation', type: 'Menu', roles: COUNTER },
   customer_order_cancel: { label: 'Annuler une commande client', group: 'Facturation', type: 'Bouton', parent: 'customer_orders' },
+  back_orders: { label: 'Commander au fournisseur ce qui manque pour une commande client (contremarque)', group: 'Facturation', type: 'Bouton', parent: 'customer_orders' },
   price: { label: 'Appliquer un prix négocié à la saisie (jamais sous le revient)', group: 'Facturation', type: 'Fonction', roles: POS },
   discount: { label: 'Accorder une remise sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   sale_hold: { label: 'Mettre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
@@ -109,6 +110,7 @@ export const PERMISSIONS = {
   customer_price_level: { label: "Fixer la grille tarifaire d'un client (gros, super gros)", group: 'Fichier des clients', type: 'Fonction', parent: 'receivables' },
   customer_payment: { label: 'Encaisser un règlement client', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   customer_statement: { label: "Consulter et imprimer l'extrait de compte d'un client", group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
+  summary_invoices: { label: 'Factures récapitulatives des clients (fin de mois)', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   loyalty_adjust: { label: 'Corriger les points de fidélité d’un client (avec motif)', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
   rebates: { label: 'Ristournes et bonus clients : réglages, constater, accorder et régulariser', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
 
@@ -127,6 +129,7 @@ export const PERMISSIONS = {
   purchase_invoices: { label: 'Saisir les factures fournisseurs (à partir des bons de réception)', group: 'Achat de marchandises', type: 'Fonction', roles: [...ACCOUNTING, 'buyer'] },
   supplier_pay: { label: 'Payer une facture fournisseur', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   purchase_due: { label: 'Échéancier des fournisseurs', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
+  supplier_returns: { label: 'Retours au fournisseur et avoirs attendus', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
 
   // --- Configuration des produits ----------------------------------------------
   articles: { label: 'Liste et fiches des produits', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
@@ -211,6 +214,10 @@ export const PERMISSIONS = {
   statements: { label: 'États financiers (bilan, compte de résultat, flux)', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   accounting_export: { label: 'Exporter la comptabilité et les ventes (CSV)', group: 'Comptabilité', type: 'Bouton', parent: 'accounting' },
   fixed_assets: { label: 'Registre des immobilisations et plans d’amortissement', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  cash_forecast: { label: 'Trésorerie prévisionnelle', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  budgets: { label: 'Budgets par compte et suivi du réel', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  analytics: { label: 'Analytique : résultat par rayon et par magasin', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  cheque_deposits: { label: 'Bordereaux de remise de chèques en banque', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   fixed_asset_edit: { label: 'Ajouter, modifier, sortir ou supprimer une immobilisation', group: 'Comptabilité', type: 'Bouton', parent: 'journal_entry' },
 
   // --- Divers ------------------------------------------------------------------

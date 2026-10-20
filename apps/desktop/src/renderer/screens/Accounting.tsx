@@ -4,13 +4,14 @@ import { type ApiError, type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, askConfirm, dateFr, dateTime, downloadText, fcfa, parseAmount, readTextFile, today, useCan, useLoad, useToast } from '../ui';
 import { Disclosures } from './Disclosures';
 import { Assets } from './Assets';
+import { Analytics, Budgets, CashForecast, ChequeDeposits } from './Planning';
 import { AccountPicker } from './accountPicker';
 import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal' | 'assets';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal' | 'assets' | 'forecast' | 'budgets' | 'analytics' | 'cheques';
 type Entry = Result<'accounting.entries'>[number];
 type FiscalYear = Result<'fiscal.list'>[number];
 
@@ -45,6 +46,7 @@ const ROLES: Record<string, string> = {
   cash_over: 'Excédents de caisse',
   stock: 'Stock de marchandises',
   stock_variation: 'Variation des stocks',
+  cheques: 'Chèques à encaisser',
 };
 
 const monthStart = () => `${today().slice(0, 7)}-01`;
@@ -67,6 +69,10 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
     accounts: true,
     fiscal: can('accounting', 'fiscal_years'),
     assets: can('fixed_assets'),
+    forecast: can('cash_forecast'),
+    budgets: can('budgets'),
+    analytics: can('analytics'),
+    cheques: can('cheque_deposits'),
   };
   const [tab, setTab] = useState<AccountingTab>(allowed[initialTab] ? initialTab : ((Object.keys(allowed) as AccountingTab[]).find((k) => allowed[k]) ?? 'accounts'));
   const [ledgerAccount, setLedgerAccount] = useState('571');
@@ -94,6 +100,10 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
             ['tax', 'Impôt sur le résultat'],
             ['treasury', 'Trésorerie'],
             ['bank', 'Rapprochement bancaire'],
+            ['cheques', 'Remises de chèques'],
+            ['forecast', 'Trésorerie prévisionnelle'],
+            ['budgets', 'Budgets'],
+            ['analytics', 'Analytique'],
             ['assets', 'Immobilisations'],
             ['accounts', 'Plan comptable'],
             ['fiscal', 'Exercices'],
@@ -113,6 +123,10 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'accounts' && <Accounts user={user} />}
       {tab === 'fiscal' && allowed.fiscal && <FiscalYears />}
       {tab === 'assets' && allowed.assets && <Assets />}
+      {tab === 'forecast' && allowed.forecast && <CashForecast />}
+      {tab === 'budgets' && allowed.budgets && <Budgets />}
+      {tab === 'analytics' && allowed.analytics && <Analytics />}
+      {tab === 'cheques' && allowed.cheques && <ChequeDeposits />}
     </div>
   );
 }

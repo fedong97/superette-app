@@ -11,11 +11,12 @@ import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } fr
 import { hasVat, tx } from '../tax';
 import { DocPreview } from './docPreview';
 import { ReceptionLabels } from './barcodePrint';
+import { SupplierReturns } from './SupplierReturns';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
 type Invoice = Result<'purchases.invoice'>['invoice'];
-export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder';
+export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns';
 
 const ORDER_STATES: Record<Order['state'], string> = {
   draft: 'Brouillon',
@@ -60,6 +61,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
     ...(invoices ? ([['invoices', 'Registre des achats']] as [PurchasesTab, string][]) : []),
     ...(direct ? ([['direct', 'Facture directe']] as [PurchasesTab, string][]) : []),
     ...(has(user, 'purchase_due') ? ([['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'supplier_returns') ? ([['returns', 'Retours fournisseur']] as [PurchasesTab, string][]) : []),
     ['byproduct', 'Achats par produit'],
     ...(has(user, 'reorder') ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
   ];
@@ -76,6 +78,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       {tab === 'invoices' && invoices && <Invoices />}
       {tab === 'direct' && direct && <DirectInvoice canPay={has(user, 'supplier_pay')} />}
       {tab === 'due' && has(user, 'purchase_due') && <Due />}
+      {tab === 'returns' && has(user, 'supplier_returns') && <SupplierReturns canCredit={has(user, 'purchase_invoices')} />}
       {tab === 'reorder' && has(user, 'reorder') && <Reorder onCreated={() => setTab('orders')} />}
     </div>
   );

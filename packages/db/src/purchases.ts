@@ -555,6 +555,101 @@ export class PurchaseService extends Base {
     return result;
   }
 
+  // --- Contremarque ---------------------------------------------------------------
+
+  /**
+   * Lignes d'une commande client que le stock ne couvre pas : quantité commandée
+   * moins le stock du magasin non réservé par d'autres commandes préparées.
+   */
+  backOrderNeeds(storeId: string, customerOrderId: string): { lineId: string; articleId: string; name: string; missing: Milli; supplierId: string | null; supplierName: string | null; unitCost: Fcfa }[] {
+    const lines = this.db
+      .prepare(
+        `SELECT l.id, l.article_id, a.name, l.qty, a.purchase_price FROM customer_order_lines l JOIN customer_orders o ON o.id = l.order_id
+         JOIN articles a ON a.id = l.article_id WHERE o.id = ? AND o.store_id = ? AND l.purchase_order_id IS NULL AND a.is_service = 0 ORDER BY l.line_no`,
+      )
+      .all(customerOrderId, storeId) as { id: string; article_id: string; name: string; qty: number; purchase_price: number }[];
+    const stocked = this.db.prepare('SELECT COALESCE(SUM(s.qty), 0) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ? AND s.article_id = ?').pluck();
+    const reserved = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(l.qty), 0) FROM customer_order_lines l JOIN customer_orders o ON o.id = l.order_id
+         WHERE o.store_id = ? AND o.status = 'prepared' AND o.id <> ? AND l.article_id = ?`,
+      )
+      .pluck();
+    const main = this.db.prepare(
+      `SELECT sa.supplier_id, s.name, sa.unit_cost FROM supplier_articles sa JOIN suppliers s ON s.id = sa.supplier_id
+       WHERE sa.article_id = ? AND s.active = 1 ORDER BY sa.is_main DESC, sa.updated_at DESC LIMIT 1`,
+    );
+    const left = new Map<string, number>();
+    const out: ReturnType<PurchaseService['backOrderNeeds']> = [];
+    for (const l of lines) {
+      if (!left.has(l.article_id)) left.set(l.article_id, Math.max(0, (stocked.get(storeId, l.article_id) as number) - (reserved.get(storeId, customerOrderId, l.article_id) as number)));
+      const free = left.get(l.article_id)!;
+      const missing = Math.max(0, l.qty - free);
+      left.set(l.article_id, Math.max(0, free - l.qty));
+      if (missing <= 0) continue;
+      const sup = main.get(l.article_id) as { supplier_id: string; name: string; unit_cost: number } | undefined;
+      out.push({ lineId: l.id, articleId: l.article_id, name: l.name, missing, supplierId: sup?.supplier_id ?? null, supplierName: sup?.name ?? null, unitCost: sup?.unit_cost || l.purchase_price });
+    }
+    return out;
+  }
+
+  /**
+   * Contremarque : ce qui manque pour une commande client part dans le bon de
+   * commande en brouillon de son fournisseur (créé au besoin), et la ligne de la
+   * commande client garde le bon où elle est commandée.
+   */
+  backOrder(ctx: Context, customerOrderId: string, opts: { supplierId?: string | null; warehouseId?: string | null } = {}): PurchaseOrder[] {
+    const status = this.db.prepare('SELECT status FROM customer_orders WHERE id = ? AND store_id = ?').pluck().get(customerOrderId, ctx.storeId) as string | undefined;
+    if (!status) throw new AppError('Commande client introuvable', 'NOT_FOUND');
+    if (status === 'invoiced' || status === 'cancelled') throw new AppError('Cette commande client est clôturée', 'INVALID');
+    const needs = this.backOrderNeeds(ctx.storeId, customerOrderId).map((n) => (opts.supplierId ? { ...n, supplierId: opts.supplierId } : n));
+    if (needs.length === 0) throw new AppError('Le stock couvre déjà toute la commande : rien à commander', 'EMPTY');
+    const orphan = needs.find((n) => !n.supplierId);
+    if (orphan) throw new AppError(`${orphan.name} n'a pas de fournisseur : choisissez le fournisseur à qui commander`, 'SUPPLIER_REQUIRED');
+    const warehouseId =
+      opts.warehouseId ?? (this.db.prepare('SELECT id FROM warehouses WHERE store_id = ? AND active = 1 ORDER BY is_sales_default DESC, name LIMIT 1').pluck().get(ctx.storeId) as string);
+    const bySupplier = new Map<string, typeof needs>();
+    for (const n of needs) bySupplier.set(n.supplierId!, [...(bySupplier.get(n.supplierId!) ?? []), n]);
+    const ref = this.db.prepare('SELECT number FROM customer_orders WHERE id = ?').pluck().get(customerOrderId) as string;
+    return this.tx(() =>
+      [...bySupplier].map(([supplierId, ns]) => {
+        // Un brouillon en cours chez ce fournisseur reçoit les lignes ; sinon un nouveau bon.
+        const draft = this.db
+          .prepare("SELECT id FROM purchase_orders WHERE store_id = ? AND supplier_id = ? AND status = 'draft' ORDER BY created_at DESC LIMIT 1")
+          .pluck()
+          .get(ctx.storeId, supplierId) as string | undefined;
+        const add = ns.map((n) => ({ articleId: n.articleId, qty: n.missing, unitCost: n.unitCost }));
+        let order: PurchaseOrder;
+        if (draft) {
+          const current = this.getOrder(draft);
+          const lines: PurchaseOrderLineInput[] = current.lines.map((l) => ({
+            articleId: l.article_id,
+            qty: l.qty,
+            unitCost: l.unit_cost,
+            discountBp: l.discount_bp,
+            freeQty: l.free_qty,
+            promoBuy: l.promo_buy,
+            promoPay: l.promo_pay,
+          }));
+          for (const a of add) {
+            const same = lines.find((l) => l.articleId === a.articleId && !l.freeQty);
+            if (same) same.qty += a.qty;
+            else lines.push(a);
+          }
+          const notes = [current.notes, `Contremarque ${ref}`].filter(Boolean).join(' · ');
+          order = this.updateOrder(ctx, draft, { supplierId, warehouseId: current.warehouse_id, expectedDate: current.expected_date, notes, lines });
+        } else {
+          order = this.createOrder(ctx, { supplierId, warehouseId, notes: `Contremarque ${ref}`, lines: add });
+        }
+        const link = this.db.prepare('UPDATE customer_order_lines SET purchase_order_id = ? WHERE id = ?');
+        for (const n of ns) link.run(order.id, n.lineId);
+        this.enqueue(ctx, 'customer_order', customerOrderId, 'upsert', {});
+        this.audit(ctx.userId, 'order.back_order', 'customer_order', customerOrderId, { purchaseOrder: order.number, lines: ns.length });
+        return order;
+      }),
+    );
+  }
+
   // --- Réceptions ---------------------------------------------------------------
 
   private receptionTotals(id: string): { total_ht: Fcfa; total_tva: Fcfa; total_ttc: Fcfa } {
@@ -979,7 +1074,7 @@ export class PurchaseService extends Base {
 }
 
 /** Totaux HT, TVA, TTC d'un document d'achat, TVA calculée par taux sur le cumul HT. */
-function taxTotals(lines: { ht: Fcfa; rate: number }[]): { total_ht: Fcfa; total_tva: Fcfa; total_ttc: Fcfa } {
+export function taxTotals(lines: { ht: Fcfa; rate: number }[]): { total_ht: Fcfa; total_tva: Fcfa; total_ttc: Fcfa } {
   const byRate = new Map<number, number>();
   for (const l of lines) byRate.set(l.rate, (byRate.get(l.rate) ?? 0) + l.ht);
   let ht = 0;

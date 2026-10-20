@@ -55,12 +55,16 @@ export const ENTITY_LABELS: Record<string, string> = {
   summary_invoice: 'Facture récapitulative',
   cheque_deposit: 'Remise de chèques',
   budget: 'Budget',
+  attendance: 'Pointage',
+  cash_handover: 'Relève de caisse',
+  fixed_asset: 'Immobilisation',
+  opening_balance: "Solde d'ouverture",
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
   { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice'] },
-  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense'] },
+  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover'] },
   {
     key: 'stock',
     label: 'Stock',
@@ -72,11 +76,11 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
     label: 'Articles et prix',
     entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules'],
   },
-  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'expense_category'] },
+  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'attendance', 'expense_category'] },
   {
     key: 'compta',
     label: 'Comptabilité',
-    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'budget'],
+    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'budget', 'fixed_asset', 'opening_balance'],
   },
 ];
 

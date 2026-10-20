@@ -197,8 +197,9 @@ export class SyncService extends Base {
     this.set('sync.cursor', String(cursor));
   }
 
-  recordResult(error: string | null): void {
-    if (error === null) this.set('sync.lastSyncAt', this.now());
+  /** `synced` : l'échange a eu lieu, même si `error` signale des opérations refusées. */
+  recordResult(error: string | null, synced = error === null): void {
+    if (synced) this.set('sync.lastSyncAt', this.now());
     this.set('sync.lastError', error);
   }
 

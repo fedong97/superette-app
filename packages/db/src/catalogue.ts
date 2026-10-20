@@ -5,8 +5,10 @@ import {
   type BarcodeKind,
   type Fcfa,
   type Milli,
+  type QtyTier,
   type ScaleBarcodeConfig,
   checkPacks,
+  checkQtyTiers,
   internalEan13,
   internalEan8,
   isValidEan,
@@ -66,6 +68,8 @@ export interface Article {
   substitute_name: string | null;
   /** Emplacement dans chaque dépôt (JSON : {"<dépôt>": "A3-2"}). */
   locations: string | null;
+  /** Prix par quantité de l'unité de détail (JSON : [{"minQty": 12000, "price": 480}]). */
+  qty_tiers: string | null;
   barcodes: { code: string; pack_qty: Milli }[];
   /** Conditionnements, du plus grand au plus petit (carton, paquet). */
   packs: ArticlePack[];
@@ -850,6 +854,24 @@ export class CatalogueService extends Base {
   setSubstitute(userId: string, articleId: string, substituteId: string | null): Article {
     const a = this.getArticle(articleId);
     return this.saveArticle(userId, { ...this.inputOf(a), substituteId }, articleId);
+  }
+
+  /** Prix par quantité de l'unité de détail (« 480 F à partir de 12 ») ; une liste vide les retire. */
+  setQtyTiers(userId: string, articleId: string, tiers: QtyTier[]): Article {
+    const a = this.getArticle(articleId);
+    const clean = tiers.map((t) => ({ minQty: t.minQty, price: t.price })).sort((x, y) => x.minQty - y.minQty);
+    if (clean.length && a.unit !== 'piece') throw new AppError('Les prix par quantité ne valent que pour les articles vendus à la pièce', 'INVALID');
+    const err = checkQtyTiers(clean, a.sale_price);
+    if (err) throw new AppError(err, 'INVALID');
+    const json = clean.length ? JSON.stringify(clean) : null;
+    if (json === (a.qty_tiers ?? null)) return a;
+    return this.tx(() => {
+      this.db.prepare('UPDATE articles SET qty_tiers = ?, updated_at = ? WHERE id = ?').run(json, this.now(), articleId);
+      const next = this.getArticle(articleId);
+      this.enqueue(null, 'article', articleId, 'upsert', next);
+      this.audit(userId, 'article.qty_tiers', 'article', articleId, { tiers: clean });
+      return next;
+    });
   }
 
   /** Emplacement de l'article dans un dépôt (allée, étagère) ; vide le retire. */

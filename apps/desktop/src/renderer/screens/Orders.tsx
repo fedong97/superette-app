@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { type Result, call } from '../api';
 import { askConfirm, askText, dateFr, Empty, fcfa, Field, has, Modal, parseAmount, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
-import { ArticlePicker } from './pickers';
+import { ArticlePicker, SupplierSelect } from './pickers';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'orders.get'>;
@@ -319,6 +319,7 @@ function OrderDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
   const toast = useToast();
   const can = useCan();
   const loaded = useLoad(() => call('orders.get', id), [id]);
+  const [backOrder, setBackOrder] = useState(false);
   const o = loaded.data;
   if (!o) return null;
   const act = async (fn: () => Promise<unknown>, done: string) => {
@@ -340,6 +341,7 @@ function OrderDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
     }
   };
   const openOrder = o.status === 'new' || o.status === 'prepared';
+  const backOrdered = o.lines.some((l) => l.purchase_order_id);
   return (
     <Modal title={`Commande ${o.number}`} onClose={onClose} wide>
       <p>
@@ -358,6 +360,7 @@ function OrderDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
             <th className="r">Quantité</th>
             <th className="r">Prix</th>
             <th className="r">Montant</th>
+            {backOrdered && <th>Chez le fournisseur</th>}
           </tr>
         </thead>
         <tbody>
@@ -367,6 +370,7 @@ function OrderDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
               <td className="r">{qty(l.qty, l.unit)}</td>
               <td className="r">{fcfa(l.unit_price)}</td>
               <td className="r">{fcfa(l.total_ttc)}</td>
+              {backOrdered && <td>{l.purchase_order_number ? `${l.purchase_order_number} · ${l.purchase_received > 0 ? `reçu ${qty(l.purchase_received, l.unit)}` : 'commandé'}` : ''}</td>}
             </tr>
           ))}
           {o.delivery_fee > 0 && (
@@ -402,6 +406,11 @@ function OrderDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
             Modifier
           </button>
         )}
+        {openOrder && can('back_orders') && (
+          <button type="button" onClick={() => setBackOrder(true)}>
+            Commander au fournisseur ce qui manque
+          </button>
+        )}
         {openOrder && o.phone && (
           <button type="button" onClick={() => void whatsapp()}>
             Confirmer par WhatsApp
@@ -422,6 +431,75 @@ function OrderDetail({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
             Préparée
           </button>
         )}
+      </div>
+      {backOrder && (
+        <BackOrderDialog
+          order={o}
+          onClose={() => setBackOrder(false)}
+          onDone={() => {
+            setBackOrder(false);
+            loaded.reload();
+            onChanged();
+          }}
+        />
+      )}
+    </Modal>
+  );
+}
+
+/** Contremarque : ce que le stock ne couvre pas part en bon de commande chez le fournisseur. */
+function BackOrderDialog({ order, onClose, onDone }: { order: Order; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const needs = useLoad(() => call('orders.backOrderNeeds', order.id), [order.id]);
+  const [supplierId, setSupplierId] = useState('');
+  const rows = needs.data ?? [];
+  const orphan = rows.some((n) => !n.supplierId);
+  return (
+    <Modal title={`Commander au fournisseur pour ${order.number}`} onClose={onClose}>
+      {needs.data && rows.length === 0 ? (
+        <p>Le stock couvre déjà toute la commande : rien à commander.</p>
+      ) : (
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Article</th>
+              <th className="r">Manque</th>
+              <th>Fournisseur</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((n) => (
+              <tr key={n.lineId}>
+                <td>{n.name}</td>
+                <td className="r">{qty(n.missing, order.lines.find((l) => l.id === n.lineId)?.unit ?? 'piece')}</td>
+                <td>{n.supplierName ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {rows.length > 0 && <SupplierSelect value={supplierId} onChange={setSupplierId} optional={!orphan} label={orphan ? 'Fournisseur à qui commander' : 'Autre fournisseur (sinon le fournisseur habituel)'} />}
+      <p className="muted">Les articles sont ajoutés au bon de commande en préparation chez le fournisseur, ou à un nouveau bon.</p>
+      <div className="actions">
+        <button type="button" onClick={onClose}>
+          Fermer
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={rows.length === 0 || (orphan && !supplierId)}
+          onClick={async () => {
+            try {
+              const pos = await call('orders.backOrder', order.id, { supplierId: supplierId || null });
+              toast.ok(`Bon de commande ${pos.map((p) => p.number).join(', ')}`);
+              onDone();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          Commander
+        </button>
       </div>
     </Modal>
   );

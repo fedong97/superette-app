@@ -109,6 +109,17 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.75.0',
+    items: [
+      'Retours fournisseur : Achats › Retours fournisseur et avoirs attendus. La marchandise rendue (casse, périmés, erreur) sort du stock, le bon s’imprime, et l’avoir du fournisseur se saisit depuis le bon pour venir en déduction de sa dette.',
+      'Prix par quantité : dans la fiche d’un produit, jusqu’à 3 paliers (à partir de N pièces, tel prix). Remises par famille : dans la fiche d’un client, un pourcentage par famille d’articles. La caisse applique les deux toute seule.',
+      'Factures récapitulatives : Client › Factures récapitulatives. Les tickets et factures d’un client sur le mois, sur une seule facture à imprimer (sans nouvelle écriture comptable).',
+      'Contremarque : dans une commande client, « Commander au fournisseur ce qui manque » ajoute les quantités manquantes au bon de commande du fournisseur ; la commande montre où en est la livraison.',
+      'Comptabilité : trésorerie prévisionnelle semaine par semaine, budgets mensuels par compte comparés au réel, analytique par rayon et par magasin.',
+      'Remises de chèques : les chèques reçus à partir de cette version restent au compte 513 jusqu’au bordereau de remise en banque (Trésorerie › Remises de chèques en banque).',
+    ],
+  },
+  {
     version: '0.74.0',
     items: [
       'Couleurs de l’entreprise : Administration › Couleurs et badges. Choisissez une couleur principale et une secondaire (ou une palette toute prête) : toute l’application, les badges, les cartes de fidélité et les documents A4 les prennent, sur tous les postes.',

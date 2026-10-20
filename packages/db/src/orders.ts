@@ -23,6 +23,11 @@ export interface OrderLine {
   qty: Milli;
   unit_price: Fcfa;
   total_ttc: Fcfa;
+  /** Contremarque : bon de commande fournisseur où la ligne est commandée, et ce qui en est déjà reçu. */
+  purchase_order_id: string | null;
+  purchase_order_number: string | null;
+  purchase_order_status: string | null;
+  purchase_received: Milli;
 }
 
 export interface CustomerOrder {
@@ -117,6 +122,7 @@ export class OrderService extends Base {
     const total = lines.reduce((t, l) => t + l.total, 0) + fee;
     return this.tx(() => {
       const orderId = id ?? newId();
+      const backOrdered = new Map<string, string>();
       const now = this.now();
       const row = {
         id: orderId,
@@ -141,6 +147,12 @@ export class OrderService extends Base {
                status = 'new', prepared_at = NULL, updated_at = @now WHERE id = @id`,
           )
           .run(row);
+        // Les articles déjà commandés au fournisseur (contremarque) gardent leur bon.
+        for (const r of this.db.prepare('SELECT article_id, purchase_order_id FROM customer_order_lines WHERE order_id = ? AND purchase_order_id IS NOT NULL').all(orderId) as {
+          article_id: string;
+          purchase_order_id: string;
+        }[])
+          backOrdered.set(r.article_id, r.purchase_order_id);
         this.db.prepare('DELETE FROM customer_order_lines WHERE order_id = ?').run(orderId);
       } else {
         const prefix = this.admin.storeSettings(ctx.storeId).prefixCustomerOrder || 'CC';
@@ -155,9 +167,9 @@ export class OrderService extends Base {
           .run({ ...row, number, store: ctx.storeId, user: ctx.userId });
       }
       const insert = this.db.prepare(
-        'INSERT INTO customer_order_lines (id, order_id, line_no, article_id, label, qty, unit_price, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO customer_order_lines (id, order_id, line_no, article_id, label, qty, unit_price, total_ttc, purchase_order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
-      lines.forEach((l, i) => insert.run(newId(), orderId, i + 1, l.articleId, l.label, l.qty, l.unitPrice, l.total));
+      lines.forEach((l, i) => insert.run(newId(), orderId, i + 1, l.articleId, l.label, l.qty, l.unitPrice, l.total, backOrdered.get(l.articleId) ?? null));
       this.enqueue(ctx, 'customer_order', orderId, 'upsert', {});
       this.audit(ctx.userId, id ? 'order.update' : 'order.create', 'customer_order', orderId, { total, channel });
       return this.get(orderId);
@@ -193,8 +205,12 @@ export class OrderService extends Base {
     if (!head) throw new AppError('Commande introuvable', 'NOT_FOUND');
     const lines = this.db
       .prepare(
-        `SELECT l.id, l.line_no, l.article_id, l.label, a.unit, l.qty, l.unit_price, l.total_ttc
-         FROM customer_order_lines l JOIN articles a ON a.id = l.article_id WHERE l.order_id = ? ORDER BY l.line_no`,
+        `SELECT l.id, l.line_no, l.article_id, l.label, a.unit, l.qty, l.unit_price, l.total_ttc, l.purchase_order_id,
+                po.number AS purchase_order_number, po.status AS purchase_order_status,
+                COALESCE((SELECT SUM(rl.qty) FROM reception_lines rl JOIN purchase_order_lines pl ON pl.id = rl.order_line_id
+                          WHERE pl.order_id = l.purchase_order_id AND pl.article_id = l.article_id), 0) AS purchase_received
+         FROM customer_order_lines l JOIN articles a ON a.id = l.article_id LEFT JOIN purchase_orders po ON po.id = l.purchase_order_id
+         WHERE l.order_id = ? ORDER BY l.line_no`,
       )
       .all(id) as OrderLine[];
     return { ...head, lines };

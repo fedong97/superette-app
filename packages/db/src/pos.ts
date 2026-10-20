@@ -9,6 +9,7 @@ import {
   type PromotedLine,
   PAYMENT_METHODS,
   type RegisterKind,
+  agreedPrices,
   applyPromotions,
   paymentRegisterKind,
   ELECTRONIC_METHODS,
@@ -22,6 +23,8 @@ import {
   formatFcfa,
   roundCash,
   levelCost,
+  parseFamilyDiscounts,
+  parseQtyTiers,
   tariffPrice,
 } from '@superette/core';
 import type { AdminService } from './admin';
@@ -582,9 +585,11 @@ export class PosService extends Base {
    * l'unité au détail, prix du conditionnement pour un carton ou un paquet. Les
    * promotions ne valent qu'au détail.
    */
-  priceLines(storeId: string, input: SaleLineInput[], level: PriceLevel = 'retail'): PricedLine[] {
+  priceLines(storeId: string, input: SaleLineInput[], level: PriceLevel = 'retail', customerId: string | null = null): PricedLine[] {
     // Magasin non assujetti (régime simplifié) : aucune TVA sur ses ventes.
     const vat = this.admin.getStore(storeId).vat_enabled === 1;
+    // Prix convenus : paliers de quantité de l'article, remises du client par famille.
+    const discounts = customerId ? parseFamilyDiscounts(this.customers.getCustomer(customerId).family_discounts) : {};
     const lines = input.map((l) => {
       if (!Number.isSafeInteger(l.qty) || l.qty === 0) throw new AppError('Quantité invalide', 'INVALID');
       const article = this.catalogue.getArticle(l.articleId, storeId);
@@ -625,8 +630,9 @@ export class PosService extends Base {
         ...(price !== null && !pack ? { unitPrice: price } : {}),
         ...(price !== null ? { priceSet: true } : {}),
       };
-      if (lineTotal(line) < 0) throw new AppError(`Remise supérieure au prix : ${article.name}`, 'INVALID');
-      return line;
+      const agreed = agreedPrices(line, { tiers: parseQtyTiers(article.qty_tiers), familyId: article.family_id }, discounts);
+      if (lineTotal(agreed) < 0) throw new AppError(`Remise supérieure au prix : ${article.name}`, 'INVALID');
+      return agreed;
     });
     return applyPromotions(lines, level === 'retail' ? this.promotions.activeRules(storeId) : []);
   }
@@ -790,7 +796,7 @@ export class PosService extends Base {
     const level = input.priceLevel ?? (input.customerId ? this.customers.getCustomer(input.customerId).price_level : 'retail');
     const set = this.admin.storeSettings(ctx.storeId);
     const warehouse = this.saleWarehouse(ctx.storeId, input.warehouseId);
-    const lines = this.priceLines(ctx.storeId, input.lines, level);
+    const lines = this.priceLines(ctx.storeId, input.lines, level, input.customerId ?? null);
     if (input.delivery) {
       this.deliveries.check(input.delivery);
       const fee = input.delivery.fee ?? 0;
@@ -899,8 +905,11 @@ export class PosService extends Base {
           line.packName, line.packUnits ?? null, line.packPrice ?? null,
         );
       });
-      const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id) VALUES (?, ?, ?, ?, ?, ?)');
-      input.payments.forEach((p, i) => insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null, paymentSessions[i]));
+      // Un chèque reçu attend sa remise en banque (bordereau) : compte 513 d'ici là.
+      const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id, clearing) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      input.payments.forEach((p, i) =>
+        insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null, paymentSessions[i], p.method === 'CHEQUE' && p.amount > 0 ? 1 : 0),
+      );
       if (granted > 0) {
         this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: granted, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
       }
@@ -1086,7 +1095,7 @@ export class PosService extends Base {
     return this.tx(() => {
       this.cancelSale(ctx, replacesId, byId, 'Facture modifiée', { byRight: true });
       const carried = this.carriedPayments(original);
-      const total = () => computeTotals(this.priceLines(ctx.storeId, input.lines, input.priceLevel ?? original.price_level)).totalTtc;
+      const total = () => computeTotals(this.priceLines(ctx.storeId, input.lines, input.priceLevel ?? original.price_level, input.customerId ?? null)).totalTtc;
       // Moins d'articles qu'avant : la part à crédit baisse d'abord ; un paiement électronique ne se rend pas en espèces.
       const nonCash = (ps: Payment[]) => ps.filter((p) => p.method !== 'CASH').reduce((t, p) => t + p.amount, 0);
       let excess = nonCash([...carried, ...input.payments]) - total();

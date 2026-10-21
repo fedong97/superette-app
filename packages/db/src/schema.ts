@@ -2142,4 +2142,115 @@ CREATE INDEX treasury_entries_session ON treasury_entries(session_id);
 CREATE INDEX treasury_entries_staff ON treasury_entries(staff_id);
 `,
   },
+  {
+    version: 54,
+    name: 'gestion commerciale : prix négociés, compensation, lettrage, avaries, dépôt-vente, zones, sociétés',
+    sql: `
+-- Prix négociés d'un client par article : { "<article>": prix TTC de l'unité de détail }.
+ALTER TABLE customers ADD COLUMN article_prices TEXT;
+-- Zone ou tournée du client (quartier, ligne de livraison).
+ALTER TABLE customers ADD COLUMN zone TEXT;
+-- Le client est aussi fournisseur : ses dettes et créances peuvent se compenser.
+ALTER TABLE customers ADD COLUMN supplier_id TEXT;
+
+-- Bonus convenu avec le fournisseur sur l'article (« 12 achetés, 10 payés ») : proposé à la commande et à la réception.
+ALTER TABLE supplier_articles ADD COLUMN promo_buy INTEGER;
+ALTER TABLE supplier_articles ADD COLUMN promo_pay INTEGER;
+
+-- Usage du dépôt : stock normal, avaries (marchandise abîmée, hors vente) ou dépôt-vente chez un client revendeur.
+ALTER TABLE warehouses ADD COLUMN purpose TEXT NOT NULL DEFAULT 'stock';
+ALTER TABLE warehouses ADD COLUMN customer_id TEXT;
+
+-- Compensation : ce que le client doit est soldé par ce qu'on lui doit comme fournisseur (facture fournisseur choisie).
+CREATE TABLE account_offsets (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  customer_id TEXT NOT NULL,
+  supplier_id TEXT NOT NULL,
+  invoice_id TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  offset_date TEXT NOT NULL,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX account_offsets_customer ON account_offsets(customer_id, offset_date);
+CREATE INDEX account_offsets_invoice ON account_offsets(invoice_id);
+
+-- Lettrage manuel : la part d'un règlement imputée à une vente précise (id = règlement:vente).
+CREATE TABLE payment_allocations (
+  id TEXT PRIMARY KEY,
+  payment_id TEXT NOT NULL,
+  sale_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount >= 0),
+  user_id TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX payment_allocations_customer ON payment_allocations(store_id, customer_id);
+
+-- Demande de modification d'une facture validée : le gérant accorde ou refuse ; accordée, elle sert une fois.
+CREATE TABLE sale_edit_requests (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  sale_id TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'used')),
+  decided_by TEXT,
+  decided_at TEXT,
+  decision_note TEXT,
+  new_sale_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX sale_edit_requests_sale ON sale_edit_requests(sale_id);
+
+-- Fiche de contrôle d'un dépôt-vente : stock compté chez le revendeur, le manque est facturé, le reste est repris ou laissé.
+CREATE TABLE consignment_counts (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  warehouse_id TEXT NOT NULL REFERENCES warehouses(id),
+  customer_id TEXT NOT NULL,
+  sale_id TEXT,
+  total_ttc INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE consignment_count_lines (
+  id TEXT PRIMARY KEY,
+  count_id TEXT NOT NULL REFERENCES consignment_counts(id),
+  line_no INTEGER NOT NULL,
+  article_id TEXT NOT NULL,
+  expected INTEGER NOT NULL,
+  counted INTEGER NOT NULL,
+  sold INTEGER NOT NULL,
+  returned INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX consignment_count_lines_count ON consignment_count_lines(count_id);
+
+-- Société (personne morale) qui regroupe un ou plusieurs magasins, pour les chiffres consolidés.
+CREATE TABLE companies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  legal_form TEXT,
+  taxpayer_number TEXT,
+  rccm TEXT,
+  address TEXT,
+  phone TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE stores ADD COLUMN company_id TEXT;
+`,
+  },
 ];

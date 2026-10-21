@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, today, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 import { tx } from '../tax';
@@ -8,7 +8,7 @@ import { tx } from '../tax';
 type Supplier = Result<'suppliers.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 
-export type SuppliersTab = 'list' | 'statement' | 'situation' | 'recent';
+export type SuppliersTab = 'list' | 'statement' | 'situation' | 'recent' | 'bonus';
 
 /** Fournisseurs : fiches, extrait de compte, situation et comptes qui ont bougé. */
 export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTab?: SuppliersTab }) {
@@ -27,12 +27,14 @@ export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTa
           ...(accounting ? ([['statement', 'Extrait de compte']] as [SuppliersTab, string][]) : []),
           ...(accounting ? ([['situation', 'Situation des fournisseurs']] as [SuppliersTab, string][]) : []),
           ['recent', 'Soldes qui ont bougé'],
+          ...(has(user, 'free_goods') ? ([['bonus', 'Bonus fournisseurs']] as [SuppliersTab, string][]) : []),
         ]}
       />
       {tab === 'list' && <SupplierList user={user} />}
       {tab === 'statement' && accounting && <SupplierStatement />}
       {tab === 'situation' && accounting && <SupplierSituation />}
       {tab === 'recent' && <RecentAccounts party="supplier" />}
+      {tab === 'bonus' && has(user, 'free_goods') && <FreeGoods />}
     </div>
   );
 }
@@ -232,13 +234,13 @@ function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | nul
 function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit: boolean }) {
   const toast = useToast();
   const list = useLoad(() => call('suppliers.articles', supplierId), [supplierId]);
-  const [edit, setEdit] = useState<{ articleId: string; name: string; unit: 'piece' | 'kg' | 'litre'; ref: string; cost: string; pack: string; main: boolean } | null>(null);
+  const [edit, setEdit] = useState<{ articleId: string; name: string; unit: 'piece' | 'kg' | 'litre'; ref: string; cost: string; pack: string; main: boolean; buy: string; pay: string } | null>(null);
   return (
     <>
       {canEdit && (
         <ArticlePicker
           placeholder="Ajouter un article : scanner ou rechercher"
-          onPick={(a) => setEdit({ articleId: a.id, name: a.name, unit: a.unit, ref: '', cost: String(a.purchase_price || ''), pack: '1', main: false })}
+          onPick={(a) => setEdit({ articleId: a.id, name: a.name, unit: a.unit, ref: '', cost: String(a.purchase_price || ''), pack: '1', main: false, buy: '', pay: '' })}
         />
       )}
       <table className="list">
@@ -249,6 +251,7 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
             <th className="r">{tx('Prix négocié HT')}</th>
             <th className="r">Dernier prix payé</th>
             <th className="r">Colisage</th>
+            <th>Bonus</th>
             <th>Principal</th>
             <th />
           </tr>
@@ -268,6 +271,8 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
                   cost: String(a.unit_cost),
                   pack: String(a.pack_qty / 1000).replace('.', ','),
                   main: a.is_main === 1,
+                  buy: a.promo_buy ? String(a.promo_buy) : '',
+                  pay: a.promo_pay ? String(a.promo_pay) : '',
                 })
               }
             >
@@ -278,6 +283,7 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
               <td className="r">{fcfa(a.unit_cost)}</td>
               <td className={`r ${a.last_cost !== null && a.last_cost > a.unit_cost ? 'neg' : ''}`}>{a.last_cost === null ? '' : fcfa(a.last_cost)}</td>
               <td className="r">{qty(a.pack_qty, a.unit)}</td>
+              <td>{a.promo_buy ? `${a.promo_buy} achetés, ${a.promo_pay} payés` : ''}</td>
               <td>{a.is_main ? 'Oui' : ''}</td>
               <td>
                 {canEdit && (
@@ -306,8 +312,10 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
               const cost = parseAmount(edit.cost);
               const pack = parseQty(edit.pack);
               if (cost === null || !pack) return toast.error('Prix ou colisage invalide');
+              const promoBuy = edit.buy.trim() ? Number(edit.buy) : null;
+              const promoPay = edit.pay.trim() ? Number(edit.pay) : null;
               try {
-                await call('suppliers.setArticle', { supplierId, articleId: edit.articleId, supplierRef: edit.ref, unitCost: cost, packQty: pack, isMain: edit.main || undefined });
+                await call('suppliers.setArticle', { supplierId, articleId: edit.articleId, supplierRef: edit.ref, unitCost: cost, packQty: pack, isMain: edit.main || undefined, promoBuy, promoPay });
                 setEdit(null);
                 list.reload();
               } catch (err) {
@@ -324,6 +332,14 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
               </Field>
               <Field label="Colisage" hint="On commande par multiples de cette quantité (ex. 24 pour un casier)">
                 <input inputMode="decimal" value={edit.pack} onChange={(e) => setEdit({ ...edit, pack: e.target.value })} />
+              </Field>
+            </div>
+            <div className="grid2">
+              <Field label="Bonus : quantité achetée" hint="Ex. 12 dans « 12 achetés, 10 payés » ; vide = pas de bonus">
+                <input inputMode="numeric" value={edit.buy} onChange={(e) => setEdit({ ...edit, buy: e.target.value })} />
+              </Field>
+              <Field label="Bonus : quantité payée" hint="Les unités gratuites entrent en stock à la réception, sans être payées">
+                <input inputMode="numeric" value={edit.pay} onChange={(e) => setEdit({ ...edit, pay: e.target.value })} />
               </Field>
             </div>
             <label>
@@ -385,5 +401,54 @@ function SupplierAccount({ supplierId }: { supplierId: string }) {
         </table>
       </section>
     </div>
+  );
+}
+
+/** Unités gratuites reçues des fournisseurs (bonus « 12 achetés, 10 payés ») et ce qu'elles valent au prix d'achat. */
+function FreeGoods() {
+  const [from, setFrom] = useState(`${today().slice(0, 8)}01`);
+  const [to, setTo] = useState(today());
+  const data = useLoad(() => call('purchases.freeGoods', from, to), [from, to]);
+  return (
+    <>
+      <div className="filters">
+        <Field label="Du">
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </Field>
+        <Field label="Au">
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </Field>
+      </div>
+      {data.data?.rows.length === 0 ? (
+        <Empty>Aucune unité gratuite reçue sur la période.</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Fournisseur</th>
+              <th>Article</th>
+              <th className="r">Unités gratuites</th>
+              <th className="r">Réceptions</th>
+              <th className="r">{tx('Valeur (prix d’achat HT)')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data.data?.rows ?? []).map((r) => (
+              <tr key={`${r.supplier_id}:${r.article_id}`}>
+                <td>{r.supplier_name}</td>
+                <td>{r.article_name}</td>
+                <td className="r">{qty(r.free_qty, r.unit as 'piece')}</td>
+                <td className="r">{r.receptions}</td>
+                <td className="r">{fcfa(r.value)}</td>
+              </tr>
+            ))}
+            <tr className="b">
+              <td colSpan={4}>Total des bonus reçus</td>
+              <td className="r">{fcfa(data.data?.total ?? 0)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }

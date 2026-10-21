@@ -71,6 +71,8 @@ export interface Store {
   phone: string | null;
   taxpayer_number: string | null;
   active: number;
+  /** Société (personne morale) à laquelle appartient le magasin. */
+  company_id: string | null;
   /** Assujetti à la TVA (régime réel) ; sinon les ventes se font sans TVA. */
   vat_enabled: number;
   /** Vente permise sans stock : le stock passe en négatif et se régularise à la réception. */
@@ -109,7 +111,19 @@ export interface Warehouse {
   manager: string | null;
   phone: string | null;
   address: string | null;
+  /** Usage : stock normal, avaries (abîmé, hors vente) ou dépôt-vente chez un client revendeur. */
+  purpose: WarehousePurpose;
+  /** Dépôt-vente : le client revendeur qui détient la marchandise. */
+  customer_id: string | null;
 }
+
+export type WarehousePurpose = 'stock' | 'damaged' | 'consignment';
+
+export const WAREHOUSE_PURPOSES: Record<WarehousePurpose, string> = {
+  stock: 'Stock du magasin',
+  damaged: 'Avaries (hors vente)',
+  consignment: 'Dépôt-vente chez un client',
+};
 
 export interface WarehouseInput {
   name: string;
@@ -117,6 +131,10 @@ export interface WarehouseInput {
   manager?: string | null;
   phone?: string | null;
   address?: string | null;
+  /** Absent : inchangé (stock normal à la création). */
+  purpose?: WarehousePurpose;
+  /** Client revendeur d'un dépôt-vente. */
+  customerId?: string | null;
 }
 
 const WAREHOUSE_KINDS: Warehouse['kind'][] = ['shop', 'reserve', 'cold'];
@@ -334,13 +352,21 @@ export class AdminService extends Base {
 
   // --- Dépôts ---------------------------------------------------------------
 
-  createWarehouse(storeId: string, name: string, kind: Warehouse['kind'], salesDefault = false): Warehouse {
-    this.checkWarehouseInput(storeId, { name, kind });
+  createWarehouse(
+    storeId: string,
+    name: string,
+    kind: Warehouse['kind'],
+    salesDefault = false,
+    opts: { purpose?: WarehousePurpose; customerId?: string | null } = {},
+  ): Warehouse {
+    const purpose = opts.purpose ?? 'stock';
+    this.checkWarehouseInput(storeId, { name, kind, purpose, customerId: opts.customerId ?? null });
+    if (salesDefault && purpose !== 'stock') throw new AppError('Le dépôt des ventes est un dépôt de stock normal', 'INVALID');
     name = name.trim();
     const id = newId();
     this.db
-      .prepare('INSERT INTO warehouses (id, store_id, name, kind, is_sales_default) VALUES (?, ?, ?, ?, ?)')
-      .run(id, storeId, name, kind, salesDefault ? 1 : 0);
+      .prepare('INSERT INTO warehouses (id, store_id, name, kind, is_sales_default, purpose, customer_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, storeId, name, kind, salesDefault ? 1 : 0, purpose, purpose === 'consignment' ? opts.customerId! : null);
     const wh = this.db.prepare('SELECT * FROM warehouses WHERE id = ?').get(id) as Warehouse;
     this.enqueue({ storeId, registerId: null }, 'warehouse', id, 'upsert', wh);
     return wh;
@@ -364,6 +390,11 @@ export class AdminService extends Base {
     if (!name) throw new AppError('Donnez un nom au dépôt', 'INVALID');
     if (name.length > 60) throw new AppError('Nom du dépôt trop long (60 caractères au plus)', 'INVALID');
     if (!WAREHOUSE_KINDS.includes(input.kind)) throw new AppError('Type de dépôt inconnu', 'INVALID');
+    if (input.purpose !== undefined && !(input.purpose in WAREHOUSE_PURPOSES)) throw new AppError('Usage du dépôt inconnu', 'INVALID');
+    if (input.purpose === 'consignment') {
+      if (!input.customerId) throw new AppError('Choisissez le client revendeur qui détient ce dépôt-vente', 'INVALID');
+      if (!this.db.prepare('SELECT 1 FROM customers WHERE id = ?').get(input.customerId)) throw new AppError('Client introuvable', 'INVALID');
+    }
     // Un ancien doublon de nom garde son nom : seul un nouveau nom doit être libre.
     if (id && this.getWarehouse(id).name.toLowerCase() === name.toLowerCase()) return;
     const twin = this.db
@@ -376,15 +407,26 @@ export class AdminService extends Base {
   /** Nom, type et fiche du dépôt (responsable, téléphone, adresse) : l'historique garde le dépôt, sous son nouveau nom. */
   updateWarehouse(userId: string, id: string, input: WarehouseInput): Warehouse {
     const wh = this.getWarehouse(id);
-    this.checkWarehouseInput(wh.store_id, input, id);
+    const purpose = input.purpose ?? wh.purpose;
+    const customerId = purpose === 'consignment' ? (input.customerId === undefined ? wh.customer_id : input.customerId) : null;
+    this.checkWarehouseInput(wh.store_id, { ...input, purpose, customerId }, id);
+    if (purpose !== 'stock' && wh.is_sales_default) throw new AppError(`« ${wh.name} » est le dépôt des ventes : il reste un dépôt de stock normal`, 'INVALID');
+    if (purpose !== wh.purpose || customerId !== wh.customer_id) {
+      // Changer l'usage d'un dépôt qui contient de la marchandise fausserait ventes et contrôles : il se vide d'abord.
+      const stocked = this.db.prepare('SELECT COUNT(*) FROM stock WHERE warehouse_id = ? AND qty <> 0').pluck().get(id) as number;
+      if (stocked > 0) throw new AppError(`« ${wh.name} » contient encore du stock : transférez-le avant de changer l'usage du dépôt`, 'WAREHOUSE_NOT_EMPTY');
+    }
     const text = (v: string | null | undefined, current: string | null) => (v === undefined ? current : v?.trim() || null);
     return this.tx(() => {
       this.db
-        .prepare('UPDATE warehouses SET name = ?, kind = ?, manager = ?, phone = ?, address = ? WHERE id = ?')
-        .run(input.name.trim(), input.kind, text(input.manager, wh.manager), text(input.phone, wh.phone), text(input.address, wh.address), id);
+        .prepare('UPDATE warehouses SET name = ?, kind = ?, manager = ?, phone = ?, address = ?, purpose = ?, customer_id = ? WHERE id = ?')
+        .run(input.name.trim(), input.kind, text(input.manager, wh.manager), text(input.phone, wh.phone), text(input.address, wh.address), purpose, customerId, id);
       const next = this.getWarehouse(id);
       this.enqueue({ storeId: wh.store_id, registerId: null }, 'warehouse', id, 'upsert', next);
-      this.audit(userId, 'warehouse.update', 'warehouse', id, { from: { name: wh.name, kind: wh.kind }, to: { name: next.name, kind: next.kind } });
+      this.audit(userId, 'warehouse.update', 'warehouse', id, {
+        from: { name: wh.name, kind: wh.kind, purpose: wh.purpose },
+        to: { name: next.name, kind: next.kind, purpose: next.purpose },
+      });
       return next;
     });
   }
@@ -427,6 +469,7 @@ export class AdminService extends Base {
   setSalesWarehouse(userId: string, id: string): Warehouse {
     const wh = this.getWarehouse(id);
     if (!wh.active) throw new AppError(`« ${wh.name} » est désactivé : réactivez-le d'abord`, 'INVALID');
+    if (wh.purpose !== 'stock') throw new AppError(`« ${wh.name} » est un dépôt ${wh.purpose === 'damaged' ? 'd’avaries' : 'de dépôt-vente'} : on n'y vend pas`, 'INVALID');
     if (wh.is_sales_default) return wh;
     return this.tx(() => {
       const previous = this.db.prepare('SELECT id FROM warehouses WHERE store_id = ? AND is_sales_default = 1').pluck().all(wh.store_id) as string[];
@@ -443,7 +486,8 @@ export class AdminService extends Base {
    * depuis un autre dépôt », sinon le seul dépôt de vente.
    */
   saleWarehousesFor(storeId: string, userId: string): Warehouse[] {
-    const all = this.listWarehouses(storeId);
+    // Avaries et dépôts-ventes ne servent jamais de source à la caisse.
+    const all = this.listWarehouses(storeId).filter((w) => w.purpose === 'stock');
     const main = this.salesWarehouse(storeId);
     const user = this.getUser(userId);
     let chosen: string[] | null = null;

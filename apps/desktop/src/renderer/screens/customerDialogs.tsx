@@ -1,7 +1,8 @@
-import { DOC_LANGS, DOC_LANG_LABELS, type DocLang, PRICE_LEVELS, type PriceLevel, parseFamilyDiscounts } from '@superette/core';
+import { DOC_LANGS, DOC_LANG_LABELS, type DocLang, PRICE_LEVELS, type PriceLevel, parseArticlePrices, parseFamilyDiscounts } from '@superette/core';
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Field, Modal, fcfa, has, parseAmount, useLoad, useStoreSettings, useToast } from '../ui';
+import { Field, Modal, dateFr, fcfa, has, parseAmount, useCan, useLoad, useStoreSettings, useToast } from '../ui';
+import { ArticlePicker } from './pickers';
 
 export type Customer = Result<'customers.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -21,11 +22,14 @@ export function CustomerFields({
   onChange,
   canSetCredit,
   canSetLevel = canSetCredit,
+  canLinkSupplier = false,
 }: {
   value: CustomerDraft;
   onChange: (v: CustomerDraft) => void;
   canSetCredit: boolean;
   canSetLevel?: boolean;
+  /** Relier la fiche à un fournisseur, pour compenser les deux comptes. */
+  canLinkSupplier?: boolean;
 }) {
   const set = (patch: Partial<CustomerDraft>) => onChange({ ...value, ...patch });
   return (
@@ -78,12 +82,95 @@ export function CustomerFields({
         <Field label="Notes">
           <input value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
+        <Field label="Zone ou tournée" hint="Quartier ou tournée du livreur : la liste des clients se filtre par zone">
+          <input list="customer-zones" value={value.zone} onChange={(e) => set({ zone: e.target.value })} placeholder="BONAMOUSSADI" />
+        </Field>
+        {canLinkSupplier && <LinkedSupplier value={value.supplierId} onChange={(supplierId) => set({ supplierId })} />}
       </div>
       <label className="check" title={canSetCredit ? 'Le client ne peut plus payer par chèque, ni en caisse ni en règlement' : 'Fixé par le gérant ou le comptable'}>
         <input type="checkbox" checked={value.noCheque} disabled={!canSetCredit} onChange={(e) => set({ noCheque: e.target.checked })} /> Interdit de chèque
       </label>
+      <ZoneList />
       {canSetLevel && <FamilyDiscountFields value={value.discounts} onChange={(discounts) => set({ discounts })} />}
+      {canSetLevel && <ArticlePriceFields value={value.prices} onChange={(prices) => set({ prices })} />}
     </>
+  );
+}
+
+/** Zones déjà utilisées, proposées à la saisie. */
+function ZoneList() {
+  const zones = useLoad(() => call('customers.zones'), []);
+  return (
+    <datalist id="customer-zones">
+      {(zones.data ?? []).map((z) => (
+        <option key={z.zone} value={z.zone} />
+      ))}
+    </datalist>
+  );
+}
+
+/** Le même tiers est aussi fournisseur : ses deux comptes peuvent se compenser. */
+function LinkedSupplier({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const suppliers = useLoad(() => call('suppliers.list'), []);
+  return (
+    <Field label="Aussi fournisseur" hint="Pour compenser ce qu’il doit avec ce qu’on lui doit">
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Non</option>
+        {(suppliers.data ?? []).map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.name}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+/** Prix convenus avec le client, article par article : appliqués en caisse quand ils sont plus bas que le prix du jour. */
+function ArticlePriceFields({ value, onChange }: { value: Record<string, { name: string; price: string }>; onChange: (v: Record<string, { name: string; price: string }>) => void }) {
+  const [adding, setAdding] = useState(false);
+  // Noms des articles d'une fiche déjà enregistrée.
+  const missing = Object.keys(value).filter((id) => !value[id]!.name);
+  const names = useLoad(async () => {
+    const found = await Promise.all(missing.map((id) => call('catalogue.get', id).catch(() => null)));
+    return Object.fromEntries(found.map((a, i) => [missing[i]!, a?.name ?? '—']));
+  }, [missing.join()]);
+  const rows = Object.entries(value);
+  return (
+    <div className="family-discounts">
+      <h4>Prix négociés par article</h4>
+      <p className="muted">Prix unitaire TTC convenu : la caisse le prend quand il est plus bas que le prix du jour, sans code du gérant.</p>
+      {rows.map(([id, r]) => (
+        <div key={id} className="inline">
+          <span>{r.name || names.data?.[id] || '…'}</span>
+          <input inputMode="numeric" style={{ width: 100 }} value={r.price} onChange={(e) => onChange({ ...value, [id]: { ...r, price: e.target.value } })} /> FCFA
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              const next = { ...value };
+              delete next[id];
+              onChange(next);
+            }}
+          >
+            Retirer
+          </button>
+        </div>
+      ))}
+      {adding ? (
+        <ArticlePicker
+          placeholder="Article au prix convenu"
+          onPick={(a) => {
+            onChange({ ...value, [a.id]: { name: a.name, price: '' } });
+            setAdding(false);
+          }}
+        />
+      ) : (
+        <button type="button" onClick={() => setAdding(true)}>
+          Ajouter un article
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -157,6 +244,10 @@ export interface CustomerDraft {
   discounts: Record<string, string>;
   /** Le client ne peut plus payer par chèque (chèque revenu impayé). */
   noCheque: boolean;
+  zone: string;
+  supplierId: string;
+  /** Prix convenu (texte saisi) par article. */
+  prices: Record<string, { name: string; price: string }>;
 }
 
 /** Brouillon de la fiche ; un nouveau client prend le plafond et le délai des paramètres du magasin. */
@@ -175,6 +266,9 @@ export const draftOf = (c: Customer | null, defaults?: { creditDefaultLimit: num
   language: c?.language ?? 'fr',
   noCheque: c ? c.no_cheque === 1 : false,
   discounts: Object.fromEntries(Object.entries(parseFamilyDiscounts(c?.family_discounts)).map(([k, bp]) => [k, String(bp / 100).replace('.', ',')])),
+  zone: c?.zone ?? '',
+  supplierId: c?.supplier_id ?? '',
+  prices: Object.fromEntries(Object.entries(parseArticlePrices(c?.article_prices)).map(([k, price]) => [k, { name: '', price: String(price) }])),
 });
 
 export function inputOf(d: CustomerDraft) {
@@ -204,6 +298,17 @@ export function inputOf(d: CustomerDraft) {
           return [k, Math.round(pct * 100)];
         }),
     ),
+    zone: d.zone.trim() || null,
+    supplierId: d.supplierId || null,
+    articlePrices: Object.fromEntries(
+      Object.entries(d.prices)
+        .filter(([, r]) => r.price.trim())
+        .map(([k, r]) => {
+          const price = parseAmount(r.price);
+          if (!price) throw new Error(`Prix négocié invalide pour ${r.name}`);
+          return [k, price];
+        }),
+    ),
   };
 }
 
@@ -211,6 +316,8 @@ export function inputOf(d: CustomerDraft) {
 export const canSetCredit = (user: User) => has(user, 'receivables');
 /** Tarif du client (détail, gros, super gros). */
 export const canSetLevel = (user: User) => has(user, 'customer_price_level');
+/** Fiche fournisseur liée (compensation des comptes). */
+export const canLinkSupplier = (user: User) => has(user, 'account_offsets') || has(user, 'receivables');
 
 /** Choix du client depuis la fiche de facturation, avec création rapide. */
 export function CustomerPickDialog({ user, onClose, onPick }: { user: User; onClose: () => void; onPick: (c: Customer) => void }) {
@@ -305,7 +412,21 @@ export function CustomerPaymentDialog({
   const [method, setMethod] = useState<keyof typeof CUSTOMER_PAY_METHODS>('CASH');
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
+  const can = useCan();
+  // Lettrage : factures cochées, réglées dans l'ordre coché ; sinon les plus anciennes d'abord.
+  const [picked, setPicked] = useState<string[]>([]);
   const balance = account.data?.balance ?? 0;
+  const items = account.data?.openItems ?? [];
+  const lettering = can('customer_lettering') && items.length > 1;
+  const allocate = (total: number) => {
+    let left = total;
+    return picked.flatMap((id) => {
+      const item = items.find((i) => i.id === id);
+      const amount = Math.min(item?.remaining ?? 0, left);
+      left -= amount;
+      return amount > 0 ? [{ saleId: id, amount }] : [];
+    });
+  };
 
   return (
     <Modal title={customer ? `Règlement de ${customer.name}` : 'Règlement client'} onClose={onClose}>
@@ -316,7 +437,7 @@ export function CustomerPaymentDialog({
           if (!chosen) return toast.error('Choisissez le client');
           if (!v) return toast.error('Montant invalide');
           try {
-            const p = await call('customers.pay', { customerId: chosen, method, amount: v, reference: reference || null, atRegister });
+            const p = await call('customers.pay', { customerId: chosen, method, amount: v, reference: reference || null, atRegister, allocations: picked.length ? allocate(v) : null });
             toast.ok(`Règlement ${p.number} enregistré`);
             onPaid(p.id);
           } catch (err) {
@@ -356,6 +477,23 @@ export function CustomerPaymentDialog({
           <Field label={method === 'CHEQUE' ? 'N° de chèque' : 'Référence de la transaction'}>
             <input value={reference} onChange={(e) => setReference(e.target.value)} required />
           </Field>
+        )}
+        {lettering && (
+          <div className="family-discounts">
+            <h4>Factures réglées</h4>
+            <p className="muted">Cochez les factures que le client règle ; sans choix, les plus anciennes sont soldées d'abord.</p>
+            {items.map((i) => (
+              <label key={i.id} className="inline">
+                <input type="checkbox" checked={picked.includes(i.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, i.id] : picked.filter((x) => x !== i.id))} /> {i.number} ·{' '}
+                {dateFr(i.created_at.slice(0, 10))} · reste {fcfa(i.remaining)}
+              </label>
+            ))}
+            {picked.length > 0 && !amount && (
+              <button type="button" className="link" onClick={() => setAmount(String(picked.reduce((t, id) => t + (items.find((i) => i.id === id)?.remaining ?? 0), 0)))}>
+                Montant des factures cochées
+              </button>
+            )}
+          </div>
         )}
         {atRegister && method === 'CASH' && <p className="muted">Les espèces entrent dans le tiroir et apparaissent sur le Z.</p>}
         <div className="actions">

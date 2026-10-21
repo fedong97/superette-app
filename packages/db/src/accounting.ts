@@ -200,6 +200,7 @@ export class AccountingService extends Base {
       ...this.rebateEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
+      ...this.offsetEntries(storeId, r, opts),
       ...this.expenseEntries(storeId, r, opts),
       ...this.staffSalaryEntries(storeId, opts),
       ...this.treasuryPieceEntries(storeId, r, opts),
@@ -519,6 +520,30 @@ export class AccountingService extends Base {
           label,
           source: 'auto' as const,
           lines: [side(r.suppliers, sign * p.amount, label, { code: p.code, name: p.name }), side(p.from_central ? r.central_cash : r[METHOD_ROLE[p.method] ?? 'bank'], -sign * p.amount, label)],
+        };
+      });
+  }
+
+  /** Compensation client / fournisseur d'un même tiers : la dette fournisseur solde la créance client (OD). */
+  private offsetEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT o.number, o.offset_date AS d, o.amount, i.number AS invoice, c.code AS c_code, c.name AS c_name, f.code AS f_code, f.name AS f_name
+         FROM account_offsets o JOIN customers c ON c.id = o.customer_id JOIN suppliers f ON f.id = o.supplier_id JOIN supplier_invoices i ON i.id = o.invoice_id
+         WHERE o.store_id = ? AND o.status = 'active'`,
+      )
+      .all(storeId) as { number: string; d: string; amount: number; invoice: string; c_code: string; c_name: string; f_code: string; f_name: string }[];
+    return rows
+      .filter((o) => inRange(o.d, opts.from, opts.to))
+      .map((o) => {
+        const label = `Compensation ${o.c_name} (facture ${o.invoice})`;
+        return {
+          journal: 'OD' as const,
+          date: o.d,
+          ref: o.number,
+          label,
+          source: 'auto' as const,
+          lines: [side(r.suppliers, o.amount, label, { code: o.f_code, name: o.f_name }), side(r.customers, -o.amount, label, { code: o.c_code, name: o.c_name })],
         };
       });
   }

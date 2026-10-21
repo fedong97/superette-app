@@ -133,6 +133,16 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'z', title: 'Clôtures Z', steps: ['Chaque journée de caisse clôturée, avec son numéro de Z. Cliquez pour revoir ou réimprimer le Z.'] },
       { tab: 'cashops', title: 'Opérations de caisse', perm: 'sales', steps: ['Apports, prélèvements et dépenses payées au tiroir, par caisse et par jour.'] },
       { tab: 'export', title: 'Export comptable', perm: 'sales', steps: ['Choisissez la période puis « Télécharger le CSV » : le fichier s’ouvre dans Excel.'] },
+      {
+        tab: 'requests',
+        title: 'Demandes de modification de facture',
+        perm: ['sale_edit_request', 'sale_edit_approve'],
+        steps: [
+          'Sans le droit « Modifier une facture », ouvrez la facture puis « Demander la modification… » avec ce qu’il faut changer.',
+          'Le gérant la voit dans ses points d’attention et dans cet onglet : « Accorder » ou « Refuser » (avec le motif). Il ne décide jamais de sa propre demande.',
+          'Accordée, « Modifier la facture » la recharge dans la caisse, une seule fois. L’ancienne facture reste au registre, annulée et reliée à la nouvelle.',
+        ],
+      },
     ],
   },
   articles: {
@@ -335,6 +345,15 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'list', title: 'Fiche fournisseur', steps: ['Cliquez un fournisseur pour sa fiche : NIU, délais de paiement et de livraison, articles référencés avec prix négocié.'] },
       { tab: 'statement', title: 'Extrait de compte', steps: ['Factures, avoirs et paiements d’un fournisseur sur une période, avec le solde.'] },
       { tab: 'situation', title: 'Situation', perm: 'purchase_invoices', steps: ['Ce que l’on doit à chaque fournisseur.'] },
+      {
+        tab: 'bonus',
+        title: 'Bonus fournisseurs',
+        perm: 'free_goods',
+        steps: [
+          'Dans la fiche fournisseur, sur un article : « 12 achetés, 10 payés ». Le bonus est proposé tout seul sur les bons de commande de ce fournisseur.',
+          'L’onglet « Bonus fournisseurs » totalise les unités gratuites reçues sur la période et leur valeur au prix d’achat.',
+        ],
+      },
     ],
   },
   customers: {
@@ -376,6 +395,33 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Choisissez le client et la période (le mois dernier par défaut) : ses tickets et factures pas encore regroupés s’affichent, cochés.',
           '« Créer la facture récapitulative » puis « Imprimer » : une seule facture avec le détail de chaque vente, la TVA par taux et ce qui est passé à son compte.',
           'Les ventes sont déjà comptabilisées à leur date : la récapitulative ne passe pas d’écriture. Une vente ne figure que sur une récapitulative ; « Annuler la facture » la libère.',
+        ],
+      },
+      {
+        tab: 'list',
+        title: 'Prix négociés, zones et lettrage',
+        steps: [
+          'Fiche client, « Prix négociés par article » : un prix convenu par article. La caisse le prend quand il est plus bas que le prix du jour.',
+          '« Zone ou tournée » range les clients par quartier ; la liste et la balance âgée se filtrent par zone pour la tournée du livreur ou du recouvreur.',
+          'En encaissant un règlement, cochez les factures que le client règle : elles sont soldées en premier, le reste va aux plus anciennes.',
+        ],
+      },
+      {
+        tab: 'offsets',
+        title: 'Compensations client / fournisseur',
+        perm: 'account_offsets',
+        steps: [
+          'Un grossiste à qui l’on achète et qui nous achète : reliez sa fiche client à sa fiche fournisseur (« Aussi fournisseur »).',
+          '« Compenser avec son compte fournisseur… » solde une facture fournisseur avec ce qu’il doit, sans argent. L’écriture passe en OD (401 / 411) ; une erreur s’annule avec motif.',
+        ],
+      },
+      {
+        tab: 'consignment',
+        title: 'Dépôt-vente',
+        perm: 'consignment',
+        steps: [
+          '« Ouvrir un dépôt-vente » pour un client revendeur, puis « Confier de la marchandise » : elle reste à votre stock, dans son dépôt.',
+          'À chaque passage, « Fiche de contrôle » : comptez ce qui reste. Le manque est facturé à crédit au client, à son tarif, sur votre caisse ouverte ; cochez « Reprendre » pour rapporter le reste.',
         ],
       },
       { tab: 'rebates-state', title: 'Ristournes', perm: 'rebates', steps: ['Réglez les taux par famille, puis chaque mois « Constater » et « Accorder » en avoir ou en bon.', 'Payée : en espèces depuis la caisse centrale, ou par MTN MoMo / Orange Money depuis une caisse électronique (la centrale par défaut), avec la référence du transfert.'] },
@@ -557,6 +603,15 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: ['Par rayon ou par magasin : chiffre d’affaires HT, marge et résultat après les charges réparties au prorata du chiffre d’affaires.'],
       },
       {
+        tab: 'patrimony',
+        title: 'Courbe du patrimoine',
+        perm: 'patrimony',
+        steps: [
+          'À chaque fin de mois : trésorerie + créances clients + stock au prix de revient − dettes fournisseurs. Survolez un mois pour son détail.',
+          'Avec le droit « Sociétés », la courbe se voit aussi pour tous les magasins ou pour une société.',
+        ],
+      },
+      {
         tab: 'assets',
         title: 'Immobilisations',
         perm: 'fixed_assets',
@@ -655,6 +710,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Modifier » change le nom, le type (magasin, réserve, chambre froide…), le responsable, le téléphone et l’adresse du dépôt.',
           '« Désactiver » retire un dépôt des listes. Il faut d’abord le vider de son stock, finir ses transferts et ses inventaires, et ce ne doit pas être le dépôt des ventes. « Réactiver » le remet en service.',
           '« Dépôt des ventes » choisit le dépôt d’où sort la marchandise vendue en caisse.',
+          'Usage « Avaries » : la marchandise abîmée y est mise à part ; elle ne se vend jamais et ne compte pas dans les propositions de commande.',
+        ],
+      },
+      {
+        tab: 'companies',
+        title: 'Sociétés',
+        perm: 'companies',
+        steps: [
+          '« Nouvelle société » : raison sociale, forme, NIU, RCCM. Rattachez ensuite chaque magasin à sa société.',
+          '« Chiffres consolidés » : ventes du mois, trésorerie, créances, stock, dettes et patrimoine de chaque magasin et de la société.',
         ],
       },
       { tab: 'registers', title: 'Caisses', steps: ['Choisissez le type (Espèces, Électronique, Banque) puis « Ajouter une caisse ».', 'Le code d’activation d’une caisse espèces rattache un nouveau PC.'] },

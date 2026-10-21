@@ -13,6 +13,7 @@ export type AttentionKey =
   | 'cash_gaps'
   | 'transfers'
   | 'stock_requests'
+  | 'sale_edit_requests'
   | 'rebates_pending'
   | 'rebates_balance'
   | 'inventories'
@@ -120,6 +121,24 @@ export class AttentionService extends Base {
       items.push({
         key: 'stock_requests',
         label: 'Demandes de correction de stock',
+        count: rows.length,
+        amount: null,
+        detail: rows.length ? firstNames(rows) : 'Aucune demande en attente',
+        tone: 'warning',
+      });
+    }
+
+    if (want('sale_edit_requests')) {
+      const rows = this.db
+        .prepare(
+          `SELECT s.number || ' (' || u.name || ')' FROM sale_edit_requests r JOIN sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.requested_by
+           WHERE r.store_id = ? AND r.status = 'pending' ORDER BY r.created_at`,
+        )
+        .pluck()
+        .all(storeId) as string[];
+      items.push({
+        key: 'sale_edit_requests',
+        label: 'Demandes de modification de facture',
         count: rows.length,
         amount: null,
         detail: rows.length ? firstNames(rows) : 'Aucune demande en attente',

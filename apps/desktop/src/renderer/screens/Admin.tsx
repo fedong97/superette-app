@@ -14,13 +14,14 @@ import { Fiches, Repair } from './Dossiers';
 import { RemoteTills } from './RemoteTills';
 import { ShopTemplates } from './ShopTemplates';
 import { Takeover } from './Takeover';
+import { Companies } from './Companies';
 import contract from '../../../build/contrat-licence.txt?raw';
 import serverLogo from '../assets/logo-serveur.png';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -33,6 +34,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ...(user.role === 'admin' ? ([['stores', 'Magasins']] as [Tab, string][]) : []),
     ['registers', 'Caisses'],
     ['warehouses', 'Dépôts'],
+    ...(can('companies') ? ([['companies', 'Sociétés']] as [Tab, string][]) : []),
     ['users', 'Utilisateurs'],
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
@@ -62,6 +64,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'stores' && <Stores onChanged={onChanged} />}
       {tab === 'registers' && <Registers isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'warehouses' && <Warehouses canCreate={can('warehouses_manage')} />}
+      {tab === 'companies' && can('companies') && <Companies />}
       {tab === 'users' && (
         <Users
           currentRole={user.role}
@@ -351,6 +354,8 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
 
 type WarehouseRow = Result<'admin.warehouses'>[number];
 const WAREHOUSE_KINDS = { shop: 'Surface de vente', reserve: 'Réserve', cold: 'Chambre froide' } as const;
+/** Usage du dépôt : stock vendable, marchandise abîmée (jamais vendue), ou dépôt-vente chez un revendeur. */
+const WAREHOUSE_PURPOSES = { stock: 'Stock vendable', damaged: 'Avaries (jamais vendu)', consignment: 'Dépôt-vente chez un revendeur' } as const;
 
 /**
  * Dépôts du magasin : créer, modifier (nom, type, responsable), désactiver ou
@@ -363,6 +368,7 @@ function Warehouses({ canCreate }: { canCreate: boolean }) {
   const wh = useLoad(() => call('admin.warehouses', { includeInactive: true }));
   const [name, setName] = useState('');
   const [kind, setKind] = useState<WarehouseRow['kind']>('reserve');
+  const [purpose, setPurpose] = useState<'stock' | 'damaged'>('stock');
   const [editing, setEditing] = useState<WarehouseRow | null>(null);
   const all = wh.data ?? [];
   const inactive = all.filter((w) => !w.active).length;
@@ -407,7 +413,10 @@ function Warehouses({ canCreate }: { canCreate: boolean }) {
                 <b>{w.name}</b>
                 {w.address && <small className="muted block">{w.address}</small>}
               </td>
-              <td>{WAREHOUSE_KINDS[w.kind]}</td>
+              <td>
+                {WAREHOUSE_KINDS[w.kind]}
+                {w.purpose !== 'stock' && <span className={`tag ${w.purpose === 'damaged' ? 'rupture' : 'info'}`}>{WAREHOUSE_PURPOSES[w.purpose]}</span>}
+              </td>
               <td>{w.manager ?? ''}</td>
               <td>{w.phone ?? ''}</td>
               <td>
@@ -457,7 +466,7 @@ function Warehouses({ canCreate }: { canCreate: boolean }) {
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await call('admin.createWarehouse', name, kind);
+              await call('admin.createWarehouse', name, kind, { purpose });
               setName('');
               wh.reload();
             } catch (err) {
@@ -472,6 +481,10 @@ function Warehouses({ canCreate }: { canCreate: boolean }) {
                 {v}
               </option>
             ))}
+          </select>
+          <select value={purpose} onChange={(e) => setPurpose(e.target.value as typeof purpose)} title="Un dépôt d’avaries garde la marchandise abîmée hors de la vente et des propositions de commande">
+            <option value="stock">{WAREHOUSE_PURPOSES.stock}</option>
+            <option value="damaged">{WAREHOUSE_PURPOSES.damaged}</option>
           </select>
           <button type="submit" disabled={!name.trim()}>
             Ajouter
@@ -494,7 +507,7 @@ function Warehouses({ canCreate }: { canCreate: boolean }) {
 
 function WarehouseForm({ warehouse, onClose, onSaved }: { warehouse: WarehouseRow; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ name: warehouse.name, kind: warehouse.kind, manager: warehouse.manager ?? '', phone: warehouse.phone ?? '', address: warehouse.address ?? '' });
+  const [f, setF] = useState({ name: warehouse.name, kind: warehouse.kind, purpose: warehouse.purpose, manager: warehouse.manager ?? '', phone: warehouse.phone ?? '', address: warehouse.address ?? '' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   return (
     <Modal title={`Modifier le dépôt « ${warehouse.name} »`} onClose={onClose}>
@@ -521,6 +534,17 @@ function WarehouseForm({ warehouse, onClose, onSaved }: { warehouse: WarehouseRo
                   {v}
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Usage" hint="Changeable seulement quand le dépôt est vide">
+            <select value={f.purpose} onChange={set('purpose')} disabled={warehouse.purpose === 'consignment'}>
+              {Object.entries(WAREHOUSE_PURPOSES)
+                .filter(([k]) => k !== 'consignment' || warehouse.purpose === 'consignment')
+                .map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
             </select>
           </Field>
           <Field label="Responsable">

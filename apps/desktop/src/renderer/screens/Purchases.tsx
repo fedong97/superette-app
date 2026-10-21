@@ -12,11 +12,12 @@ import { hasVat, tx } from '../tax';
 import { DocPreview } from './docPreview';
 import { ReceptionLabels } from './barcodePrint';
 import { SupplierReturns } from './SupplierReturns';
+import { GroupOrders } from './GroupOrders';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
 type Invoice = Result<'purchases.invoice'>['invoice'];
-export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns';
+export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns' | 'group';
 
 const ORDER_STATES: Record<Order['state'], string> = {
   draft: 'Brouillon',
@@ -64,6 +65,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
     ...(has(user, 'supplier_returns') ? ([['returns', 'Retours fournisseur']] as [PurchasesTab, string][]) : []),
     ['byproduct', 'Achats par produit'],
     ...(has(user, 'reorder') ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'group_orders') ? ([['group', 'Commandes groupées']] as [PurchasesTab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -80,6 +82,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       {tab === 'due' && has(user, 'purchase_due') && <Due />}
       {tab === 'returns' && has(user, 'supplier_returns') && <SupplierReturns canCredit={has(user, 'purchase_invoices')} />}
       {tab === 'reorder' && has(user, 'reorder') && <Reorder onCreated={() => setTab('orders')} />}
+      {tab === 'group' && has(user, 'group_orders') && <GroupOrders />}
     </div>
   );
 }
@@ -1277,7 +1280,11 @@ function Due() {
 function Reorder({ onCreated }: { onCreated: () => void }) {
   const toast = useToast();
   const [cover, setCover] = useState('7');
-  const proposal = useLoad(() => call('purchases.reorder', Number(cover) || 7), [cover]);
+  const [method, setMethod] = useState<'recent' | 'season'>('recent');
+  const [boost, setBoost] = useState('0');
+  const boostPct = Math.max(-50, Math.min(300, Math.round(Number(boost.replace(',', '.')) || 0)));
+  const proposal = useLoad(() => call('purchases.reorder', Number(cover) || 7, { method, boostPct }), [cover, method, boostPct]);
+  const season = method === 'season';
   const suppliers = useLoad(() => call('suppliers.list'));
   const [warehouseId, setWarehouseId] = useState('');
   const [edits, setEdits] = useState<Record<string, { qty: string; supplierId: string; on: boolean }>>({});
@@ -1305,7 +1312,7 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
   const exportXlsx = () =>
     saveXlsx(`proposition-de-commande-${today()}.xlsx`, {
       name: 'Proposition de commande',
-      title: [`Proposition de commande du ${dateFr(today())} · ${cover} jours à couvrir`],
+      title: [`Proposition de commande du ${dateFr(today())} · ${cover} jours à couvrir${season ? ' · saison' : ''}${boostPct ? ` · majoration ${boostPct} %` : ''}`],
       columns: [
         { header: 'Code', width: 14 },
         { header: 'Article', width: 32 },
@@ -1343,7 +1350,22 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
           <input inputMode="numeric" value={cover} onChange={(e) => setCover(e.target.value)} />
         </Field>
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} label="Livrer au dépôt" />
+        <Field label="Calcul">
+          <select value={method} onChange={(e) => setMethod(e.target.value as 'recent' | 'season')}>
+            <option value="recent">Ventes récentes</option>
+            <option value="season">Même période l'an dernier (saison)</option>
+          </select>
+        </Field>
+        <Field label="Majoration %" hint="Pour un événement (fêtes, rentrée, Ramadan…) : de −50 à 300.">
+          <input type="number" min={-50} max={300} step={5} value={boost} onChange={(e) => setBoost(e.target.value)} />
+        </Field>
       </div>
+      {season && (
+        <p className="muted">
+          Calcul « saison » : les ventes des mêmes semaines l'an dernier, corrigées de l'évolution des ventes récentes par rapport à l'an dernier. Sans historique de
+          l'an dernier, la moyenne récente est utilisée.
+        </p>
+      )}
       <div className="filters">
         <select value={dept} onChange={(e) => setDept(e.target.value)}>
           <option value="">Tous les rayons</option>
@@ -1395,6 +1417,8 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
               <th className="r">Stock</th>
               <th className="r">En commande</th>
               <th className="r">Ventes / jour</th>
+              {season && <th className="r">L'an dernier / jour</th>}
+              {season && <th className="r">Tendance</th>}
               <th className="r">Point de commande</th>
               <th>À commander</th>
               <th>En conditionnements</th>
@@ -1425,6 +1449,8 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
                 <td className={`r ${r.stock <= 0 ? 'neg' : ''}`}>{qty(r.stock, r.unit)}</td>
                 <td className="r">{r.on_order ? qty(r.on_order, r.unit) : ''}</td>
                 <td className="r">{r.avg_daily_sales ? qty(r.avg_daily_sales, r.unit) : ''}</td>
+                {season && <td className="r">{r.last_year_daily != null ? qty(r.last_year_daily, r.unit) : <span className="muted">—</span>}</td>}
+                {season && <td className="r">{r.trend != null ? `×${r.trend.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}</td>}
                 <td className="r">{qty(r.reorder_point, r.unit)}</td>
                 <td>
                   <input className="qty" value={r.qtyText} onChange={(e) => set(r.article_id, { qty: e.target.value })} />

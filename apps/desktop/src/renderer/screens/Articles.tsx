@@ -217,6 +217,12 @@ export function ArticleForm({
     active: article ? article.active === 1 : true,
   });
   const [printing, setPrinting] = useState(false);
+  // Emballage consigné (casier, bouteille) : un emballage pour `units` unités vendues.
+  const canContainer = can('containers', 'article_edit');
+  const containerTypes = useLoad(() => (canContainer ? call('containers.types') : Promise.resolve([])), []);
+  const withContainer = article as (Article & { container_id?: string | null; container_units?: number }) | null;
+  const initialContainer = { id: withContainer?.container_id ?? '', units: withContainer?.container_units ?? 1000 };
+  const [container, setContainer] = useState({ id: initialContainer.id, units: String(initialContainer.units / 1000) });
   const packCodes = new Set(article?.packs.map((p) => p.barcode).filter(Boolean));
   const [barcodes, setBarcodes] = useState(
     article?.barcodes.filter((b) => !packCodes.has(b.code)).map((b) => ({ code: b.code, pack: String(b.pack_qty / 1000) })) ?? [],
@@ -336,6 +342,11 @@ export function ArticleForm({
       for (const w of warehouses.data ?? []) {
         const v = (locations[w.id] ?? '').trim().toUpperCase();
         if (v !== (initialLocations[w.id] ?? '')) await call('catalogue.setLocation', saved.id, w.id, v);
+      }
+      if (canContainer) {
+        const units = parseQty(container.units) ?? 1000;
+        if (container.id !== initialContainer.id || (container.id && units !== initialContainer.units))
+          await call('containers.setArticle', saved.id, container.id || null, container.id ? units : 1000);
       }
       const nextTiers = tiers
         .filter((t) => t.qty.trim() && t.price.trim())
@@ -473,6 +484,26 @@ export function ArticleForm({
           <Field label="Article de remplacement" hint="Proposé en caisse quand celui-ci est épuisé">
             <SubstituteInput value={substitute} exclude={article?.id ?? null} onChange={setSubstitute} />
           </Field>
+          {canContainer && (container.id || (containerTypes.data ?? []).length > 0) && (
+            <>
+              <Field label="Emballage consigné" hint="Casier ou bouteille dont la consigne se paie à la caisse">
+                <select value={container.id} onChange={(e) => setContainer({ ...container, id: e.target.value })}>
+                  <option value="">Aucun</option>
+                  {(containerTypes.data ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} · consigne {fcfa(c.deposit)}
+                    </option>
+                  ))}
+                  {container.id && !(containerTypes.data ?? []).some((c) => c.id === container.id) && <option value={container.id}>Emballage désactivé</option>}
+                </select>
+              </Field>
+              {container.id && (
+                <Field label="Unités par emballage" hint="12 pour un casier de 12 bouteilles, 1 pour une bouteille">
+                  <input inputMode="decimal" value={container.units} onChange={(e) => setContainer({ ...container, units: e.target.value })} />
+                </Field>
+              )}
+            </>
+          )}
           {piece &&
             tiers.map((t, i) => (
               <Field key={`tier${i}`} label={`Prix par quantité ${i + 1}`} hint={i === 0 ? 'À partir de combien d’unités, et le prix de l’unité' : undefined}>

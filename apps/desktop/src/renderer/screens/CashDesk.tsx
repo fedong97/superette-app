@@ -272,6 +272,8 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
   const [target, setTarget] = useState('');
   const [pin, setPin] = useState('');
   const [print, setPrint] = useState(true);
+  // Avance au-delà du plafond du magasin : le code d'un gérant est demandé.
+  const [overCeiling, setOverCeiling] = useState(false);
   useEffect(() => {
     if (o) setMethod(o.methods[0] as Method);
   }, [o?.register.id]);
@@ -293,7 +295,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
     (!needsTarget || Boolean(target)) &&
     (method === 'CASH' || reference.trim()) &&
     ((type !== 'other' && type !== 'expense') || label.trim()) &&
-    (!o.needsPin || pin.length >= 4);
+    (!(o.needsPin || overCeiling) || pin.length >= 4);
   return (
     <Modal title="Décaisser" onClose={onClose} wide>
       <form
@@ -316,7 +318,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
                         : loan === 'staff_salary'
                           ? { ...base, type: loan, salaryId: target }
                           : { ...base, type: loan, customerId: target };
-            const r = await call('cashdesk.out', sessionId, input, o.needsPin ? pin : undefined);
+            const r = await call('cashdesk.out', sessionId, input, o.needsPin || overCeiling ? pin : undefined);
             toast.ok('Sortie enregistrée');
             if (print) {
               const printing = r.source === 'cash_operation' ? Promise.resolve() : r.source === 'movement' ? call('emoney.print', r.id) : call('cashdesk.print', sessionId, r.source, r.id);
@@ -324,6 +326,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
             }
             onDone();
           } catch (err) {
+            if ((err as { code?: string }).code === 'SUPERVISOR_REQUIRED') setOverCeiling(true);
             toast.error(err);
           }
         }}
@@ -449,7 +452,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
           </div>
         )}
         <Tail method={method} reference={reference} setReference={setReference} piece={piece} setPiece={setPiece} pieceLabel="N° reçu" label={label} setLabel={setLabel} labelRequired={type === 'other' || type === 'expense'} />
-        {o.needsPin && (
+        {(o.needsPin || overCeiling) && (
           <>
             <Field label="Code du gérant">
               <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />

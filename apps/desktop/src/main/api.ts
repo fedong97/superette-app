@@ -53,10 +53,17 @@ import {
 } from '@superette/core';
 import {
   AppError,
+  type AgentInput,
+  type AgentKind,
+  ClearanceService,
+  type ReorderOptions,
+  type WeekSchedule,
   approvalStatus,
   requestApproval,
   shelfCarts,
   takeShelfCart,
+  takeWebOrder,
+  webOrders,
   type AssetInput,
   ficheBanner,
   FICHE_EXTENSION,
@@ -134,6 +141,7 @@ import {
   type FiscalAdjustmentInput,
   type FiscalAdjustmentStatus,
 } from '@superette/db';
+import { createCloudBackup } from './cloudBackup';
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -257,6 +265,8 @@ export interface Printer {
   summaryInvoice(invoiceId: string): Promise<void>;
   /** Bordereau de remise de chèques en banque. */
   chequeDeposit(depositId: string): Promise<void>;
+  /** Feuille de route d'un livreur : ses livraisons, adresses et montants à encaisser. */
+  courierSheet(storeId: string, courier: string, date: string): Promise<void>;
   productionNote(orderId: string): Promise<void>;
   /** Facture fournisseur A4 : en-tête, lignes (prix, remise, gratuits, net) et règlements. */
   purchaseInvoice(invoiceId: string, opts?: InvoicePrintOptions): Promise<boolean>;
@@ -367,6 +377,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const PRODUCTION: Permission[] = ['production', 'production_recipes', 'production_create', 'production_validate', 'production_cancel', ...STOCK];
   /** Paramètres du magasin de ce poste. */
   const settings = () => s.admin.storeSettings(ctx().storeId);
+  const cloud = createCloudBackup(s);
   /** Ce qui s'imprime sur le badge d'un employé : fiche collaborateur, photo, couleurs et logo de son magasin. */
   const badgeCard = (target: User): BadgeCard => {
     const storeId = target.store_id ?? s.admin.station()?.store.id ?? ctx().storeId;
@@ -1084,7 +1095,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Paramètres du magasin de ce poste (Administration › Paramètres). */
     'admin.storeSettings': () => s.admin.storeSettings(ctx().storeId),
     'admin.saveStoreSettings': (patch: Partial<StoreSettings>) => {
-      const c = ctx(['settings_edit']);
+      // Boutique en ligne et vérificateur de prix : le droit « online_shop » suffit pour ces réglages-là.
+      const shopOnly = Object.keys(patch).length > 0 && Object.keys(patch).every((k) => k.startsWith('onlineShop') || k === 'priceChecker');
+      const c = ctx(shopOnly ? ['settings_edit', 'online_shop'] : ['settings_edit']);
       if (patch.posLayout !== undefined) requireAdmin();
       // Les couleurs de l'entreprise et le badge valent pour tous ses magasins.
       const shared = Object.fromEntries(Object.entries(patch).filter(([k]) => k === 'brandColor' || k === 'brandColor2' || k === 'badge'));
@@ -1408,7 +1421,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'purchases.pay': (input: { invoiceId: string; method: SupplierPaymentMethod; amount: Fcfa; reference?: string | null; registerId?: string | null }) =>
       s.purchases.paySupplier(ctx(['supplier_pay']), input),
     'purchases.due': () => s.purchases.dueSchedule(ctx(['purchase_due']).storeId),
-    'purchases.reorder': (coverDays?: number) => s.purchases.reorderProposal(ctx(['reorder']).storeId, { coverDays }),
+    'purchases.reorder': (coverDays?: number, opts?: Omit<ReorderOptions, 'coverDays'>) => s.purchases.reorderProposal(ctx(['reorder']).storeId, { ...opts, coverDays }),
     'purchases.printReorder': (lines: { articleId: string; supplierId: string | null; qty: Milli; unitCost: Fcfa }[]) => printer.reorderSheet(ctx(['reorder']).storeId, lines),
     'purchases.createOrders': (input: { warehouseId: string; lines: (PurchaseOrderLineInput & { supplierId: string })[] }) =>
       s.purchases.createOrdersFromProposal(ctx(['reorder']), input),
@@ -1923,7 +1936,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Une sortie par un caissier demande le code du gérant, comme un prélèvement ou une dépense. */
     'cashdesk.out': (sessionId: string, input: CashOutInput, supervisorPin?: string) => {
       const c = deskCtx(sessionId);
-      const by = can(user!, ['cashout']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      // Le code saisi l'emporte : il sert aussi à dépasser le plafond des avances.
+      const by = supervisorPin ? supervisor(supervisorPin).id : can(user!, ['cashout']) ? user!.id : supervisor('').id;
       return s.cashdesk.cashOut(c, sessionId, input, by);
     },
     /** Reçu (entrée) ou bon (sortie) d'une ligne de la journée : ticket ou A4. Le reçu réimprimé porte « DUPLICATA ». */
@@ -2083,6 +2097,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Remises par famille : un prix convenu, comme le tarif. Sans le droit, la fiche garde les siennes.
       if (!can(u, ['customer_price_level'])) input = { ...input, familyDiscounts: undefined };
       if (!can(u, ['customer_deactivate']) && (input.active ?? active) !== active) throw new AppError("Vous n'avez pas le droit de désactiver un client", 'FORBIDDEN');
+      // Interdit de chèque : décidé par le gérant ou le comptable, comme le crédit.
+      if (!can(u, ['receivables', 'cheque_rejections']) && input.noCheque !== undefined && input.noCheque !== Boolean(before?.no_cheque)) {
+        throw new AppError("Vous n'avez pas le droit d'autoriser ou d'interdire les chèques à un client", 'FORBIDDEN');
+      }
       const fiche = (a: { name: string; phone?: string | null; contact?: string | null; email?: string | null; address?: string | null; notes?: string | null }) =>
         [a.name.trim(), a.phone ?? '', a.contact ?? '', a.email ?? '', a.address ?? '', a.notes ?? ''].join('|');
       if (!id && !can(u, ['customer_create'])) throw new AppError("Vous n'avez pas le droit de créer un client", 'FORBIDDEN');
@@ -2195,6 +2213,27 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'orders.list': (opts?: { status?: OrderStatus | 'open'; search?: string; date?: string }) => s.orders.list(ctx(['customer_orders', ...POS]).storeId, opts),
     'orders.get': (id: string) => (requireUser(), s.orders.get(id)),
     'orders.save': (input: OrderInput, id?: string | null) => s.orders.save(ctx(['customer_orders']), input, id ?? undefined),
+    /** Commandes de la boutique en ligne qui attendent d'être prises par un PC du magasin. */
+    'orders.webOrders': async () => {
+      ctx(['customer_orders']);
+      if (s.fiches.current() || !s.sync.credentials()) return [];
+      return webOrders(s).catch(() => []);
+    },
+    /** Prend la commande en ligne (un seul PC l'obtient) : elle devient une commande client « Boutique en ligne ». */
+    'orders.takeWeb': async (id: string) => {
+      const c = ctx(['customer_orders']);
+      const w = await takeWebOrder(s, id);
+      return s.orders.importWeb(c, {
+        ref: w.id,
+        customerName: w.customerName,
+        phone: w.phone,
+        address: w.address,
+        slot: w.slot,
+        note: [`Boutique en ligne ${w.number}`, w.note].filter(Boolean).join(' · '),
+        deliveryFee: w.deliveryFee,
+        lines: w.lines.map((l) => ({ articleId: l.articleId, qty: l.qty, name: l.name })),
+      });
+    },
     'orders.prepare': (id: string) => s.orders.prepare(ctx(['customer_orders']), id),
     'orders.backOrderNeeds': (id: string) => s.purchases.backOrderNeeds(ctx(['back_orders']).storeId, id),
     'orders.backOrder': (id: string, opts?: { supplierId?: string | null; warehouseId?: string | null }) => s.purchases.backOrder(ctx(['back_orders']), id, opts),
@@ -2336,6 +2375,97 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'cheques.create': (input: { date: string; bank?: string | null; paymentIds?: string[] }) => s.cheques.create(ctx(['cheque_deposits']), input),
     'cheques.cancel': (id: string) => s.cheques.cancel(ctx(['cheque_deposits']), id),
     'cheques.print': (id: string) => (ctx(['cheque_deposits']), printer.chequeDeposit(id)),
+    'cheques.received': (since?: string | null) => s.cheques.received(ctx(['cheque_rejections']).storeId, { since }),
+    'cheques.reject': (input: Parameters<Services['cheques']['reject']>[1]) => s.cheques.reject(ctx(['cheque_rejections']), input),
+    'cheques.cancelRejection': (id: string) => s.cheques.cancelRejection(ctx(['cheque_rejections']), id),
+    'cheques.rejections': () => s.cheques.rejections(ctx(['cheque_rejections']).storeId),
+
+    // --- Emballages consignés --------------------------------------------------
+    'containers.types': (includeInactive?: boolean) => (requireUser(), s.containers.listTypes({ includeInactive })),
+    'containers.saveType': (input: { name: string; deposit: Fcfa; active?: boolean }, id?: string | null) => s.containers.saveType(requireUser(['containers']).id, input, id ?? undefined),
+    'containers.setArticle': (articleId: string, containerId: string | null, units?: Milli) => s.containers.setArticleContainer(requireUser(['containers', 'article_edit']).id, articleId, containerId, units),
+    'containers.needsFor': (lines: { articleId: string; qty: Milli }[]) => (requireUser(), s.containers.needsFor(lines)),
+    /** Consigne d'un passage en caisse : emballages sortis et vides rapportés, payés en espèces. */
+    'containers.counter': (input: Parameters<Services['containers']['counter']>[1]) => s.containers.counter(ctx(['containers_counter', 'containers']), input),
+    'containers.record': (input: Parameters<Services['containers']['record']>[1]) => s.containers.record(ctx(['containers']), input),
+    'containers.cancel': (id: string, reason: string) => s.containers.cancel(ctx(['containers']), id, reason),
+    'containers.moves': (opts?: Parameters<Services['containers']['moves']>[1]) => s.containers.moves(ctx(['containers', 'containers_counter']).storeId, opts),
+    'containers.balances': () => s.containers.balances(ctx(['containers']).storeId),
+    'containers.atCustomers': () => s.containers.atCustomers(ctx(['containers', 'containers_counter']).storeId),
+    'containers.owedToSuppliers': () => s.containers.owedToSuppliers(ctx(['containers']).storeId),
+
+    // --- Point Mobile Money ----------------------------------------------------
+    'agent.accounts': (includeInactive?: boolean) => s.agent.accounts(ctx(['agent_point', 'agent_accounts']).storeId, { includeInactive }),
+    'agent.saveAccount': (input: Parameters<Services['agent']['saveAccount']>[1], id?: string | null) => s.agent.saveAccount(ctx(['agent_accounts']), input, id ?? undefined),
+    'agent.commissionFor': (accountId: string, kind: AgentKind, amount: Fcfa) => (requireUser(['agent_point']), s.agent.commissionFor(accountId, kind, amount)),
+    'agent.record': (input: AgentInput) => {
+      // L'approvisionnement de la flotte et la commission se règlent au bureau.
+      const need: Permission[] = input.kind === 'float_in' || input.kind === 'float_out' || input.kind === 'commission' ? ['agent_accounts'] : ['agent_point'];
+      return s.agent.record(ctx(need), input);
+    },
+    'agent.cancel': (id: string, reason: string) => s.agent.cancel(ctx(['agent_cancel']), id, reason),
+    /** Reçu d'une opération : une pièce de caisse par mouvement d'espèces (montant, frais). */
+    'agent.print': async (id: string) => {
+      const c = ctx(['agent_point', 'agent_accounts']);
+      const op = s.agent.get(id);
+      if (op.store_id !== c.storeId) throw new AppError("Cette opération est d'un autre magasin", 'FORBIDDEN');
+      const ids = JSON.parse((s.db.prepare('SELECT entry_ids FROM agent_operations WHERE id = ?').pluck().get(id) as string | undefined) ?? '[]') as string[];
+      if (!ids.length) throw new AppError("Cette opération n'a pas de reçu : elle ne passe pas par la caisse", 'INVALID');
+      for (const e of ids) await printer.officeVoucher(e);
+    },
+    'agent.list': (opts?: Parameters<Services['agent']['list']>[1]) => s.agent.list(ctx(['agent_point', 'agent_accounts']).storeId, opts),
+    'agent.summary': (from: string, to: string) => s.agent.summary(ctx(['agent_accounts']).storeId, from, to),
+
+    // --- Contrôle des caissiers ------------------------------------------------
+    'cashierControl.report': (from: string, to: string) => s.cashierControl.report(ctx(['cashier_control']).storeId, from, to),
+    'cashierControl.events': (userId: string, from: string, to: string) => s.cashierControl.events(ctx(['cashier_control']).storeId, userId, from, to),
+
+    // --- Congés et planning ----------------------------------------------------
+    'staffTime.leaves': (opts?: { staffId?: string | null; year?: number | null }) => s.staffTime.leaves(ctx(['staff_leaves']).storeId, opts),
+    'staffTime.requestLeave': (input: Parameters<Services['staffTime']['requestLeave']>[1]) => s.staffTime.requestLeave(ctx(['staff_leaves']), input),
+    'staffTime.decideLeave': (id: string, decision: 'approved' | 'refused' | 'cancelled') => s.staffTime.decideLeave(ctx(['staff_leaves']), id, decision),
+    'staffTime.balances': (year?: number) => s.staffTime.balances(ctx(['staff_leaves']).storeId, year),
+    'staffTime.week': (monday: string) => s.staffTime.week(ctx(['staff_leaves']).storeId, monday),
+    'staffTime.schedule': (staffId: string) => (requireUser(['staff_leaves']), s.staffTime.schedule(staffId)),
+    'staffTime.saveSchedule': (staffId: string, days: WeekSchedule | null) => s.staffTime.saveSchedule(ctx(['staff_leaves']), staffId, days),
+
+    // --- Déstockage, démarque et inventaire tournant ---------------------------
+    'clearance.candidates': () => s.clearance.candidates(ctx(['clearance']).storeId),
+    'clearance.createPromotions': (items: { articleId: string; promoPrice: Fcfa; until?: string | null }[]) => {
+      const c = ctx(['clearance']);
+      return s.clearance.createPromotions(c.userId, c.storeId, items);
+    },
+    'clearance.losses': (from: string, to: string) => s.clearance.losses(ctx(['clearance']).storeId, from, to),
+    'clearance.lossLabels': () => (requireUser(), ClearanceService.lossLabels()),
+    'cycleCount.proposal': (warehouseId: string, size?: number) => s.cycleCount.proposal(ctx(['cycle_count']).storeId, warehouseId, { size }),
+    'cycleCount.start': (warehouseId: string, articleIds: string[]) => s.cycleCount.start(ctx(['cycle_count']), warehouseId, articleIds),
+
+    // --- Commandes groupées ----------------------------------------------------
+    'purchases.createGroupOrder': (input: Parameters<Services['purchases']['createGroupOrder']>[1]) => s.purchases.createGroupOrder(ctx(['group_orders']), input),
+    'purchases.groupOrders': () => (requireUser(['group_orders']), s.purchases.groupOrders()),
+    'purchases.groupOrder': (ref: string) => (requireUser(['group_orders']), s.purchases.groupOrder(ref)),
+    /** Stock et ventes des 28 derniers jours d'un article dans chaque magasin, pour répartir une commande groupée. */
+    'purchases.groupNeeds': (articleIds: string[]) => {
+      requireUser(['group_orders']);
+      const stores = s.admin.listStores();
+      const stock = s.db.prepare('SELECT COALESCE(SUM(s.qty), 0) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE s.article_id = ? AND w.store_id = ?').pluck();
+      const since = new Date(Date.now() - 28 * 86_400_000).toISOString();
+      const sold = s.db
+        .prepare("SELECT COALESCE(-SUM(m.qty), 0) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id WHERE m.article_id = ? AND w.store_id = ? AND m.type IN ('SALE', 'RETURN') AND m.at >= ?")
+        .pluck();
+      return stores.map((st) => ({
+        storeId: st.id,
+        storeName: st.name,
+        articles: Object.fromEntries(articleIds.map((a) => [a, { stock: stock.get(a, st.id) as number, sold28: sold.get(a, st.id, since) as number }])),
+      }));
+    },
+
+    // --- Tournées des livreurs ---------------------------------------------------
+    'couriers.sheet': (courier: string, date: string) => s.couriers.sheet(ctx(['deliveries']).storeId, courier, date),
+    'couriers.printSheet': (courier: string, date: string) => printer.courierSheet(ctx(['deliveries']).storeId, courier, date),
+    'couriers.pending': (courier?: string | null) => s.couriers.pending(ctx(['courier_returns']).storeId, courier),
+    'couriers.settle': (input: Parameters<Services['couriers']['settle']>[1]) => s.couriers.settle(ctx(['courier_returns']), input),
+    'couriers.returns': (opts?: { from?: string; to?: string }) => s.couriers.list(ctx(['courier_returns']).storeId, opts),
     'accounting.statements': (opts: { from: string; to: string }) => s.statements.statements(ctx(['statements']).storeId, opts),
     'accounting.cashFlow': (opts: { from: string; to: string }) => s.statements.cashFlow(ctx(['statements']).storeId, opts),
     'accounting.notes': (year: number) => s.notes.notes(ctx(['tax', 'statements']).storeId, year),
@@ -2367,6 +2497,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),
     'backup.now': () => s.backups.saveNow(requireUser(['backups']).id),
+    // --- Sauvegarde en ligne (chiffrée sur ce PC, gardée par le serveur) ---------
+    'backup.cloudStatus': () => (requireUser(['backups']), cloud.status()),
+    'backup.cloudSetKey': (passphrase: string) => (requireAdmin(), cloud.setKey(passphrase)),
+    'backup.cloudNow': () => cloud.now(requireUser(['backups']).id),
+    'backup.cloudList': () => (requireUser(['backups']), cloud.list()),
+    'backup.cloudDownload': (id: string, passphrase: string) => (requireAdmin(), cloud.download(id, passphrase)),
     'backup.toFolder': async () => {
       const u = requireUser(['backups']);
       const dir = await system.chooseFolder('Choisir la clé USB ou le dossier de la copie');

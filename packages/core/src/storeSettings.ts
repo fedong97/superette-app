@@ -116,6 +116,29 @@ export interface StoreSettings {
   /** Jours travaillés (0 = dimanche … 6 = samedi) : « 123456 » du lundi au samedi. */
   workDays: string;
 
+  /** Congés payés acquis par mois de service, en dixièmes de jour (15 = 1,5 jour, Code du travail). */
+  leaveDaysPerMonth: number;
+  /** Avances sur salaire : encours maximal en % du salaire de base ; 0 : sans plafond. */
+  advanceMaxPct: number;
+  /** Déstockage avant péremption : « jours:remise % » séparés par des virgules (14:10,7:20,3:30). */
+  clearanceRules: string;
+  /** Inventaire tournant : nombre de produits proposés à compter chaque semaine. */
+  cycleCountPerWeek: number;
+
+  /** Boutique en ligne : page internet du magasin sur le serveur, les commandes arrivent dans « Commandes clients ». */
+  onlineShop: boolean;
+  /** Livraison proposée sur la boutique en ligne, et ses frais TTC (0 : à convenir). */
+  onlineShopDelivery: boolean;
+  onlineShopDeliveryFee: number;
+  /** Montant minimal d'une commande en ligne (0 : sans minimum). */
+  onlineShopMinOrder: number;
+  /** Message affiché en haut de la boutique (horaires, zone de livraison…). */
+  onlineShopMessage: string;
+  /** Vérificateur de prix : page du serveur ouverte sur un téléphone ou une tablette au rayon. */
+  priceChecker: boolean;
+  /** Sauvegarde en ligne : copie chiffrée de la base envoyée au serveur après chaque sauvegarde. */
+  cloudBackup: boolean;
+
   /** Paie : retenues légales (CNPS, IRPP, CAC, CFC, RAV, TDL) et charges patronales. */
   payroll: PayrollRules;
 
@@ -181,6 +204,17 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   workStart: '08:00',
   lateToleranceMinutes: 10,
   workDays: '123456',
+  leaveDaysPerMonth: 15,
+  advanceMaxPct: 0,
+  clearanceRules: '14:10,7:20,3:30',
+  cycleCountPerWeek: 30,
+  onlineShop: false,
+  onlineShopDelivery: true,
+  onlineShopDeliveryFee: 0,
+  onlineShopMinOrder: 0,
+  onlineShopMessage: '',
+  priceChecker: false,
+  cloudBackup: false,
   payroll: DEFAULT_PAYROLL,
   printTemplates: [],
   printDefaults: {},
@@ -207,8 +241,13 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   loyaltyPointValue: [1, 1e6],
   loyaltyMinRedeem: [0, 1e7],
   lateToleranceMinutes: [0, 240],
+  leaveDaysPerMonth: [0, 50],
+  advanceMaxPct: [0, 100],
+  cycleCountPerWeek: [5, 500],
+  onlineShopDeliveryFee: [0, 1e7],
+  onlineShopMinOrder: [0, 1e8],
 };
-const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500 };
+const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500, onlineShopMessage: 300 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
 
 /**
@@ -254,6 +293,11 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
         s = [...new Set(s.replace(/[^0-6]/g, ''))].sort().join('');
         if (!s) throw new Error('Choisissez au moins un jour travaillé');
       }
+      if (k === 'clearanceRules') {
+        const rules = parseClearanceRules(s);
+        if (s && !rules.length) throw new Error('Déstockage : « jours:remise » séparés par des virgules, par exemple 14:10,7:20,3:30');
+        s = rules.map((r) => `${r.days}:${r.pct}`).join(',');
+      }
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);
@@ -283,4 +327,29 @@ export function roundCash(total: number, rounding: number): number {
 /** Numéro d'une pièce avec son préfixe : « DV-01-00012 », ou sans préfixe « 01-00012 ». */
 export function withPrefix(prefix: string, rest: string): string {
   return prefix ? `${prefix}-${rest}` : rest;
+}
+
+/** Palier de déstockage : à J-`days` de la péremption, `pct` % de remise. */
+export interface ClearanceRule {
+  days: number;
+  pct: number;
+}
+
+/** Paliers de déstockage lus dans le paramètre, du plus proche de la péremption au plus lointain. */
+export function parseClearanceRules(text: string): ClearanceRule[] {
+  const out: ClearanceRule[] = [];
+  for (const part of text.split(/[,;\s]+/).filter(Boolean)) {
+    const m = /^(\d{1,3}):(\d{1,2})$/.exec(part);
+    if (!m) return [];
+    const days = Number(m[1]);
+    const pct = Number(m[2]);
+    if (days < 0 || days > 365 || pct < 1 || pct > 90) return [];
+    out.push({ days, pct });
+  }
+  return out.sort((a, b) => a.days - b.days);
+}
+
+/** Remise proposée pour un lot qui périme dans `daysLeft` jours (0 : aucune). */
+export function clearancePct(rules: ClearanceRule[], daysLeft: number): number {
+  return rules.find((r) => daysLeft <= r.days)?.pct ?? 0;
 }

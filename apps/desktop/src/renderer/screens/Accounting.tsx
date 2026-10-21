@@ -6,12 +6,13 @@ import { Disclosures } from './Disclosures';
 import { Assets } from './Assets';
 import { Analytics, Budgets, CashForecast, ChequeDeposits } from './Planning';
 import { AccountPicker } from './accountPicker';
+import { ChequeRejections } from './ChequeRejections';
 import { hasVat, tx } from '../tax';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Account = Result<'accounting.accounts'>[number];
 type JournalCode = Result<'accounting.entries'>[number]['journal'];
-export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal' | 'assets' | 'forecast' | 'budgets' | 'analytics' | 'cheques';
+export type AccountingTab = 'journals' | 'ledger' | 'balance' | 'statements' | 'dsf' | 'vat' | 'tax' | 'treasury' | 'bank' | 'accounts' | 'fiscal' | 'assets' | 'forecast' | 'budgets' | 'analytics' | 'cheques' | 'unpaid';
 type Entry = Result<'accounting.entries'>[number];
 type FiscalYear = Result<'fiscal.list'>[number];
 
@@ -73,6 +74,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
     budgets: can('budgets'),
     analytics: can('analytics'),
     cheques: can('cheque_deposits'),
+    unpaid: can('cheque_rejections'),
   };
   const [tab, setTab] = useState<AccountingTab>(allowed[initialTab] ? initialTab : ((Object.keys(allowed) as AccountingTab[]).find((k) => allowed[k]) ?? 'accounts'));
   const [ledgerAccount, setLedgerAccount] = useState('571');
@@ -101,6 +103,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
             ['treasury', 'Trésorerie'],
             ['bank', 'Rapprochement bancaire'],
             ['cheques', 'Remises de chèques'],
+            ['unpaid', 'Chèques impayés'],
             ['forecast', 'Trésorerie prévisionnelle'],
             ['budgets', 'Budgets'],
             ['analytics', 'Analytique'],
@@ -127,6 +130,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
       {tab === 'budgets' && allowed.budgets && <Budgets />}
       {tab === 'analytics' && allowed.analytics && <Analytics />}
       {tab === 'cheques' && allowed.cheques && <ChequeDeposits />}
+      {tab === 'unpaid' && allowed.unpaid && <ChequeRejections />}
     </div>
   );
 }

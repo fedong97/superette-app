@@ -22,6 +22,9 @@ export type WinKind =
   | 'admin'
   | 'production'
   | 'staff'
+  | 'containers'
+  | 'agent'
+  | 'control'
   | 'realSales'
   | 'fiscalPrep';
 

@@ -835,3 +835,172 @@ export function WhatsappTicketDialog({ saleId, number, onClose }: { saleId: stri
     </Modal>
   );
 }
+
+type ContainerNeed = Result<'containers.needsFor'>[number];
+
+/**
+ * Consigne des emballages au comptoir : emballages qui partent avec le client
+ * et vides qu'il rapporte. La différence s'encaisse ou se rend en espèces dans
+ * la journée de la caisse. Après une vente, les emballages des articles vendus
+ * sont proposés ; sans vente, la fenêtre sert aux retours de vides.
+ */
+export function ContainerCounterDialog({
+  saleId = null,
+  needs = [],
+  customer: initialCustomer = null,
+  clientName: initialName = '',
+  onClose,
+  onDone,
+}: {
+  saleId?: string | null;
+  needs?: ContainerNeed[];
+  customer?: { id: string; name: string } | null;
+  clientName?: string | null;
+  onClose: () => void;
+  onDone?: () => void;
+}) {
+  const toast = useToast();
+  const types = useLoad(() => call('containers.types'), []);
+  const [customer, setCustomer] = useState(initialCustomer);
+  const [clientName, setClientName] = useState(initialName ?? '');
+  const [search, setSearch] = useState('');
+  const found = useLoad(() => (search.trim().length >= 2 ? call('customers.list', { search: search.trim() }) : Promise.resolve([])), [search]);
+  const [rows, setRows] = useState<Record<string, { out: string; back: string }>>(() =>
+    Object.fromEntries(needs.map((n) => [n.container_id, { out: String(n.count), back: '0' }])),
+  );
+  const [onAccount, setOnAccount] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const count = (v: string | undefined) => {
+    const n = Number((v ?? '').trim() || '0');
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
+  };
+  // Les emballages de la vente d'abord, puis les autres.
+  const list = [...(types.data ?? [])].sort((a, b) => Number(Boolean(rows[b.id])) - Number(Boolean(rows[a.id])));
+  const invalid = list.some((t) => count(rows[t.id]?.out) === null || count(rows[t.id]?.back) === null);
+  const lines = list.map((t) => ({ containerId: t.id, out: count(rows[t.id]?.out) ?? 0, back: count(rows[t.id]?.back) ?? 0, deposit: t.deposit }));
+  const net = onAccount ? 0 : lines.reduce((s, l) => s + (l.out - l.back) * l.deposit, 0);
+  const empty = !lines.some((l) => l.out > 0 || l.back > 0);
+  const set = (id: string, patch: Partial<{ out: string; back: string }>) => setRows({ ...rows, [id]: { out: '0', back: '0', ...rows[id], ...patch } });
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await call('containers.counter', {
+        lines: lines.map(({ containerId, out, back }) => ({ containerId, out, back })),
+        saleId,
+        customerId: customer?.id ?? null,
+        clientName: customer ? null : clientName.trim() || null,
+        onAccount: onAccount && Boolean(customer),
+      });
+      toast.ok(net > 0 ? `Consigne encaissée : ${fcfa(net)}` : net < 0 ? `Consigne rendue : ${fcfa(-net)}` : 'Emballages enregistrés');
+      onDone?.();
+      onClose();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Consigne des emballages" onClose={onClose} wide>
+      {saleId && <p className="muted">Emballages des articles vendus : corrigez si le client rapporte des vides ou garde moins d'emballages.</p>}
+      <div className="grid3">
+        {customer ? (
+          <Field label="Client en compte">
+            <span className="inline">
+              <b>{customer.name}</b>
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setCustomer(null);
+                  setOnAccount(false);
+                }}
+              >
+                Changer
+              </button>
+            </span>
+          </Field>
+        ) : (
+          <>
+            <Field label="Client en compte (facultatif)">
+              <input placeholder="Nom, code ou téléphone" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </Field>
+            <Field label="Nom du client comptoir" hint="Facultatif">
+              <input value={clientName} onChange={(e) => setClientName(e.target.value)} />
+            </Field>
+          </>
+        )}
+      </div>
+      {!customer && (found.data ?? []).length > 0 && (
+        <div className="inline">
+          {(found.data ?? []).slice(0, 6).map((c) => (
+            <button
+              type="button"
+              key={c.id}
+              onClick={() => {
+                setCustomer({ id: c.id, name: c.name });
+                setSearch('');
+              }}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {types.data && types.data.length === 0 ? (
+        <Empty>Aucun emballage consigné. Le gérant les crée dans Stock › Emballages consignés.</Empty>
+      ) : (
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>Emballage</th>
+              <th className="r">Consigne</th>
+              <th className="r">Sortis</th>
+              <th className="r">Rapportés</th>
+              <th className="r">Montant</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((t) => {
+              const l = lines.find((x) => x.containerId === t.id)!;
+              return (
+                <tr key={t.id}>
+                  <td>{t.name}</td>
+                  <td className="r">{fcfa(t.deposit)}</td>
+                  <td className="r">
+                    <input className="num" inputMode="numeric" value={rows[t.id]?.out ?? '0'} onChange={(e) => set(t.id, { out: e.target.value })} />
+                  </td>
+                  <td className="r">
+                    <input className="num" inputMode="numeric" value={rows[t.id]?.back ?? '0'} onChange={(e) => set(t.id, { back: e.target.value })} />
+                  </td>
+                  <td className="r">{onAccount || l.out === l.back ? '' : fcfa((l.out - l.back) * t.deposit)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <label className="inline">
+        <input type="checkbox" checked={onAccount} disabled={!customer} onChange={(e) => setOnAccount(e.target.checked)} /> Le client garde les emballages sans payer la
+        consigne (client en compte)
+      </label>
+      {!customer && <p className="muted small">Choisissez un client en compte pour lui laisser les emballages sans consigne.</p>}
+      <div className="kpis">
+        <div className={net > 0 ? 'pos' : net < 0 ? 'neg' : ''}>
+          <small>{net > 0 ? 'À encaisser' : net < 0 ? 'À rendre' : 'Rien à payer'}</small>
+          <strong>{fcfa(Math.abs(net))}</strong>
+        </div>
+      </div>
+      <div className="actions">
+        <button type="button" onClick={onClose}>
+          {saleId ? 'Passer' : 'Annuler'}
+        </button>
+        <button type="button" className="primary" disabled={busy || empty || invalid} onClick={save}>
+          Enregistrer la consigne
+        </button>
+      </div>
+    </Modal>
+  );
+}

@@ -82,6 +82,17 @@ const POS: PageHelp = {
       steps: [
         'Encaisser un règlement client, payer une dépense avec les espèces du tiroir, facturer un devis.',
         'Apport ou prélèvement d’espèces, retour d’articles d’un client, annulation d’un ticket (code du gérant).',
+        '« Consignes (emballages) » : un client rapporte ses vides ou prend des casiers sans achat ; la consigne se rend ou s’encaisse en espèces.',
+      ],
+    },
+    {
+      title: 'Consigne des emballages',
+      perm: 'containers_counter',
+      steps: [
+        'Après la vente d’une boisson consignée (casier, bouteille), la fenêtre de consigne s’ouvre avec le nombre d’emballages qui partent.',
+        'Tapez dans « Rapportés » les vides que le client ramène : la différence s’affiche « À encaisser » ou « À rendre », en espèces.',
+        'Client en compte qui garde les emballages sans payer : cochez « Le client garde les emballages sans payer la consigne ».',
+        '« Passer » ferme la fenêtre sans consigne.',
       ],
     },
   ],
@@ -226,6 +237,36 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
       { tab: 'expiry', title: 'Péremptions', steps: ['Les lots qui périment bientôt (J-7, J-3, J-1) ou déjà périmés : déstockez-les en perte.'] },
       { tab: 'monitoring', title: 'Monitoring', steps: ['Pour un produit, chaque mouvement avec le stock avant et après et le login.', 'Le magasinier demande une correction avec un motif ; le gérant la valide.'] },
+      {
+        tab: 'clearance',
+        title: 'Déstockage avant péremption',
+        perm: 'clearance',
+        steps: [
+          'La liste montre les produits dont un lot approche de sa date limite, avec la remise proposée et la valeur menacée au prix de revient.',
+          'Les paliers de remise se règlent dans Administration › Paramètres (par exemple « 14:10,7:20,3:30 » : 10 % à 14 jours, 20 % à 7 jours, 30 % à 3 jours).',
+          'Changez la remise ou le prix promotionnel d’une ligne si besoin ; « sous le prix de revient » signale une vente à perte, souvent moins coûteuse qu’un produit jeté.',
+          'Cochez les produits puis « Créer les promotions » : chaque promotion court jusqu’à la date limite du lot, dans ce magasin seulement. Un produit déjà en promotion est laissé.',
+        ],
+      },
+      {
+        tab: 'losses',
+        title: 'Démarque',
+        perm: 'clearance',
+        steps: [
+          'Choisissez la période (le mois en cours par défaut) : pour chaque rayon, la casse, les vols, les périmés, la consommation interne et les écarts d’inventaire, au prix de revient.',
+          'La dernière colonne rapporte les pertes au chiffre d’affaires du rayon : au-delà de 2 %, elle passe en rouge.',
+        ],
+      },
+      {
+        tab: 'cycle',
+        title: 'Inventaire tournant',
+        perm: 'cycle_count',
+        steps: [
+          'Choisissez le dépôt : une courte liste de produits à compter cette semaine s’affiche, avec la raison (valeur élevée, écarts passés, jamais compté…).',
+          'Le nombre de produits par semaine se règle dans Administration › Paramètres ; décochez ceux à laisser pour plus tard.',
+          '« Ouvrir l’inventaire de la semaine » crée un inventaire partiel : saisissez les quantités comptées dans l’onglet Inventaires, puis clôturez-le.',
+        ],
+      },
     ],
   },
   purchases: {
@@ -252,7 +293,27 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Enregistrer » : le stock entre au coût net, un bon de réception est créé et la facture va au registre des achats et à l’échéancier. Imprimez-la en A4.',
         ],
       },
-      { tab: 'reorder', title: 'Proposition de commande', perm: 'purchase_orders', steps: ['Les quantités à commander d’après les ventes des 4 dernières semaines et le stock d’alerte ; un bon par fournisseur en un clic.'] },
+      {
+        tab: 'reorder',
+        title: 'Proposition de commande',
+        perm: 'purchase_orders',
+        steps: [
+          'Les quantités à commander d’après les ventes des 4 dernières semaines et le stock d’alerte ; un bon par fournisseur en un clic.',
+          'Calcul « même période l’an dernier (saison) » : les ventes des mêmes semaines l’an dernier, corrigées de l’évolution récente (colonne Tendance). Utile avant les fêtes, la rentrée ou le Ramadan.',
+          '« Majoration % » augmente (ou baisse, jusqu’à −50 %) toutes les quantités pour un événement prévu.',
+        ],
+      },
+      {
+        tab: 'group',
+        title: 'Commandes groupées',
+        perm: 'group_orders',
+        steps: [
+          'Choisissez le fournisseur, puis ajoutez les articles : pour chaque magasin s’affichent son stock et ses ventes des 28 derniers jours.',
+          'La quantité proposée couvre 14 jours de vente moins le stock ; corrigez-la magasin par magasin, ainsi que le prix d’achat négocié.',
+          '« Créer la commande groupée » : chaque magasin reçoit son propre bon de commande (numéro commun « CG- ») et réceptionne lui-même la marchandise.',
+          'La liste du bas montre les commandes groupées passées et combien de magasins ont reçu ; cliquez pour le détail par magasin.',
+        ],
+      },
       { tab: 'invoices', title: 'Factures fournisseurs', perm: 'purchase_invoices', steps: ['Saisissez la facture à partir des bons de réception, puis enregistrez les paiements.'] },
       { tab: 'due', title: 'Échéancier', perm: 'purchase_invoices', steps: ['Ce qui reste à payer à chaque fournisseur, avec les retards en rouge.'] },
       {
@@ -347,6 +408,22 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Partir 🚚 » quand le livreur s’en va (l’heure est notée), puis « Livrée ✓ » à son retour.',
           '« Bon » réimprime le bon de livraison ; ✕ retire la livraison sans annuler la vente.',
           'Pour une vente à crédit, « À encaisser » montre ce que le livreur doit rapporter : à « Livrée », le logiciel propose d’enregistrer le règlement du client.',
+          'À « Partir », si le client a un téléphone, le logiciel propose de le prévenir par WhatsApp : « Votre commande … est en route avec … ».',
+        ],
+      },
+      {
+        title: 'Feuille de route',
+        steps: [
+          'Avant le départ, « Feuille de route » à côté du nom du livreur imprime ses livraisons du jour (de demain si « Demain » est choisi) : client, téléphone, adresse et montant à encaisser.',
+        ],
+      },
+      {
+        title: 'Retour du livreur',
+        perm: 'courier_returns',
+        steps: [
+          'Au retour, « Retour du livreur » : choisissez le livreur, ses livraisons faites et pas encore rendues s’affichent avec le montant à encaisser.',
+          'Corrigez la colonne « Encaissé » si un client n’a pas tout payé (le reste demeure sur son compte), puis tapez les espèces remises : un manquant s’affiche en rouge.',
+          '« Enregistrer le retour » (caisse ouverte) : l’argent entre dans le tiroir comme règlement de chaque client et l’écart reste noté dans l’historique des retours.',
         ],
       },
     ],
@@ -360,6 +437,14 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           '« Nouvelle commande » : origine (téléphone, WhatsApp, au magasin), client et téléphone, adresse (vide si le client vient la chercher), jour et créneau, frais de livraison, articles.',
           '« Confirmer par WhatsApp » ouvre WhatsApp avec le récapitulatif de la commande pour le client.',
+        ],
+      },
+      {
+        title: 'Commandes en ligne',
+        steps: [
+          'Quand la boutique en ligne est ouverte (Administration › Paramètres), les commandes passées sur internet s’affichent en haut de l’écran : « Commandes en ligne (n) ». La liste se met à jour toutes les minutes.',
+          '« Prendre » enregistre la commande dans ce magasin, avec l’origine « Boutique en ligne » ; un seul PC peut la prendre. Les articles inconnus ou inactifs ne sont pas repris : leur nom s’affiche.',
+          'Ensuite, la commande se prépare et s’encaisse comme les autres.',
         ],
       },
       {
@@ -434,6 +519,17 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Les chèques reçus en caisse ou en règlement d’un client restent au compte 513 « Chèques à encaisser ».',
           'Cochez les chèques portés à la banque, la date et la banque, puis « Créer et imprimer le bordereau » : une seule écriture 521 / 513, facile à retrouver sur le relevé.',
+        ],
+      },
+      {
+        tab: 'unpaid',
+        title: 'Chèques revenus impayés',
+        perm: 'cheque_rejections',
+        steps: [
+          'La liste montre les chèques reçus ces 90 derniers jours, remis en banque ou pas encore.',
+          '« Revenu impayé » : date du rejet, frais prélevés par la banque et motif. Pour un chèque de client comptoir, choisissez le client à qui le réclamer. La case « Interdire les chèques à ce client » est cochée d’office.',
+          'Le montant du chèque et les frais retournent au compte du client et apparaissent sur son relevé ; l’écriture reprend la banque (ou le compte 513 si le chèque n’était pas encore remis).',
+          '« Annuler » sur un impayé saisi par erreur : le chèque redevient bon.',
         ],
       },
       {
@@ -611,6 +707,7 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Les paramètres sont rangés par section : identité du magasin (logo, RCCM, message du ticket), ventes et caisse, caisses électroniques (centrale ou indépendantes), crédit clients, stock, achats, sécurité, numérotation des pièces, imprimante, balance, affichage.',
           'Tapez un mot dans la recherche pour retrouver un paramètre, puis « Enregistrer ».',
           'Les sections « (ce PC) » ne valent que pour ce poste ; les autres valent pour tout le magasin.',
+          'Boutique en ligne et vérificateur de prix : ouvrez la boutique, la livraison, ses frais, le montant minimal et le message, ou le vérificateur de prix. Sur un PC relié au serveur, les deux liens à partager s’affichent avec « Copier ». Les réglages parviennent au serveur avec la prochaine synchronisation.',
         ],
       },
       {
@@ -633,7 +730,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Importer » enregistre tout d’un bloc et passe les à-nouveaux contre le compte 4711. S’il reste une erreur, rien n’est importé : corrigez le fichier et recommencez.',
         ],
       },
-      { tab: 'backups', title: 'Sauvegardes', steps: ['Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.'] },
+      {
+        tab: 'backups',
+        title: 'Sauvegardes',
+        steps: [
+          'Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.',
+          'Sauvegarde en ligne (PC relié au serveur) : choisissez une phrase secrète de 8 caractères au moins et notez-la en lieu sûr, puis activez. Après chaque sauvegarde, une copie chiffrée part sur le serveur.',
+          'Sans la phrase secrète, les copies en ligne ne peuvent pas être lues : l’éditeur ne la connaît pas.',
+          'Sur un nouveau PC : « Voir les copies en ligne », « Récupérer » avec la phrase secrète ; la sauvegarde arrive dans la liste et se restaure comme les autres.',
+        ],
+      },
       {
         tab: 'server',
         title: 'Serveur central',
@@ -689,6 +795,98 @@ export const HELP: Record<WinKind, PageHelp> = {
       { tab: 'orders', title: 'Ordre de fabrication', steps: ['« Nouvel ordre » : recette et quantité, puis « Fabriquer » : les composants sortent du stock, le produit fini entre.'] },
     ],
   },
+  containers: {
+    title: 'Emballages consignés',
+    intro: 'Casiers et bouteilles consignés : la consigne encaissée, les vides au magasin, chez les clients et à rendre aux brasseries.',
+    sections: [
+      {
+        tab: 'types',
+        title: 'Types d’emballages',
+        perm: 'containers',
+        steps: [
+          '« Nouvel emballage » : son nom (Casier 12, Bouteille 65 cl) et le montant de sa consigne en FCFA.',
+          'Sur la fiche de chaque boisson, choisissez son « Emballage consigné » et le nombre d’unités par emballage (12 pour un casier de 12 bouteilles, 1 pour une bouteille).',
+          'Un emballage qui ne sert plus se décoche « Actif » : son historique reste.',
+        ],
+      },
+      {
+        tab: 'situation',
+        title: 'Situation',
+        perm: 'containers',
+        steps: [
+          'Pour chaque emballage : les vides au magasin, ceux chez les clients, les consignes encaissées (à rendre aux clients, compte 4194) et ce qui est à rendre aux fournisseurs.',
+          'En dessous : les clients qui gardent des emballages (avec ou sans consigne payée) et ce que chaque fournisseur attend en retour.',
+          '« Reçus du fournisseur » à la livraison, « Vides rendus au fournisseur » quand la brasserie reprend les vides, « Casse ou comptage » pour corriger les vides (nombre négatif pour une casse, motif obligatoire).',
+        ],
+      },
+      {
+        tab: 'moves',
+        title: 'Mouvements',
+        steps: [
+          'Tous les mouvements d’emballages, filtrés par emballage et par dates : sorties et retours des clients, réceptions et retours fournisseurs, casse.',
+          '« Annuler » (avec un motif) annule un mouvement saisi par erreur ; la consigne encaissée ou rendue avec est annulée aussi, tant que la journée de caisse est ouverte.',
+        ],
+      },
+      {
+        title: 'Consigne au comptoir',
+        perm: 'containers_counter',
+        steps: [
+          '« Consigne au comptoir » : choisissez le client (facultatif), puis pour chaque emballage le nombre sorti et le nombre de vides rapportés.',
+          'La différence s’encaisse ou se rend en espèces dans la journée de la caisse ouverte. Un client en compte peut garder les emballages sans payer la consigne.',
+          'À la caisse, la même fenêtre s’ouvre après la vente d’une boisson consignée, et dans Actions › Consignes (emballages).',
+        ],
+      },
+    ],
+  },
+  agent: {
+    title: 'Point Mobile Money',
+    intro: 'Dépôts, retraits, crédit de communication et factures pour les clients, avec la flotte de chaque compte agent.',
+    sections: [
+      {
+        tab: 'counter',
+        title: 'Comptoir',
+        perm: 'agent_point',
+        steps: [
+          'La caisse doit être ouverte : les espèces reçues ou données passent par sa journée et comptent dans le Z.',
+          'Choisissez le compte agent (sa flotte s’affiche), puis Dépôt, Retrait, Crédit de communication ou Paiement de facture.',
+          'Tapez le montant, le téléphone du client et la référence du SMS. Pour une facture : ENEO, CAMWATER, Canal+… et les frais payés par le client.',
+          'La commission de l’opérateur s’affiche avant de valider. Après « Valider l’opération », le reçu du client peut s’imprimer.',
+          'Les opérations de la journée sont listées en dessous ; « Annuler » (avec le droit) annule aussi leurs espèces.',
+        ],
+      },
+      {
+        tab: 'history',
+        title: 'Historique',
+        steps: ['Toutes les opérations par dates et par compte, avec les frais, les commissions et les opérations annulées. « Reçu » réimprime le reçu du client.'],
+      },
+      {
+        tab: 'accounts',
+        title: 'Comptes et flotte',
+        perm: 'agent_accounts',
+        steps: [
+          '« Nouveau compte agent » : un compte par puce (MTN Mobile Money, Orange Money, autres services) et ses taux de commission en % (0,5 pour 0,5 %).',
+          '« Approvisionner la flotte » achète de la flotte avec les espèces de la caisse ; « Revendre de la flotte » fait l’inverse ; « Commission reçue de l’opérateur » ajoute à la flotte la commission versée sur la puce.',
+          'Le bilan de la période donne, par compte, le nombre d’opérations, les montants par type, les commissions, les frais et les espèces nettes.',
+        ],
+      },
+    ],
+  },
+  control: {
+    title: 'Contrôle des caissiers',
+    intro: 'Pour chaque caissier : annulations, retours, remises, prix modifiés, tiroir ouvert sans vente et manquants, comparés à la moyenne de l’équipe.',
+    sections: [
+      {
+        title: 'Lire le tableau',
+        perm: 'cashier_control',
+        steps: [
+          'Choisissez la période (le mois en cours par défaut). Chaque ligne donne les tickets et les ventes du caissier, puis le nombre et le montant de chaque geste.',
+          'Une case en rouge est nettement au-dessus de la moyenne de l’équipe, rapportée au nombre de tickets. La note va de 0 (rien à signaler) à 100.',
+          'Les ouvertures de tiroir, les prix modifiés et les factures supprimées sont ceux enregistrés sur ce PC.',
+          'Cliquez un caissier pour la liste de ses gestes (date, numéro, montant, motif) et vérifiez-les un par un avant toute conclusion.',
+        ],
+      },
+    ],
+  },
   staff: {
     title: 'Collaborateurs et salaires',
     intro: 'Vos employés, leurs sous-comptes en comptabilité, leurs salaires et leurs avances.',
@@ -725,6 +923,27 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Le tableau du mois donne pour chacun les jours de présence, les heures, les retards et les absences. Cliquez une personne pour ses journées.',
           'Un oubli se corrige avec « Corriger » : heures d’arrivée et de départ, et un motif obligatoire.',
           'L’heure d’embauche, la tolérance de retard et les jours travaillés se règlent dans Administration › Paramètres › Pointage du personnel.',
+          'Les départs avant la fin prévue au planning et les jours de congé accordés apparaissent dans le tableau ; un jour de congé n’est pas une absence.',
+        ],
+      },
+      {
+        tab: 'leaves',
+        title: 'Congés',
+        perm: 'staff_leaves',
+        steps: [
+          'Le haut montre le solde de congés payés de chacun pour l’année : acquis, pris et restant.',
+          '« Nouveau congé… » : collaborateur, type (payé, maladie, sans solde, permission), dates et motif. Cochez « Accordé tout de suite » ou laissez-le en demande.',
+          'Une demande s’accorde ou se refuse dans la liste ; un congé accordé peut encore être annulé. Seuls les jours travaillés du planning sont décomptés.',
+        ],
+      },
+      {
+        tab: 'planning',
+        title: 'Planning de la semaine',
+        perm: 'staff_leaves',
+        steps: [
+          'Chaque ligne montre les horaires de la semaine, les congés (une demande non accordée est en orange) et les jours de repos, avec le total d’heures.',
+          '‹ et › changent de semaine ; « Imprimer le planning » l’imprime pour l’afficher.',
+          'Cliquez un nom pour régler ses horaires jour par jour ; « Reprendre les horaires du magasin » efface ses horaires propres.',
         ],
       },
     ],

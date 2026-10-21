@@ -52,6 +52,13 @@ import { SupplierReturnService } from './supplierReturns';
 import { SummaryInvoiceService } from './summaryInvoices';
 import { ChequeService } from './cheques';
 import { PlanningService } from './planning';
+import { ContainerService } from './containers';
+import { AgentService } from './agent';
+import { StaffTimeService } from './staffTime';
+import { CashierControlService } from './cashierControl';
+import { ClearanceService } from './clearance';
+import { CycleCountService } from './cycleCount';
+import { CourierService } from './couriers';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -109,6 +116,13 @@ export * from './supplierReturns';
 export * from './summaryInvoices';
 export * from './cheques';
 export * from './planning';
+export * from './containers';
+export * from './agent';
+export * from './staffTime';
+export * from './cashierControl';
+export * from './clearance';
+export * from './cycleCount';
+export * from './couriers';
 export { AppError, type Clock, type Context } from './util';
 
 export interface Services {
@@ -166,6 +180,13 @@ export interface Services {
   summaryInvoices: SummaryInvoiceService;
   cheques: ChequeService;
   planning: PlanningService;
+  containers: ContainerService;
+  agent: AgentService;
+  staffTime: StaffTimeService;
+  cashierControl: CashierControlService;
+  clearance: ClearanceService;
+  cycleCount: CycleCountService;
+  couriers: CourierService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -217,12 +238,19 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const templates = new TemplateService(db, clock, admin, catalogue);
   const opening = new OpeningService(db, clock, catalogue, customers, purchases, stock);
   const assets = new AssetService(db, clock);
-  const attendance = new AttendanceService(db, clock, admin);
+  const staffTime = new StaffTimeService(db, clock, admin);
+  const attendance = new AttendanceService(db, clock, admin, staffTime);
+  const containers = new ContainerService(db, clock, pos, cashdesk);
+  const agent = new AgentService(db, clock, pos, cashdesk);
+  const cashierControl = new CashierControlService(db, clock);
+  const clearance = new ClearanceService(db, clock, admin, catalogue, promotions);
+  const cycleCount = new CycleCountService(db, clock, admin, inventories);
+  const couriers = new CourierService(db, clock, deliveries, customers, pos);
   const supplierReturns = new SupplierReturnService(db, clock, stock, purchases);
   const summaryInvoices = new SummaryInvoiceService(db, clock);
   const cheques = new ChequeService(db, clock);
   const planning = new PlanningService(db, clock, accounting, customers, purchases, charges, reports);
-  return { db, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, realSales, fiscalPrep, notes, disclosures, attention, digest, sync, license };
+  return { db, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, realSales, fiscalPrep, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

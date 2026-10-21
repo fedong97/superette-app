@@ -223,6 +223,23 @@ export interface ReorderRow {
   unit_name: string | null;
   /** Conditionnements de l'article (carton, casier…), pour lire la quantité en cartons et pièces. */
   packs: { name: string; units: Milli }[];
+  /** Méthode « saison » : ventes par jour des semaines à venir, l'an dernier (null sans historique). */
+  last_year_daily?: Milli | null;
+  /** Méthode « saison » : évolution des ventes récentes par rapport à l'an dernier (1 = pareil). */
+  trend?: number | null;
+}
+
+/** Options de la proposition de commande. */
+export interface ReorderOptions {
+  coverDays?: number;
+  historyDays?: number;
+  /**
+   * « recent » : moyenne des dernières semaines. « season » : ventes des mêmes
+   * semaines l'an dernier, corrigées de l'évolution récente (fêtes, rentrée…).
+   */
+  method?: 'recent' | 'season';
+  /** Majoration en % pour un événement (fêtes de fin d'année, Ramadan…), -50 à +300. */
+  boostPct?: number;
 }
 
 /**
@@ -525,6 +542,81 @@ export class PurchaseService extends Base {
         return order;
       })
       .filter((o) => !opts.open || o.state !== 'received');
+  }
+
+  // --- Commandes groupées ---------------------------------------------------------
+
+  /**
+   * Commande groupée : une négociation, un fournisseur, plusieurs magasins. Un
+   * bon de commande brouillon par magasin (livré à son dépôt de vente), tous
+   * sous le même numéro « CG- » ; chaque magasin réceptionne le sien. Les bons
+   * partent vers les PC de chaque magasin par la synchronisation.
+   */
+  createGroupOrder(
+    ctx: Context,
+    input: { supplierId: string; expectedDate?: string | null; notes?: string | null; lines: { articleId: string; unitCost: Fcfa; qtyByStore: Record<string, Milli> }[] },
+  ): { ref: string; orders: PurchaseOrder[] } {
+    const supplier = this.getSupplier(input.supplierId);
+    if (!input.lines.length) throw new AppError('Ajoutez au moins un article', 'EMPTY');
+    const stores = new Map<string, PurchaseOrderLineInput[]>();
+    for (const l of input.lines) {
+      for (const [storeId, qty] of Object.entries(l.qtyByStore)) {
+        if (!qty) continue;
+        if (!Number.isSafeInteger(qty) || qty < 0) throw new AppError('Quantité invalide', 'INVALID');
+        stores.set(storeId, [...(stores.get(storeId) ?? []), { articleId: l.articleId, qty, unitCost: l.unitCost }]);
+      }
+    }
+    if (stores.size === 0) throw new AppError('Indiquez les quantités de chaque magasin', 'EMPTY');
+    const warehouseOf = this.db.prepare("SELECT id FROM warehouses WHERE store_id = ? AND active = 1 ORDER BY is_sales_default DESC, CASE kind WHEN 'shop' THEN 0 ELSE 1 END, name LIMIT 1");
+    return this.tx(() => {
+      const ref = `CG-${this.stationPrefix()}-${String(this.nextCounter('order.group')).padStart(5, '0')}`;
+      const orders: PurchaseOrder[] = [];
+      for (const [storeId, lines] of stores) {
+        const store = this.db.prepare('SELECT name FROM stores WHERE id = ?').pluck().get(storeId) as string | undefined;
+        if (!store) throw new AppError('Magasin introuvable', 'NOT_FOUND');
+        const warehouseId = warehouseOf.pluck().get(storeId) as string | undefined;
+        if (!warehouseId) throw new AppError(`Le magasin ${store} n'a pas de dépôt`, 'INVALID');
+        const o = this.createOrder(
+          { ...ctx, storeId },
+          { supplierId: supplier.id, warehouseId, expectedDate: input.expectedDate, notes: [`Commande groupée ${ref}`, input.notes?.trim()].filter(Boolean).join(' · '), lines },
+        );
+        this.db.prepare('UPDATE purchase_orders SET group_ref = ? WHERE id = ?').run(ref, o.id);
+        this.enqueue({ ...ctx, storeId }, 'purchase_order', o.id, 'upsert', {});
+        orders.push(this.getOrder(o.id));
+      }
+      this.audit(ctx.userId, 'order.group', 'purchase_order', ref, { supplier: supplier.name, stores: stores.size });
+      return { ref, orders };
+    });
+  }
+
+  /** Commandes groupées : numéro, fournisseur, magasins et total. */
+  groupOrders(): { ref: string; supplier_name: string; order_date: string; stores: number; total_ht: Fcfa; received: number }[] {
+    const refs = this.db
+      .prepare('SELECT group_ref AS ref, MAX(order_date) AS d FROM purchase_orders WHERE group_ref IS NOT NULL GROUP BY group_ref ORDER BY d DESC, group_ref DESC LIMIT 200')
+      .all() as { ref: string; d: string }[];
+    return refs.map((r) => {
+      const g = this.groupOrder(r.ref);
+      return {
+        ref: r.ref,
+        supplier_name: g.supplier_name,
+        order_date: r.d,
+        stores: g.orders.length,
+        total_ht: g.orders.reduce((t, o) => t + o.total_ht, 0),
+        received: g.orders.filter((o) => o.state === 'received' || o.status === 'closed').length,
+      };
+    });
+  }
+
+  /** Détail d'une commande groupée : un bon par magasin. */
+  groupOrder(ref: string): { ref: string; supplier_name: string; orders: (PurchaseOrder & { store_name: string })[] } {
+    const ids = this.db.prepare('SELECT id FROM purchase_orders WHERE group_ref = ? ORDER BY number').pluck().all(ref) as string[];
+    if (!ids.length) throw new AppError('Commande groupée introuvable', 'NOT_FOUND');
+    const storeName = this.db.prepare('SELECT name FROM stores WHERE id = ?').pluck();
+    const orders = ids.map((id) => {
+      const o = this.getOrder(id);
+      return { ...o, store_name: (storeName.get(o.store_id) as string | undefined) ?? '' };
+    });
+    return { ref, supplier_name: orders[0]!.supplier_name, orders };
   }
 
   /**
@@ -973,9 +1065,18 @@ export class PurchaseService extends Base {
    * qui est déjà commandé, passe sous le point de commande (stock d'alerte ou
    * ventes pendant le délai du fournisseur principal).
    */
-  reorderProposal(storeId: string, opts: { coverDays?: number; historyDays?: number } = {}): ReorderRow[] {
+  reorderProposal(storeId: string, opts: ReorderOptions = {}): ReorderRow[] {
     const historyDays = opts.historyDays ?? 28;
-    const since = new Date(this.clock().getTime() - historyDays * 86_400_000).toISOString();
+    const boost = opts.boostPct ?? 0;
+    if (!Number.isFinite(boost) || boost < -50 || boost > 300) throw new AppError('Majoration entre -50 % et +300 %', 'INVALID');
+    const nowMs = this.clock().getTime();
+    const since = new Date(nowMs - historyDays * 86_400_000).toISOString();
+    // Même période l'an dernier : les semaines passées (évolution) et celles à venir (saison).
+    const lyNow = nowMs - 364 * 86_400_000;
+    const coverAhead = Math.max(historyDays, (opts.coverDays ?? 7) + 7);
+    const lyPastFrom = new Date(lyNow - historyDays * 86_400_000).toISOString();
+    const lyNowIso = new Date(lyNow).toISOString();
+    const lyNextTo = new Date(lyNow + coverAhead * 86_400_000).toISOString();
     const rows = this.db
       .prepare(
         `SELECT a.id AS article_id, a.code AS article_code, a.name AS article_name, a.unit, a.unit_name, a.min_qty, a.alert_qty, a.max_qty,
@@ -986,10 +1087,14 @@ export class PurchaseService extends Base {
                            FROM purchase_order_lines l JOIN purchase_orders o ON o.id = l.order_id
                            WHERE l.article_id = a.id AND o.store_id = @storeId AND o.status IN ('draft', 'sent')), 0) AS on_order,
                 COALESCE((SELECT -SUM(m.qty) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
-                           WHERE m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @since), 0) AS sold
+                           WHERE m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @since), 0) AS sold,
+                COALESCE((SELECT -SUM(m.qty) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
+                           WHERE @season = 1 AND m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @lyPastFrom AND m.at < @lyNow), 0) AS sold_ly_past,
+                COALESCE((SELECT -SUM(m.qty) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
+                           WHERE @season = 1 AND m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @lyNow AND m.at < @lyNextTo), 0) AS sold_ly_next
          FROM articles a LEFT JOIN families f ON f.id = a.family_id LEFT JOIN departments d ON d.id = f.department_id WHERE a.active = 1`,
       )
-      .all({ storeId, since }) as {
+      .all({ storeId, since, season: opts.method === 'season' ? 1 : 0, lyPastFrom, lyNow: lyNowIso, lyNextTo }) as {
       article_id: string;
       article_code: string;
       article_name: string;
@@ -1005,6 +1110,8 @@ export class PurchaseService extends Base {
       stock: number;
       on_order: number;
       sold: number;
+      sold_ly_past: number;
+      sold_ly_next: number;
     }[];
     const mainSupplier = this.db.prepare(
       `SELECT sa.supplier_id, s.name AS supplier_name, s.lead_time_days, sa.supplier_ref, sa.unit_cost, sa.pack_qty
@@ -1017,7 +1124,17 @@ export class PurchaseService extends Base {
       const sup = mainSupplier.get(r.article_id) as
         | { supplier_id: string; supplier_name: string; lead_time_days: number; supplier_ref: string | null; unit_cost: number; pack_qty: number }
         | undefined;
-      const avgDaily = Math.max(0, Math.round(r.sold / historyDays));
+      const recentDaily = Math.max(0, r.sold / historyDays);
+      let avg = recentDaily;
+      let lastYearDaily: number | null = null;
+      let trend: number | null = null;
+      if (opts.method === 'season' && r.sold_ly_next > 0) {
+        lastYearDaily = r.sold_ly_next / coverAhead;
+        // Évolution : ventes récentes comparées aux mêmes semaines de l'an dernier, bornée de ×0,5 à ×2.
+        trend = r.sold_ly_past > 0 ? Math.min(2, Math.max(0.5, r.sold / r.sold_ly_past)) : 1;
+        avg = lastYearDaily * trend;
+      }
+      const avgDaily = Math.max(0, Math.round(avg * (1 + boost / 100)));
       const s = suggestReorder({
         stock: r.stock,
         onOrder: r.on_order,
@@ -1051,6 +1168,7 @@ export class PurchaseService extends Base {
         family_name: r.family_name,
         unit_name: r.unit_name,
         packs: packsOf.all(r.article_id) as { name: string; units: Milli }[],
+        ...(opts.method === 'season' ? { last_year_daily: lastYearDaily === null ? null : Math.round(lastYearDaily), trend: trend === null ? null : Math.round(trend * 100) / 100 } : {}),
       });
     }
     return result.sort((a, b) => (a.supplier_name ?? '~').localeCompare(b.supplier_name ?? '~') || a.article_name.localeCompare(b.article_name));

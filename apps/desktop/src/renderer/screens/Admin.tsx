@@ -1573,8 +1573,226 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
           </tbody>
         </table>
       )}
+      <CloudBackup isAdmin={isAdmin} onDownloaded={status.reload} />
       {restoring && <RestoreDialog backup={restoring} onClose={() => setRestoring(null)} />}
     </div>
+  );
+}
+
+/**
+ * Sauvegarde en ligne : après chaque sauvegarde, une copie chiffrée avec la
+ * phrase secrète du magasin part sur le serveur central. Sans cette phrase,
+ * personne (pas même l'éditeur) ne peut lire les copies.
+ */
+function CloudBackup({ isAdmin, onDownloaded }: { isAdmin: boolean; onDownloaded: () => void }) {
+  const toast = useToast();
+  const status = useLoad(() => call('backup.cloudStatus'));
+  const [listing, setListing] = useState(false);
+  const list = useLoad(() => (listing ? call('backup.cloudList') : Promise.resolve([])), [listing]);
+  const [keyDialog, setKeyDialog] = useState(false);
+  const [downloading, setDownloading] = useState<{ id: string; name: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const st = status.data;
+  if (!st) return null;
+  const toggle = async (on: boolean) => {
+    try {
+      await call('admin.saveStoreSettings', { cloudBackup: on });
+      toast.ok(on ? 'Sauvegarde en ligne activée' : 'Sauvegarde en ligne arrêtée');
+      status.reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+  const sendNow = async () => {
+    setBusy(true);
+    try {
+      const r = await call('backup.cloudNow');
+      toast.ok(`Copie envoyée au serveur : ${r.name}`);
+      if (listing) list.reload();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+      status.reload();
+    }
+  };
+  return (
+    <>
+      <h3>Sauvegarde en ligne</h3>
+      <p className="muted">
+        Après chaque sauvegarde, une copie chiffrée de la base part sur le serveur central. En cas de vol, d'incendie ou de panne du PC, vous la récupérez sur un autre PC
+        relié au serveur.
+      </p>
+      {!st.linked ? (
+        <p className="muted">Ce PC n'est pas relié au serveur central (Administration › Serveur central) : la sauvegarde en ligne n'est pas disponible.</p>
+      ) : (
+        <>
+          <table className="list narrow">
+            <tbody>
+              <tr>
+                <th>Sauvegarde en ligne</th>
+                <td>
+                  {isAdmin ? (
+                    <select value={st.enabled ? '1' : '0'} onChange={(e) => void toggle(e.target.value === '1')}>
+                      <option value="1">Activée</option>
+                      <option value="0">Arrêtée</option>
+                    </select>
+                  ) : st.enabled ? (
+                    'Activée'
+                  ) : (
+                    'Arrêtée'
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <th>Phrase secrète</th>
+                <td>
+                  {st.hasKey ? <span className="tag normal">Enregistrée</span> : <span className="tag rupture">À choisir</span>}{' '}
+                  {isAdmin && <button onClick={() => setKeyDialog(true)}>{st.hasKey ? 'Changer' : 'Choisir'}</button>}
+                </td>
+              </tr>
+              <tr>
+                <th>Dernier envoi</th>
+                <td>
+                  {!st.last ? (
+                    'Jamais'
+                  ) : st.last.ok ? (
+                    <>
+                      {dateTime(st.last.at)} <span className="tag normal">Réussi</span>
+                    </>
+                  ) : (
+                    <>
+                      {dateTime(st.last.at)} <span className="tag rupture">Échec</span> <span className="danger-text">{st.last.error}</span>
+                    </>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="actions" style={{ justifyContent: 'flex-start' }}>
+            <button className="primary" disabled={busy || !st.hasKey} onClick={() => void sendNow()}>
+              Envoyer une copie maintenant
+            </button>
+            <button onClick={() => (listing ? list.reload() : setListing(true))}>Voir les copies en ligne</button>
+          </div>
+          {listing &&
+            ((list.data ?? []).length === 0 ? (
+              <p className="muted">Aucune copie en ligne.</p>
+            ) : (
+              <table className="list compact">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Fichier</th>
+                    <th>Envoyée par</th>
+                    <th className="r">Taille</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(list.data ?? []).map((b) => (
+                    <tr key={b.id}>
+                      <td>{dateTime(b.at)}</td>
+                      <td>{b.name}</td>
+                      <td>{b.device ?? '-'}</td>
+                      <td className="r">{size(b.size)}</td>
+                      <td className="r">{isAdmin && <button onClick={() => setDownloading({ id: b.id, name: b.name })}>Récupérer</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
+        </>
+      )}
+      {keyDialog && (
+        <CloudKeyDialog
+          onClose={() => setKeyDialog(false)}
+          onSaved={() => {
+            setKeyDialog(false);
+            status.reload();
+          }}
+        />
+      )}
+      {downloading && (
+        <CloudDownloadDialog
+          backup={downloading}
+          onClose={() => setDownloading(null)}
+          onDone={() => {
+            setDownloading(null);
+            onDownloaded();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function CloudKeyDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [a, setA] = useState('');
+  const [b, setB] = useState('');
+  const save = async () => {
+    if (a.length < 8) return toast.error('La phrase secrète doit faire au moins 8 caractères');
+    if (a !== b) return toast.error('Les deux phrases ne sont pas identiques');
+    try {
+      await call('backup.cloudSetKey', a);
+      toast.ok('Phrase secrète enregistrée');
+      onSaved();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+  return (
+    <Modal title="Phrase secrète de la sauvegarde en ligne" onClose={onClose}>
+      <p className="danger-text">
+        Notez cette phrase et gardez-la en lieu sûr, hors du magasin. Sans elle, les sauvegardes en ligne ne peuvent pas être lues : l'éditeur ne la connaît pas et ne
+        peut pas la retrouver.
+      </p>
+      <Field label="Phrase secrète (8 caractères au moins)">
+        <input type="password" autoFocus value={a} onChange={(e) => setA(e.target.value)} />
+      </Field>
+      <Field label="Retapez la phrase secrète">
+        <input type="password" value={b} onChange={(e) => setB(e.target.value)} />
+      </Field>
+      <div className="actions">
+        <button onClick={onClose}>Fermer</button>
+        <button className="primary" onClick={() => void save()}>
+          Enregistrer
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function CloudDownloadDialog({ backup, onClose, onDone }: { backup: { id: string; name: string }; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const r = await call('backup.cloudDownload', backup.id, pass);
+      toast.ok(`Sauvegarde ${r.name} récupérée : elle est dans la liste des sauvegardes, prête à restaurer`);
+      onDone();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`Récupérer ${backup.name}`} onClose={onClose}>
+      <p>La copie est déchiffrée dans le dossier des sauvegardes de ce PC. Restaurez-la ensuite depuis la liste des sauvegardes.</p>
+      <Field label="Phrase secrète du magasin">
+        <input type="password" autoFocus value={pass} onChange={(e) => setPass(e.target.value)} />
+      </Field>
+      <div className="actions">
+        <button onClick={onClose}>Fermer</button>
+        <button className="primary" disabled={busy || !pass} onClick={() => void go()}>
+          Récupérer
+        </button>
+      </div>
+    </Modal>
   );
 }
 

@@ -3,13 +3,15 @@ import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, useLoad, useStoreSettings, useToast } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
-import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
+import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canLinkSupplier, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
+import { OffsetDialog, Offsets } from './Offsets';
+import { Consignment } from './Consignment';
 import { tx } from '../tax';
 import { InvoicePreview } from './docPreview';
 import { SummaryInvoices } from './SummaryInvoices';
 
 type User = NonNullable<Result<'app.state'>['user']>;
-export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | 'summary' | `rebates-${RebatesTab}`;
+export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | 'summary' | 'offsets' | 'consignment' | `rebates-${RebatesTab}`;
 
 /** Clients : fiches, comptes à crédit, balance âgée et règlements reçus. */
 export function Customers({ user, initialTab = 'list' }: { user: User; initialTab?: CustomersTab }) {
@@ -29,6 +31,8 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
     ['payments', 'Règlements reçus'],
     ...(has(user, 'summary_invoices') ? ([['summary', 'Factures récapitulatives']] as [CustomersTab, string][]) : []),
     ...(has(user, 'rebates') ? ([['rebates', 'Ristournes']] as [CustomersTab, string][]) : []),
+    ...(has(user, 'account_offsets') ? ([['offsets', 'Compensations']] as [CustomersTab, string][]) : []),
+    ...(has(user, 'consignment') ? ([['consignment', 'Dépôt-vente']] as [CustomersTab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -44,6 +48,8 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       {tab === 'payments' && <Payments />}
       {tab === 'summary' && has(user, 'summary_invoices') && <SummaryInvoices />}
       {tab === 'rebates' && has(user, 'rebates') && <Rebates user={user} initialTab={rebateTab} />}
+      {tab === 'offsets' && has(user, 'account_offsets') && <Offsets />}
+      {tab === 'consignment' && has(user, 'consignment') && <Consignment />}
     </div>
   );
 }
@@ -52,7 +58,9 @@ function CustomerList({ user }: { user: User }) {
   const [search, setSearch] = useState('');
   const [inactive, setInactive] = useState(false);
   const [debtors, setDebtors] = useState(false);
-  const list = useLoad(() => call('customers.list', { search: search || undefined, includeInactive: inactive, withBalance: debtors }), [search, inactive, debtors]);
+  const [zone, setZone] = useState('');
+  const zones = useLoad(() => call('customers.zones'), []);
+  const list = useLoad(() => call('customers.list', { search: search || undefined, includeInactive: inactive, withBalance: debtors, zone: zone || null }), [search, inactive, debtors, zone]);
   const [open, setOpen] = useState<Customer | 'new' | null>(null);
   const loyaltyOn = useStoreSettings().loyaltyEnabled;
   const points = useLoad(() => (loyaltyOn ? call('loyalty.balances') : Promise.resolve({} as Record<string, number>)), [loyaltyOn, list.data]);
@@ -60,6 +68,16 @@ function CustomerList({ user }: { user: User }) {
     <>
       <div className="filters">
         <input className="search" placeholder="Nom, code ou téléphone" value={search} onChange={(e) => setSearch(e.target.value)} />
+        {(zones.data ?? []).length > 0 && (
+          <select value={zone} onChange={(e) => setZone(e.target.value)} title="Zone ou tournée">
+            <option value="">Toutes les zones</option>
+            {zones.data!.map((z) => (
+              <option key={z.zone} value={z.zone}>
+                {z.zone} ({z.count})
+              </option>
+            ))}
+          </select>
+        )}
         <label>
           <input type="checkbox" checked={debtors} onChange={(e) => setDebtors(e.target.checked)} /> Qui doivent seulement
         </label>
@@ -81,6 +99,7 @@ function CustomerList({ user }: { user: User }) {
               <th>Code</th>
               <th>Client</th>
               <th>Téléphone</th>
+              <th>Zone</th>
               <th className="r">Délai</th>
               <th className="r">Plafond</th>
               <th className="r">Doit</th>
@@ -98,6 +117,7 @@ function CustomerList({ user }: { user: User }) {
                   {c.no_cheque === 1 && <span className="tag rupture" style={{ marginLeft: 6 }}>Interdit de chèque</span>}
                 </td>
                 <td>{c.phone}</td>
+                <td>{c.zone ?? ''}</td>
                 <td className="r">{c.payment_terms_days} j</td>
                 <td className="r">{c.credit_limit ? fcfa(c.credit_limit) : '—'}</td>
                 <td className={`r ${c.balance > c.credit_limit ? 'neg' : ''}`}>{c.balance ? fcfa(c.balance) : ''}</td>
@@ -272,7 +292,7 @@ function CustomerCard({ user, customer, onSaved }: { user: User; customer: Custo
         }
       }}
     >
-      <CustomerFields value={draft} onChange={setDraft} canSetCredit={canSetCredit(user)} canSetLevel={canSetLevel(user)} />
+      <CustomerFields value={draft} onChange={setDraft} canSetCredit={canSetCredit(user)} canSetLevel={canSetLevel(user)} canLinkSupplier={canLinkSupplier(user)} />
       {customer && (
         <label>
           <input type="checkbox" checked={draft.active} disabled={!has(user, 'customer_deactivate')} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} /> Client actif
@@ -292,6 +312,7 @@ function Account({ customer }: { customer: Customer }) {
   const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
   const [paying, setPaying] = useState(false);
+  const [offsetting, setOffsetting] = useState(false);
   const [reminding, setReminding] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   if (!acc.data) return null;
@@ -365,6 +386,11 @@ function Account({ customer }: { customer: Customer }) {
             Relancer par WhatsApp…
           </button>
         )}
+        {can('account_offsets') && customer.supplier_id && (
+          <button disabled={a.balance <= 0} title="Solder ce qu’il doit par ce qu’on lui doit comme fournisseur" onClick={() => setOffsetting(true)}>
+            Compenser avec son compte fournisseur…
+          </button>
+        )}
         {can('customer_payment') && (
           <button className="primary" disabled={!a.balance} onClick={() => setPaying(true)}>
             Encaisser un règlement
@@ -378,6 +404,16 @@ function Account({ customer }: { customer: Customer }) {
           onClose={() => setPaying(false)}
           onPaid={() => {
             setPaying(false);
+            acc.reload();
+          }}
+        />
+      )}
+      {offsetting && (
+        <OffsetDialog
+          customerId={customer.id}
+          onClose={() => setOffsetting(false)}
+          onDone={() => {
+            setOffsetting(false);
             acc.reload();
           }}
         />
@@ -613,9 +649,23 @@ function Receivables({ user }: { user: User }) {
   const data = useLoad(() => call('customers.receivables'), []);
   const [open, setOpen] = useState<Customer | null>(null);
   const [remind, setRemind] = useState<string[] | null>(null);
+  const [zone, setZone] = useState('');
   if (!data.data) return null;
-  const { customers, totals, labels } = data.data;
+  const { labels } = data.data;
   const buckets = Object.keys(labels) as (keyof typeof labels)[];
+  // Une zone choisie : la tournée du recouvreur, avec ses totaux.
+  const zones = [...new Set(data.data.customers.map((c) => c.zone).filter((z): z is string => Boolean(z)))].sort();
+  const customers = zone ? data.data.customers.filter((c) => c.zone === zone) : data.data.customers;
+  const totals = zone
+    ? customers.reduce(
+        (t, c) => {
+          t.balance += c.balance;
+          for (const b of buckets) t[b] += c.buckets[b];
+          return t;
+        },
+        { ...data.data.totals, ...Object.fromEntries([['balance', 0], ...buckets.map((b) => [b, 0])]) } as typeof data.data.totals,
+      )
+    : data.data.totals;
   const late = totals.balance - totals.current;
   const lateIds = customers.filter((c) => c.balance > 0 && c.balance > c.buckets.current).map((c) => c.id);
   return (
@@ -638,6 +688,18 @@ function Receivables({ user }: { user: User }) {
           <strong>{customers.length}</strong>
         </div>
       </div>
+      {zones.length > 0 && (
+        <div className="filters">
+          <select value={zone} onChange={(e) => setZone(e.target.value)} title="Zone ou tournée">
+            <option value="">Toutes les zones</option>
+            {zones.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {lateIds.length > 0 && (
         <div className="actions" style={{ justifyContent: 'flex-start' }}>
           <button className="primary" onClick={() => setRemind(lateIds)}>
@@ -653,6 +715,7 @@ function Receivables({ user }: { user: User }) {
             <tr>
               <th>Client</th>
               <th>Téléphone</th>
+              <th>Zone</th>
               <th className="r">Doit</th>
               {buckets.map((b) => (
                 <th key={b} className="r">
@@ -668,6 +731,7 @@ function Receivables({ user }: { user: User }) {
               <tr key={c.id} className="clickable" onClick={() => void call('customers.get', c.id).then(setOpen)}>
                 <td>{c.name}</td>
                 <td>{c.phone}</td>
+                <td>{c.zone ?? ''}</td>
                 <td className="r b">{fcfa(c.balance)}</td>
                 {buckets.map((b) => (
                   <td key={b} className={`r ${b !== 'current' && c.buckets[b] ? 'neg' : ''}`}>
@@ -691,7 +755,7 @@ function Receivables({ user }: { user: User }) {
               </tr>
             ))}
             <tr className="b">
-              <td colSpan={2}>Total</td>
+              <td colSpan={3}>Total</td>
               <td className="r">{fcfa(totals.balance)}</td>
               {buckets.map((b) => (
                 <td key={b} className="r">

@@ -7,7 +7,7 @@ import { WhatsappTicketDialog, ZView } from './PosDialogs';
 import { InvoicePreview } from './docPreview';
 import { tx } from '../tax';
 
-export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export';
+export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export' | 'requests';
 type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
 
 /**
@@ -15,7 +15,7 @@ type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
  * les trois dernières factures de l'utilisateur, pour les réimprimer.
  */
 export function Sales({ initialTab = 'tickets', rights }: { initialTab?: SalesTab; rights: string[] }) {
-  const wide = ['sales', 'sales_alerts', 'cash_operations', 'cash_z', 'accounting_export', 'report_export'].some((r) => rights.includes(r));
+  const wide = ['sales', 'sales_alerts', 'cash_operations', 'cash_z', 'accounting_export', 'report_export', 'sale_edit_approve'].some((r) => rights.includes(r));
   return wide ? <AllSales initialTab={initialTab} rights={rights} /> : <MyLastInvoices />;
 }
 
@@ -29,6 +29,7 @@ function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string
     ...(can('cash_operations') ? ([['cashops', 'Opérations de caisse']] as [ShownTab, string][]) : []),
     ...(can('cash_amounts') && can('cash_z') ? ([['z', 'Clôtures Z']] as [ShownTab, string][]) : []),
     ...(can('accounting_export', 'report_export') ? ([['export', 'Export comptable']] as [ShownTab, string][]) : []),
+    ...(can('sale_edit_approve', 'sale_edit_request') ? ([['requests', 'Demandes de modification']] as [ShownTab, string][]) : []),
   ];
   // Retours, annulés et recherche s'ouvrent sur le registre, déjà filtré.
   const preset: RegisterPreset = initialTab === 'returns' ? 'returns' : initialTab === 'cancelled' ? 'cancelled' : 'all';
@@ -46,6 +47,7 @@ function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string
       {tab === 'cashops' && <CashOperations />}
       {tab === 'z' && <Sessions />}
       {tab === 'export' && <Export />}
+      {tab === 'requests' && <EditRequests approve={can('sale_edit_approve')} />}
     </div>
   );
 }
@@ -92,6 +94,7 @@ function Tickets() {
 /** Les trois dernières factures du caissier, à réimprimer au besoin. */
 function MyLastInvoices({ embedded }: { embedded?: boolean }) {
   const toast = useToast();
+  const can = useCan();
   const [open, setOpen] = useState<Result<'pos.sale'> | null>(null);
   const sales = useLoad(() => call('pos.sales', {}));
   return (
@@ -134,7 +137,158 @@ function MyLastInvoices({ embedded }: { embedded?: boolean }) {
         </tbody>
       </table>
       {open && <SaleDetail sale={open} onClose={() => setOpen(null)} onChanged={sales.reload} />}
+      {!embedded && can('sale_edit_request') && (
+        <>
+          <h3>Mes demandes de modification</h3>
+          <EditRequests approve={false} />
+        </>
+      )}
     </div>
+  );
+}
+
+const REQUEST_STATUS: Record<string, [string, string]> = {
+  pending: ['En attente', 'alerte'],
+  approved: ['Accordée', 'normal'],
+  rejected: ['Refusée', 'rupture'],
+  used: ['Facture modifiée', ''],
+};
+
+/**
+ * Demandes de modification de factures validées. Le gérant accorde ou refuse
+ * (motif obligatoire pour un refus) ; le vendeur suit les siennes et, accordée,
+ * recharge la facture dans la caisse.
+ */
+export function EditRequests({ approve }: { approve: boolean }) {
+  const toast = useToast();
+  const [status, setStatus] = useState<'' | 'pending' | 'approved' | 'rejected' | 'used'>(approve ? 'pending' : '');
+  const list = useLoad(() => call('editRequests.list', status || null), [status]);
+  const [refusing, setRefusing] = useState<Result<'editRequests.list'>[number] | null>(null);
+  const [note, setNote] = useState('');
+  const decide = async (id: string, ok: boolean, why?: string) => {
+    try {
+      const r = await call('editRequests.decide', id, ok, why ?? null);
+      toast.ok(`${r.number} ${ok ? 'accordée' : 'refusée'}`);
+      setRefusing(null);
+      setNote('');
+      list.reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  return (
+    <>
+      <div className="filters">
+        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+          <option value="">Toutes</option>
+          {Object.entries(REQUEST_STATUS).map(([k, [label]]) => (
+            <option key={k} value={k}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <span className="muted">Une demande accordée permet une seule modification de la facture, par celui qui l’a demandée.</span>
+      </div>
+      {list.data?.length === 0 ? (
+        <p className="muted">Aucune demande.</p>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Demande</th>
+              <th>Date</th>
+              <th>Facture</th>
+              <th>Client</th>
+              <th className="r">Montant</th>
+              <th>Demandée par</th>
+              <th>Motif</th>
+              <th>État</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {(list.data ?? []).map((r) => (
+              <tr key={r.id}>
+                <td>{r.number}</td>
+                <td className="nowrap">{dateTime(r.created_at)}</td>
+                <td>{r.sale_number}</td>
+                <td>{r.customer_name ?? ''}</td>
+                <td className="r">{fcfa(r.sale_total)}</td>
+                <td>{r.requester_name}</td>
+                <td>{r.reason}</td>
+                <td>
+                  <span className={`tag ${REQUEST_STATUS[r.status]![1]}`}>{REQUEST_STATUS[r.status]![0]}</span>
+                  {r.decider_name && (
+                    <small className="muted">
+                      {' '}
+                      · {r.decider_name}
+                      {r.decision_note ? ` : ${r.decision_note}` : ''}
+                    </small>
+                  )}
+                  {r.new_sale_number && <small className="muted"> → {r.new_sale_number}</small>}
+                </td>
+                <td className="nowrap">
+                  {approve && r.status === 'pending' && (
+                    <>
+                      <button onClick={() => void decide(r.id, true)}>Accorder</button>
+                      <button className="danger" onClick={() => setRefusing(r)}>
+                        Refuser
+                      </button>
+                    </>
+                  )}
+                  {!approve && r.status === 'approved' && <button onClick={() => editSale(r.sale_id)}>Modifier la facture</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {refusing && (
+        <Modal title={`Refuser ${refusing.number}`} onClose={() => setRefusing(null)}>
+          <Field label="Pourquoi la demande est refusée">
+            <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          <div className="actions">
+            <button onClick={() => setRefusing(null)}>Retour</button>
+            <button className="primary" disabled={!note.trim()} onClick={() => void decide(refusing.id, false, note)}>
+              Refuser la demande
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** Le vendeur sans le droit de modifier une facture la demande au gérant, avec le motif. */
+function EditRequestDialog({ sale, onClose }: { sale: Result<'pos.sale'>; onClose: () => void }) {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  return (
+    <Modal title={`Demander la modification de ${sale.number}`} onClose={onClose}>
+      <p className="muted">Le gérant reçoit la demande dans ses points d’attention. Accordée, vous pourrez modifier cette facture une fois depuis « Mes factures ».</p>
+      <Field label="Ce qu’il faut changer">
+        <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Le client a pris 3 cartons et non 2…" />
+      </Field>
+      <div className="actions">
+        <button onClick={onClose}>Retour</button>
+        <button
+          className="primary"
+          disabled={reason.trim().length < 3}
+          onClick={async () => {
+            try {
+              const r = await call('editRequests.request', sale.id, reason);
+              toast.ok(`Demande ${r.number} envoyée au gérant`);
+              onClose();
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          Envoyer la demande
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -226,7 +380,13 @@ export function SaleDetail({ sale, onClose, onChanged }: { sale: Result<'pos.sal
   const [preview, setPreview] = useState(false);
   const [voiding, setVoiding] = useState<'cancel' | 'hide' | null>(null);
   const [whatsapp, setWhatsapp] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const live = sale.kind === 'sale' && sale.status === 'completed';
+  // Sans le droit de modifier : une demande accordée par le gérant pour cette facture en tient lieu.
+  const asking = live && !can('sale_edit') && can('sale_edit_request');
+  const requests = useLoad(() => (asking ? call('editRequests.list', 'approved') : Promise.resolve([])), [sale.id, asking]);
+  const granted = (requests.data ?? []).some((r) => r.sale_id === sale.id);
+  if (requesting) return <EditRequestDialog sale={sale} onClose={() => setRequesting(false)} />;
   if (preview) return <InvoicePreview saleId={sale.id} onClose={() => setPreview(false)} />;
   if (voiding)
     return (
@@ -277,7 +437,12 @@ export function SaleDetail({ sale, onClose, onChanged }: { sale: Result<'pos.sal
         <button disabled={!can('sale_reprint')} onClick={() => setPreview(true)} title="Aperçu avec le choix du modèle : facture ou bon de livraison, en A4, listing ou ticket">
           Facture ou BL (aperçu)…
         </button>
-        {live && can('sale_edit') && (
+        {asking && !granted && (
+          <button title="Le gérant accorde ou refuse ; accordée, vous modifiez la facture une fois" onClick={() => setRequesting(true)}>
+            Demander la modification…
+          </button>
+        )}
+        {live && (can('sale_edit') || granted) && (
           <button
             title="Recharge la facture dans la caisse : ajoutez ou retirez des articles, changez les quantités, puis validez"
             onClick={() => {

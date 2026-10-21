@@ -109,10 +109,24 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
-    version: '0.77.0',
+    version: '0.79.0',
     items: [
       'Ventes réelles : Vente › Ventes réelles. Toutes les opérations de vente telles qu’enregistrées à la caisse (ventes, paiements, annulations, remboursements), en lecture seule, avec une synthèse et des exports CSV qui portent l’identifiant de chaque vente.',
       'Préparation fiscale : Fiscal › Préparation fiscale. L’état de la période par catégorie fiscale, lu dans les ventes réelles (avoirs clients compris) et contrôlé avec la comptabilité, avec la TVA collectée et l’acompte d’impôt. Les états générés sont figés avec leur empreinte.',
+    ],
+  },
+  {
+    version: '0.78.0',
+    items: [
+      'Prix négociés par article : dans la fiche d’un client, un prix convenu pour chaque article. La caisse le prend tout seul quand il est plus bas que le prix du jour.',
+      'Zones et tournées : rangez vos clients par quartier (fiche client) ; la liste et la balance âgée se filtrent par zone pour la tournée du livreur ou du recouvreur.',
+      'Lettrage : en encaissant un règlement client, cochez les factures qu’il règle.',
+      'Compensation : un grossiste qui est aussi votre fournisseur ? Reliez ses deux fiches, puis « Compenser avec son compte fournisseur » solde une facture fournisseur avec ce qu’il vous doit, sans argent (Client › Compensations).',
+      'Demande de modification de facture : le vendeur sans le droit la demande avec un motif depuis la facture ; le gérant l’accorde ou la refuse (Vente › Demandes de modification de facture).',
+      'Dépôt-vente chez les revendeurs : confiez de la marchandise à un client, puis la fiche de contrôle facture ce qu’il a vendu et reprend le reste (Client › Dépôt-vente).',
+      'Dépôt d’avaries : un dépôt d’usage « Avaries » garde la marchandise abîmée hors de la vente et des propositions de commande (Administration › Dépôts).',
+      'Bonus fournisseurs : « 12 achetés, 10 payés » sur l’article du fournisseur, proposé sur les bons de commande ; Fournisseur › Bonus fournisseurs chiffre les unités gratuites reçues.',
+      'Courbe du patrimoine (Trésorerie › Courbe du patrimoine) et sociétés : regroupez vos magasins par société et voyez leurs chiffres consolidés (Administration › Sociétés).',
     ],
   },
   {

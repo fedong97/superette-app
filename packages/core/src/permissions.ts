@@ -75,6 +75,8 @@ export const PERMISSIONS = {
   sale_resume: { label: 'Reprendre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_cancel: { label: 'Annuler une facture (avec le code du gérant)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_edit: { label: 'Modifier une facture de la journée (articles et quantités)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
+  sale_edit_request: { label: 'Demander au gérant la modification d’une facture validée (avec motif)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
+  sale_edit_approve: { label: 'Accorder ou refuser les demandes de modification de facture', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   sale_cancel_free: { label: 'Annuler ou supprimer une facture sans le code du gérant', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_return: { label: "Retour d'articles et facture d'avoir (avec le code du gérant)", group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_reprint: { label: 'Réimprimer un ticket ou une facture', group: 'Facturation', type: 'Bouton', parent: 'cash' },
@@ -118,6 +120,9 @@ export const PERMISSIONS = {
   customer_payment: { label: 'Encaisser un règlement client', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   customer_statement: { label: "Consulter et imprimer l'extrait de compte d'un client", group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   summary_invoices: { label: 'Factures récapitulatives des clients (fin de mois)', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
+  customer_lettering: { label: 'Lettrer un règlement client sur les factures choisies', group: 'Fichier des clients', type: 'Bouton', parent: 'customer_payment' },
+  account_offsets: { label: 'Compenser le compte client et le compte fournisseur d’un même tiers', group: 'Fichier des clients', type: 'Fonction', roles: ACCOUNTING },
+  consignment: { label: 'Dépôt-vente chez les revendeurs : envoyer, contrôler, facturer le vendu', group: 'Fichier des clients', type: 'Menu', roles: MANAGE },
   loyalty_adjust: { label: 'Corriger les points de fidélité d’un client (avec motif)', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
   rebates: { label: 'Ristournes et bonus clients : réglages, constater, accorder et régulariser', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
 
@@ -126,6 +131,7 @@ export const PERMISSIONS = {
   supplier_edit: { label: 'Enregistrer ou modifier un fournisseur', group: 'Fichier des fournisseurs', type: 'Fonction', parent: 'suppliers' },
   supplier_articles: { label: "Produits et prix d'achat d'un fournisseur", group: 'Fichier des fournisseurs', type: 'Fonction', parent: 'suppliers' },
   supplier_statement: { label: "Consulter l'extrait de compte et la situation des fournisseurs", group: 'Fichier des fournisseurs', type: 'Menu', parent: 'purchase_invoices' },
+  free_goods: { label: 'Bonus fournisseurs : unités gratuites reçues et leur valeur', group: 'Fichier des fournisseurs', type: 'Menu', parent: 'suppliers' },
 
   // --- Achat de marchandises ---------------------------------------------------
   purchases: { label: 'Achats : bons de commande et réceptions (consultation)', group: 'Achat de marchandises', type: 'Menu', roles: BUYING },
@@ -230,6 +236,7 @@ export const PERMISSIONS = {
   cash_forecast: { label: 'Trésorerie prévisionnelle', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   budgets: { label: 'Budgets par compte et suivi du réel', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   analytics: { label: 'Analytique : résultat par rayon et par magasin', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
+  patrimony: { label: 'Courbe du patrimoine (trésorerie, créances, stock, dettes)', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   cheque_deposits: { label: 'Bordereaux de remise de chèques en banque', group: 'Comptabilité', type: 'Menu', parent: 'accounting' },
   cheque_rejections: { label: 'Chèques revenus impayés', group: 'Comptabilité', type: 'Menu', parent: 'cheque_deposits' },
   fixed_asset_edit: { label: 'Ajouter, modifier, sortir ou supprimer une immobilisation', group: 'Comptabilité', type: 'Bouton', parent: 'journal_entry' },
@@ -244,6 +251,7 @@ export const PERMISSIONS = {
   training: { label: 'Ouvrir le mode formation (caisse d’entraînement sur une copie de la boutique)', group: 'Paramétrage du système', type: 'Fonction', roles: MANAGE },
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   warehouses_manage: { label: 'Créer, modifier et désactiver les dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
+  companies: { label: 'Sociétés : regrouper les magasins, chiffres consolidés', group: 'Paramétrage du système', type: 'Fonction' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
   print_templates: { label: "Modifier les modèles d'impression (factures, tickets)", group: 'Paramétrage du système', type: 'Fonction', parent: 'settings_edit' },
   backups: { label: 'Faire une sauvegarde et consulter les sauvegardes', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },

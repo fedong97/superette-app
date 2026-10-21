@@ -18,6 +18,9 @@ export interface QtyTier {
 /** Remises par famille d'articles : identifiant de la famille → points de base (300 = 3 %). */
 export type FamilyDiscounts = Record<string, number>;
 
+/** Prix négociés d'un client : identifiant de l'article → prix TTC de l'unité de détail. */
+export type ArticlePrices = Record<string, Fcfa>;
+
 /** Paliers lus sans jamais échouer, du plus petit au plus grand. */
 export function parseQtyTiers(json: string | null | undefined): QtyTier[] {
   if (!json) return [];
@@ -40,6 +43,18 @@ export function parseFamilyDiscounts(json: string | null | undefined): FamilyDis
     const raw = JSON.parse(json) as unknown;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter((e): e is [string, number] => Number.isSafeInteger(e[1]) && (e[1] as number) > 0 && (e[1] as number) < 10_000));
+  } catch {
+    return {};
+  }
+}
+
+/** Prix négociés lus sans jamais échouer. */
+export function parseArticlePrices(json: string | null | undefined): ArticlePrices {
+  if (!json) return {};
+  try {
+    const raw = JSON.parse(json) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter((e): e is [string, number] => Number.isSafeInteger(e[1]) && (e[1] as number) > 0));
   } catch {
     return {};
   }
@@ -78,12 +93,20 @@ export function familyPrice(price: Fcfa, discounts: FamilyDiscounts, familyId: s
  * détail, puis remise du client sur la famille (unité ou conditionnement).
  * Un prix saisi à la caisse n'est pas touché.
  */
-export function agreedPrices<L extends { unitPrice: Fcfa; packPrice?: Fcfa; qty: Milli; priceSet?: boolean }>(
+export function agreedPrices<L extends { unitPrice: Fcfa; packPrice?: Fcfa; packUnits?: Milli; qty: Milli; priceSet?: boolean }>(
   line: L,
-  article: { tiers: readonly QtyTier[]; familyId: string | null },
+  article: { tiers: readonly QtyTier[]; familyId: string | null; id?: string },
   discounts: FamilyDiscounts,
+  /** Prix négociés du client par article : ils remplacent paliers et remises quand ils sont plus bas. */
+  negotiated: ArticlePrices = {},
 ): L {
   if (line.priceSet) return line;
-  if (line.packPrice !== undefined) return { ...line, packPrice: familyPrice(line.packPrice, discounts, article.familyId) };
-  return { ...line, unitPrice: familyPrice(tierPrice(line.unitPrice, article.tiers, line.qty), discounts, article.familyId) };
+  const deal = article.id ? negotiated[article.id] : undefined;
+  if (line.packPrice !== undefined) {
+    const usual = familyPrice(line.packPrice, discounts, article.familyId);
+    const dealPack = deal !== undefined && line.packUnits ? Math.round((deal * line.packUnits) / 1000) : undefined;
+    return { ...line, packPrice: dealPack !== undefined && dealPack < usual ? dealPack : usual };
+  }
+  const usual = familyPrice(tierPrice(line.unitPrice, article.tiers, line.qty), discounts, article.familyId);
+  return { ...line, unitPrice: deal !== undefined && deal < usual ? deal : usual };
 }

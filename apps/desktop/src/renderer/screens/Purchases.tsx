@@ -243,7 +243,9 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
     const baseQty = ref?.pack_qty ?? purchaseUnits(a);
     const units = unitsFor(baseQty, packChoices(a), purchaseUnits(a));
     const cost = ref?.unit_cost ? String(Math.round((ref.unit_cost * units) / 1000)) : packCostText(a, units);
-    return { ...newRecLine(a), supplierRef: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units };
+    // Bonus convenu avec ce fournisseur (« 12 achetés, 10 payés ») : proposé sur la ligne.
+    const promo = ref?.promo_buy && ref.promo_pay ? { promo: `${ref.promo_buy}/${ref.promo_pay}`, discType: 'promo' as const } : {};
+    return { ...newRecLine(a), supplierRef: ref?.supplier_ref ?? null, qty: num((baseQty * 1000) / units), cost, packUnits: units, ...promo };
   };
 
   const save = async (send: boolean) => {

@@ -85,6 +85,9 @@ import {
   STAFF_CATEGORIES,
   type ArticleInput,
   type WarehouseInput,
+  type WarehousePurpose,
+  type EditRequestStatus,
+  type CompanyInput,
   type ExportFilter,
   type ImportMode,
   type PriceUpdateInput,
@@ -423,6 +426,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     const fresh = sale.user_id === u.id && Date.now() - Date.parse(sale.created_at) < 15 * 60000;
     if (!fresh && !can(u, ['sale_reprint'])) throw new AppError("Vous n'avez pas le droit de réimprimer une facture", 'FORBIDDEN');
     return fresh;
+  };
+  /**
+   * Modifier une facture validée : avec le droit (ses factures, toutes pour qui voit le registre),
+   * ou avec la demande que le gérant a accordée à cet utilisateur pour cette facture (renvoyée, à marquer utilisée).
+   */
+  const editGrant = (saleId: string) => {
+    const u = requireUser();
+    const sale = s.pos.getSale(saleId);
+    if (can(u, ['sale_edit']) && (sale.user_id === u.id || can(u, ['sales']))) return null;
+    const grant = s.editRequests.granted(u.id, saleId);
+    if (!grant) throw new AppError("Vous n'avez pas le droit de modifier cette facture : demandez-le au gérant", 'FORBIDDEN');
+    return grant;
   };
   /** La facture de la vente est déjà sortie une fois : la suivante est un duplicata. */
   const invoiceDuplicate = (saleId: string) => s.pos.getSale(saleId).invoice_prints > 0;
@@ -934,7 +949,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.createRegister': (storeId: string, name?: string, kind?: RegisterKind) => s.admin.createRegister(requireAdmin().id, storeId, name, kind),
     'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean }) => s.admin.updateRegister(requireAdmin().id, id, patch),
     'admin.warehouses': (opts?: { includeInactive?: boolean }) => s.admin.listWarehouses(ctx().storeId, opts),
-    'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold') => s.admin.createWarehouse(ctx(['warehouses_manage']).storeId, name, kind),
+    'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold', opts?: { purpose?: WarehousePurpose; customerId?: string | null }) =>
+      s.admin.createWarehouse(ctx(['warehouses_manage']).storeId, name, kind, false, opts),
     'admin.updateWarehouse': (id: string, input: WarehouseInput) => {
       const c = ctx(['warehouses_manage']);
       if (s.admin.getWarehouse(id).store_id !== c.storeId) throw new AppError("Ce dépôt n'est pas dans ce magasin", 'FORBIDDEN');
@@ -1349,6 +1365,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Nouveau fournisseur : le délai de paiement par défaut vient des paramètres.
       return s.purchases.saveSupplier(u.id, id || input.paymentTermsDays !== undefined ? input : { ...input, paymentTermsDays: settings().supplierDefaultDays }, id);
     },
+    'purchases.freeGoods': (from: string, to: string) => s.purchases.freeGoods(ctx(['free_goods']).storeId, from, to),
     'suppliers.articles': (supplierId: string) => (requireUser(), s.purchases.supplierArticles(supplierId)),
     'suppliers.ofArticle': (articleId: string) => (requireUser(), s.purchases.articleSuppliers(articleId)),
     'suppliers.setArticle': (input: Parameters<Services['purchases']['setSupplierArticle']>[1]) =>
@@ -1494,9 +1511,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         sellerId: input.sellerId ?? null,
       };
       if (input.replacesId) {
-        const original = s.pos.getSale(input.replacesId);
-        if (!can(user!, ['sale_edit']) || (original.user_id !== user!.id && !can(user!, ['sales']))) throw new AppError("Vous n'avez pas le droit de modifier cette facture", 'FORBIDDEN');
-        return s.pos.replaceSale(c, input.replacesId, saleInput, user!.id);
+        const grant = editGrant(input.replacesId);
+        const replaced = s.pos.replaceSale(c, input.replacesId, saleInput, user!.id);
+        if (grant) s.editRequests.markUsed(c, grant.id, replaced.id);
+        return replaced;
       }
       return s.pos.completeSale(c, saleInput);
     },
@@ -1530,11 +1548,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const by = free ? u.id : supervisor(opts?.supervisorPin ?? '').id;
       return s.pos.voidSale(c, saleId, by, reason, { byRight: free, hide: Boolean(opts?.hide) });
     },
+    /** Demande de modification d'une facture validée, accordée ou refusée par le gérant. */
+    'editRequests.request': (saleId: string, reason: string) => {
+      requireSaleAccess(saleId);
+      return s.editRequests.request(ctx(['sale_edit_request']), saleId, reason);
+    },
+    'editRequests.decide': (id: string, approve: boolean, note?: string | null) => s.editRequests.decide(ctx(['sale_edit_approve']), id, approve, note),
+    /** Le gérant voit toutes les demandes du magasin ; les autres, les leurs. */
+    'editRequests.list': (status?: EditRequestStatus | null) => {
+      const c = ctx();
+      return s.editRequests.list(c.storeId, { status, requestedBy: can(user!, ['sale_edit_approve']) ? null : c.userId });
+    },
     /** Facture à recharger dans la caisse pour la modifier. */
     'sales.editable': (saleId: string) => {
-      const u = requireSaleAccess(saleId);
+      requireSaleAccess(saleId);
       const sale = s.pos.getSale(saleId);
-      if (!can(u, ['sale_edit']) || (sale.user_id !== u.id && !can(u, ['sales']))) throw new AppError("Vous n'avez pas le droit de modifier cette facture", 'FORBIDDEN');
+      editGrant(saleId);
       return { ...s.pos.editableSale(saleId), number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
     },
     'pos.return': (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) =>
@@ -2076,7 +2105,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Clients et crédit ----------------------------------------------------
-    'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean }) => s.customers.listCustomers(ctx().storeId, opts),
+    'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean; zone?: string | null }) => s.customers.listCustomers(ctx().storeId, opts),
+    'customers.zones': () => (requireUser(), s.customers.zones()),
     'customers.get': (id: string) => (requireUser(), s.customers.getCustomer(id)),
     'customers.save': (input: CustomerInput, id?: string) => {
       const u = requireUser([id ? 'customer_edit' : 'customer_create', 'customer_deactivate', 'receivables', 'customer_price_level']);
@@ -2093,7 +2123,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       }
       if (!can(u, ['customer_price_level']) && (input.priceLevel ?? level) !== level) throw new AppError("Vous n'avez pas le droit de fixer le tarif du client", 'FORBIDDEN');
       // Remises par famille : un prix convenu, comme le tarif. Sans le droit, la fiche garde les siennes.
-      if (!can(u, ['customer_price_level'])) input = { ...input, familyDiscounts: undefined };
+      if (!can(u, ['customer_price_level'])) input = { ...input, familyDiscounts: undefined, articlePrices: undefined };
+      // Fiche fournisseur liée : elle permet de compenser les deux comptes.
+      if (!can(u, ['account_offsets', 'receivables'])) input = { ...input, supplierId: undefined };
       if (!can(u, ['customer_deactivate']) && (input.active ?? active) !== active) throw new AppError("Vous n'avez pas le droit de désactiver un client", 'FORBIDDEN');
       // Interdit de chèque : décidé par le gérant ou le comptable, comme le crédit.
       if (!can(u, ['receivables', 'cheque_rejections']) && input.noCheque !== undefined && input.noCheque !== Boolean(before?.no_cheque)) {
@@ -2131,8 +2163,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.statement': (id: string, from?: string | null, to?: string | null) =>
       s.customers.statement(ctx(['customer_statement', 'receivables']).storeId, id, { from: from ?? undefined, to: to ?? undefined }),
     'customers.sales': (id: string) => s.pos.listSales({ storeId: ctx().storeId, customerId: id, limit: 100 }),
-    'customers.pay': (input: { customerId: string; method: CustomerPaymentMethod; amount: Fcfa; reference?: string | null; notes?: string | null; atRegister?: boolean }) => {
+    'customers.pay': (input: {
+      customerId: string;
+      method: CustomerPaymentMethod;
+      amount: Fcfa;
+      reference?: string | null;
+      notes?: string | null;
+      atRegister?: boolean;
+      /** Lettrage : factures que ce règlement solde, au lieu des plus anciennes. */
+      allocations?: { saleId: string; amount: Fcfa }[] | null;
+    }) => {
       const c = ctx(['customer_payment']);
+      if (input.allocations?.length && !can(user!, ['customer_lettering'])) throw new AppError("Vous n'avez pas le droit de lettrer un règlement", 'FORBIDDEN');
       // Encaissé à la caisse : rattaché à la session ouverte, les espèces vont dans le tiroir.
       const session = input.atRegister && c.registerId ? s.pos.currentSession(c.registerId) : null;
       if (input.atRegister && !session) throw new AppError("Ouvrez la caisse avant d'encaisser un règlement client", 'NO_SESSION');
@@ -2141,6 +2183,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
+    'customers.allocations': (paymentId: string) => (requireUser(['customer_payment', 'customer_lettering', 'receivables']), s.customers.allocations(paymentId)),
+    'customers.setAllocations': (paymentId: string, allocations: { saleId: string; amount: Fcfa }[]) => s.customers.setAllocations(ctx(['customer_lettering']), paymentId, allocations),
+    // --- Compensation client / fournisseur ----------------------------------------
+    'offsets.candidates': (customerId: string) => s.offsets.candidates(ctx(['account_offsets']).storeId, customerId),
+    'offsets.create': (input: { customerId: string; invoiceId: string; amount: Fcfa; date?: string | null; notes?: string | null }) => s.offsets.create(ctx(['account_offsets']), input),
+    'offsets.cancel': (id: string, reason: string) => s.offsets.cancel(ctx(['account_offsets']), id, reason),
+    'offsets.list': (customerId?: string | null) => s.offsets.list(ctx(['account_offsets', 'receivables']).storeId, { customerId }),
+    // --- Dépôt-vente chez les revendeurs ------------------------------------------
+    'consignment.depots': () => s.consignment.depots(ctx(['consignment']).storeId),
+    'consignment.open': (customerId: string) => s.consignment.openDepot(ctx(['consignment']), customerId),
+    'consignment.stock': (warehouseId: string) => (ctx(['consignment']), s.consignment.stockAt(warehouseId)),
+    'consignment.send': (input: { warehouseId: string; fromWarehouseId: string; lines: { articleId: string; qty: Milli }[] }) => s.consignment.send(ctx(['consignment']), input),
+    'consignment.count': (input: { warehouseId: string; lines: { articleId: string; counted: Milli }[]; takeBack?: { toWarehouseId: string } | null; notes?: string | null }) =>
+      s.consignment.count(ctx(['consignment']), input),
+    'consignment.history': (warehouseId?: string | null) => s.consignment.history(ctx(['consignment']).storeId, warehouseId),
+    'consignment.get': (id: string) => (ctx(['consignment']), s.consignment.get(id)),
     'summaryInvoices.candidates': (customerId: string, from: string, to: string) => s.summaryInvoices.candidates(ctx(['summary_invoices']).storeId, customerId, from, to),
     'summaryInvoices.create': (input: { customerId: string; from: string; to: string; saleIds?: string[] }) => s.summaryInvoices.create(ctx(['summary_invoices']), input),
     'summaryInvoices.cancel': (id: string) => s.summaryInvoices.cancel(ctx(['summary_invoices']), id),
@@ -2351,6 +2409,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'tax.book': (year: number) => s.tax.book(ctx(['tax_settings']), year),
     'tax.print': (year: number) => printer.taxAssessment(ctx(['tax', 'tax_settings']).storeId, year),
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(['vat_return']).storeId, month),
+    'patrimony.series': (scope?: { companyId?: string | null; allStores?: boolean }, months?: number) => {
+      const c = ctx(['patrimony']);
+      if ((scope?.companyId || scope?.allStores) && !can(user!, ['companies'])) throw new AppError("Vous n'avez pas le droit de voir les chiffres des autres magasins", 'FORBIDDEN');
+      return s.companies.patrimony(scope?.companyId ? { companyId: scope.companyId } : scope?.allStores ? {} : { storeId: c.storeId }, months);
+    },
+    'companies.list': (includeInactive?: boolean) => (requireUser(['companies', 'patrimony']), s.companies.list(includeInactive)),
+    'companies.save': (input: CompanyInput, id?: string) => s.companies.save(requireUser(['companies']).id, input, id),
+    'companies.assignStore': (storeId: string, companyId: string | null) => s.companies.assignStore(requireUser(['companies']).id, storeId, companyId),
+    'companies.consolidated': (companyId: string, date?: string | null) => (requireUser(['companies']), s.companies.consolidated(companyId, date)),
     'planning.forecast': (opts?: { weeks?: number; estimates?: boolean }) => s.planning.forecast(ctx(['cash_forecast']).storeId, opts),
     'planning.budgetReport': (year: number, month: number) => s.planning.budgetReport(ctx(['budgets']).storeId, year, month),
     'planning.saveBudget': (input: { year: number; account: string; months: number[] }) => s.planning.saveBudget(ctx(['budgets']), input),

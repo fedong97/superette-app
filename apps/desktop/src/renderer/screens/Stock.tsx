@@ -5,6 +5,7 @@ import { StockByWarehouse, saveXlsx } from './Controls';
 import { Inventories } from './Inventories';
 import { Transfers } from './Transfers';
 import { Monitoring } from './Monitoring';
+import { Clearance, CycleCount, Losses } from './Clearance';
 import { packCostText, purchaseUnits } from './packs';
 import { type ExtraTerms, type TermsText, lineNet, lineTerms, noTerms } from './purchaseTerms';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
@@ -16,7 +17,7 @@ import { PurchaseEntry } from './purchaseEntry';
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring';
+type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
@@ -39,6 +40,9 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
     moves: any('stock_moves', 'stock'),
     adjustments: any('stock_moves', 'stock'),
     monitoring: any('stock_monitoring', 'stock_request', 'stock_adjust', 'stock_decide'),
+    clearance: has(user, 'clearance'),
+    losses: has(user, 'clearance'),
+    cycle: has(user, 'cycle_count'),
   };
   const tabs = (
     [
@@ -53,6 +57,9 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       ['moves', 'Mouvements'],
       ['adjustments', 'Ajustements'],
       ['monitoring', 'Monitoring'],
+      ['clearance', 'Déstockage'],
+      ['losses', 'Démarque'],
+      ['cycle', 'Inventaire tournant'],
     ] as [Tab, string][]
   ).filter(([k]) => allowed[k]);
   return (
@@ -73,6 +80,9 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'moves' && allowed.moves && <Moves />}
       {tab === 'adjustments' && allowed.adjustments && <Moves adjustments />}
       {tab === 'monitoring' && allowed.monitoring && <Monitoring user={user} />}
+      {tab === 'clearance' && allowed.clearance && <Clearance />}
+      {tab === 'losses' && allowed.losses && <Losses />}
+      {tab === 'cycle' && allowed.cycle && <CycleCount onOpenInventory={allowed.inventory ? () => setTab('inventory') : undefined} />}
     </div>
   );
 }

@@ -27,7 +27,7 @@ import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
-import { CancelDialog, CashOpDialog, HeldDialog, PaymentDialog, ReturnDialog, WhatsappTicketDialog } from './PosDialogs';
+import { CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, WhatsappTicketDialog } from './PosDialogs';
 import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
@@ -199,6 +199,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const [lastSale, setLastSale] = useState<Result<'pos.sell'> | null>(null);
   const [waSale, setWaSale] = useState<{ id: string; number: string } | null>(null);
   const sendWhatsapp = () => lastSale && setWaSale({ id: lastSale.id, number: lastSale.number });
+  /** Consigne des emballages : proposée après une vente d'articles consignés, ou ouverte depuis Actions. */
+  const [consigne, setConsigne] = useState<Omit<Parameters<typeof ContainerCounterDialog>[0], 'onClose'> | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   /** Nom donné par un client comptoir (facultatif), imprimé sur le ticket et la facture. */
   const [clientName, setClientName] = useState('');
@@ -476,6 +478,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     const delivered = delivery.on;
     resetOptions();
     toast.ok(`Facture ${sale.number} enregistrée${sale.change_given > 0 ? ` · rendu ${fcfa(sale.change_given)}` : ''}`);
+    // Articles consignés (casiers, bouteilles) : la consigne est proposée, le caissier peut passer.
+    if (can('containers_counter')) {
+      const soldName = customer ? null : clientName.trim() || null;
+      call('containers.needsFor', sale.lines.map((l) => ({ articleId: l.article_id, qty: l.qty })))
+        .then((needs) => {
+          if (needs.length) setConsigne({ saleId: sale.id, needs, customer: sale.customer_id ? { id: sale.customer_id, name: sale.customer_name ?? '' } : null, clientName: soldName });
+        })
+        .catch(() => undefined);
+    }
     const print = printRef.current;
     printRef.current = 'none';
     if (print === 'ticket') call('pos.printTicket', sale.id, { newSale: true, force: true }).catch((err) => toast.error(err));
@@ -910,11 +921,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     className="opt action"
     value=""
     onChange={(e) => {
-      const v = e.target.value as Dialog | 'close';
+      const v = e.target.value as Dialog | 'close' | 'containers';
       if (v === 'close') {
         if (lines.length) return toast.error('Terminez ou mettez en attente le ticket en cours');
         return onTreasury();
       }
+      if (v === 'containers') return setConsigne({});
       setDialog(v);
     }}
   >
@@ -929,12 +941,14 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     <option value="quote">Facturer un devis / proforma</option>
     <option value="order">Charger une commande client</option>
     <option value="expense">Dépense payée en caisse</option>
+    {can('containers_counter') && <option value="containers">Consignes (emballages)</option>}
     <option value="close">Clôture de caisse (Trésorerie)</option>
   </select>
   );
 
   const dialogs = (
     <>
+    {consigne && <ContainerCounterDialog {...consigne} onClose={() => setConsigne(null)} />}
     {waSale && <WhatsappTicketDialog saleId={waSale.id} number={waSale.number} onClose={() => setWaSale(null)} />}
       {dialog === 'pay' && (
       <PaymentDialog

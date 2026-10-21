@@ -195,6 +195,8 @@ export class AccountingService extends Base {
       ...this.emoneyEntries(storeId, r, opts),
       ...this.customerPaymentEntries(storeId, r, opts),
       ...this.chequeDepositEntries(storeId, r, opts),
+      ...this.chequeRejectionEntries(storeId, r, opts),
+      ...this.agentEntries(storeId, opts),
       ...this.rebateEntries(storeId, r, opts),
       ...this.purchaseEntries(storeId, r, opts),
       ...this.supplierPaymentEntries(storeId, r, opts),
@@ -424,6 +426,48 @@ export class AccountingService extends Base {
       .map((x) => {
         const label = `Remise de chèques n° ${x.number}${x.bank ? ` (${x.bank})` : ''}`;
         return { journal: 'BQ' as const, date: x.d, ref: x.number, label, source: 'auto' as const, lines: [side(r.bank, x.total, label), side(r.cheques, -x.total, label)] };
+      });
+  }
+
+  /**
+   * Chèque impayé : la banque reprend le chèque (ou il sort du 513 s'il n'était
+   * pas encore remis) et ses frais ; le client doit les deux (411).
+   */
+  private chequeRejectionEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT x.number, x.rejected_on AS d, x.amount, x.fees, x.deposited, x.doc_number, x.reference, c.code, c.name
+         FROM cheque_rejections x JOIN customers c ON c.id = x.customer_id WHERE x.store_id = ? AND x.status = 'active'`,
+      )
+      .all(storeId) as { number: string; d: string; amount: number; fees: number; deposited: number; doc_number: string; reference: string | null; code: string; name: string }[];
+    return rows
+      .filter((x) => inRange(x.d, opts.from, opts.to))
+      .map((x) => {
+        const label = `Chèque impayé${x.reference ? ` n° ${x.reference}` : ''} (${x.doc_number}), ${x.name}`;
+        const lines = [side(r.customers, x.amount + x.fees, label, { code: x.code, name: x.name }), side(x.deposited ? r.bank : r.cheques, -x.amount, label)];
+        if (x.fees) lines.push(side(r.bank, -x.fees, `Frais de rejet, ${label}`));
+        return { journal: 'BQ' as const, date: x.d, ref: x.number, label, source: 'auto' as const, lines };
+      });
+  }
+
+  /**
+   * Point Mobile Money : les commissions de l'opérateur entrent dans la flotte
+   * (55xx) et sont un produit (7072). Les espèces passent par les pièces de caisse.
+   */
+  private agentEntries(storeId: string, opts: { from?: string; to?: string }): Entry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT o.number, o.kind, o.amount, o.commission, date(o.created_at, 'localtime') AS d, a.name, a.account
+         FROM agent_operations o JOIN agent_accounts a ON a.id = o.agent_account_id
+         WHERE o.store_id = ? AND o.status = 'active' AND (o.kind = 'commission' OR o.commission > 0)`,
+      )
+      .all(storeId) as { number: string; kind: string; amount: number; commission: number; d: string; name: string; account: string }[];
+    return rows
+      .filter((x) => inRange(x.d, opts.from, opts.to))
+      .map((x) => {
+        const amount = x.kind === 'commission' ? x.amount : x.commission;
+        const label = `Commission ${x.name} (${x.number})`;
+        return { journal: 'MM' as const, date: x.d, ref: x.number, label, source: 'auto' as const, lines: [side(x.account, amount, label), side('7072', -amount, label)] };
       });
   }
 

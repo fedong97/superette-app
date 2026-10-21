@@ -518,6 +518,23 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         <p class="muted">Facture récapitulative des tickets et factures de la période : chaque vente a déjà été enregistrée à sa date.</p>`);
     },
 
+    async courierSheet(storeId, courier, date) {
+      const store = s.admin.getStore(storeId);
+      const sheet = s.couriers.sheet(storeId, courier, date);
+      const rows = sheet.deliveries
+        .map(
+          (d, i) => `<tr><td>${i + 1}</td><td>${esc(d.sale_number)}</td><td>${esc(d.customer_name ?? '')}<br>${esc(d.phone ?? '')}</td><td>${esc(d.address)}${d.note ? `<br><i>${esc(d.note)}</i>` : ''}</td>
+            <td>${esc(d.slot ?? '')}</td><td class="r">${money(d.total_ttc)}</td><td class="r">${d.to_collect ? money(d.to_collect) : 'Payé'}</td><td></td></tr>`,
+        )
+        .join('');
+      await printA4(`${a4Head(store)}
+        <h1>Feuille de route de ${esc(courier)}</h1>
+        <p>Livraisons jusqu'au ${dayFr(date)} · ${sheet.deliveries.length} livraison(s) · à encaisser ${money(sheet.to_collect)} FCFA</p>
+        <table><thead><tr><th>N°</th><th>Ticket</th><th>Client</th><th>Adresse</th><th>Créneau</th><th class="r">Total</th><th class="r">À encaisser</th><th>Signature du client</th></tr></thead>
+        <tbody>${rows}<tr class="total"><td colspan="6">Total à rapporter (FCFA)</td><td class="r">${money(sheet.to_collect)}</td><td></td></tr></tbody></table>
+        <div class="sign"><span>Départ : ……… h ………</span><span>Retour : ……… h ………</span><span>Signature du livreur : ……………………</span></div>`);
+    },
+
     async chequeDeposit(depositId) {
       const d = s.cheques.get(depositId);
       const store = s.admin.getStore(d.store_id);

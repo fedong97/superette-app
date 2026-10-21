@@ -82,6 +82,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   const barcodeInfo = useLoad(() => call('barcode.info'));
   const emoney = useLoad(() => call('emoney.registers'));
   const templates = useLoad(() => call('docs.templates'));
+  const syncState = useLoad(() => call('sync.state'));
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [storeDraft, setStoreDraft] = useState<Partial<StoreSettings>>({});
   const [identity, setIdentity] = useState<Partial<StoreIdentity>>({});
@@ -92,16 +93,17 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   const isAdmin = user.role === 'admin';
   const canEdit = user.rights.includes('settings_edit');
   const canStock = user.rights.includes('ignore_stock');
+  const canShop = canEdit || user.rights.includes('online_shop');
 
   const v = (k: string, d = '') => draft[k] ?? local.data![k] ?? d;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setDraft({ ...draft, [k]: e.target.value });
   const sv = <K extends keyof StoreSettings>(k: K): StoreSettings[K] => (storeDraft[k] ?? store.data![k]) as StoreSettings[K];
   const sset = <K extends keyof StoreSettings>(k: K, value: StoreSettings[K]) => setStoreDraft({ ...storeDraft, [k]: value });
-  const num = (k: keyof StoreSettings, suffix?: string) => (
+  const num = (k: keyof StoreSettings, suffix?: string, editable = canEdit) => (
     <span className="inline">
       <input
         inputMode="numeric"
-        disabled={!canEdit}
+        disabled={!editable}
         className="qty"
         value={String(sv(k))}
         onChange={(e) => sset(k, (e.target.value.replace(/\D/g, '') === '' ? 0 : Number(e.target.value.replace(/\D/g, ''))) as never)}
@@ -109,14 +111,14 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       {suffix && <span className="muted">{suffix}</span>}
     </span>
   );
-  const yes = (k: keyof StoreSettings) => (
-    <select disabled={!canEdit} value={sv(k) ? '1' : '0'} onChange={(e) => sset(k, (e.target.value === '1') as never)}>
+  const yes = (k: keyof StoreSettings, editable = canEdit) => (
+    <select disabled={!editable} value={sv(k) ? '1' : '0'} onChange={(e) => sset(k, (e.target.value === '1') as never)}>
       <option value="1">Oui</option>
       <option value="0">Non</option>
     </select>
   );
-  const text = (k: keyof StoreSettings, placeholder?: string) => (
-    <input disabled={!canEdit} value={String(sv(k))} placeholder={placeholder} onChange={(e) => sset(k, e.target.value as never)} />
+  const text = (k: keyof StoreSettings, placeholder?: string, editable = canEdit) => (
+    <input disabled={!editable} value={String(sv(k))} placeholder={placeholder} onChange={(e) => sset(k, e.target.value as never)} />
   );
   const pay = sv('payroll');
   const pset = (patch: Partial<PayrollRules>) => sset('payroll', { ...pay, ...patch });
@@ -160,6 +162,21 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   const mode = v('printer.mode', 'driver');
   const displayMode = v('display.customer', 'off') as CustomerDisplayMode;
   const logo = sv('logo');
+  const serverUrl = syncState.data?.connected ? syncState.data.url : null;
+  const shopLink = (path: 'boutique' | 'prix') => `${serverUrl}/${path}/${encodeURIComponent(st.code)}`;
+  const copyLink = (link: string) =>
+    navigator.clipboard.writeText(link).then(
+      () => toast.ok('Lien copié'),
+      () => toast.error('Copie impossible : sélectionnez le lien à la main'),
+    );
+  const linkRow = (link: string) => (
+    <span className="inline">
+      <code>{link}</code>
+      <button type="button" onClick={() => void copyLink(link)}>
+        Copier
+      </button>
+    </span>
+  );
 
   const sections: [string, string, Item[]][] = [
     [
@@ -605,6 +622,12 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         { label: 'Alerte de péremption', hint: 'Les lots qui périment dans ce délai sont signalés', render: () => num('expiryAlertDays', 'jours avant') },
         { label: 'Stock d’alerte proposé pour un nouveau produit', hint: '0 : aucun', render: () => num('defaultAlertQty', 'unités') },
         { label: 'Un transfert est réceptionné par un autre utilisateur que celui qui l’a expédié', render: () => yes('transferTwoUsers') },
+        {
+          label: 'Paliers de déstockage avant péremption',
+          hint: '« jours:remise % » séparés par des virgules. 14:10,7:20,3:30 : 10 % à 14 jours de la péremption, 20 % à 7 jours, 30 % à 3 jours. Vide : pas de déstockage proposé.',
+          render: () => text('clearanceRules', '14:10,7:20,3:30'),
+        },
+        { label: 'Produits à compter chaque semaine (inventaire tournant)', hint: 'Les produits les plus vendus et les plus chers reviennent plus souvent.', render: () => num('cycleCountPerWeek', 'produits') },
       ],
     ],
     [
@@ -621,6 +644,12 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       [
         { label: 'Heure d’arrivée attendue', render: () => <input type="time" disabled={!canEdit} value={String(sv('workStart'))} onChange={(e) => e.target.value && sset('workStart', e.target.value)} /> },
         { label: 'Tolérance avant un retard', render: () => num('lateToleranceMinutes', 'minutes') },
+        {
+          label: 'Congés payés acquis par mois (jours)',
+          hint: 'Code du travail : 1,5 jour par mois de service.',
+          render: () => <DecimalInput disabled={!canEdit} value={Number(sv('leaveDaysPerMonth'))} onChange={(n) => sset('leaveDaysPerMonth', n)} suffix="jours" />,
+        },
+        { label: 'Plafond des avances (% du salaire, 0 = sans plafond)', hint: 'Une avance qui dépasse ce pourcentage du salaire de base est refusée.', render: () => num('advanceMaxPct', '%') },
         {
           label: 'Jours travaillés',
           hint: 'Un jour travaillé sans pointage compte comme absence.',
@@ -645,6 +674,31 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
               })}
             </span>
           ),
+        },
+      ],
+    ],
+    [
+      'Boutique en ligne et vérificateur de prix',
+      'Pages internet du magasin sur le serveur central. Les commandes en ligne arrivent dans Commandes clients. Les réglages parviennent au serveur avec la prochaine synchronisation.',
+      [
+        { label: 'Boutique en ligne', hint: 'Vos clients commandent depuis leur téléphone ; la commande attend dans Commandes clients qu’un PC la prenne.', render: () => yes('onlineShop', canShop) },
+        { label: 'Livraison proposée sur la boutique', hint: 'Non : retrait au magasin seulement.', render: () => yes('onlineShopDelivery', canShop) },
+        { label: 'Frais de livraison de la boutique', hint: '0 : à convenir avec le client.', render: () => num('onlineShopDeliveryFee', 'FCFA', canShop) },
+        { label: 'Montant minimal d’une commande en ligne', hint: '0 : sans minimum.', render: () => num('onlineShopMinOrder', 'FCFA', canShop) },
+        { label: 'Message en haut de la boutique', hint: 'Horaires, zone de livraison, délai…', render: () => text('onlineShopMessage', 'Livraison à Douala sous 2 heures', canShop) },
+        { label: 'Vérificateur de prix', hint: 'Page à ouvrir sur un téléphone ou une tablette au rayon : le client scanne ou tape un code et voit le prix.', render: () => yes('priceChecker', canShop) },
+        {
+          label: 'Liens à partager',
+          hint: serverUrl ? 'À mettre sur WhatsApp, Facebook ou une affiche (QR code).' : 'Ce PC n’est pas relié au serveur central (Administration › Synchronisation) : les pages ne sont pas disponibles.',
+          render: () =>
+            serverUrl ? (
+              <span>
+                <div>Boutique : {linkRow(shopLink('boutique'))}</div>
+                <div>Prix : {linkRow(shopLink('prix'))}</div>
+              </span>
+            ) : (
+              <span className="muted">Pas de serveur</span>
+            ),
         },
       ],
     ],
@@ -955,7 +1009,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         <button className="ghost" disabled={!dirty} onClick={() => (setDraft({}), setStoreDraft({}), setIdentity({}))}>
           Annuler les changements
         </button>
-        <button className="primary" disabled={!canEdit || !dirty} onClick={save}>
+        <button className="primary" disabled={!canShop || !dirty} onClick={save}>
           Enregistrer
         </button>
       </div>
@@ -982,6 +1036,29 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       ))}
       {!shown.length && <Empty>Aucun paramètre ne correspond. Essayez un autre mot.</Empty>}
     </div>
+  );
+}
+
+/** Nombre à une décimale saisi « 1,5 » et gardé en dixièmes (15). */
+function DecimalInput({ value, onChange, disabled, suffix }: { value: number; onChange: (n: number) => void; disabled?: boolean; suffix?: string }) {
+  const shown = (value / 10).toLocaleString('fr-FR', { maximumFractionDigits: 1 });
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <span className="inline">
+      <input
+        inputMode="decimal"
+        className="qty"
+        disabled={disabled}
+        value={text ?? shown}
+        onChange={(e) => {
+          setText(e.target.value);
+          const n = Number(e.target.value.replace(',', '.').replace(/\s/g, '') || 0);
+          if (Number.isFinite(n) && n >= 0) onChange(Math.round(n * 10));
+        }}
+        onBlur={() => setText(null)}
+      />
+      {suffix && <span className="muted">{suffix}</span>}
+    </span>
   );
 }
 

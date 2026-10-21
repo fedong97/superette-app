@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { computePayroll } from '@superette/core';
 import { type Result, call } from '../api';
+import { Leaves, WeekPlanning } from './StaffTime';
 import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useStoreSettings, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
 type MonthRow = Result<'staff.month'>[number];
-export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement';
+export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement' | 'leaves' | 'planning';
 
 const OFFICE_METHODS = { CASH: 'Espèces (caisse centrale)', MTN_MOMO: 'MTN MoMo (caisse électronique centrale)', ORANGE_MONEY: 'Orange Money (caisse électronique centrale)', BANK_TRANSFER: 'Virement', CHEQUE: 'Chèque' } as const;
 type OfficeMethod = keyof typeof OFFICE_METHODS;
@@ -20,8 +21,14 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
   const pay = has(user, 'staff_salaries');
   const targets = has(user, 'staff_targets');
   const attendance = has(user, 'staff_attendance');
+  const leaves = has(user, 'staff_leaves');
   const [tab, setTab] = useState<StaffTab>(
-    (initialTab === 'salaries' && !pay) || (initialTab === 'targets' && !targets) || (initialTab === 'attendance' && !attendance) ? 'list' : initialTab,
+    (initialTab === 'salaries' && !pay) ||
+      (initialTab === 'targets' && !targets) ||
+      (initialTab === 'attendance' && !attendance) ||
+      ((initialTab === 'leaves' || initialTab === 'planning') && !leaves)
+      ? 'list'
+      : initialTab,
   );
   const [shown, setShown] = useState<string | null>(null);
   return (
@@ -37,6 +44,12 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
           ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []),
           ...(targets ? ([['targets', 'Objectifs et commissions']] as [StaffTab, string][]) : []),
           ...(attendance ? ([['attendance', 'Pointage']] as [StaffTab, string][]) : []),
+          ...(leaves
+            ? ([
+                ['leaves', 'Congés'],
+                ['planning', 'Planning'],
+              ] as [StaffTab, string][])
+            : []),
           ['statement', 'Extrait de compte'],
         ]}
       />
@@ -52,6 +65,8 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
       {tab === 'salaries' && pay && <Salaries />}
       {tab === 'targets' && targets && <Targets />}
       {tab === 'attendance' && attendance && <AttendanceMonth />}
+      {tab === 'leaves' && leaves && <Leaves />}
+      {tab === 'planning' && leaves && <WeekPlanning />}
       {tab === 'statement' && <Statement initial={shown} />}
     </div>
   );
@@ -868,6 +883,7 @@ function TargetEditor({ row, onClose, onSaved }: { row: TargetRow; onClose: () =
 type AttendanceRow = Result<'attendance.month'>[number];
 const hm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
 const hours = (minutes: number) => `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
+const early = (r: AttendanceRow) => r.days.reduce((t, d) => t + d.early_minutes, 0);
 
 /**
  * Pointage du mois : arrivée à la première connexion du jour, départ à la
@@ -906,7 +922,9 @@ function AttendanceMonth() {
               <th className="r">Heures</th>
               <th className="r">Retards</th>
               <th className="r">Minutes de retard</th>
+              <th className="r">Départs anticipés</th>
               <th className="r">Absences</th>
+              <th className="r">Jours de congé</th>
             </tr>
           </thead>
           <tbody>
@@ -916,11 +934,20 @@ function AttendanceMonth() {
                   <b>{r.name}</b>
                 </td>
                 <td className="r">{r.present}</td>
-                <td className="r">{hours(r.minutes)}</td>
+                <td className="r">
+                  {hours(r.minutes)}
+                  {r.scheduled_minutes > 0 && <small className="muted block">prévu {hours(r.scheduled_minutes)}</small>}
+                </td>
                 <td className={`r ${r.late ? 'neg' : ''}`}>{r.late || ''}</td>
                 <td className="r">{r.late_minutes || ''}</td>
+                <td className="r" title={early(r) ? `${early(r)} min au total` : ''}>
+                  {r.days.filter((d) => d.early_minutes > 0).length || ''}
+                </td>
                 <td className={`r ${r.absences.length ? 'neg' : ''}`} title={r.absences.map(dateFr).join(', ')}>
                   {r.absences.length || ''}
+                </td>
+                <td className="r" title={r.leave_days.map(dateFr).join(', ')}>
+                  {r.leave_days.length || ''}
                 </td>
               </tr>
             ))}
@@ -939,19 +966,27 @@ function AttendanceMonth() {
                 <th>Départ</th>
                 <th className="r">Durée</th>
                 <th className="r">Retard</th>
+                <th className="r">Départ anticipé</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {[...open.days.map((d) => ({ ...d, absent: false })), ...open.absences.map((day) => ({ day, arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, corrected: false, correction_reason: null, absent: true }))]
+              {[
+                ...open.days.map((d) => ({ ...d, absent: false, leave: false })),
+                ...open.absences.map((day) => ({ day, arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, early_minutes: 0, corrected: false, correction_reason: null, absent: true, leave: false })),
+                ...open.leave_days
+                  .filter((day) => !open.days.some((d) => d.day === day))
+                  .map((day) => ({ day, arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, early_minutes: 0, corrected: false, correction_reason: null, absent: false, leave: true })),
+              ]
                 .sort((a, b) => a.day.localeCompare(b.day))
                 .map((d) => (
                   <tr key={d.day} className={d.absent ? 'inactive' : ''}>
                     <td>{dateFr(d.day)}</td>
-                    <td>{d.absent ? <span className="tag rupture">absent</span> : hm(d.arrived_at)}</td>
+                    <td>{d.absent ? <span className="tag rupture">absent</span> : d.leave ? <span className="tag info">congé</span> : hm(d.arrived_at)}</td>
                     <td>{hm(d.left_at)}</td>
                     <td className="r">{d.minutes ? hours(d.minutes) : ''}</td>
                     <td className={`r ${d.late_minutes ? 'neg' : ''}`}>{d.late_minutes ? `${d.late_minutes} min` : ''}</td>
+                    <td className={`r ${d.early_minutes ? 'neg' : ''}`}>{d.early_minutes ? `${d.early_minutes} min` : ''}</td>
                     <td>
                       {d.corrected && <small className="muted" title={d.correction_reason ?? ''}>corrigé </small>}
                       <button

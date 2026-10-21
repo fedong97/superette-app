@@ -1,5 +1,6 @@
 import type { AdminService } from './admin';
 import type { Db } from './database';
+import type { StaffTimeService } from './staffTime';
 import { AppError, Base, type Clock } from './util';
 
 /** Une journée pointée : arrivée à la première connexion, départ à la clôture de caisse ou par « Je pars ». */
@@ -23,6 +24,8 @@ export interface AttendanceDay {
   minutes: number;
   /** Minutes de retard au-delà de l'heure d'arrivée et de la tolérance. */
   late_minutes: number;
+  /** Minutes de départ avant la fin prévue au planning. */
+  early_minutes: number;
   corrected: boolean;
   correction_reason: string | null;
 }
@@ -36,14 +39,19 @@ export interface AttendanceMonthRow {
   minutes: number;
   late: number;
   late_minutes: number;
-  /** Jours travaillés passés du mois sans aucun pointage. */
+  /** Jours travaillés passés du mois sans aucun pointage (congés accordés exclus). */
   absences: string[];
+  /** Jours de congé accordés dans le mois. */
+  leave_days: string[];
+  /** Heures prévues au planning sur les jours passés du mois (congés exclus), en minutes. */
+  scheduled_minutes: number;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 /** Minutes après minuit, à l'heure locale du poste. */
+const toMinutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 const localMinutes = (iso: string) => {
   const d = new Date(iso);
   return d.getHours() * 60 + d.getMinutes();
@@ -59,6 +67,7 @@ export class AttendanceService extends Base {
     db: Db,
     clock: Clock,
     private readonly admin: AdminService,
+    private readonly time: StaffTimeService,
   ) {
     super(db, clock);
   }
@@ -149,36 +158,55 @@ export class AttendanceService extends Base {
     return row;
   }
 
-  /** État du mois (AAAA-MM) : présence, heures, retards et absences de chaque employé du magasin. */
+  /** État du mois (AAAA-MM) : présence, heures, retards et absences de chaque employé du magasin, d'après son planning. */
   month(storeId: string, period: string): AttendanceMonthRow[] {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new AppError('Mois invalide', 'INVALID');
     const settings = this.admin.storeSettings(storeId);
-    const [sh, sm] = settings.workStart.split(':').map(Number);
-    const startMin = sh! * 60 + sm!;
-    const lateAfter = startMin + settings.lateToleranceMinutes;
     const today = this.today();
     const [y, m] = period.split('-').map(Number);
-    const workDays: string[] = [];
+    const monthDays: { day: string; weekday: number }[] = [];
     for (let d = new Date(y!, m! - 1, 1); d.getMonth() === m! - 1; d.setDate(d.getDate() + 1)) {
       const day = localDay(d);
       if (day >= today) break;
-      if (settings.workDays.includes(String(d.getDay()))) workDays.push(day);
+      monthDays.push({ day, weekday: d.getDay() });
     }
+    const first = `${period}-01`;
+    const last = `${period}-31`;
     const users = this.db
       .prepare("SELECT id, name, role FROM users WHERE deleted_at IS NULL AND active = 1 AND role <> 'admin' AND (store_id = ? OR store_id IS NULL) ORDER BY name")
       .all(storeId) as { id: string; name: string; role: string }[];
     const rows = this.db.prepare("SELECT * FROM attendance WHERE day LIKE ? || '-%' ORDER BY day").all(period) as Attendance[];
     const byUser = new Map<string, Attendance[]>();
     for (const r of rows) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), r]);
+    const staffOf = this.db.prepare('SELECT id FROM staff WHERE user_id = ? AND active = 1 ORDER BY created_at LIMIT 1').pluck();
     return users.map((u) => {
+      const staffId = staffOf.get(u.id) as string | undefined;
+      // Planning du collaborateur ; sans fiche, les jours et l'heure du magasin.
+      const schedule = staffId ? this.time.schedule(staffId).schedule : null;
+      const shiftOf = (weekday: number) =>
+        schedule ? (schedule[String(weekday) as '0'] ?? null) : settings.workDays.includes(String(weekday)) ? { start: settings.workStart, end: null as string | null } : null;
+      const leaves = staffId ? this.time.leaveDays(staffId, first, last) : new Map<string, string>();
       const days: AttendanceDay[] = (byUser.get(u.id) ?? [])
         .filter((r) => r.arrived_at || r.left_at)
         .map((r) => {
           const minutes = r.arrived_at && r.left_at ? Math.max(0, Math.round((Date.parse(r.left_at) - Date.parse(r.arrived_at)) / 60_000)) : 0;
-          const late = r.arrived_at && settings.workDays.includes(String(new Date(r.arrived_at).getDay())) ? localMinutes(r.arrived_at) > lateAfter ? localMinutes(r.arrived_at) - startMin : 0 : 0;
-          return { day: r.day, arrived_at: r.arrived_at, left_at: r.left_at, minutes, late_minutes: late, corrected: Boolean(r.corrected_by), correction_reason: r.correction_reason };
+          const shift = shiftOf(new Date(`${r.day}T12:00:00`).getDay());
+          const start = shift ? toMinutes(shift.start) : null;
+          const arrived = r.arrived_at ? localMinutes(r.arrived_at) : null;
+          const late = start !== null && arrived !== null && arrived > start + settings.lateToleranceMinutes ? arrived - start : 0;
+          const end = shift?.end ? toMinutes(shift.end) : null;
+          const left = r.left_at ? localMinutes(r.left_at) : null;
+          const early = end !== null && left !== null && left < end ? end - left : 0;
+          return { day: r.day, arrived_at: r.arrived_at, left_at: r.left_at, minutes, late_minutes: late, early_minutes: early, corrected: Boolean(r.corrected_by), correction_reason: r.correction_reason };
         });
       const seen = new Set(days.map((d) => d.day));
+      const expected = monthDays.filter((d) => shiftOf(d.weekday));
+      const scheduled = expected
+        .filter((d) => !leaves.has(d.day))
+        .reduce((t, d) => {
+          const sh = shiftOf(d.weekday)!;
+          return t + (sh.end ? Math.max(0, toMinutes(sh.end) - toMinutes(sh.start)) : 0);
+        }, 0);
       return {
         user_id: u.id,
         name: u.name,
@@ -188,7 +216,9 @@ export class AttendanceService extends Base {
         minutes: days.reduce((a, d) => a + d.minutes, 0),
         late: days.filter((d) => d.late_minutes > 0).length,
         late_minutes: days.reduce((a, d) => a + d.late_minutes, 0),
-        absences: workDays.filter((d) => !seen.has(d)),
+        absences: expected.filter((d) => !seen.has(d.day) && !leaves.has(d.day)).map((d) => d.day),
+        leave_days: [...leaves.keys()].filter((d) => d.startsWith(period)).sort(),
+        scheduled_minutes: scheduled,
       };
     });
   }

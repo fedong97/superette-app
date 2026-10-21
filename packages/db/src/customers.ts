@@ -35,6 +35,8 @@ export interface Customer {
   language: DocLang;
   /** Remises convenues par famille d'articles (JSON : {"<famille>": 300} = 3 %). */
   family_discounts: string | null;
+  /** Interdit de chèque (chèque revenu impayé) : la caisse refuse ses chèques. */
+  no_cheque: number;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +56,8 @@ export interface CustomerInput {
   language?: DocLang;
   /** Remises par famille (points de base) ; absent = inchangées. */
   familyDiscounts?: FamilyDiscounts;
+  /** Interdit de chèque ; absent = inchangé. */
+  noCheque?: boolean;
 }
 
 export const CUSTOMER_PAYMENT_METHODS = {
@@ -99,7 +103,7 @@ export interface CustomerAccount {
 
 export interface StatementLine {
   date: string;
-  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening';
+  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening' | 'rejected';
   ref_id: string;
   number: string;
   label: string;
@@ -214,6 +218,7 @@ export class CustomerService extends Base {
       price_level: input.priceLevel ?? (id ? this.getCustomer(id).price_level : 'retail'),
       language: input.language ?? (id ? this.getCustomer(id).language : 'fr'),
       family_discounts: input.familyDiscounts === undefined ? (id ? this.getCustomer(id).family_discounts : null) : this.discountsJson(input.familyDiscounts),
+      no_cheque: input.noCheque === undefined ? (id ? this.getCustomer(id).no_cheque : 0) : input.noCheque ? 1 : 0,
       updated_at: now,
     };
     if (!(values.price_level in PRICE_LEVELS)) throw new AppError('Tarif inconnu', 'INVALID');
@@ -227,7 +232,7 @@ export class CustomerService extends Base {
             `UPDATE customers SET name = @name, contact = @contact, phone = @phone, email = @email, address = @address,
                taxpayer_number = @taxpayer_number, credit_limit = @credit_limit, payment_terms_days = @payment_terms_days,
                notes = @notes, active = @active, price_level = @price_level, language = @language, family_discounts = @family_discounts,
-               updated_at = @updated_at WHERE id = @id`,
+               no_cheque = @no_cheque, updated_at = @updated_at WHERE id = @id`,
           )
           .run({ ...values, id: customerId });
         if (before.credit_limit !== limit) this.audit(userId, 'customer.credit_limit', 'customer', customerId, { from: before.credit_limit, to: limit });
@@ -239,9 +244,9 @@ export class CustomerService extends Base {
         this.db
           .prepare(
             `INSERT INTO customers (id, code, name, contact, phone, email, address, taxpayer_number, credit_limit, payment_terms_days,
-               notes, active, price_level, language, family_discounts, created_at, updated_at)
+               notes, active, price_level, language, family_discounts, no_cheque, created_at, updated_at)
              VALUES (@id, @code, @name, @contact, @phone, @email, @address, @taxpayer_number, @credit_limit, @payment_terms_days,
-               @notes, @active, @price_level, @language, @family_discounts, @created_at, @updated_at)`,
+               @notes, @active, @price_level, @language, @family_discounts, @no_cheque, @created_at, @updated_at)`,
           )
           .run({ ...values, id: customerId, code: this.number('CLI', 'customer.code'), created_at: now });
       }
@@ -268,6 +273,14 @@ export class CustomerService extends Base {
       .prepare('SELECT id, number, doc_date AS created_at, due_date, amount FROM opening_balances WHERE store_id = ? AND customer_id = ? ORDER BY doc_date, number')
       .all(storeId, customerId) as { id: string; number: string; created_at: string; due_date: string; amount: number }[];
     debits.unshift(...opening.filter((o) => o.amount > 0));
+    // Chèques revenus impayés : la somme (et les frais) redevient due tout de suite.
+    debits.push(
+      ...(this.db
+        .prepare(
+          "SELECT id, number, rejected_on AS created_at, rejected_on AS due_date, amount + fees AS amount FROM cheque_rejections WHERE store_id = ? AND customer_id = ? AND status = 'active'",
+        )
+        .all(storeId, customerId) as { id: string; number: string; created_at: string; due_date: string; amount: number }[]),
+    );
     debits.sort((a, b) => a.created_at.slice(0, 10).localeCompare(b.created_at.slice(0, 10)));
     const openingCredit = -opening.filter((o) => o.amount < 0).reduce((t, o) => t + o.amount, 0);
     const returned = this.db
@@ -359,6 +372,8 @@ export class CustomerService extends Base {
          SELECT at, 'rebate', id, number, -amount FROM rebate_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'credit'
          UNION ALL
          SELECT at, 'refund', id, number, amount FROM treasury_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'customer_refund' AND status = 'active'
+         UNION ALL
+         SELECT rejected_on, 'rejected', id, number, amount + fees FROM cheque_rejections WHERE store_id = @storeId AND customer_id = @customerId AND status = 'active'
          ORDER BY 1, 4`,
       )
       .all({ storeId, customerId }) as { date: string; kind: StatementLine['kind']; ref_id: string; number: string; amount: number }[];
@@ -394,7 +409,9 @@ export class CustomerService extends Base {
               ? 'Ristourne accordée en avoir'
               : r.kind === 'refund'
                 ? 'Avoir remboursé au client'
-                : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
+                : r.kind === 'rejected'
+                  ? 'Chèque revenu impayé (frais compris)'
+                  : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }
     return { opening, lines, closing: running };
@@ -414,6 +431,9 @@ export class CustomerService extends Base {
     if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new AppError('Montant invalide', 'INVALID');
     if (input.method !== 'CASH' && !input.reference?.trim()) {
       throw new AppError(`Référence obligatoire pour un règlement par ${CUSTOMER_PAYMENT_METHODS[input.method]}`, 'REFERENCE_REQUIRED');
+    }
+    if (input.method === 'CHEQUE' && this.getCustomer(input.customerId).no_cheque) {
+      throw new AppError('Ce client est interdit de chèque (chèque revenu impayé)', 'NO_CHEQUE');
     }
     const { balance } = this.ledger(ctx.storeId, input.customerId);
     if (input.amount > balance) {

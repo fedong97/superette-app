@@ -21,7 +21,10 @@ export type WinKind =
   | 'dashboard'
   | 'admin'
   | 'production'
-  | 'staff';
+  | 'staff'
+  | 'containers'
+  | 'agent'
+  | 'control';
 
 /** Onglet rapide : une fenêtre, éventuellement ouverte sur un de ses onglets. */
 export interface QuickTab {

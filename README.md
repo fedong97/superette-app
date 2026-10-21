@@ -277,6 +277,17 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Trésorerie prévisionnelle par semaine (clients, fournisseurs, charges fixes, moyennes comptant en option), budgets mensuels par compte 6/7 avec écarts du mois et cumulés, analytique par rayon et par magasin (charges réparties au prorata du CA HT).
 - Chèques à encaisser : compte 513 (rôle `cheques`) pour les chèques reçus à partir de 0.75.0 ; bordereau de remise `RCH-` = écriture BQ 521 / 513. Les chèques plus anciens restent passés en banque comme avant.
 
+**Comptoir, personnel et magasin en ligne (0.76.0)**
+- Emballages consignés : types (`containers`), emballage par article (`articles.container_id`, `container_units` en millièmes d'unités vendues par emballage), mouvements `EM-` (`container_moves`). La consigne est une pièce d'« Encaisser » / « Décaisser » au compte 4194 (genres `container_deposit` / `container_refund`), dans le Z ; vides, chez les clients et dus aux fournisseurs se déduisent des mouvements.
+- Point Mobile Money : comptes agent (`agent_accounts`, flotte en 5523 MTN, 5524 Orange, 5525 autre), opérations `AG-` (`agent_operations`). Les espèces passent par des pièces de trésorerie (`agent_in` / `agent_out`) contre la flotte ; frais de facture et commissions en 7072 (journal MM).
+- Contrôle des caissiers (`CashierControlService`) : annulations, retours (avec et sans ticket), remises, prix modifiés, tiroir ouvert sans vente, factures masquées et manquants par caissier, signalés au-delà de deux fois le taux de l'équipe.
+- Congés (`staff_leaves`, acquis `leaveDaysPerMonth` dixièmes de jour par mois de service) et semaine type par collaborateur (`staff_schedules`) : le pointage compte retards, départs anticipés et absences d'après l'horaire du collaborateur, hors congés. Plafond des avances `advanceMaxPct` (code d'un gérant au-delà).
+- Chèques impayés `CI-` (`cheque_rejections`) : écriture BQ 411 / 521 (ou 513 si le chèque n'était pas remis) avec les frais ; extrait de compte du client ; `customers.no_cheque` bloque le paiement par chèque.
+- Tournées : feuille de route par livreur, retour du livreur `RL-` (`courier_returns`) qui crée les règlements des clients dans la journée de caisse et garde l'écart.
+- Déstockage avant péremption (paliers `clearanceRules`, promotions de prix du magasin), démarque par rayon (casse, vol, périmés, consommation interne, écarts d'inventaire) et inventaire tournant (score valeur, écarts passés, ancienneté du comptage).
+- Proposition de commande « saison » (ventes N-1 des semaines à venir × tendance récente bornée de 0,5 à 2, majoration −50 à +300 %) ; commandes groupées `CG-` : un bon de commande par magasin (`purchase_orders.group_ref`).
+- Serveur : boutique en ligne `/boutique/<code magasin>` (commandes `web_orders`, reprises par un seul PC en commande client `web`), vérificateur de prix `/prix/<code magasin>`, sauvegardes des postes chiffrées sur le PC (AES-256-GCM, clé tirée de la phrase secrète par scrypt) et gardées par le serveur (10 par poste).
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

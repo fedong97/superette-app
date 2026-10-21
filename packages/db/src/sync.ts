@@ -73,6 +73,14 @@ const TABLES: Record<string, string> = {
   sales_target: 'sales_targets',
   summary_invoice: 'summary_invoices',
   budget: 'budgets',
+  container: 'containers',
+  container_move: 'container_moves',
+  agent_account: 'agent_accounts',
+  agent_operation: 'agent_operations',
+  staff_leave: 'staff_leaves',
+  staff_schedule: 'staff_schedules',
+  cheque_rejection: 'cheque_rejections',
+  courier_return: 'courier_returns',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -89,6 +97,10 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   supplier_returns: { open: 0, credited: 1 },
   summary_invoices: { active: 0, cancelled: 1 },
   cheque_deposits: { active: 0, cancelled: 1 },
+  container_moves: { active: 0, cancelled: 1 },
+  agent_operations: { active: 0, cancelled: 1 },
+  staff_leaves: { requested: 0, approved: 1, refused: 1, cancelled: 2 },
+  cheque_rejections: { active: 0, cancelled: 1 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
@@ -764,6 +776,8 @@ export class SyncService extends Base {
       default: {
         const table = TABLES[event.entity];
         if (!table) throw new Error(`Type d'opération inconnu : ${event.entity}`);
+        // Une annulation (consigne, opération Mobile Money, chèque impayé, congé) ne recule pas.
+        if (STATUS_RANK[table] && this.isAhead(table, event.entityId, p['status'])) return;
         this.upsert(table, p, ['id'], IMMUTABLE.has(event.entity));
       }
     }

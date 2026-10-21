@@ -18,6 +18,23 @@ export interface Supplier {
   franco: Fcfa | null;
   notes: string | null;
   active: number;
+  /** Jours de passage (1 = lundi … 7 = dimanche), « 1,4 » ; null sans calendrier. */
+  visit_days: string | null;
+}
+
+/** Ligne du calendrier des fournisseurs. */
+export interface SupplierVisit {
+  supplier_id: string;
+  supplier_name: string;
+  phone: string | null;
+  days: number[];
+  next_visit: string | null;
+  /** Articles à commander pour ce fournisseur d'après la proposition de commande. */
+  to_order: number;
+  /** Montant HT estimé de cette commande. */
+  amount: Fcfa;
+  /** Bon de commande déjà préparé et pas encore reçu. */
+  open_order: string | null;
 }
 
 export interface SupplierInput {
@@ -230,6 +247,10 @@ export interface ReorderRow {
   last_year_daily?: Milli | null;
   /** Méthode « saison » : évolution des ventes récentes par rapport à l'an dernier (1 = pareil). */
   trend?: number | null;
+  /** Demandes des clients non servies sur la période (ventes manquées), comptées dans les ventes par jour. */
+  missed: Milli;
+  /** Prochain jour de passage du fournisseur principal (AAAA-MM-JJ), null sans calendrier. */
+  next_visit: string | null;
 }
 
 /** Options de la proposition de commande. */
@@ -243,6 +264,8 @@ export interface ReorderOptions {
   method?: 'recent' | 'season';
   /** Majoration en % pour un événement (fêtes de fin d'année, Ramadan…), -50 à +300. */
   boostPct?: number;
+  /** Seulement les articles de ce fournisseur principal (proposition prête la veille de son passage). */
+  supplierId?: string | null;
 }
 
 /**
@@ -283,6 +306,45 @@ export class PurchaseService extends Base {
          ORDER BY s.name`,
       )
       .all({ all: opts.includeInactive ? 1 : 0, search: opts.search ? `%${opts.search}%` : null }) as never;
+  }
+
+  /** Jours de passage du fournisseur (calendrier des fournisseurs). */
+  setVisitDays(userId: string, id: string, days: number[]): Supplier {
+    this.getSupplier(id);
+    const clean = parseVisitDays(days.join(','));
+    return this.tx(() => {
+      this.db.prepare('UPDATE suppliers SET visit_days = ?, updated_at = ? WHERE id = ?').run(clean.length ? clean.join(',') : null, this.now(), id);
+      this.enqueue(null, 'supplier', id, 'upsert', {});
+      this.audit(userId, 'supplier.visit_days', 'supplier', id, { days: clean });
+      return this.getSupplier(id);
+    });
+  }
+
+  /**
+   * Calendrier des fournisseurs : jour de passage de chacun et ce qu'il faut
+   * lui commander. La veille de son passage, sa proposition est prête.
+   */
+  visitCalendar(storeId: string): SupplierVisit[] {
+    const suppliers = this.db.prepare('SELECT id, name, phone, visit_days FROM suppliers WHERE active = 1 ORDER BY name').all() as { id: string; name: string; phone: string | null; visit_days: string | null }[];
+    const proposal = this.reorderProposal(storeId);
+    const today = this.today();
+    const openOrder = this.db.prepare("SELECT number FROM purchase_orders WHERE supplier_id = ? AND store_id = ? AND status IN ('draft', 'sent') ORDER BY created_at DESC LIMIT 1").pluck();
+    return suppliers
+      .map((f) => {
+        const lines = proposal.filter((r) => r.supplier_id === f.id);
+        return {
+          supplier_id: f.id,
+          supplier_name: f.name,
+          phone: f.phone,
+          days: parseVisitDays(f.visit_days),
+          next_visit: nextVisit(f.visit_days, today),
+          to_order: lines.length,
+          amount: lines.reduce((t, l) => t + Math.round((l.qty * l.unit_cost) / 1000), 0),
+          open_order: (openOrder.get(f.id, storeId) as string | undefined) ?? null,
+        };
+      })
+      .filter((v) => v.days.length || v.to_order)
+      .sort((a, b) => (a.next_visit ?? '9999').localeCompare(b.next_visit ?? '9999') || a.supplier_name.localeCompare(b.supplier_name, 'fr'));
   }
 
   getSupplier(id: string): Supplier {
@@ -1138,7 +1200,8 @@ export class PurchaseService extends Base {
                 COALESCE((SELECT -SUM(m.qty) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
                            WHERE @season = 1 AND m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @lyPastFrom AND m.at < @lyNow), 0) AS sold_ly_past,
                 COALESCE((SELECT -SUM(m.qty) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
-                           WHERE @season = 1 AND m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @lyNow AND m.at < @lyNextTo), 0) AS sold_ly_next
+                           WHERE @season = 1 AND m.article_id = a.id AND w.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @lyNow AND m.at < @lyNextTo), 0) AS sold_ly_next,
+                COALESCE((SELECT SUM(x.qty) FROM missed_sales x WHERE x.article_id = a.id AND x.store_id = @storeId AND x.created_at >= @since), 0) AS missed
          FROM articles a LEFT JOIN families f ON f.id = a.family_id LEFT JOIN departments d ON d.id = f.department_id WHERE a.active = 1`,
       )
       .all({ storeId, since, season: opts.method === 'season' ? 1 : 0, lyPastFrom, lyNow: lyNowIso, lyNextTo }) as {
@@ -1159,9 +1222,10 @@ export class PurchaseService extends Base {
       sold: number;
       sold_ly_past: number;
       sold_ly_next: number;
+      missed: number;
     }[];
     const mainSupplier = this.db.prepare(
-      `SELECT sa.supplier_id, s.name AS supplier_name, s.lead_time_days, sa.supplier_ref, sa.unit_cost, sa.pack_qty
+      `SELECT sa.supplier_id, s.name AS supplier_name, s.lead_time_days, s.visit_days, sa.supplier_ref, sa.unit_cost, sa.pack_qty
        FROM supplier_articles sa JOIN suppliers s ON s.id = sa.supplier_id
        WHERE sa.article_id = ? AND s.active = 1 ORDER BY sa.is_main DESC, sa.unit_cost LIMIT 1`,
     );
@@ -1169,9 +1233,11 @@ export class PurchaseService extends Base {
     const result: ReorderRow[] = [];
     for (const r of rows) {
       const sup = mainSupplier.get(r.article_id) as
-        | { supplier_id: string; supplier_name: string; lead_time_days: number; supplier_ref: string | null; unit_cost: number; pack_qty: number }
+        | { supplier_id: string; supplier_name: string; lead_time_days: number; visit_days: string | null; supplier_ref: string | null; unit_cost: number; pack_qty: number }
         | undefined;
-      const recentDaily = Math.max(0, r.sold / historyDays);
+      if (opts.supplierId && sup?.supplier_id !== opts.supplierId) continue;
+      // Les demandes non servies comptent comme des ventes : le rayon vide ne fait pas baisser la commande.
+      const recentDaily = Math.max(0, (r.sold + r.missed) / historyDays);
       let avg = recentDaily;
       let lastYearDaily: number | null = null;
       let trend: number | null = null;
@@ -1215,6 +1281,8 @@ export class PurchaseService extends Base {
         family_name: r.family_name,
         unit_name: r.unit_name,
         packs: packsOf.all(r.article_id) as { name: string; units: Milli }[],
+        missed: r.missed,
+        next_visit: nextVisit(sup?.visit_days ?? null, this.today()),
         ...(opts.method === 'season' ? { last_year_daily: lastYearDaily === null ? null : Math.round(lastYearDaily), trend: trend === null ? null : Math.round(trend * 100) / 100 } : {}),
       });
     }
@@ -1251,3 +1319,20 @@ export function taxTotals(lines: { ht: Fcfa; rate: number }[]): { total_ht: Fcfa
   return { total_ht: ht, total_tva: ttc - ht, total_ttc: ttc };
 }
 
+/** Jours de passage « 1,4 » (lundi, jeudi) → liste triée de 1 à 7. */
+export function parseVisitDays(v: string | null | undefined): number[] {
+  return [...new Set((v ?? '').split(/[,\s]+/).map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 7))].sort();
+}
+
+/** Prochain jour de passage à partir d'aujourd'hui compris (AAAA-MM-JJ), null sans calendrier. */
+export function nextVisit(visitDays: string | null, today: string): string | null {
+  const days = parseVisitDays(visitDays);
+  if (!days.length) return null;
+  const t = new Date(`${today}T00:00:00Z`);
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(t.getTime() + i * 86_400_000);
+    const iso = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+    if (days.includes(iso)) return d.toISOString().slice(0, 10);
+  }
+  return null;
+}

@@ -72,11 +72,12 @@ export const ENTITY_LABELS: Record<string, string> = {
   payment_allocation: 'Lettrage de règlement',
   sale_edit_request: 'Demande de modification de facture',
   consignment_count: 'Fiche de contrôle dépôt-vente',
+  missed_sale: 'Vente manquée (le client voulait…)',
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
-  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count'] },
+  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale'] },
   { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover', 'agent_operation', 'agent_account'] },
   {
     key: 'stock',

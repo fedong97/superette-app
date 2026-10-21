@@ -141,6 +141,13 @@ ul.errors { color: var(--danger); }
 .toast { padding: 12px 16px; border-radius: var(--radius); color: #fff; max-width: 420px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
 .toast.ok { background: var(--ok); }
 .toast.error { background: var(--danger); }
+.toast.undo { background: #1f2937; }
+.toast.with-fixes, .toast.undo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.toast.with-fixes > span, .toast.undo > span { flex: 1 1 100%; }
+.toast.undo > span { flex: 1 1 auto; }
+.toast-btn { background: #fff; color: var(--ink); border: none; padding: 6px 12px; font-weight: 700; }
+.toast.error .toast-btn { color: var(--danger); }
+.toast-x { background: transparent; border: none; color: #fff; padding: 2px 6px; margin-left: auto; }
 
 /* Caisse : fiche de facturation */
 .scan-input { flex: 1; min-width: 260px; background: #f6e05e; border-color: #c9b015 !important; font-size: 17px; padding: 7px 10px !important; font-style: italic; }
@@ -1205,3 +1212,72 @@ p.substitute { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; b
 
 /* Contrôle des caissiers : geste nettement au-dessus de la moyenne de l’équipe. */
 table.list td.flagged, table.list tr.flagged td { background: var(--danger-soft); color: var(--danger); font-weight: 700; }
+
+/* 0.81.0 : listes plus pratiques (tri, colonnes, vues, Excel, PDF) */
+[data-lv-hidden], tr[data-lv-hide] { display: none !important; }
+.windows table.list[data-lv] > thead th { cursor: pointer; user-select: none; }
+.windows table.list[data-lv] > thead th:hover { color: var(--brand); }
+table.list th[data-lv-sort='asc']::after { content: ' ▲'; font-size: 10px; }
+table.list th[data-lv-sort='desc']::after { content: ' ▼'; font-size: 10px; }
+.lv-tools { position: fixed; z-index: 15; display: flex; gap: 4px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-bottom: none; border-radius: 8px 8px 0 0; padding: 3px 4px; box-shadow: 0 -2px 8px rgba(16, 24, 40, 0.08); }
+.lv-tools input { padding: 3px 8px; width: 150px; font-size: 13px; }
+.lv-tools button { padding: 3px 8px; font-size: 12px; }
+.lv-panel { width: 480px; }
+.lv-cols { list-style: none; padding: 0; margin: 8px 0; max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.lv-cols li { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; border-bottom: 1px solid var(--line); }
+.lv-cols li:last-child { border-bottom: none; }
+.lv-cols label { display: flex; gap: 8px; align-items: center; }
+.lv-cols button { padding: 2px 6px; }
+.lv-views { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.lv-view { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: var(--radius); }
+.lv-view button { border: none; padding: 4px 8px; }
+.lv-save { display: flex; gap: 6px; }
+.lv-save input { flex: 1; }
+
+/* 0.81.0 : la touche écrite sur les boutons */
+button[data-kbd]:not([data-kbd=''])::after { content: attr(data-kbd); margin-left: 8px; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: 0.65; vertical-align: 1px; }
+.shortcut-list th { white-space: nowrap; }
+.shortcut-list kbd, kbd { font: 700 11px/1 'Segoe UI', sans-serif; padding: 2px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel); }
+
+/* 0.81.0 : saisie retrouvée après une coupure */
+.draft-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; margin: 0 0 12px; border: 1px solid var(--gold); background: var(--cream); border-radius: var(--radius); }
+.draft-banner span { flex: 1 1 300px; }
+.home-drafts { margin: 14px auto 0; max-width: 620px; text-align: left; }
+.home-drafts button { display: block; width: 100%; text-align: left; margin-top: 6px; }
+
+/* 0.81.0 : thème sombre (couleurs inversées, photos gardées) et contraste fort */
+html.theme-dark { filter: invert(0.9) hue-rotate(180deg); background: #111; }
+html.theme-dark img, html.theme-dark video, html.theme-dark .photo, html.theme-dark .tile-icon, html.theme-dark .rail i, html.theme-dark canvas { filter: invert(1) hue-rotate(180deg); }
+html.theme-contrast { --ink: #000; --muted: #1f2937; --line: #4b5563; --brand-pale: #ffffff; --bg: #ffffff; }
+html.theme-contrast body, html.theme-contrast .window, html.theme-contrast .windows { color: #000; }
+html.theme-contrast table.list th, html.theme-contrast table.list td { border-bottom: 1px solid #4b5563; color: #000; }
+html.theme-contrast button, html.theme-contrast input, html.theme-contrast select { border-width: 2px; border-color: #374151; }
+html.theme-contrast * { font-weight: 700; }
+html.theme-contrast .muted, html.theme-contrast small { color: #111827 !important; }
+.theme-choices { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+
+/* 0.81.0 : tâches du jour, avant de clôturer, calendrier fournisseurs, état des PC. */
+.day-tasks { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 14px; }
+.day-tasks h2 { margin: 0 0 8px; font-size: 17px; }
+.day-tasks ul { list-style: none; margin: 0; padding: 0; }
+.day-tasks li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.day-tasks li:first-child { border-top: none; }
+.day-tasks li label { flex: 1; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.day-tasks li.done span { text-decoration: line-through; color: var(--muted); }
+.day-tasks.compact { max-width: 720px; }
+.before-close { border-radius: var(--radius); padding: 10px 14px; margin: 10px 0; border: 1px solid var(--line); }
+.before-close.open { background: var(--warn-soft); border-color: #f5c38b; }
+.before-close.clear { background: var(--ok-soft); border-color: #b5e0c8; }
+.before-close h3 { margin: 0 0 6px; font-size: 15px; }
+.before-close ul { margin: 0; padding-left: 18px; }
+.before-close li { margin: 4px 0; }
+.day-picks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 14px; margin-bottom: 12px; }
+.day-picks label { display: flex; align-items: center; gap: 6px; }
+tr.station-alert td { background: var(--danger-soft); }
+.owner-report td:first-child { font-weight: 700; }
+ul.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain li { padding: 3px 0; }
+/* Grille tactile : rayons des touches rapides. */
+.pos-rayons { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 0; }
+.pos-rayons button { min-height: 40px; padding: 6px 16px; border-radius: 20px; font-size: 15px; }
+.pos-rayons button.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }

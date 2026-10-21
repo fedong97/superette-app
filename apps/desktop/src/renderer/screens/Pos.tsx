@@ -28,7 +28,8 @@ import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
-import { CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, WhatsappTicketDialog } from './PosDialogs';
+import { CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, ScannedTicketDialog, WhatsappTicketDialog } from './PosDialogs';
+import { MissedSaleDialog } from './Floor';
 import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
@@ -105,7 +106,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order';
+type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
 type PrintChoice = 'none' | 'ticket' | 'listing';
@@ -174,6 +175,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const toast = useToast();
   const session = useLoad(() => call('pos.session'), []);
   const quickKeys = useLoad(() => call('catalogue.quickKeys'), []);
+  // Grille tactile : les touches rapides rangées par rayon.
+  const [rayon, setRayon] = useState<string | null>(null);
+  const rayons = useMemo(() => [...new Set((quickKeys.data ?? []).map((a) => a.department_name ?? 'Autres'))], [quickKeys.data]);
+  const shownKeys = (quickKeys.data ?? []).filter((a) => !rayon || (a.department_name ?? 'Autres') === rayon);
   const warehouses = useLoad(() => call('admin.warehouses'), []);
   // Dépôts où ce vendeur vend sans le code du gérant.
   const myWarehouses = useLoad(() => call('pos.saleWarehouses'), []);
@@ -181,6 +186,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const [selected, setSelected] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [scanned, setScanned] = useState<Result<'pos.sale'> | null>(null);
+  const [returnOf, setReturnOf] = useState<Result<'pos.sale'> | null>(null);
   const [pane, setPane] = useState<Pane>('lines');
   const [cashGiven, setCashGiven] = useState(0);
   const [showTaxes, setShowTaxes] = useState(false);
@@ -385,6 +392,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           addArticle(hit.article, mult ?? 1000);
         }
         return;
+      }
+      // Code-barres d'un ticket (numéro « DLA1-1-000123 ») : retour, réimpression ou facture A4.
+      if (!m && /^[A-Z0-9]+-[A-Z0-9-]*\d$/i.test(code) && /[A-Z]/i.test(code)) {
+        const found = await call('pos.findSale', code);
+        if (found) {
+          setScanned(found);
+          setDialog('ticket');
+          return;
+        }
       }
       // Carte de fidélité ou numéro de téléphone d'un client : il devient le client de la fiche.
       if (!m && !customer) {
@@ -729,6 +745,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       if (fn[e.key]) {
         e.preventDefault();
         fn[e.key]!();
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'm' && can('missed_sale')) {
+        e.preventDefault();
+        setDialog('missed');
       } else if (e.ctrlKey && e.key.toLowerCase() === 'e' && lines.length) {
         e.preventDefault();
         printRef.current = 'none';
@@ -1142,7 +1161,17 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       </Modal>
     )}
     {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
-    {dialog === 'return' && <ReturnDialog onClose={() => setDialog(null)} />}
+    {dialog === 'return' && <ReturnDialog initialSale={returnOf} onClose={() => (setDialog(null), setReturnOf(null))} />}
+    {dialog === 'missed' && <MissedSaleDialog onClose={() => (setDialog(null), focusScan())} />}
+    {dialog === 'ticket' && scanned && (
+      <ScannedTicketDialog
+        sale={scanned}
+        canReturn={can('sale_return')}
+        canReprint={can('sale_reprint')}
+        onReturn={() => (setReturnOf(scanned), setDialog('return'))}
+        onClose={() => (setDialog(null), setScanned(null), focusScan())}
+      />
+    )}
     {(dialog === 'cashIn' || dialog === 'cashOut') && (
       <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={!has(user, 'cashout')} onClose={() => setDialog(null)} />
     )}
@@ -1155,8 +1184,20 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     printRef.current = 'none';
     setDialog('pay');
   };
+  // Vider sans « Êtes-vous sûr ? » : la fiche revient avec « Annuler » (10 s) ou Ctrl+Z.
+  // Une fiche reprise (devis, commande, modification) garde la confirmation.
   const askClear = async () => {
-    if (await askConfirm('Vider la fiche en cours ?')) clear();
+    if (quote || order || replacing) {
+      if (await askConfirm('Vider la fiche en cours ?')) clear();
+    } else {
+      const kept = { lines, clientName, seller };
+      clear();
+      toast.later(`Fiche vidée (${kept.lines.length} article${kept.lines.length > 1 ? 's' : ''})`, () => undefined, () => {
+        setLines(kept.lines);
+        setClientName(kept.clientName);
+        setSeller(kept.seller);
+      });
+    }
     focusScan();
   };
   const closeFiche = () => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose());
@@ -1516,6 +1557,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
               Tiroir <kbd>F5</kbd>
             </button>
+            {can('missed_sale') && (
+              <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre">
+                Le client voulait… <kbd>Ctrl+M</kbd>
+              </button>
+            )}
             <hr />
             <button disabled={!sel} onClick={() => setDialog('vary')}>
               Varier
@@ -1568,6 +1614,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           <button disabled={!can('drawer_open')} onClick={openDrawer}>
             <i>🗃</i>Tiroir <kbd>F5</kbd>
           </button>
+          {can('missed_sale') && (
+            <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre (Ctrl+M)">
+              <i>🙋</i>Le client voulait…
+            </button>
+          )}
           <button className={pane === 'delivery' ? 'on' : ''} onClick={() => setPane(pane === 'delivery' ? 'lines' : 'delivery')}>
             <i>🚚</i>Livraison{delivery.on ? ' ✓' : ''}
           </button>
@@ -1864,6 +1915,18 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                   : ''}
             </span>
           </div>
+          {!suggestions.items.length && rayons.length > 1 && (
+            <div className="pos-rayons" role="tablist" aria-label="Rayons">
+              <button type="button" className={rayon === null ? 'on' : ''} onClick={() => setRayon(null)}>
+                Tous
+              </button>
+              {rayons.map((r) => (
+                <button type="button" key={r} className={rayon === r ? 'on' : ''} onClick={() => setRayon(r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="pos-tiles">
             {suggestions.items.length > 0
               ? suggestions.items.map((r, i) => (
@@ -1892,7 +1955,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                     </span>
                   </button>
                 ))
-              : (quickKeys.data ?? []).map((a) => (
+              : shownKeys.map((a) => (
                   <button type="button" key={a.id} className="pos-tile" style={tileColor(a.name)} onClick={() => addArticle(a)}>
                     {a.photo_thumb ? <img className="tile-ph" src={a.photo_thumb} alt="" /> : <span className="tile-ic">{initials(a.name)}</span>}
                     <b>{a.name}</b>
@@ -2111,6 +2174,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)" style={{ '--c': '#0891b2' } as React.CSSProperties}>
           <i aria-hidden>🗃</i>Tiroir <kbd>F5</kbd>
         </button>
+        {can('missed_sale') && (
+          <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre" style={{ '--c': '#0d9488' } as React.CSSProperties}>
+            <i aria-hidden>🙋</i>Le client voulait… <kbd>Ctrl+M</kbd>
+          </button>
+        )}
         <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket de caisse' : 'Réimprimer le dernier ticket'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>🧾</i>Ticket <kbd>F2</kbd>
         </button>
@@ -2123,10 +2191,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
         </button>
-        <button disabled={!lines.length} onClick={async () => {
-            if (await askConfirm('Vider la fiche en cours ?')) clear();
-            focusScan();
-          }} style={{ '--c': '#dc2626' } as React.CSSProperties}>
+        <button disabled={!lines.length} onClick={() => void askClear()} style={{ '--c': '#dc2626' } as React.CSSProperties}>
           <i aria-hidden>🗑</i>Vider
         </button>
         <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>

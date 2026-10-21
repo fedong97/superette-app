@@ -585,3 +585,4 @@ html.camera .app > *:not(.camera-ui) {
 [hidden] {
   display: none !important;
 }
+.item b.warn { color: #b54708; }

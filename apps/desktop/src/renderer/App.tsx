@@ -32,9 +32,11 @@ import { AgentPoint, type AgentTab } from './screens/AgentPoint';
 import { CashierControl } from './screens/CashierControl';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { AskHost, askConfirm, Field, Modal, RefreshCtx, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, DRAFT_SCREENS, KeyHints, THEMES, type Theme, applyTheme, askConfirm, Field, Modal, OPEN_EVENT, RefreshCtx, dateTime, pageShortcuts, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
+import { type ListPrefs, ListTools } from './listTools';
+import { DayTasks } from './screens/Floor';
 import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
 import { type Lang, currentLang, setLang, storedLang } from './i18n';
 
@@ -64,9 +66,9 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   articles: { label: 'Produits', perm: ['articles', 'article_create'] },
   stock: {
     label: 'Stock',
-    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count'],
+    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count', 'restock', 'day_tasks'],
   },
-  purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns', 'group_orders'] },
+  purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns', 'group_orders', 'supplier_calendar', 'missed_report', 'mobile_reception'] },
   suppliers: { label: 'Fournisseurs', perm: ['suppliers', 'supplier_statement', 'free_goods'] },
   customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement', 'summary_invoices', 'account_offsets', 'consignment'] },
   expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
@@ -78,7 +80,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
   accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'journal_edit', 'chart_accounts', 'fiscal_years', 'cash_forecast', 'budgets', 'analytics', 'cheque_deposits', 'patrimony', 'cheque_rejections'] },
   treasury: { label: 'Opérations de trésorerie', perm: ['treasury', 'cash_history', 'central_cash'] },
-  dashboard: { label: 'Tableau de bord', perm: ['dashboard'] },
+  dashboard: { label: 'Tableau de bord', perm: ['dashboard', 'price_review', 'team_board', 'owner_report'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
   staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets', 'staff_attendance', 'staff_leaves'] },
@@ -90,7 +92,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail';
+  action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme';
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -167,6 +169,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Synchroniser maintenant', action: 'sync' },
       { label: 'Personnaliser les onglets rapides', action: 'tabs' },
       { label: 'Personnaliser la barre latérale', action: 'rail' },
+      { label: 'Thème : clair, sombre ou contraste fort', action: 'theme' },
       { label: "Changer d'utilisateur", action: 'logout' },
       { label: 'Je pars (fin de journée)', action: 'leave' },
       { label: 'Mode formation (caisse d’entraînement)…', action: 'training', perm: 'training' },
@@ -212,8 +215,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       { label: 'Situation des ventes', open: ['reports', 'department'], perm: 'reports' },
       { label: 'Évolution périodique', open: ['reports', 'evolution'], perm: 'reports' },
-      { label: 'Tableau de bord', open: ['dashboard', 'day'] },
-      { label: "Points d'attention", open: ['dashboard', 'attention'] },
+      { label: 'Tableau de bord', open: ['dashboard', 'day'], perm: 'dashboard' },
+      { label: "Points d'attention", open: ['dashboard', 'attention'], perm: 'dashboard' },
+      { label: 'Prix à revoir (hausses fournisseurs)', open: ['dashboard', 'prices'], perm: 'price_review' },
+      { label: "Tableau de l'équipe de la semaine", open: ['dashboard', 'team'], perm: 'team_board' },
+      { label: 'Rapport du mois pour le propriétaire', open: ['dashboard', 'owner'], perm: 'owner_report' },
     ],
   ],
   [
@@ -231,6 +237,9 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Bons de commande', open: ['purchases', 'orders'], perm: ['purchases', 'purchase_orders', 'order_receive'] },
       { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
       { label: 'Commandes groupées (plusieurs magasins)', open: ['purchases', 'group'], perm: 'group_orders' },
+      { label: 'Calendrier des passages fournisseurs', open: ['purchases', 'calendar'], perm: 'supplier_calendar' },
+      { label: 'Ventes manquées (le client voulait…)', open: ['purchases', 'missed'], perm: 'missed_report' },
+      { label: 'Réceptions comptées au téléphone', open: ['purchases', 'phone'], perm: 'mobile_reception' },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
       SEP,
       { label: 'Marchandises non encore reçues', open: ['purchases', 'pending'] },
@@ -374,6 +383,8 @@ const MENUS: [string, MenuItem[]][] = [
   [
     'Magasinier',
     [
+      { label: 'Tâches du jour', open: ['stock', 'tasks'], perm: 'day_tasks' },
+      { label: 'Réassort du rayon', open: ['stock', 'restock'], perm: 'restock' },
       { label: 'État du stock', open: ['stock', 'state'], perm: 'stock' },
       { label: 'Mouvements de stock', open: ['stock', 'moves'], perm: 'stock_moves' },
       { label: 'Monitoring du stock', open: ['stock', 'monitoring'], perm: ['stock_monitoring', 'stock_request', 'stock_decide'] },
@@ -434,6 +445,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Fiches boutique', open: ['admin', 'fiches'] },
       { label: 'Reprise des données (clients, fournisseurs, stock)', open: ['admin', 'takeover'], perm: 'data_takeover' },
       { label: 'Réparation', open: ['admin', 'repair'], adminOnly: true },
+      { label: 'État des PC du magasin', open: ['admin', 'stations'], perm: 'stations' },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: 'Licence', open: ['admin', 'license'] },
       { label: 'Résumé du jour', open: ['admin', 'digest'], perm: 'dashboard' },
@@ -448,7 +460,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Guide de démarrage', action: 'guide' },
       { label: 'Quoi de neuf', action: 'news' },
       SEP,
-      { label: 'Raccourcis clavier', action: 'shortcuts' },
+      { label: 'Raccourcis clavier (Ctrl+/)', action: 'shortcuts' },
       { label: 'À propos', action: 'about' },
     ],
   ],
@@ -549,7 +561,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Écran « Tous les menus » : chaque menu en tuile, avec tous ses écrans. */
   const [allMenus, setAllMenus] = useState(false);
   const [chooseRegister, setChooseRegister] = useState(false);
-  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | null>(null);
+  const [help, setHelp] = useState<'shortcuts' | 'about' | 'page' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | null>(null);
   /** Place du menu ouvert depuis la barre verte (elle défile : le menu s'affiche par-dessus). */
   const [menuAt, setMenuAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const [finding, setFinding] = useState(false);
@@ -614,6 +626,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   useEffect(() => {
     document.documentElement.classList.toggle('large-text', state.display === 'large');
   }, [state.display]);
+  // Thème choisi par l'utilisateur : clair, sombre ou contraste fort.
+  useEffect(() => applyTheme(prefs.theme as Theme | undefined), [prefs.theme]);
+  useEffect(() => () => applyTheme('light'), []);
+  /** Raccourcis des boutons de la page de devant, relevés à l'ouverture de l'aide clavier. */
+  const [pageKeys, setPageKeys] = useState<[string, string][]>([]);
+  /** Saisies en cours gardées sur ce PC (coupure de courant) : proposées sur la page d'accueil. */
+  const drafts = useLoad(() => call('drafts.list'), []);
   // Paramètres › Sécurité : déconnexion après quelques minutes sans clavier ni souris.
   const idleMinutes = state.storeSettings?.idleMinutes ?? 0;
   useEffect(() => {
@@ -653,6 +672,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         e.preventDefault();
         setAllMenus(false);
         setHelp('palette');
+      } else if (e.ctrlKey && (e.key === '/' || e.code === 'Slash' || e.key === ':')) {
+        // Ctrl+/ : les raccourcis de la page affichée.
+        e.preventDefault();
+        setPageKeys(pageShortcuts());
+        setHelp('shortcuts');
       } else if (e.key === 'F1' && !onPos) {
         e.preventDefault();
         setHelp('page');
@@ -719,6 +743,15 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     window.addEventListener(EDIT_SALE_EVENT, onEdit);
     return () => window.removeEventListener(EDIT_SALE_EVENT, onEdit);
   });
+  // Écran demandé ailleurs : solution d'un message d'erreur, tâche du jour, réassort…
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const [kind, tab] = (e as CustomEvent<[WinKind, string?]>).detail;
+      if (kind in WINDOWS) open(kind, tab);
+    };
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOpen);
+  });
   /** ⟳ : recharge les données de la fenêtre sans la fermer. */
   const refreshWin = (kind: WinKind) => setWins((ws) => ws.map((w) => (w.kind === kind ? { ...w, rev: (w.rev ?? 0) + 1 } : w)));
   const close = (kind: WinKind | null) => {
@@ -777,7 +810,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.action === 'training') return startTraining();
     if (item.action === 'dossiers') return setDossiers(true);
     if (item.action === 'quit') return window.close();
-    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail') return setHelp(item.action);
+    if (item.action === 'shortcuts') setPageKeys(pageShortcuts());
+    if (item.action === 'shortcuts' || item.action === 'about' || item.action === 'palette' || item.action === 'guide' || item.action === 'news' || item.action === 'tabs' || item.action === 'rail' || item.action === 'theme') return setHelp(item.action);
     if (item.action === 'help') return setHelp('page');
     if (item.action === 'openInvoice') return setFinding(true);
     if (item.action === 'sync') {
@@ -850,6 +884,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : sync.data.pending ? `Serveur : ${sync.data.pending} en attente` : 'Serveur : connecté';
   const activeWin = wins.find((w) => w.kind === active);
   const showHome = !activeWin;
+  // Retour à l'accueil : les saisies en cours sont relues (l'une vient peut-être d'être enregistrée).
+  useEffect(() => {
+    if (showHome) drafts.reload();
+  }, [showHome]);
   const tiles = ROLE_TILES[user.role].filter((t) => canWin(t.open[0]));
 
   return (
@@ -983,6 +1021,20 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
             </p>
             {(can('cash') || can('credit')) && showHome && <MyDay />}
+            {Boolean(drafts.data?.length) && showHome && (
+              <div className="home-drafts">
+                <h2>Saisies en cours retrouvées</h2>
+                {drafts.data!.map((d) => {
+                  const target = DRAFT_SCREENS[d.key.split(':')[0]!];
+                  return (
+                    <button key={d.key} disabled={!target || !canWin(target[0] as WinKind)} onClick={() => target && open(target[0] as WinKind, target[1])}>
+                      {d.label} <small className="muted">· gardée le {dateTime(d.updated_at)}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {can('day_tasks') && showHome && <DayTasks compact />}
             <div className="role-tiles">
               {tiles.map((t) => (
                 <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
@@ -1048,7 +1100,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'suppliers' && <Suppliers user={user} initialTab={w.tab as SuppliersTab | undefined} />}
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
-            {w.kind === 'quotes' && <Quotes user={user} />}
+            {w.kind === 'quotes' && <Quotes user={user} startNew={w.tab === 'new'} />}
             {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
             {w.kind === 'orders' && <Orders user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
@@ -1279,12 +1331,52 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           onClose={() => setHelp(null)}
         />
       )}
+      {help === 'theme' && (
+        <Modal title="Thème de l'écran" onClose={() => setHelp(null)}>
+          <p className="muted">Votre choix ne change que votre écran ; chaque utilisateur garde le sien.</p>
+          <div className="theme-choices">
+            {(Object.keys(THEMES) as Theme[]).map((t) => (
+              <button key={t} className={(prefs.theme ?? 'light') === t ? 'primary' : ''} onClick={() => savePref('theme', t)}>
+                {THEMES[t]}
+              </button>
+            ))}
+          </div>
+          <div className="actions">
+            <button className="primary" onClick={() => setHelp(null)}>
+              Fermer
+            </button>
+          </div>
+        </Modal>
+      )}
       {help === 'shortcuts' && (
         <Modal title="Raccourcis clavier" onClose={() => setHelp(null)}>
-          <table className="list compact">
+          {pageKeys.length > 0 && (
+            <>
+              <h3>Sur cette page</h3>
+              <table className="list compact shortcut-list" data-lv-off>
+                <tbody>
+                  {pageKeys.map(([k, v]) => (
+                    <tr key={k + v}>
+                      <th>
+                        <kbd>{k}</kbd>
+                      </th>
+                      <td>{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <h3>Partout</h3>
+            </>
+          )}
+          <table className="list compact shortcut-list" data-lv-off>
             <tbody>
               {[
                 ['Ctrl+K', 'Rechercher un écran par son nom'],
+                ['Ctrl+/', 'Raccourcis de la page affichée'],
+                ['Entrée', 'Valider le champ ou le formulaire'],
+                ['Ctrl+Entrée', 'Valider la fenêtre ouverte (bouton principal)'],
+                ['Échap', 'Fermer la fenêtre ouverte'],
+                ['Ctrl+Z', 'Annuler la dernière action (pendant 10 secondes)'],
                 ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
                 ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
                 ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière en listing)'],
@@ -1308,6 +1400,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           </table>
         </Modal>
       )}
+      <KeyHints />
+      <ListTools prefs={(prefs.lists as ListPrefs | undefined) ?? {}} onSave={(p) => savePref('lists', p)} />
       {dossiers && <DossierPicker onClose={() => setDossiers(false)} />}
       {finding && (
         <OpenInvoice

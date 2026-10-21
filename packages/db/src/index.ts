@@ -61,6 +61,9 @@ import { OffsetService } from './offsets';
 import { SaleEditRequestService } from './editRequests';
 import { ConsignmentService } from './consignment';
 import { CompanyService } from './companies';
+import { MissedSaleService } from './missedSales';
+import { FloorService } from './floor';
+import { InsightService } from './insights';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -127,7 +130,10 @@ export * from './offsets';
 export * from './editRequests';
 export * from './consignment';
 export * from './companies';
-export { AppError, type Clock, type Context } from './util';
+export * from './missedSales';
+export * from './floor';
+export * from './insights';
+export { AppError, type Clock, type Context, type ErrorFix } from './util';
 
 export interface Services {
   db: Db;
@@ -193,6 +199,9 @@ export interface Services {
   editRequests: SaleEditRequestService;
   consignment: ConsignmentService;
   companies: CompanyService;
+  missedSales: MissedSaleService;
+  floor: FloorService;
+  insights: InsightService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -258,7 +267,10 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const editRequests = new SaleEditRequestService(db, clock, pos);
   const consignment = new ConsignmentService(db, clock, admin, stock, pos, customers);
   const companies = new CompanyService(db, clock, admin, accounting, stock);
-  return { db, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const missedSales = new MissedSaleService(db, clock);
+  const floor = new FloorService(db, clock, stock);
+  const insights = new InsightService(db, clock, catalogue, cashierControl, companies);
+  return { db, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

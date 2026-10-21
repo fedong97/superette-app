@@ -346,6 +346,33 @@ CREATE INDEX station_backups_device ON station_backups (device_id, created_at);
 CREATE INDEX station_backups_store ON station_backups (store_id, created_at);
 `,
   },
+  {
+    version: 10,
+    sql: `
+-- État d'un PC envoyé toutes les 5 minutes (sauvegarde, imprimante, envois en attente, licence) :
+-- le gérant voit d'un coup d'œil les PC du magasin.
+ALTER TABLE devices ADD COLUMN status JSONB;
+ALTER TABLE devices ADD COLUMN status_at TIMESTAMPTZ;
+-- Livraison comptée sur le téléphone devant le camion : un PC du magasin la reprend
+-- (une seule fois), vérifie les prix et valide ; le stock n'entre qu'à ce moment.
+CREATE TABLE mobile_receptions (
+  id TEXT PRIMARY KEY,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  store_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  order_number TEXT,
+  user_id TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  delivery_note TEXT,
+  note TEXT,
+  lines JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  taken_at TIMESTAMPTZ,
+  taken_by UUID
+);
+CREATE INDEX mobile_receptions_waiting ON mobile_receptions (store_id, created_at) WHERE taken_at IS NULL;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

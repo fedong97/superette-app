@@ -1,7 +1,7 @@
 import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useDraft, useLoad, useToast, has } from '../ui';
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
@@ -13,11 +13,12 @@ import { DocPreview } from './docPreview';
 import { ReceptionLabels } from './barcodePrint';
 import { SupplierReturns } from './SupplierReturns';
 import { GroupOrders } from './GroupOrders';
+import { MissedReport, SupplierCalendar } from './Floor';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
 type Invoice = Result<'purchases.invoice'>['invoice'];
-export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns' | 'group';
+export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns' | 'group' | 'calendar' | 'missed' | 'phone';
 
 const ORDER_STATES: Record<Order['state'], string> = {
   draft: 'Brouillon',
@@ -66,6 +67,9 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
     ['byproduct', 'Achats par produit'],
     ...(has(user, 'reorder') ? ([['reorder', 'Proposition de commande']] as [PurchasesTab, string][]) : []),
     ...(has(user, 'group_orders') ? ([['group', 'Commandes groupées']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'supplier_calendar') ? ([['calendar', 'Calendrier fournisseurs']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'missed_report') ? ([['missed', 'Ventes manquées']] as [PurchasesTab, string][]) : []),
+    ...(has(user, 'mobile_reception') ? ([['phone', 'Réceptions du téléphone']] as [PurchasesTab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -83,13 +87,16 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       {tab === 'returns' && has(user, 'supplier_returns') && <SupplierReturns canCredit={has(user, 'purchase_invoices')} />}
       {tab === 'reorder' && has(user, 'reorder') && <Reorder onCreated={() => setTab('orders')} />}
       {tab === 'group' && has(user, 'group_orders') && <GroupOrders />}
+      {tab === 'calendar' && has(user, 'supplier_calendar') && <SupplierCalendar onReorder={() => setTab('reorder')} />}
+      {tab === 'missed' && has(user, 'missed_report') && <MissedReport />}
+      {tab === 'phone' && has(user, 'mobile_reception') && <PhoneReceptions />}
     </div>
   );
 }
 
 // --- Bons de commande --------------------------------------------------------
 
-type OrderView = { mode: 'list' } | { mode: 'edit'; order: Order | null } | { mode: 'view'; id: string } | { mode: 'receive'; id: string };
+type OrderView = { mode: 'list' } | { mode: 'edit'; order: Order | null } | { mode: 'view'; id: string } | { mode: 'receive'; id: string; phone?: PhoneReception };
 
 function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: boolean }) {
   const [view, setView] = useState<OrderView>(startNew ? { mode: 'edit', order: null } : { mode: 'list' });
@@ -98,7 +105,7 @@ function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: bo
   if (view.mode === 'edit') return <OrderEditor order={view.order} onDone={(id) => setView(id ? { mode: 'view', id } : { mode: 'list' })} />;
   if (view.mode === 'view')
     return <OrderDetail id={view.id} canEdit={canEdit} onBack={() => setView({ mode: 'list' })} onEdit={(o) => setView({ mode: 'edit', order: o })} onReceive={() => setView({ mode: 'receive', id: view.id })} />;
-  if (view.mode === 'receive') return <ReceiveOrder id={view.id} onDone={() => setView({ mode: 'view', id: view.id })} />;
+  if (view.mode === 'receive') return <ReceiveOrder id={view.id} phone={view.phone} onDone={() => setView({ mode: 'view', id: view.id })} />;
   return (
     <>
       <div className="filters">
@@ -235,6 +242,14 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
     if (order) orderLines(order).then(setLines, (err) => toast.error(err));
   }, [order?.id]);
   const total = lines.reduce((t, l) => t + lineNet(l), 0);
+  // Saisie gardée sur ce PC : une coupure de courant ne fait pas perdre le bon en cours.
+  const draft = useDraft(
+    order ? null : 'order:new',
+    order ? `Bon de commande ${order.number}` : 'Nouveau bon de commande',
+    { supplierId, warehouseId, expected, notes, lines },
+    (d) => (setSupplierId(d.supplierId), setWarehouseId(d.warehouseId), setExpected(d.expected), setNotes(d.notes), setLines(d.lines)),
+    (d) => !d.lines.length,
+  );
 
   /** Prix négocié et colisage du fournisseur choisi, sinon dernier prix d'achat ; saisie dans le conditionnement d'achat. */
   const prepare = async (a: Result<'catalogue.get'>): Promise<RecLine> => {
@@ -265,6 +280,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
       let saved = order ? await call('purchases.updateOrder', order.id, input) : await call('purchases.createOrder', input);
       if (send) saved = await call('purchases.setOrderStatus', saved.id, 'sent');
       toast.ok(send ? `Bon ${saved.number} envoyé` : `Bon ${saved.number} enregistré`);
+      draft.clear();
       onDone(saved.id);
     } catch (err) {
       toast.error(err);
@@ -274,6 +290,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
   return (
     <div>
       <h2>{order ? `Bon de commande ${order.number}` : 'Nouveau bon de commande'}</h2>
+      {draft.banner}
       <div className="grid3">
         <SupplierSelect value={supplierId} onChange={setSupplierId} />
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} label="Livrer au dépôt" />
@@ -441,11 +458,21 @@ interface RecvLine {
   promo: string;
 }
 
-function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
+type PhoneReception = Result<'purchases.takeMobileReception'>;
+
+/** Quantité, lot et date limite comptés au téléphone pour une ligne du bon. */
+function phoneCount(phone: PhoneReception, orderLineId: string): Partial<RecvLine> {
+  const counted = phone.lines.filter((x) => x.orderLineId === orderLineId);
+  const total = counted.reduce((t, x) => t + x.qty, 0);
+  const first = counted.find((x) => x.lot || x.expiry);
+  return { qty: num(total), auto: false, lot: first?.lot ?? '', expiry: first?.expiry ?? '' };
+}
+
+function ReceiveOrder({ id, onDone, phone }: { id: string; onDone: () => void; phone?: PhoneReception }) {
   const toast = useToast();
   const order = useLoad(() => call('purchases.order', id), [id]);
   const [lines, setLines] = useState<RecvLine[] | null>(null);
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(phone?.deliveryNote ?? '');
   const [received, setReceived] = useState<{ number: string; lines: { articleId: string; qty: number; packUnits: number }[] } | null>(null);
   useEffect(() => {
     if (order.data && !lines)
@@ -465,23 +492,35 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
           lot: '',
           expiry: '',
           ...termsFrom(l),
+          // Comptage fait au téléphone : on reprend ce qui a été compté.
+          ...(phone ? phoneCount(phone, l.id) : {}),
         })),
       );
   }, [order.data, lines]);
   const [packs, remember] = useArticlePacks((lines ?? []).map((l) => l.articleId));
   useAutoPacks(lines, setLines, packs);
+  // Réception commencée et pas encore validée : gardée sur ce PC (coupure, fermeture).
+  const [touched, setTouched] = useState(false);
+  const draft = useDraft(
+    phone ? null : `reception:${id}`,
+    `Réception du bon ${order.data?.number ?? ''}`,
+    { note, lines, touched },
+    (d) => (setNote(d.note), setLines(d.lines), setTouched(true)),
+    (d) => !d.touched || !d.lines,
+  );
   const inPacks = (q: number, articleId: string) => {
     const a = packs.get(articleId);
     return a && a.packs.length ? describeInPacks(q, a.packs, a.unit_name || 'Pièce') : '';
   };
   if (!order.data || !lines) return null;
-  const update = (i: number, patch: Partial<RecvLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const update = (i: number, patch: Partial<RecvLine>) => (setTouched(true), setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l))));
   const total = lines.reduce((t, l) => t + lineNet(l), 0);
   return (
     <div>
       <h2>
         Réception du bon {order.data.number} · {order.data.supplier_name}
       </h2>
+      {draft.banner}
       <p className="muted">Saisissez ce qui est réellement livré (0 si absent). Un écart de prix avec la commande est signalé en rouge.</p>
       <div className="grid3">
         <Field label="N° du bon de livraison fournisseur">
@@ -572,6 +611,7 @@ function ReceiveOrder({ id, onDone }: { id: string; onDone: () => void }) {
                 }));
               const r = await call('purchases.receiveOrder', id, { deliveryNote: note || undefined, lines: input });
               toast.ok(`Réception ${r.number} enregistrée, stock mis à jour`);
+              draft.clear();
               setReceived({ number: r.number, lines: input.map((l) => ({ articleId: l.articleId, qty: l.qty, packUnits: l.packUnits })) });
             } catch (err) {
               toast.error(err);
@@ -1530,5 +1570,59 @@ function WhatsappOrderDialog({ orderId, number, supplier, onClose }: { orderId: 
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Réceptions comptées au téléphone : le PC les reprend pour valider l'entrée en stock. */
+function PhoneReceptions() {
+  const toast = useToast();
+  const list = useLoad(() => call('purchases.mobileReceptions'), []);
+  const [open, setOpen] = useState<PhoneReception | null>(null);
+  if (open) return <ReceiveOrder id={open.orderId} phone={open} onDone={() => (setOpen(null), list.reload())} />;
+  const take = (id: string) =>
+    call('purchases.takeMobileReception', id).then((r) => {
+      setOpen(r);
+      toast.ok('Comptage repris : vérifiez puis validez la réception');
+    }, toast.error);
+  return (
+    <>
+      <p className="muted">
+        Le magasinier compte la livraison sur le téléphone, devant le camion. Ici, vous reprenez son comptage, vérifiez les prix, puis validez : le stock n'entre qu'à ce moment.
+      </p>
+      {list.data?.length === 0 ? (
+        <Empty>Aucune réception en attente venant d'un téléphone.</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Reçue le</th>
+              <th>Bon</th>
+              <th>Par</th>
+              <th>N° BL</th>
+              <th className="r">Lignes</th>
+              <th className="r">Abîmés</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {(list.data ?? []).map((r) => (
+              <tr key={r.id}>
+                <td>{dateTime(r.at)}</td>
+                <td>{r.orderNumber}</td>
+                <td>{r.userName}</td>
+                <td>{r.deliveryNote}</td>
+                <td className="r">{r.lines.length}</td>
+                <td className="r">{r.lines.filter((l) => l.damaged > 0).length || ''}</td>
+                <td>
+                  <button className="primary" onClick={() => take(r.id)}>
+                    Reprendre et valider
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }

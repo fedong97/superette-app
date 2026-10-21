@@ -22,7 +22,9 @@ export type ReceiptLine =
    * par le pilote ; `raster` est l'image en noir et blanc (1 bit par point,
    * lignes de `ceil(width / 8)` octets) pour l'impression ESC/POS directe.
    */
-  | { t: 'image'; src: string; raster?: { width: number; height: number; data: Uint8Array } };
+  | { t: 'image'; src: string; raster?: { width: number; height: number; data: Uint8Array } }
+  /** Code-barres Code 128 centré (numéro du ticket), lisible par la douchette pour le retrouver. */
+  | { t: 'barcode'; code: string };
 export type Receipt = ReceiptLine[];
 
 /**
@@ -171,6 +173,11 @@ export function receiptToEscPos(receipt: Receipt, opts: EscPosOptions): Uint8Arr
       style(false, false, 1);
       out.push(GS, 0x76, 0x30, 0, bytes & 0xff, bytes >> 8, height & 0xff, height >> 8, ...data);
       out.push(0x0a);
+    } else if (line.t === 'barcode') {
+      // Code 128 jeu B : hauteur 64 points, module de 2 points, chiffres lisibles dessous.
+      const data = encode(`{B${line.code}`, 'ascii');
+      style(false, false, 1);
+      out.push(GS, 0x68, 64, GS, 0x77, columns <= 32 ? 1 : 2, GS, 0x48, 2, GS, 0x66, 0, GS, 0x6b, 73, data.length, ...data, 0x0a);
     } else if (line.t === 'text') {
       const width = line.big ? Math.floor(columns / 2) : columns;
       style(Boolean(line.bold), Boolean(line.big), line.align === 'center' ? 1 : line.align === 'right' ? 2 : 0);
@@ -198,6 +205,7 @@ export function receiptToText(receipt: Receipt, columns: number, codepage: Codep
     else if (line.t === 'space') lines.push(...Array<string>(Math.max(1, Math.round(line.mm / 4))).fill(''));
     else if (line.t === 'spacing') continue;
     else if (line.t === 'image') lines.push('[logo]'.padStart(Math.floor((columns + 6) / 2)));
+    else if (line.t === 'barcode') lines.push(`||| ${line.code} |||`.padStart(Math.floor((columns + line.code.length + 8) / 2)));
     else if (line.t === 'text') {
       const width = line.big ? Math.floor(columns / 2) : columns;
       for (const l of wrapText(toPrinterText(line.text, codepage), width)) {

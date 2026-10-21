@@ -21,8 +21,8 @@ export interface User {
 export interface Session {
   token: string;
   user: User;
-  /** Ce que la personne peut faire : compter un inventaire, préparer un panier au rayon. */
-  can?: { count: boolean; cart: boolean };
+  /** Ce que la personne peut faire : compter un inventaire, préparer un panier au rayon, noter une vente manquée, réceptionner. */
+  can?: { count: boolean; cart: boolean; missed?: boolean; receive?: boolean };
 }
 
 /** Ligne du panier préparé au rayon : quantité en millièmes d'unité. */
@@ -788,4 +788,79 @@ export async function loadSentCarts() {
   if (!config || !state.session) return;
   const r = await request<{ carts: SentCart[] }>(config.url, '/api/v1/mobile/carts', { auth: auth() }).catch(() => null);
   if (r) set({ sentCarts: r.carts });
+}
+
+// ——— Le client voulait… ———
+
+export type MissedReason = 'absent' | 'rupture' | 'prix' | 'autre';
+
+/** Note un produit demandé qu'on n'a pas pu vendre ; le gérant le voit sur le PC. */
+export async function recordMissed(input: { articleId: string | null; label: string | null; qty: number; reason: MissedReason; note?: string | null }) {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  await request<{ id: string }>(config.url, '/api/v1/mobile/missed', { body: { id: newId(), ...input }, auth: auth() });
+}
+
+// ——— Fiche produit : ailleurs, bientôt, à la place ———
+
+export interface ProductInfo {
+  id: string;
+  name: string;
+  unit: string;
+  price: number;
+  stock: { warehouseId: string; warehouse: string; store: string; here: boolean; qty: number }[];
+  nextDelivery: { number: string; expectedDate: string; qty: number } | null;
+  substitute: { id: string; name: string; price: number; stockHere: number } | null;
+}
+
+export async function productInfo(articleId: string): Promise<ProductInfo> {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  return request<ProductInfo>(config.url, `/api/v1/mobile/articles/${encodeURIComponent(articleId)}/info`, { auth: auth() });
+}
+
+// ——— Réception d'une livraison ———
+
+export interface ReceptionOrder {
+  id: string;
+  number: string;
+  supplier: string;
+  expectedDate: string | null;
+  waitingOnPc: boolean;
+  lines: { id: string; articleId: string; ordered: number; remaining: number }[];
+}
+
+/** Réception en cours sur le téléphone, gardée jusqu'à l'envoi (coupure, appel…). */
+export interface ReceptionDraft {
+  orderId: string;
+  orderNumber: string;
+  supplier: string;
+  deliveryNote: string;
+  note: string;
+  /** Par ligne du bon : quantité reçue en bon état et abîmée (millièmes), lot et date limite. */
+  lines: Record<string, { qty: number; damaged: number; lot: string; expiry: string }>;
+}
+
+export async function receptionOrders(): Promise<ReceptionOrder[]> {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  return (await request<{ orders: ReceptionOrder[] }>(config.url, '/api/v1/mobile/reception-orders', { auth: auth() })).orders;
+}
+
+export const loadReceptionDraft = () => load<ReceptionDraft | null>('reception', null);
+export const saveReceptionDraft = (d: ReceptionDraft | null) => save('reception', d);
+
+/** Envoie le comptage de la livraison : un PC du magasin la reprend et la valide. */
+export async function sendReception(d: ReceptionDraft, order: ReceptionOrder): Promise<void> {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  const lines = order.lines
+    .filter((l) => d.lines[l.id])
+    .map((l) => ({ orderLineId: l.id, articleId: l.articleId, qty: d.lines[l.id]!.qty, damaged: d.lines[l.id]!.damaged, lot: d.lines[l.id]!.lot || null, expiry: d.lines[l.id]!.expiry || null }));
+  if (!lines.length) throw new ApiError('Rien n’a été compté', 400);
+  await request<{ id: string }>(config.url, '/api/v1/mobile/receptions', {
+    body: { id: newId(), orderId: d.orderId, deliveryNote: d.deliveryNote.trim() || null, note: d.note.trim() || null, lines },
+    auth: auth(),
+  });
+  await saveReceptionDraft(null);
 }

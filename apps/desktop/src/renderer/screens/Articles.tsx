@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { parseQtyTiers, splitTtc } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings, useDraft } from '../ui';
 import { ExportDialog, ImportDialog, type ListFilter, PriceUpdateDialog } from './articleFiles';
 import { useArticleSuggestions, SuggestionList } from './pickers';
 import { Shelving } from './Controls';
@@ -281,6 +281,7 @@ export function ArticleForm({
     [0, 1, 2].map((i) => ({ qty: initialTiers[i] ? String(initialTiers[i]!.minQty / 1000) : '', price: initialTiers[i] ? String(initialTiers[i]!.price) : '' })),
   );
   const [newDept, setNewDept] = useState('');
+  const [shelfQty, setShelfQty] = useState(milli(article?.shelf_qty));
   const [storePrice, setStorePrice] = useState(article && article.store_price !== article.sale_price ? String(article.store_price) : '');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value });
@@ -302,6 +303,15 @@ export function ArticleForm({
             sale: Math.ceil(((cost / d) * (100 + settings.defaultMarginPct) * (10000 + (noVat ? 0 : rate))) / 1_000_000 / 5) * 5,
           }))
       : [];
+
+  // Nouvel article en cours de saisie : gardé sur ce PC (coupure de courant, fermeture).
+  const draft = useDraft(
+    article || initialName ? null : 'article:new',
+    f.name.trim() ? `Nouvel article ${f.name.trim()}` : 'Nouvel article',
+    { f, levels, buy, barcodes },
+    (d) => (setF(d.f), setLevels(d.levels), setBuy(d.buy), setBarcodes(d.barcodes)),
+    (d) => !d.f.name.trim(),
+  );
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -358,6 +368,8 @@ export function ArticleForm({
         if (sp !== current) await call('catalogue.setStorePrice', saved.id, sp);
       }
       if (photo !== undefined) await call('catalogue.setPhoto', saved.id, photo);
+      if (shelfQty !== milli(article?.shelf_qty) && can('restock', 'article_edit')) await call('restock.setShelfQty', saved.id, shelfQty.trim() ? parseQty(shelfQty) : null);
+      draft.clear();
       toast.ok('Article enregistré');
       onSaved(saved);
     } catch (err) {
@@ -368,6 +380,7 @@ export function ArticleForm({
   return (
     <Modal title={article ? `${article.code} · ${article.name}` : 'Nouvel article'} onClose={onClose} wide>
       <form onSubmit={save}>
+        {draft.banner}
         <div className="article-top">
         <div className="grid3">
           <Field label="Désignation">
@@ -518,6 +531,9 @@ export function ArticleForm({
               <input value={locations[w.id] ?? ''} maxLength={20} disabled={!can('article_edit', 'stock_location')} onChange={(e) => setLocations({ ...locations, [w.id]: e.target.value })} />
             </Field>
           ))}
+          <Field label="Quantité voulue en rayon" hint="Réassort du rayon ; vide : deux jours de ventes">
+            <input inputMode="decimal" value={shelfQty} disabled={!can('restock', 'article_edit')} onChange={(e) => setShelfQty(e.target.value)} />
+          </Field>
         </div>
         <div className="checks">
           <label>

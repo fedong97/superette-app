@@ -14,6 +14,7 @@ import { formatFcfa } from './money';
 import { formatRate, splitTtc } from './tax';
 import { numberToWordsFr } from './words';
 import type { Receipt, ReceiptLine } from './escpos';
+import { barcodeSvg } from './labels';
 
 export const DOC_KINDS = {
   invoice: 'Facture client',
@@ -325,6 +326,8 @@ export interface DocTemplate {
     signRight: string;
     /** « DUPLICATA » sur les réimpressions. */
     duplicate: boolean;
+    /** Code-barres du numéro en bas du ticket (retour, réimpression, facture A4 en le scannant) ; oui par défaut. */
+    barcode?: boolean;
     /** Remarque à gauche du montant en lettres (présentation encadrée), « Merci de votre fidélité ». */
     remark: string;
     /** Troisième et quatrième zones de signature (listing : « Le chauffeur », « Le contrôleur »). */
@@ -856,6 +859,9 @@ const shown = (t: DocTemplate, d: DocData) => {
 /** Réimpression d'un document dont le modèle affiche la mention. */
 const duplicata = (t: DocTemplate, d: DocData) => d.doc.duplicate && t.footer.duplicate;
 /** Une imprimante à ticket ne sait pas faire de filigrane : bandeau en gros caractères en haut et en bas. */
+/** Le ticket de vente (ou de retour) porte le code-barres de son numéro, sauf si le modèle l'a retiré. */
+const ticketBarcode = (t: DocTemplate, d: DocData) => t.footer.barcode !== false && (d.doc.kind === 'sale' || d.doc.kind === 'return') && /^[\x20-\x7e]{1,30}$/.test(d.doc.number);
+const barcodeHtml = (code: string) => `<div class="c" style="margin-top:2mm">${barcodeSvg(code, Math.min(56, 14 + code.length * 4.4), 10)}<div style="font-size:9pt;letter-spacing:1px">${esc(code)}</div></div>`;
 const DUPLICATA_BANNER: ReceiptLine = { t: 'text', text: 'DUPLICATA', align: 'center', bold: true, big: true };
 
 /** Filigrane « DUPLICATA » en diagonale, répété sur chaque page imprimée. */
@@ -961,6 +967,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   const ft = (line: DocLineKey) => (text: string): ReceiptLine => ({ t: 'text', text, align: lineAlign(t, 'footer', line, 'center') });
   const bottom = [...lines(t.footer.text).map(ft('footerText')), ...lines(t.footer.thanks || d.store.thanks).map(ft('thanks'))];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom);
+  if (ticketBarcode(t, d)) r.push({ t: 'barcode', code: d.doc.number });
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   parts.footer = r;
   return arrangeReceipt(t, parts);
@@ -975,6 +982,7 @@ export function receiptToHtml(receipt: Receipt): string {
       if (l.t === 'space') return `<div style="height:${l.mm}mm"></div>`;
       if (l.t === 'spacing') return '';
       if (l.t === 'image') return `<div class="c"><img src="${esc(l.src)}" style="max-width:60%;max-height:30mm"></div>`;
+      if (l.t === 'barcode') return barcodeHtml(l.code);
       const cls = [l.bold ? 'b' : '', l.big ? 'big' : ''];
       if (l.t === 'text') return `<div class="${[...cls, l.align === 'center' ? 'c' : l.align === 'right' ? 'r' : ''].join(' ').trim()}">${esc(l.text)}</div>`;
       const pad = l.indent ? ` style="padding-left:${l.indent}ch"` : '';
@@ -1494,6 +1502,7 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
     t.footer.text ? `<div class="notes c" style="margin-top:2mm;text-align:${lineAlign(t, 'footer', 'footerText', 'center')}">${nl(fill(t.footer.text, d))}</div>` : '',
     t.footer.thanks || d.store.thanks ? `<div class="thanks"${sa(lineAlign(t, 'footer', 'thanks', 'center'))}>${nl(fill(t.footer.thanks || d.store.thanks, d))}</div>` : '',
     '<div class="soft">FEDONIX 360</div>',
+    ticketBarcode(t, d) ? barcodeHtml(d.doc.number) : '',
   ].join('');
   return arrangeHtml(t, { header: id, title: `<div class="meta">${meta}</div>${wh}`, lines: table, totals: bottom, payments: pay, footer: foot });
 }
@@ -1572,6 +1581,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   const bottom = [...split(t.footer.text).map(ft('footerText')), ...split(t.footer.thanks || d.store.thanks).map(ft('thanks'))];
   if (bottom.length) r.push({ t: 'rule' }, ...bottom);
   r.push(centered('FEDONIX 360'));
+  if (ticketBarcode(t, d)) r.push({ t: 'barcode', code: d.doc.number });
   if (duplicata(t, d)) r.push({ t: 'feed' }, DUPLICATA_BANNER);
   parts.footer = r;
   return arrangeReceipt(t, parts);

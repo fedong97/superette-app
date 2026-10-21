@@ -259,3 +259,60 @@ export async function downloadStationBackup(s: Services, id: string): Promise<{ 
   const r = await request<{ name: string; data: string }>(creds.url, `/api/v1/station-backups/${encodeURIComponent(id)}`, { token: creds.token, timeoutMs: BACKUP_TIMEOUT_MS });
   return { name: r.name, data: Buffer.from(r.data, 'base64') };
 }
+
+/** État d'un PC du magasin : envoyé au serveur, lu dans Administration › État des PC. */
+export interface StationStatus {
+  name: string;
+  register: string | null;
+  version: string;
+  lastSyncAt: string | null;
+  pending: number;
+  syncError: string | null;
+  backupAt: string | null;
+  backupError: string | null;
+  printer: string | null;
+  printerEnabled: boolean;
+  license: { state: string; canSell: boolean; daysLeft: number | null; message: string };
+  at: string;
+}
+
+/** Ce PC donne son état au serveur (après une synchronisation). */
+export async function pushStationStatus(s: Services, status: StationStatus): Promise<void> {
+  const creds = s.sync.credentials();
+  if (!creds) return;
+  await request(creds.url, '/api/v1/devices/status', { token: creds.token, body: status });
+}
+
+/** État de tous les PC du magasin, d'après le serveur. */
+export async function stationStatuses(s: Services): Promise<{ deviceId: string; name: string; lastSeenAt: string | null; appVersion: string | null; status: StationStatus | null; self: boolean }[]> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur : seul son propre état est connu", 'SYNC_NOT_CONFIGURED');
+  const r = await request<{ devices: { deviceId: string; name: string; lastSeenAt: string | null; appVersion: string | null; status: StationStatus | null }[] }>(creds.url, '/api/v1/devices/status', { token: creds.token });
+  const me = s.sync.state().deviceId;
+  return r.devices.map((d) => ({ ...d, self: d.deviceId === me }));
+}
+
+/** Réception d'un bon de commande faite sur le téléphone : le PC la valide. */
+export interface MobileReception {
+  id: string;
+  orderId: string;
+  orderNumber: string | null;
+  userName: string;
+  deliveryNote: string | null;
+  note: string | null;
+  lines: { orderLineId: string | null; articleId: string; qty: number; damaged: number; lot: string | null; expiry: string | null }[];
+  at: string;
+}
+
+export async function mobileReceptions(s: Services): Promise<MobileReception[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ receptions: MobileReception[] }>(creds.url, '/api/v1/mobile-receptions', { token: creds.token })).receptions;
+}
+
+/** Le PC prend la réception (un seul PC l'obtient) pour la valider. */
+export async function takeMobileReception(s: Services, id: string): Promise<MobileReception> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
+  return request<MobileReception>(creds.url, `/api/v1/mobile-receptions/${encodeURIComponent(id)}/take`, { token: creds.token, body: {} });
+}

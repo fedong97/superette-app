@@ -1,7 +1,7 @@
 import { type CartLine, computeTotals, lineTotal } from '@superette/core';
 import { useState } from 'react';
 import { type ApiError, type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useLoad, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, SupervisorPrompt, dateFr, fcfa, parseAmount, parseQty, qty, useCan, useDraft, useLoad, useToast, has } from '../ui';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker } from './pickers';
 import { DocPreview } from './docPreview';
@@ -27,10 +27,10 @@ function StateTag({ state }: { state: State }) {
 }
 
 /** Devis et factures proforma : prix garantis au client jusqu'à la date de validité, puis facturés à la caisse. */
-export function Quotes({ user }: { user: User }) {
+export function Quotes({ user, startNew = false }: { user: User; startNew?: boolean }) {
   const [state, setState] = useState<State | ''>('open');
   const [search, setSearch] = useState('');
-  const [editing, setEditing] = useState<Quote | 'new' | null>(null);
+  const [editing, setEditing] = useState<Quote | 'new' | null>(startNew && has(user, 'quote_save') ? 'new' : null);
   const [open, setOpen] = useState<string | null>(null);
   const list = useLoad(() => call('quotes.list', { state: state || undefined, search: search || undefined }), [state, search]);
   const rows = list.data ?? [];
@@ -138,6 +138,15 @@ function QuoteEditor({ user, quote, onClose, onSaved }: { user: User; quote: Quo
     setLines(quote.lines.map((l, i) => ({ key: ++keySeq, article: arts[i]!, qty: String(l.qty / 1000).replace('.', ','), discount: l.discount ? String(l.discount) : '' })));
   }, [quote?.id]);
 
+  // Nouveau devis en cours : gardé sur ce PC (coupure de courant, fermeture).
+  const draft = useDraft(
+    quote ? null : 'quote:new',
+    customer?.name || customerName ? `Devis pour ${customer?.name || customerName}` : 'Nouveau devis',
+    { kind, customer, customerName, validDays, notes, lines },
+    (d) => (setKind(d.kind), setCustomer(d.customer), setCustomerName(d.customerName), setValidDays(d.validDays), setNotes(d.notes), setLines(d.lines)),
+    (d) => !d.lines.length,
+  );
+
   const cart: (CartLine | null)[] = lines.map((l) => {
     const q = parseQty(l.qty);
     const d = l.discount ? parseAmount(l.discount) : 0;
@@ -171,6 +180,7 @@ function QuoteEditor({ user, quote, onClose, onSaved }: { user: User; quote: Quo
         pin,
       );
       toast.ok(`${q.number} enregistré`);
+      draft.clear();
       onSaved(q);
     } catch (err) {
       if ((err as ApiError).code === 'SUPERVISOR_REQUIRED' && !pin) setAskPin(true);
@@ -180,6 +190,7 @@ function QuoteEditor({ user, quote, onClose, onSaved }: { user: User; quote: Quo
 
   return (
     <Modal title={quote ? `Modifier ${quote.number}` : 'Nouveau devis'} onClose={onClose} wide>
+      {draft.banner}
       <div>
         <div className="methods">
           {(Object.keys(QUOTE_KINDS) as Kind[]).map((k) => (

@@ -15,13 +15,15 @@ import { RemoteTills } from './RemoteTills';
 import { ShopTemplates } from './ShopTemplates';
 import { Takeover } from './Takeover';
 import { Companies } from './Companies';
+import { ArticlePicker } from './pickers';
+import { Stations } from './Floor';
 import contract from '../../../build/contrat-licence.txt?raw';
 import serverLogo from '../assets/logo-serveur.png';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies';
+type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -49,6 +51,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ...(user.role === 'admin' || can('cash') ? ([['relay', 'Postes distants']] as [Tab, string][]) : []),
     ...(user.role === 'admin' ? ([['repair', 'Réparation']] as [Tab, string][]) : []),
     ...(can('settings_edit') ? ([['mobilepay', 'Paiement mobile']] as [Tab, string][]) : []),
+    ...(can('stations') ? ([['stations', 'État des PC']] as [Tab, string][]) : []),
     ['server', 'Serveur central'],
     ['updates', 'Mises à jour'],
     ['license', 'Licence'],
@@ -97,6 +100,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       {tab === 'relay' && (user.role === 'admin' || can('cash')) && <RemoteTills isAdmin={user.role === 'admin'} />}
       {tab === 'repair' && user.role === 'admin' && <Repair onBackups={() => setTab('backups')} />}
       {tab === 'mobilepay' && can('settings_edit') && <MobilePay />}
+      {tab === 'stations' && can('stations') && <Stations />}
       {tab === 'server' && <CentralServer isAdmin={user.role === 'admin'} />}
       {tab === 'updates' && <SoftwareUpdates isAdmin={user.role === 'admin'} />}
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}
@@ -606,6 +610,8 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     makeBadge: boolean;
   }>(null);
   const canStaff = useCan()('staff_edit');
+  const canCopy = useCan()('user_copy');
+  const [copyFrom, setCopyFrom] = useState<null | { id: string; name: string; newName: string; login: string; pin: string }>(null);
   const editBadge = async (id: string, renew: boolean) => {
     if (renew && !(await askConfirm("Refaire le badge ? L'ancien badge ne permettra plus de se connecter."))) return;
     try {
@@ -700,6 +706,11 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                 )}
               </td>
               <td onClick={(e) => e.stopPropagation()}>
+                {canCopy && u.role !== 'admin' && (
+                  <button className="ghost" title="Nouvel employé au même poste : rôle, magasin, caisse, dépôts et privilèges" onClick={() => setCopyFrom({ id: u.id, name: u.name, login: '', pin: '', newName: '' })}>
+                    Copier
+                  </button>
+                )}{' '}
                 {!u.active && <span className="tag">désactivé</span>}
                 {u.locked && (
                   <>
@@ -724,6 +735,38 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
           ))}
         </tbody>
       </table>
+      {copyFrom && (
+        <Modal title={`Nouvel employé comme ${copyFrom.name}`} onClose={() => setCopyFrom(null)}>
+          <p className="muted">Le nouvel employé reçoit le même rôle, le même magasin, la même caisse, les mêmes dépôts de vente et les mêmes privilèges que {copyFrom.name}. Seuls son nom, son identifiant et son code changent.</p>
+          <div className="grid3">
+            <Field label="Nom">
+              <input autoFocus value={copyFrom.newName} onChange={(e) => setCopyFrom({ ...copyFrom, newName: e.target.value })} />
+            </Field>
+            <Field label="Identifiant">
+              <input value={copyFrom.login} onChange={(e) => setCopyFrom({ ...copyFrom, login: e.target.value })} />
+            </Field>
+            <Field label="Code (4 chiffres ou plus)">
+              <input type="password" inputMode="numeric" value={copyFrom.pin} onChange={(e) => setCopyFrom({ ...copyFrom, pin: e.target.value })} />
+            </Field>
+          </div>
+          <div className="actions">
+            <button onClick={() => setCopyFrom(null)}>Annuler</button>
+            <button
+              className="primary"
+              disabled={!copyFrom.newName.trim() || !copyFrom.login.trim() || copyFrom.pin.length < 4}
+              onClick={() =>
+                call('admin.copyUser', copyFrom.id, { name: copyFrom.newName.trim(), login: copyFrom.login.trim(), pin: copyFrom.pin }).then(() => {
+                  toast.ok(`${copyFrom.newName.trim()} est créé comme ${copyFrom.name}`);
+                  setCopyFrom(null);
+                  users.reload();
+                }, toast.error)
+              }
+            >
+              Créer l'employé
+            </button>
+          </div>
+        </Modal>
+      )}
       {canManage && (
         <div className="actions">
           <button data-new title="Ctrl+J" className="primary" onClick={() =>
@@ -1390,28 +1433,83 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 function Audit() {
-  const log = useLoad(() => call('admin.audit'));
+  const users = useLoad(() => call('admin.users'));
+  const [userId, setUserId] = useState('');
+  const [text, setText] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [entity, setEntity] = useState<{ id: string; name: string } | null>(null);
+  const log = useLoad(
+    () => call('admin.audit', { userId: userId || null, entityId: entity?.id ?? null, text: text.trim() || null, from: from || null, to: to || null, limit: 500 }),
+    [userId, entity?.id, text, from, to],
+  );
   return (
-    <table className="list">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Utilisateur</th>
-          <th>Action</th>
-          <th>Détails</th>
-        </tr>
-      </thead>
-      <tbody>
-        {(log.data ?? []).map((a) => (
-          <tr key={a.id}>
-            <td>{dateTime(a.at)}</td>
-            <td>{a.user_name ?? '—'}</td>
-            <td>{ACTION_LABELS[a.action] ?? a.action}</td>
-            <td className="details">{a.details}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      <p className="muted">Cherchez qui a fait quoi : « qui a changé le prix de la Mutzig ? » → choisissez le produit, ou tapez « prix ».</p>
+      <div className="filters">
+        <select value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Personne">
+          <option value="">Toutes les personnes</option>
+          {(users.data ?? []).map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+        <input placeholder="Mot cherché (prix, suppression, n° de facture…)" value={text} onChange={(e) => setText(e.target.value)} style={{ minWidth: 260 }} />
+        <label>
+          Du <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          au <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        {entity ? (
+          <span className="tag normal">
+            {entity.name}{' '}
+            <button className="link" onClick={() => setEntity(null)}>
+              ✕
+            </button>
+          </span>
+        ) : (
+          <div style={{ minWidth: 260 }}>
+            <ArticlePicker placeholder="Un produit précis" onPick={(a) => setEntity({ id: a.id, name: a.name })} />
+          </div>
+        )}
+      </div>
+      {log.data?.length === 0 ? (
+        <Empty>Aucune action ne correspond à cette recherche.</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Utilisateur</th>
+              <th>Action</th>
+              <th>Fiche</th>
+              <th>Détails</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(log.data ?? []).map((a) => (
+              <tr key={a.id}>
+                <td>{dateTime(a.at)}</td>
+                <td>{a.user_name ?? '—'}</td>
+                <td>{ACTION_LABELS[a.action] ?? a.action}</td>
+                <td>
+                  {a.entity_name && a.entity_id ? (
+                    <button className="link" title="Toutes les actions sur cette fiche" onClick={() => setEntity({ id: a.entity_id!, name: a.entity_name! })}>
+                      {a.entity_name}
+                    </button>
+                  ) : (
+                    ''
+                  )}
+                </td>
+                <td className="details">{a.details}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 

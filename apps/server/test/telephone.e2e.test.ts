@@ -3,7 +3,20 @@ import { createDecipheriv, createECDH, createPublicKey, hkdfSync, randomBytes, v
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { approvalStatus, createServices, enrollStation, openDatabase, requestApproval, shelfCarts, syncOnce, takeShelfCart } from '@superette/db';
+import {
+  approvalStatus,
+  createServices,
+  enrollStation,
+  mobileReceptions,
+  openDatabase,
+  pushStationStatus,
+  requestApproval,
+  shelfCarts,
+  stationStatuses,
+  syncOnce,
+  takeMobileReception,
+  takeShelfCart,
+} from '@superette/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/main';
 import { encryptPayload, generateVapidKeys, vapidAuthorization } from '../src/webpush';
@@ -117,7 +130,7 @@ describe('panier préparé au rayon', () => {
       return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
     };
     const login = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
-    expect(login.can).toEqual({ count: false, cart: true });
+    expect(login.can).toEqual({ count: false, cart: true, missed: true, receive: false });
     const catalog = await (await phone('/catalog', undefined, login.session)).json();
     expect(catalog.articles.find((a: { id: string }) => a.id === riz)).toMatchObject({ price: 1_000 });
 
@@ -141,6 +154,59 @@ describe('panier préparé au rayon', () => {
     expect(pc.pos.getSale(sale.id).seller_id).toBe(paul.id);
     expect(pc.commissions.myDay(store.id, paul.id)).toMatchObject({ net: 3_000, tickets: 1 });
     expect(pc.commissions.myDay(store.id, admin.id)).toMatchObject({ net: 0, tickets: 0 });
+  });
+
+  it('le vendeur note une vente manquée et voit le stock ailleurs ; le magasinier compte la livraison, le PC la reprend une fois', async () => {
+    const tva = pc.admin.listVatRates()[0]!.id;
+    const shop = pc.admin.salesWarehouse(store.id).id;
+    const reserve = pc.admin.createWarehouse(store.id, 'Réserve du fond', 'reserve').id;
+    const sucre = pc.catalogue.saveArticle(admin.id, { name: 'SUCRE 1 KG', unit: 'piece', vatRateId: tva, purchasePrice: 600, salePrice: 900 }).id;
+    pc.stock.receive(ctx, { warehouseId: reserve, lines: [{ articleId: sucre, qty: 30_000, unitCost: 600 }] });
+    const supplier = pc.purchases.saveSupplier(admin.id, { name: 'SOSUCAM' });
+    const order = pc.purchases.createOrder(ctx, { supplierId: supplier.id, warehouseId: shop, expectedDate: '2099-01-15', lines: [{ articleId: sucre, qty: 24_000, unitCost: 600 }] });
+    pc.purchases.setOrderStatus(ctx, order.id, 'sent');
+    pc.admin.createUser(admin.id, { name: 'Awa', login: 'awa', pin: '5678', role: 'stock', storeId: store.id });
+    await syncOnce(pc);
+
+    const p = await (await fetch(`${url}/admin/api/mobile/pairing`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ storeId: store.id }) })).json();
+    const device = (await (await fetch(`${url}/api/v1/mobile/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: p.code, name: 'Téléphone rayon' }) })).json()).token;
+    const phone = async (path: string, body?: unknown, session = '') => {
+      const headers: Record<string, string> = { authorization: `Bearer ${device}`, 'x-fedonix-session': session, 'content-type': 'application/json' };
+      return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
+    };
+
+    // Vendeur : stock dans la réserve, livraison attendue, puis « le client voulait… ».
+    const paul = (await (await phone('/login', { login: 'paul', pin: '1111' })).json()).session;
+    const info = await (await phone(`/articles/${sucre}/info`, undefined, paul)).json();
+    expect(info.stock).toEqual(expect.arrayContaining([expect.objectContaining({ warehouseId: reserve, here: true, qty: 30_000 })]));
+    expect(info.nextDelivery).toMatchObject({ number: order.number, qty: 24_000, expectedDate: '2099-01-15' });
+    const missed = { id: 'manque-0001-paul', articleId: sucre, qty: 2_000, reason: 'rupture' };
+    expect((await phone('/missed', missed, paul)).status).toBe(200);
+    expect((await phone('/missed', missed, paul)).status).toBe(200);
+    expect((await phone('/missed', { label: 'Couches taille 5', reason: 'absent' }, paul)).status).toBe(200);
+    expect((await phone('/reception-orders', undefined, paul)).status).toBe(403);
+    await syncOnce(pc);
+    expect(pc.missedSales.list(store.id).map((m) => m.label).sort()).toEqual(['Couches taille 5', 'SUCRE 1 KG']);
+
+    // Magasinier : la livraison comptée devant le camion attend un PC, qui la prend une seule fois.
+    const awa = await (await phone('/login', { login: 'awa', pin: '5678' })).json();
+    expect(awa.can).toMatchObject({ count: true, receive: true });
+    const orders = (await (await phone('/reception-orders', undefined, awa.session)).json()).orders;
+    expect(orders).toEqual([expect.objectContaining({ id: order.id, supplier: 'SOSUCAM', lines: [expect.objectContaining({ articleId: sucre, remaining: 24_000 })] })]);
+    const lineId = orders[0].lines[0].id;
+    const rec = { id: 'reception-0001-awa', orderId: order.id, deliveryNote: '4475', lines: [{ orderLineId: lineId, articleId: sucre, qty: 22_000, damaged: 2_000, lot: 'L12', expiry: '2027-06-30' }] };
+    expect((await phone('/receptions', rec, awa.session)).status).toBe(200);
+    const waiting = await mobileReceptions(pc);
+    expect(waiting).toEqual([expect.objectContaining({ id: rec.id, orderId: order.id, deliveryNote: '4475', userName: 'Awa' })]);
+    expect((await takeMobileReception(pc, rec.id)).lines).toEqual([{ orderLineId: lineId, articleId: sucre, qty: 22_000, damaged: 2_000, lot: 'L12', expiry: '2027-06-30' }]);
+    await expect(takeMobileReception(pc, rec.id)).rejects.toThrow(/déjà été reprise/);
+    expect(await mobileReceptions(pc)).toEqual([]);
+  });
+
+  it('garde l’état de chaque PC pour le gérant', async () => {
+    await pushStationStatus(pc, { name: 'PC caisse 1', version: '0.81.0', backup: null, printer: null, pendingEvents: 0, license: { canSell: true, label: 'OK' } } as never);
+    const all = await stationStatuses(pc);
+    expect(all).toEqual([expect.objectContaining({ name: 'PC caisse 1', self: true, status: expect.objectContaining({ version: '0.81.0' }) })]);
   });
 });
 

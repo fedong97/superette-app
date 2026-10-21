@@ -49,6 +49,8 @@ export interface Article {
   min_qty: Milli | null;
   alert_qty: Milli | null;
   max_qty: Milli | null;
+  /** Quantité voulue en rayon (réassort) ; vide : deux jours de ventes. */
+  shelf_qty: Milli | null;
   active: number;
   /** Nom de l'unité de détail (Ampoule, Bouteille) ; vide = « Pièce ». */
   unit_name: string | null;
@@ -273,7 +275,7 @@ export class CatalogueService extends Base {
 
   quickKeys(storeId: string): Article[] {
     const rows = this.db
-      .prepare(`${ARTICLE_SELECT} WHERE a.quick_key = 1 AND a.active = 1 ORDER BY f.name, a.name`)
+      .prepare(`${ARTICLE_SELECT} WHERE a.quick_key = 1 AND a.active = 1 ORDER BY d.name, f.name, a.name`)
       .all({ storeId }) as Omit<Article, 'barcodes' | 'packs'>[];
     return this.withBarcodes(rows);
   }

@@ -112,8 +112,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.77.0',
     items: [
       'Ventes réelles : Vente › Ventes réelles. Toutes les opérations de vente telles qu’enregistrées à la caisse (ventes, paiements, annulations, remboursements), en lecture seule, avec une synthèse et des exports CSV qui portent l’identifiant de chaque vente.',
-      'Préparation fiscale : Fiscal › Préparation fiscale. L’état de la période par catégorie fiscale, tiré des ventes réelles sans les modifier, avec le rapprochement réel / ajustements / déclaré, la TVA collectée et l’acompte d’impôt.',
-      'Avoirs et corrections justifiés : sur une vente réelle, avec un motif et une pièce, approuvés par un autre utilisateur que leur auteur. Les états générés sont figés avec leur empreinte et le journal se vérifie.',
+      'Préparation fiscale : Fiscal › Préparation fiscale. L’état de la période par catégorie fiscale, lu dans les ventes réelles (avoirs clients compris) et contrôlé avec la comptabilité, avec la TVA collectée et l’acompte d’impôt. Les états générés sont figés avec leur empreinte.',
     ],
   },
   {

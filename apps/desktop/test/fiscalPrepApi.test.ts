@@ -7,10 +7,9 @@ const sync = { now: async () => undefined, status: () => null } as never;
 const system = { chooseFolder: async () => null, chooseBackupFile: async () => null, openFolder: async () => undefined, restore: () => undefined };
 
 describe('ventes réelles et préparation fiscale par les écrans', () => {
-  it('droits séparés : le caissier n’y entre pas, l’auteur d’un avoir ne l’approuve pas', () => {
+  it('droits : le caissier n’y entre pas, et la préparation fiscale n’a aucune commande d’écriture', () => {
     const s = createServices(openDatabase(':memory:'));
     const { store, register, admin } = s.admin.bootstrap({ storeCode: 'DLA1', storeName: 'Superette Akwa', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' });
-    s.admin.createUser(admin.id, { name: 'Mireille', login: 'mireille', pin: '2222', role: 'manager', storeId: store.id });
     s.admin.createUser(admin.id, { name: 'Awa', login: 'awa', pin: '5555', role: 'cashier', storeId: store.id, registerId: register.id });
     const tva = s.admin.listVatRates().find((r) => r.rate_bp === 1925)!.id;
     const riz = s.catalogue.saveArticle(admin.id, { name: 'Riz 5 kg', unit: 'piece', vatRateId: tva, purchasePrice: 3_000, salePrice: 5_000 }).id;
@@ -27,13 +26,9 @@ describe('ventes réelles et préparation fiscale par les écrans', () => {
 
     api['auth.login']!('steve', '1234');
     expect((api['realSales.operations']!(period) as unknown[]).length).toBe(1);
-    const adj = api['fiscalPrep.propose']!({ saleNumber: sale.number, kind: 'credit_note', vatRateBp: 1925, amountTtc: 1_000, reason: 'Geste commercial après réclamation', reference: 'RECL-1' }) as { id: string };
-    expect(() => api['fiscalPrep.decide']!(adj.id, 'approve')).toThrow(/autre utilisateur/);
-
-    api['auth.login']!('mireille', '2222');
-    expect(api['fiscalPrep.decide']!(adj.id, 'approve')).toMatchObject({ status: 'approved' });
-    const st = api['fiscalPrep.statement']!(period.from, period.to) as { reconciliation: { balanced: boolean; adjustmentsHt: number } };
-    expect(st.reconciliation).toMatchObject({ balanced: true, adjustmentsHt: -839 });
-    expect(api['realSales.detail']!(sale.id)).toMatchObject({ total_ttc: 10_000, fiscal: [expect.objectContaining({ id: adj.id })] });
+    const st = api['fiscalPrep.statement']!(period.from, period.to) as { totals: { ttc: number }; books: { matches: boolean } };
+    expect(st).toMatchObject({ totals: { ttc: 10_000 }, books: { matches: true } });
+    expect(api['fiscalPrep.propose']).toBeUndefined();
+    expect(api['realSales.detail']!(sale.id)).toMatchObject({ total_ttc: 10_000 });
   });
 });

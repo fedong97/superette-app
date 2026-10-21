@@ -138,8 +138,6 @@ import {
   type MtnConfig,
   type OrangeConfig,
   type RealSaleFilter,
-  type FiscalAdjustmentInput,
-  type FiscalAdjustmentStatus,
 } from '@superette/db';
 import { createCloudBackup } from './cloudBackup';
 
@@ -2327,19 +2325,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'realSales.payments': (p: { from: string; to: string }) => s.realSales.payments(ctx(['real_sales']).storeId, p),
     'realSales.summary': (p: { from: string; to: string }) => s.realSales.summary(ctx(['real_sales']).storeId, p),
     'realSales.exportCsv': (p: { from: string; to: string }, what: 'operations' | 'lines' | 'payments') => s.realSales.exportCsv(ctx(['real_sales']).storeId, p, what),
-    // Préparation fiscale : un état dérivé des ventes réelles, qui ne les modifie jamais.
-    'fiscalPrep.categories': () => s.fiscalPrep.categories(ctx(['fiscal_prep']).storeId),
+    // Préparation fiscale : un état lu dans les ventes réelles et la comptabilité, sans opération propre.
     'fiscalPrep.statement': (from: string, to: string) => s.fiscalPrep.statement(ctx(['fiscal_prep']).storeId, from, to),
-    'fiscalPrep.adjustments': (opts?: { status?: FiscalAdjustmentStatus | null; saleId?: string | null }) => s.fiscalPrep.list(ctx(['fiscal_prep']).storeId, opts),
-    'fiscalPrep.adjustment': (id: string) => {
-      const a = s.fiscalPrep.get(id);
-      if (a.store_id !== ctx(['fiscal_prep']).storeId) throw new AppError('Ajustement introuvable', 'NOT_FOUND');
-      return { ...a, journal: s.fiscalPrep.journal(a.store_id, { entityId: id }) };
-    },
-    'fiscalPrep.saleSituation': (ref: { saleId?: string | null; saleNumber?: string | null }) => s.fiscalPrep.saleSituation(ctx(['fiscal_prep']).storeId, ref),
-    'fiscalPrep.propose': (input: FiscalAdjustmentInput) => s.fiscalPrep.propose(ctx(['fiscal_adjust']), input),
-    'fiscalPrep.decide': (id: string, action: 'approve' | 'reject' | 'withdraw', reason?: string | null) =>
-      s.fiscalPrep.decide(ctx(action === 'withdraw' ? ['fiscal_adjust'] : ['fiscal_approve']), id, action, reason),
     'fiscalPrep.generate': (from: string, to: string) => s.fiscalPrep.generate(ctx(['fiscal_prep']), from, to),
     'fiscalPrep.statements': () => s.fiscalPrep.statements(ctx(['fiscal_prep']).storeId),
     'fiscalPrep.getStatement': (id: string) => {

@@ -225,7 +225,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const reconciliation = new ReconciliationService(db, clock, accounting);
   const tax = new TaxService(db, clock, accounting, statements);
   const realSales = new RealSalesService(db, clock);
-  const fiscalPrep = new FiscalPrepService(db, clock, tax);
+  const fiscalPrep = new FiscalPrepService(db, clock, accounting, tax);
   const disclosures = new DisclosureService(db, clock);
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
   const attention = new AttentionService(db, clock, stock, pos, purchases, customers, rebates);

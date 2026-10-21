@@ -67,7 +67,6 @@ export const ENTITY_LABELS: Record<string, string> = {
   cash_handover: 'Relève de caisse',
   fixed_asset: 'Immobilisation',
   opening_balance: "Solde d'ouverture",
-  fiscal_adjustment: 'Ajustement fiscal (avoir, correction)',
   fiscal_log: 'Journal de la préparation fiscale',
   fiscal_statement: 'État fiscal généré',
 };
@@ -91,7 +90,7 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
   {
     key: 'compta',
     label: 'Comptabilité',
-    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'cheque_rejection', 'budget', 'fixed_asset', 'opening_balance', 'fiscal_adjustment', 'fiscal_log', 'fiscal_statement'],
+    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'cheque_rejection', 'budget', 'fixed_asset', 'opening_balance', 'fiscal_log', 'fiscal_statement'],
   },
 ];
 

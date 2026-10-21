@@ -37,8 +37,6 @@ export interface RealSaleRow {
   cancelled_by_name: string | null;
   /** Moyens de paiement : « Espèces 5 000 · MTN Mobile Money 2 000 ». */
   payments: string;
-  /** Avoirs et corrections de la préparation fiscale qui citent cette vente. */
-  fiscal_refs: number;
 }
 
 export interface RealSaleDetail extends RealSaleRow {
@@ -50,8 +48,6 @@ export interface RealSaleDetail extends RealSaleRow {
   vat: { rate: number; ttc: Fcfa; ht: Fcfa; tva: Fcfa }[];
   /** Retours faits sur cette vente. */
   returns: { id: string; number: string; created_at: string; status: string; total_ttc: Fcfa; cancel_reason: string | null }[];
-  /** Avoirs et corrections de la préparation fiscale qui la citent (lecture seule). */
-  fiscal: { id: string; number: string; kind: string; created_at: string }[];
 }
 
 export interface RealPaymentRow {
@@ -110,8 +106,7 @@ export class RealSalesService extends Base {
            s.change_given, s.original_sale_id, o.number AS original_number, s.replaces_id, rp.number AS replaces_number,
            (SELECT n.number FROM sales n WHERE n.replaces_id = s.id LIMIT 1) AS replaced_by_number,
            s.cancel_reason, cb.name AS cancelled_by_name,
-           (SELECT GROUP_CONCAT(p.method || ':' || p.amount, '|') FROM sale_payments p WHERE p.sale_id = s.id) AS pay,
-           (SELECT COUNT(*) FROM fiscal_adjustments f WHERE f.sale_id = s.id) AS fiscal_refs
+           (SELECT GROUP_CONCAT(p.method || ':' || p.amount, '|') FROM sale_payments p WHERE p.sale_id = s.id) AS pay
          FROM sales s
          LEFT JOIN registers r ON r.id = s.register_id
          LEFT JOIN users u ON u.id = s.user_id
@@ -158,8 +153,7 @@ export class RealSalesService extends Base {
     const returns = this.db
       .prepare('SELECT id, number, created_at, status, total_ttc, cancel_reason FROM sales WHERE original_sale_id = ? ORDER BY created_at')
       .all(id) as RealSaleDetail['returns'];
-    const fiscal = this.db.prepare('SELECT id, number, kind, created_at FROM fiscal_adjustments WHERE sale_id = ? ORDER BY created_at').all(id) as RealSaleDetail['fiscal'];
-    return { ...row, ...extra, lines, paymentLines, vat, returns, fiscal };
+    return { ...row, ...extra, lines, paymentLines, vat, returns };
   }
 
   payments(storeId: string, p: SalesPeriod): RealPaymentRow[] {

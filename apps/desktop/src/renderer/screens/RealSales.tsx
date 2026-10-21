@@ -39,7 +39,7 @@ export function RealSales({ initialTab = 'operations' }: { initialTab?: RealSale
       </header>
       <p className="muted">
         Source de référence : toutes les ventes, paiements, annulations et remboursements, tels qu’enregistrés à la caisse. Rien n’y est masqué ni modifié ; la préparation fiscale
-        s’appuie sur ces ventes sans les toucher.
+        se lit dans ces ventes et dans la comptabilité.
       </p>
       <Tabs
         value={tab}
@@ -119,7 +119,6 @@ function Operations({ from, to }: { from: string; to: string }) {
                 <td>{r.payments}</td>
                 <td>
                   {r.original_number ? `sur ${r.original_number}` : r.replaces_number ? `remplace ${r.replaces_number}` : r.replaced_by_number ? `remplacée par ${r.replaced_by_number}` : ''}
-                  {r.fiscal_refs ? ` · ${r.fiscal_refs} ajust. fiscal` : ''}
                 </td>
               </tr>
             ))}
@@ -207,19 +206,6 @@ function RealSaleDetail({ id, onClose, onOpen }: { id: string; onClose: () => vo
                 </button>{' '}
                 du {dateTime(r.created_at)} : {fcfa(r.total_ttc)}
                 {r.cancel_reason ? ` (${r.cancel_reason})` : ''}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {d.fiscal.length > 0 && (
-        <>
-          <h3>Références dans la préparation fiscale</h3>
-          <p className="muted">Ces ajustements citent cette vente ; ils ne la modifient pas.</p>
-          <ul>
-            {d.fiscal.map((f) => (
-              <li key={f.id}>
-                {f.number} ({f.kind === 'credit_note' ? 'avoir' : f.kind === 'reclass' ? 'reclassement' : 'correction'}) du {dateTime(f.created_at)}
               </li>
             ))}
           </ul>

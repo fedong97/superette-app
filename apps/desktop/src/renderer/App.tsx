@@ -88,7 +88,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   agent: { label: 'Point Mobile Money', perm: ['agent_point', 'agent_accounts'] },
   control: { label: 'Contrôle des caissiers', perm: ['cashier_control'] },
   realSales: { label: 'Ventes réelles', perm: ['real_sales'] },
-  fiscalPrep: { label: 'Préparation fiscale', perm: ['fiscal_prep', 'fiscal_adjust', 'fiscal_approve'] },
+  fiscalPrep: { label: 'Préparation fiscale', perm: ['fiscal_prep'] },
 };
 
 interface MenuItem {
@@ -414,8 +414,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Notes déclaratives de la DSF', open: ['accounting', 'dsf'], perm: ['tax', 'tax_settings'] },
       { label: 'Impôt sur le résultat', open: ['accounting', 'tax'], perm: ['tax', 'tax_settings'] },
       SEP,
-      { label: 'Préparation fiscale (état tiré des ventes réelles)', open: ['fiscalPrep', 'state'], perm: 'fiscal_prep' },
-      { label: 'Avoirs et corrections à approuver', open: ['fiscalPrep', 'adjustments'], perm: ['fiscal_adjust', 'fiscal_approve'] },
+      { label: 'Préparation fiscale (état tiré des ventes et de la comptabilité)', open: ['fiscalPrep', 'state'], perm: 'fiscal_prep' },
       { label: 'États fiscaux générés', open: ['fiscalPrep', 'statements'], perm: 'fiscal_prep' },
       { label: 'Ventes réelles (source)', open: ['realSales', 'operations'], perm: 'real_sales' },
     ],
@@ -1053,7 +1052,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
             {w.kind === 'realSales' && <RealSales initialTab={w.tab as RealSalesTab | undefined} />}
-            {w.kind === 'fiscalPrep' && <FiscalPrep user={user} initialTab={w.tab as FiscalPrepTab | undefined} />}
+            {w.kind === 'fiscalPrep' && <FiscalPrep initialTab={w.tab as FiscalPrepTab | undefined} />}
             {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
             {w.kind === 'orders' && <Orders user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}

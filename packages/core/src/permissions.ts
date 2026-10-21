@@ -215,9 +215,7 @@ export const PERMISSIONS = {
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
   tax: { label: 'Impôt sur le résultat, acomptes et notes de la DSF', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
   tax_settings: { label: 'Préparer les déclarations fiscales (paramètres, comptabiliser l’impôt)', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
-  fiscal_prep: { label: 'Préparation fiscale : état tiré des ventes réelles, rapprochement, états générés et exports', group: 'Fiscalité', type: 'Menu', parent: 'accounting' },
-  fiscal_adjust: { label: 'Proposer un avoir ou une correction justifiée sur une vente réelle', group: 'Fiscalité', type: 'Bouton', parent: 'fiscal_prep' },
-  fiscal_approve: { label: 'Approuver ou refuser les avoirs et corrections proposés par un autre utilisateur', group: 'Fiscalité', type: 'Bouton', roles: MANAGE },
+  fiscal_prep: { label: 'Préparation fiscale : état tiré des ventes réelles et de la comptabilité, états générés et exports', group: 'Fiscalité', type: 'Menu', parent: 'accounting' },
 
   // --- Comptabilité ------------------------------------------------------------
   accounting: { label: 'Comptabilité : journaux, grand livre, balance', group: 'Comptabilité', type: 'Menu', roles: ACCOUNTING },

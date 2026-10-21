@@ -968,28 +968,20 @@ export const HELP: Record<WinKind, PageHelp> = {
   },
   fiscalPrep: {
     title: 'Préparation fiscale',
-    intro: 'Un état comptable et fiscal tiré des ventes réelles, sans jamais les modifier. Le chiffre déclaré est le chiffre réel plus les seuls avoirs et corrections approuvés.',
+    intro: 'Un état comptable et fiscal lu dans les ventes réelles et la comptabilité. Ce module n’enregistre aucune opération : son chiffre est toujours celui des livres.',
     sections: [
       {
         tab: 'state',
         title: 'État fiscal',
         steps: [
-          'Choisissez la période : les ventes réelles sont réparties par catégorie fiscale (taux de TVA), avec les ajustements approuvés et le déclaré.',
-          'Le rapprochement montre CA réel + ajustements = CA déclaré ; l’écart non justifié est toujours 0.',
+          'Choisissez la période : le chiffre d’affaires est réparti par catégorie fiscale (taux de TVA), ventes moins avoirs clients.',
+          'Un avoir est un retour client fait à la caisse (Action › Retour) : il est déjà dans les ventes réelles et en comptabilité. Une correction se passe en comptabilité.',
+          'Le contrôle avec la comptabilité compare les comptes de ventes et de TVA collectée aux ventes réelles ; un écart signale une écriture manuelle à vérifier.',
           '« Générer l’état » le fige avec son empreinte : il ne se modifie plus, on en génère un nouveau si besoin.',
         ],
       },
-      {
-        tab: 'adjustments',
-        title: 'Avoirs et corrections',
-        steps: [
-          'Un avoir, une correction ou un reclassement se fait sur une vente réelle (son n°), sans dépasser ce qui en reste après retours et ajustements.',
-          'Motif et pièce justificative sont obligatoires. L’ajustement ne compte qu’une fois approuvé par un autre utilisateur que son auteur, dans le mois de son approbation.',
-          'Une décision est définitive : pour revenir sur un ajustement approuvé, proposez-en un autre en sens inverse.',
-        ],
-      },
       { tab: 'statements', title: 'États générés', steps: ['Les états figés, avec leur empreinte vérifiée et leur export CSV.'] },
-      { tab: 'journal', title: 'Journal et contrôle', steps: ['Toutes les propositions, décisions et générations, chaînées par empreinte. « Vérifier le journal » signale toute ligne changée ou retirée.'] },
+      { tab: 'journal', title: 'Journal et contrôle', steps: ['Chaque génération, chaînée par empreinte. « Vérifier le journal » signale toute ligne changée ou retirée.'] },
     ],
   },
 };

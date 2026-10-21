@@ -39,7 +39,7 @@ import type { StockService } from './stock';
 import type { TreasuryService } from './treasury';
 import { DELIVERY_FEE_ARTICLE_ID, type DeliveryInput, type DeliveryService } from './deliveries';
 import { ENTRY_KINDS, type EmoneyRow, type EmoneyService, type EntryKind, isEmoney } from './emoney';
-import { AppError, Base, type Clock, type Context, newId } from './util';
+import { AppError, type ErrorFix, Base, type Clock, type Context, newId } from './util';
 import type { Db } from './database';
 
 export interface CashSession {
@@ -727,6 +727,33 @@ export class PosService extends Base {
   }
 
   /**
+   * Solutions proposées quand un produit manque au rayon : le monter d'un
+   * dépôt du magasin qui en a (réserve), et noter la demande du client.
+   */
+  private outOfStockFixes(storeId: string, sources: { id: string }[], chosenId: string, line: { articleId: string; label: string; qty: Milli }, need: Milli): ErrorFix[] {
+    const fixes: ErrorFix[] = [];
+    const used = new Set(sources.map((w) => w.id));
+    const other = this.db
+      .prepare(
+        `SELECT w.id, w.name, s.qty FROM stock s JOIN warehouses w ON w.id = s.warehouse_id
+         WHERE s.article_id = ? AND w.store_id = ? AND w.active = 1 AND w.purpose = 'stock' AND s.qty > 0 ORDER BY s.qty DESC`,
+      )
+      .all(line.articleId, storeId) as { id: string; name: string; qty: Milli }[];
+    const from = other.find((w) => !used.has(w.id) && w.qty >= need) ?? other.find((w) => !used.has(w.id));
+    if (from) {
+      // Un carton entier quand l'article en a un : on monte ce qui se manipule.
+      const pack = this.db.prepare('SELECT name, units FROM article_packs WHERE article_id = ? AND units >= ? ORDER BY units LIMIT 1').get(line.articleId, need) as
+        | { name: string; units: Milli }
+        | undefined;
+      const qty = Math.min(from.qty, pack && pack.units <= from.qty ? pack.units : need);
+      const label = pack && qty === pack.units ? `1 ${pack.name.toLowerCase()}` : String(qty / 1000).replace('.', ',');
+      fixes.push({ label: `Monter ${label} de « ${from.name} »`, run: { api: 'stock.transfer', args: [{ fromWarehouseId: from.id, toWarehouseId: chosenId, lines: [{ articleId: line.articleId, qty }] }] } });
+    }
+    fixes.push({ label: 'Noter : le client voulait…', run: { api: 'missed.record', args: [{ articleId: line.articleId, label: line.label, qty: line.qty, reason: 'rupture' }] } });
+    return fixes;
+  }
+
+  /**
    * Un produit épuisé ne se vend pas : chaque ligne sort du dépôt choisi, et ce
    * qui y manque se complète dans les autres dépôts du vendeur. Avec « Ignorer
    * la gestion des stocks », le reste sort quand même du dépôt choisi et la
@@ -784,7 +811,7 @@ export class PosService extends Base {
         if (!ignore) {
           const unit = head.unit === 'piece' ? (head.unit_name ?? 'pièce').toLowerCase() : head.unit === 'kg' ? 'kg' : 'L';
           const rest = total <= 0 ? 'épuisé' : `il reste ${String(total / 1000).replace('.', ',')} ${unit}`;
-          throw new AppError(`Stock insuffisant pour ${l.label} : ${rest}${head.substitute ? `. Proposez à la place : ${head.substitute}` : ''}`, 'OUT_OF_STOCK');
+          throw new AppError(`Stock insuffisant pour ${l.label} : ${rest}${head.substitute ? `. Proposez à la place : ${head.substitute}` : ''}`, 'OUT_OF_STOCK', this.outOfStockFixes(storeId, sources, chosen.id, l, need));
         }
         const s = short.get(l.articleId);
         short.set(l.articleId, { label: l.label, qty: (s?.qty ?? 0) + l.qty, stock: total });

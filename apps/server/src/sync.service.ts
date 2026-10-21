@@ -35,7 +35,7 @@ export const GLOBAL_ENTITIES = [
   'company',
 ];
 
-export const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder', 'customer_order', 'sales_target', 'supplier_return', 'summary_invoice', 'cheque_deposit', 'budget', 'attendance', 'cash_handover', 'fixed_asset', 'opening_balance', 'container_move', 'agent_account', 'agent_operation', 'staff_leave', 'staff_schedule', 'cheque_rejection', 'courier_return', 'account_offset', 'payment_allocation', 'sale_edit_request', 'consignment_count']);
+export const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder', 'customer_order', 'sales_target', 'supplier_return', 'summary_invoice', 'cheque_deposit', 'budget', 'attendance', 'cash_handover', 'fixed_asset', 'opening_balance', 'container_move', 'agent_account', 'agent_operation', 'staff_leave', 'staff_schedule', 'cheque_rejection', 'courier_return', 'account_offset', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale']);
 
 export interface SyncEvent {
   id: string;
@@ -167,6 +167,31 @@ export class SyncService {
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');
     return rows[0];
+  }
+
+  /** État du PC (sauvegarde, imprimante, envois en attente, licence), gardé pour l'écran « État des PC ». */
+  async saveStatus(device: Device, status: unknown): Promise<{ ok: true }> {
+    const text = JSON.stringify(status ?? null);
+    if (!status || typeof status !== 'object' || text.length > 8000) throw new BadRequestException('État du poste invalide');
+    await this.pg.query('UPDATE devices SET status = $2, status_at = now() WHERE id = $1', [device.id, text]);
+    return { ok: true };
+  }
+
+  /** PC du magasin et leur dernier état connu. */
+  async statuses(device: Device) {
+    const { rows } = await this.pg.query<{ id: string; name: string; last_seen_at: Date | null; app_version: string | null; status: unknown }>(
+      "SELECT id, name, last_seen_at, app_version, status FROM devices WHERE store_id = $1 AND revoked_at IS NULL AND kind = 'pc' ORDER BY name",
+      [device.store_id],
+    );
+    return {
+      devices: rows.map((r) => ({
+        deviceId: r.id,
+        name: r.name,
+        lastSeenAt: r.last_seen_at ? new Date(r.last_seen_at).toISOString() : null,
+        appVersion: r.app_version,
+        status: typeof r.status === 'string' ? (JSON.parse(r.status) as unknown) : (r.status ?? null),
+      })),
+    };
   }
 
   /**

@@ -234,6 +234,8 @@ function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | nul
 function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit: boolean }) {
   const toast = useToast();
   const list = useLoad(() => call('suppliers.articles', supplierId), [supplierId]);
+  // Retraits en attente (10 s pour annuler) : déjà masqués.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [edit, setEdit] = useState<{ articleId: string; name: string; unit: 'piece' | 'kg' | 'litre'; ref: string; cost: string; pack: string; main: boolean; buy: string; pay: string } | null>(null);
   return (
     <>
@@ -257,7 +259,7 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
           </tr>
         </thead>
         <tbody>
-          {(list.data ?? []).map((a) => (
+          {(list.data ?? []).filter((a) => !hidden.has(a.id)).map((a) => (
             <tr
               key={a.id}
               className={canEdit ? 'clickable' : ''}
@@ -289,11 +291,14 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
                 {canEdit && (
                   <button
                     className="ghost"
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      if (!(await askConfirm(`Ne plus référencer « ${a.article_name} » chez ce fournisseur ?`))) return;
-                      await call('suppliers.removeArticle', a.id).catch(toast.error);
-                      list.reload();
+                      setHidden((h) => new Set(h).add(a.id));
+                      toast.later(
+                        `« ${a.article_name} » n'est plus référencé chez ce fournisseur`,
+                        () => call('suppliers.removeArticle', a.id).then(list.reload, toast.error),
+                        () => setHidden((h) => (h.delete(a.id), new Set(h))),
+                      );
                     }}
                   >
                     ✕

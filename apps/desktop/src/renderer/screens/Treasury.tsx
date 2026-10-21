@@ -5,6 +5,7 @@ import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmo
 import { CashInDialog, CashOutDialog, DeskActions, type DeskProps, type DeskRow, NatureTotals } from './CashDesk';
 import { EmoneyCentral } from './EmoneyCentral';
 import { ZView } from './PosDialogs';
+import { BeforeClose } from './Floor';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type State = Result<'treasury.state'>;
@@ -922,6 +923,7 @@ function CloseDialog({
     <Modal title="Fermer la caisse" onClose={onClose} wide>
       {!preview ? (
         <>
+          <BeforeClose registerId={session.register_id ?? undefined} />
           <p>Comptez les espèces du tiroir par coupure. L'attendu s'affiche après le comptage.</p>
           <Denominations count={count} onChange={setCount} />
           <div className="actions">
@@ -1210,6 +1212,7 @@ function BlindCloseDialog({ session, user, onClose, onDone }: { session: NonNull
     <Modal title="Fermer la caisse" onClose={onClose} wide>
       {!checked ? (
         <>
+          <BeforeClose registerId={session.register_id ?? undefined} />
           <p>Comptez les espèces du tiroir par coupure.</p>
           <Denominations count={count} onChange={setCount} />
           <div className="actions">

@@ -373,6 +373,50 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
     barcodeLabels: printBarcodeLabelsHtml,
     a4: printA4,
 
+    async listing(storeId, title, tableHtml, output) {
+      const store = s.admin.getStore(storeId);
+      // Le tableau vient de l'écran : seules les balises du tableau sont gardées (pas de script, pas d'image).
+      const table = tableHtml
+        .replace(/<(script|style|img|svg|iframe|button|input|select)\b[\s\S]*?(<\/\1>|\/?>)/gi, '')
+        .replace(/\s(on\w+|style|class|data-[\w-]+)="[^"]*"/gi, '');
+      const body = `${a4Head(store)}
+        <h1>${esc(title)}</h1>
+        <p class="muted">Édité le ${new Date().toLocaleString('fr-FR')}</p>
+        <style>table { font-size: 11px; } td { vertical-align: top; }</style>
+        ${table}`;
+      if (output === 'pdf') return saveA4Pdf(body, `${title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'liste'}.pdf`);
+      await printA4(body);
+      return true;
+    },
+
+    async ownerReport(storeId, r, month) {
+      const store = s.admin.getStore(storeId);
+      const money = (v: number) => `${Math.round(v).toLocaleString('fr-FR')} FCFA`;
+      const evo = (a: number, b: number) => (b ? `${a >= b ? '+' : ''}${Math.round(((a - b) / Math.abs(b)) * 100)} %` : '');
+      const [y, m] = month.split('-').map(Number) as [number, number];
+      const name = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+      const rows: [string, number, number][] = [
+        ['Ventes TTC', r.current.sales_ttc, r.previous.sales_ttc],
+        ['Ventes HT', r.current.sales_ht, r.previous.sales_ht],
+        ['Marge brute', r.current.margin, r.previous.margin],
+        ['Dépenses', r.current.expenses, r.previous.expenses],
+        ['Stock (fin de mois)', r.current.stock, r.previous.stock],
+        ['Crédit clients', r.current.receivables, r.previous.receivables],
+        ['Trésorerie', r.current.treasury, r.previous.treasury],
+        ['Dettes fournisseurs', r.current.payables, r.previous.payables],
+      ];
+      const body = `${a4Head(store)}
+        <h1>Rapport du mois : ${esc(name)}</h1>
+        <p class="muted">${r.current.tickets} tickets · taux de marge ${String(r.current.margin_rate).replace('.', ',')} % (mois d'avant ${String(r.previous.margin_rate).replace('.', ',')} %)</p>
+        <table><tr><th></th><th class="r">${esc(name)}</th><th class="r">Mois d'avant</th><th class="r">Évolution</th></tr>
+        ${rows.map(([l, a, b]) => `<tr><td>${esc(l)}</td><td class="r"><b>${money(a)}</b></td><td class="r">${money(b)}</td><td class="r">${evo(a, b)}</td></tr>`).join('')}</table>
+        <h2 style="font-size:15px;margin-top:22px">Rayons qui font la marge</h2>
+        <table><tr><th>Rayon</th><th class="r">Ventes HT</th><th class="r">Marge</th></tr>
+        ${r.departments.map((d) => `<tr><td>${esc(d.name)}</td><td class="r">${money(d.sales_ht)}</td><td class="r">${money(d.margin)}</td></tr>`).join('')}</table>
+        <p class="muted" style="margin-top:24px">Chiffres tirés des ventes, de la comptabilité et du stock enregistrés dans FEDONIX 360.</p>`;
+      return saveA4Pdf(body, `rapport-${month}-${store.code}.pdf`);
+    },
+
     async countSheet(storeId, warehouseId, departmentId) {
       const store = s.admin.getStore(storeId);
       const wh = s.admin.listWarehouses(storeId).find((w) => w.id === warehouseId);

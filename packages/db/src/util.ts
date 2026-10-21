@@ -10,10 +10,23 @@ export interface Context {
   userId: string;
 }
 
+/**
+ * Solution proposée avec un message d'erreur : un bouton qui ouvre l'écran
+ * où se règle le problème, ou qui fait l'action tout de suite.
+ */
+export interface ErrorFix {
+  label: string;
+  /** Écran à ouvrir : fenêtre et onglet. */
+  open?: [string, string?];
+  /** Action à lancer (nom de l'action et ses arguments), puis l'opération est à refaire. */
+  run?: { api: string; args: unknown[] };
+}
+
 export class AppError extends Error {
   constructor(
     message: string,
     readonly code: string = 'APP_ERROR',
+    readonly fixes: ErrorFix[] = [],
   ) {
     super(message);
   }

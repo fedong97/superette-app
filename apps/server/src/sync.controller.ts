@@ -85,6 +85,30 @@ export class SyncController {
     return this.mobile.takeCart(await this.sync.authenticate(auth), id);
   }
 
+  /** État du PC (toutes les 5 minutes) et état de tous les PC du magasin. */
+  @Post('devices/status')
+  @HttpCode(200)
+  async pushStatus(@Headers('authorization') auth: string | undefined, @Body() body: unknown) {
+    return this.sync.saveStatus(await this.sync.authenticate(auth), body);
+  }
+
+  @Get('devices/status')
+  async statuses(@Headers('authorization') auth: string | undefined) {
+    return this.sync.statuses(await this.sync.authenticate(auth));
+  }
+
+  /** Livraisons comptées sur le téléphone, pour les PC du magasin. */
+  @Get('mobile-receptions')
+  async mobileReceptions(@Headers('authorization') auth: string | undefined) {
+    return this.mobile.waitingReceptions((await this.sync.authenticate(auth)).store_id);
+  }
+
+  @Post('mobile-receptions/:id/take')
+  @HttpCode(200)
+  async takeReception(@Headers('authorization') auth: string | undefined, @Param('id') id: string) {
+    return this.mobile.takeReception(await this.sync.authenticate(auth), id);
+  }
+
   @Get('sync/pull')
   async pull(@Headers('authorization') auth: string | undefined, @Headers('x-fedonix-version') version: string | undefined, @Query('since') since?: string, @Query('limit') limit?: string) {
     const device = await this.sync.authenticate(auth, version);

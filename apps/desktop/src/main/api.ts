@@ -61,6 +61,13 @@ import {
   approvalStatus,
   requestApproval,
   shelfCarts,
+  mobileReceptions,
+  takeMobileReception,
+  pushStationStatus,
+  stationStatuses,
+  type StationStatus,
+  type MissedSaleInput,
+  type OwnerReport,
   takeShelfCart,
   takeWebOrder,
   webOrders,
@@ -144,7 +151,7 @@ import {
 import { createCloudBackup } from './cloudBackup';
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { CustomerDisplay } from './customerDisplay';
 import type { DossierEntry } from './dossiers';
@@ -252,6 +259,10 @@ export interface Printer {
   barcodeLabels(html: string, format: BarcodeLabelFormatId): Promise<boolean>;
   /** Page A4 (cartes de fidélité…) : la fenêtre d'impression Windows s'ouvre. */
   a4(body: string): Promise<void>;
+  /** Liste d'un écran telle qu'affichée (colonnes choisies, tri, filtre) : imprimée ou en PDF ; false si annulé. */
+  listing(storeId: string, title: string, tableHtml: string, output: 'print' | 'pdf'): Promise<boolean>;
+  /** Rapport mensuel du propriétaire sur une page, enregistré en PDF ; false si annulé. */
+  ownerReport(storeId: string, report: OwnerReport, month: string): Promise<boolean>;
   countSheet(storeId: string, warehouseId: string, departmentId?: string | null): Promise<void>;
   /** Fiche de comptage d'un inventaire (cases vides par conditionnement), par rayon. */
   inventorySheet(inventoryId: string, opts?: { model?: InventorySheetModel; output?: 'a4' | 'pdf' | 'ticket' }): Promise<void>;
@@ -534,6 +545,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   };
   /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
   const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
+  let lastStatusPush = 0;
+  /** État de ce PC, envoyé au serveur et montré dans Administration › État des PC. */
+  const stationStatus = (): StationStatus => {
+    const station = s.admin.station();
+    const st = s.sync.state();
+    const backup = s.backups.status();
+    const lic = s.license.status();
+    const printerName = s.admin.getSetting('printer.name') || (s.admin.getSetting('printer.mode') === 'network' ? s.admin.getSetting('printer.host') : null);
+    return {
+      name: hostname(),
+      register: station?.register?.name ?? null,
+      version: appVersion,
+      lastSyncAt: st.lastSyncAt,
+      pending: st.pending,
+      syncError: st.lastError,
+      backupAt: backup.last_at,
+      backupError: backup.last_error,
+      printer: printerName || null,
+      printerEnabled: s.admin.getSetting('printer.enabled') !== '0',
+      license: { state: lic.state, canSell: lic.canSell, daysLeft: lic.daysLeft, message: lic.message },
+      at: new Date().toISOString(),
+    };
+  };
 
   return {
     // --- Application et connexion -------------------------------------------
@@ -1118,7 +1152,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (Object.keys(shared).length) for (const st of s.admin.listStores()) if (st.id !== c.storeId) s.admin.saveStoreSettings(c.userId, st.id, shared);
       return saved;
     },
-    'admin.audit': () => (requireUser(['audit']), s.admin.auditLog()),
+    'admin.audit': (filters?: Parameters<Services['admin']['auditSearch']>[0]) => (requireUser(['audit']), s.admin.auditSearch(filters ?? {})),
+    /** Nouvel employé au même poste qu'un autre (rôle, caisse, dépôts, privilèges). */
+    'admin.copyUser': (fromId: string, input: { name: string; login: string; pin: string }) => s.admin.copyUser(requireUser(['user_copy']).id, fromId, input),
     'admin.printers': () => (requireUser(), printer.list()),
     'admin.printTest': (withDrawer: boolean) => (requireUser(['settings_edit']), printer.testPage(withDrawer)),
 
@@ -1153,7 +1189,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         throw new AppError(e instanceof Error ? e.message : String(e), 'INVALID');
       }
     },
-    'sync.state': () => (requireUser(), s.sync.state()),
+    'sync.state': () => {
+      requireUser();
+      // Le serveur reçoit l'état de ce PC toutes les 5 minutes (Administration › État des PC).
+      if (s.sync.credentials() && Date.now() - lastStatusPush > 5 * 60_000) {
+        lastStatusPush = Date.now();
+        void pushStationStatus(s, stationStatus()).catch(() => undefined);
+      }
+      return s.sync.state();
+    },
     'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), notInFiche(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
     'sync.resend': () => (requireAdmin(), sync.resend()),
@@ -2609,6 +2653,77 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ['production', can(u, ['production'])],
       ];
       return s.attention.list(c.storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
+    },
+    // --- 0.81.0 : le magasin au quotidien -------------------------------------------
+    /** « Le client voulait… » : produit absent, en rupture ou trop cher. */
+    'missed.record': (input: MissedSaleInput) => s.missedSales.record(ctx(['missed_sale', 'missed_report']), { ...input, source: 'pc' }),
+    'missed.remove': (id: string) => {
+      const c = ctx(['missed_sale', 'missed_report']);
+      return s.missedSales.remove(c, id, can(requireUser(), ['missed_report']));
+    },
+    'missed.list': (opts?: { from?: string | null; to?: string | null }) => s.missedSales.list(ctx(['missed_report']).storeId, opts),
+    'missed.top': (days?: number) => s.missedSales.top(ctx(['missed_report']).storeId, days),
+    /** Mes demandes notées aujourd'hui (pour retirer une erreur). */
+    'missed.mine': () => {
+      const c = ctx(['missed_sale']);
+      return s.missedSales.list(c.storeId, { from: new Date(Date.now() - 86_400_000).toISOString() }).filter((m) => m.user_name === requireUser().name).slice(0, 20);
+    },
+    'restock.list': () => s.floor.restockList(ctx(['restock']).storeId),
+    'restock.apply': (lines: { articleId: string; fromWarehouseId: string; qty: Milli }[]) => s.floor.restock(ctx(['restock']), lines),
+    'restock.setShelfQty': (articleId: string, qty: Milli | null) => s.floor.setShelfQty(ctx(['restock', 'article_edit']), articleId, qty),
+    'tasks.today': () => {
+      const u = requireUser(['day_tasks']);
+      return s.floor.dayTasks(ctx().storeId, (r) => can(u, [r as Permission]));
+    },
+    'tasks.check': (key: string, done: boolean) => s.floor.checkTask(ctx(['day_tasks']), key, done),
+    /** Avant de clôturer : ce qui reste ouvert sur la caisse (tickets en attente, MoMo, livraisons, paniers du rayon). */
+    'treasury.beforeClose': async (registerId?: string) => {
+      const c = ctx(TREASURY);
+      const items = s.floor.beforeClose(c.storeId, registerId ?? c.registerId ?? '');
+      const carts = await shelfCarts(s).catch(() => []);
+      if (carts.length)
+        items.push({ key: 'carts', label: 'Paniers préparés au rayon, pas encore encaissés', count: carts.length, detail: carts.map((x) => `Panier ${x.number} de ${x.sellerName}`), open: ['cash1'] });
+      return items;
+    },
+    'suppliers.calendar': () => s.purchases.visitCalendar(ctx(['supplier_calendar', 'reorder']).storeId),
+    'suppliers.setVisitDays': (id: string, days: number[]) => s.purchases.setVisitDays(requireUser(['supplier_calendar', 'supplier_edit']).id, id, days),
+    'prices.review': () => s.insights.priceReview(ctx(['price_review']).storeId),
+    'prices.applyReview': (articleId: string, price: Fcfa) => {
+      const c = ctx(['price_review']);
+      requireUser(['article_price']);
+      return s.insights.applyPriceReview(c.userId, c.storeId, articleId, price);
+    },
+    'team.week': (from: string, to: string) => s.insights.team(ctx(['team_board']).storeId, from, to),
+    'owner.report': (month: string) => s.insights.ownerReport(ctx(['owner_report']).storeId, month),
+    /** Rapport mensuel en PDF (une page A4) : la fenêtre « Enregistrer sous » s'ouvre. */
+    'owner.reportPdf': async (month: string) => {
+      const c = ctx(['owner_report']);
+      return printer.ownerReport(c.storeId, s.insights.ownerReport(c.storeId, month), month);
+    },
+    /** État de ce PC : synchronisation, version, sauvegarde, imprimante, licence. */
+    'stations.self': () => (requireUser(['stations']), stationStatus()),
+    /** État de tous les PC du magasin, d'après le serveur (ce PC seul s'il n'est pas relié). */
+    'stations.all': async () => {
+      requireUser(['stations']);
+      const self = stationStatus();
+      if (!s.sync.credentials()) return { linked: false, devices: [{ deviceId: 'self', name: self.name, lastSeenAt: self.at, appVersion: self.version, status: self, self: true }] };
+      await pushStationStatus(s, self).catch(() => undefined);
+      return { linked: true, devices: await stationStatuses(s) };
+    },
+    /** Réceptions faites sur le téléphone, qui attendent la validation d'un PC. */
+    'purchases.mobileReceptions': async () => (requireUser(['order_receive']), mobileReceptions(s).catch(() => [])),
+    'purchases.takeMobileReception': (id: string) => (requireUser(['order_receive']), takeMobileReception(s, id)),
+    /** Brouillons de saisie gardés sur ce PC (coupure de courant, fermeture). */
+    'drafts.save': (key: string, label: string, data: unknown) => s.admin.saveDraft(requireUser().id, key, label, data),
+    'drafts.get': (key: string) => s.admin.draft(requireUser().id, key),
+    'drafts.list': () => s.admin.drafts(requireUser().id),
+    'drafts.clear': (key: string) => s.admin.clearDraft(requireUser().id, key),
+    /** Liste imprimée ou en PDF depuis n'importe quel écran (tableau tel qu'affiché). */
+    'list.print': (title: string, tableHtml: string) => (requireUser(), printer.listing(ctx().storeId, title, tableHtml, 'print')),
+    'list.pdf': (title: string, tableHtml: string) => (requireUser(), printer.listing(ctx().storeId, title, tableHtml, 'pdf')),
+    'list.xlsx': (title: string, columns: { header: string; format?: 'text' | 'int' | 'money' | 'qty' | 'pct' }[], rows: (string | number | null)[][]) => {
+      requireUser();
+      return xlsxWorkbook([{ name: title.slice(0, 31).replace(/[\\/?*[\]:]/g, ' '), title: [title, `Édité le ${new Date().toLocaleString('fr-FR')}`], columns: columns.map((c) => ({ ...c, width: Math.min(50, Math.max(10, c.header.length + 4)) })), rows }]);
     },
     'reports.sales': (input: SalesReportInput) => s.reports.sales(ctx(['reports', 'sales']).storeId, input),
     'reports.unsold': (from: string, to: string) => s.reports.unsold(ctx(['reports', 'sales']).storeId, from, to),

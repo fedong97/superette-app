@@ -297,6 +297,14 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Demande de modification d'une facture validée `DM-` : le vendeur sans le droit la demande avec un motif, le gérant l'accorde ou la refuse (point d'attention) ; accordée, une seule modification par le demandeur.
 - Dépôt-vente chez un revendeur (`warehouses.purpose = 'consignment'`) : marchandise confiée par transfert, fiche de contrôle `FC-` qui facture le vendu à crédit et reprend le reste.
 - Courbe du patrimoine (trésorerie + créances + stock − dettes fournisseurs, fin de mois) et sociétés (`companies`, `stores.company_id`) avec chiffres consolidés.
+**Ergonomie et métier au quotidien (0.81.0)**
+- Listes : outils ajoutés à chaque `table.list` (filtre, colonnes masquées et rangées, tri par en-tête, vues gardées dans les préférences, impression, Excel `list.xlsx`, PDF `list.pdf`).
+- Erreurs avec solutions (`AppError.fixes`, `main/fixes.ts`) ; brouillons de saisie par utilisateur (`ui_drafts`) ; « Annuler » 10 s (`toast.later`) ; raccourcis de page (Ctrl+/) et thèmes sombre et contraste fort.
+- Ticket : code-barres Code 128 du numéro (`ReceiptLine` `barcode`, ESC/POS `GS k`) ; scanné en caisse, il ouvre retour (code du gérant), réimpression et facture A4. Touches rapides par rayon.
+- Ventes manquées (`missed_sales`, entité `missed_sale`, aussi envoyées par le téléphone) comptées dans la demande de la proposition de commande ; jours de passage fournisseur (`suppliers.visit_days`).
+- Réassort du rayon (`articles.shelf_qty`, transfert depuis la réserve), tâches du jour (`day_task_checks`), avant de clôturer, prix à revoir, tableau de l'équipe, rapport mensuel du propriétaire (PDF, WhatsApp ; chiffres des ventes enregistrées).
+- Serveur (migration 10) : état des PC (`devices.status`), réceptions comptées au téléphone (`mobile_receptions`, reprises par un seul PC), fiche produit du téléphone (stock des autres dépôts, prochaine livraison, remplaçant).
+- Administration : état des PC, journal d'audit cherchable, copie d'un utilisateur (rôle, caisse, dépôts, privilèges).
 
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.

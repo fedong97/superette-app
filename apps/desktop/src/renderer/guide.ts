@@ -109,6 +109,21 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.81.0',
+    items: [
+      'Listes : survolez un tableau pour filtrer, choisir et ranger les colonnes (☰), trier en cliquant un titre, garder des vues, imprimer, exporter vers Excel ou en PDF.',
+      'Messages avec la solution : une erreur propose le bouton qui la règle (ouvrir la caisse, monter du stock de la réserve, relier le serveur…).',
+      'Saisies retrouvées : un bon de commande, un devis, une fiche article ou une réception en cours sont gardés ; après une coupure, l’accueil propose de les reprendre.',
+      'Annuler pendant 10 secondes (ou Ctrl+Z) au lieu de « Êtes-vous sûr ? » pour les actions simples, comme vider une fiche.',
+      'Clavier : Ctrl+/ montre les raccourcis de la page ; les boutons affichent leur touche ; Ctrl+Entrée valide la fenêtre ouverte. Thème sombre et contraste fort (Fichier › Thème).',
+      'Caisse : le ticket porte le code-barres de son numéro ; scanné en caisse, il ouvre retour (toujours avec le code du gérant), réimpression et facture A4. Touches rapides rangées par rayon, avec photos. « Avant de clôturer » rappelle les tickets en attente et paiements non confirmés.',
+      'Le client voulait… (Ctrl+M en caisse, ou au rayon sur le téléphone) : les ventes manquées sont comptées dans la proposition de commande. Le téléphone montre aussi le stock des autres dépôts et magasins, la prochaine livraison et le produit de remplacement.',
+      'Magasinier : réception au téléphone devant le camion (le PC valide), réassort du rayon depuis la réserve, tâches du jour sur l’accueil.',
+      'Gérant : calendrier des passages fournisseurs, prix à revoir après une hausse d’achat, tableau de l’équipe de la semaine, rapport du mois pour le propriétaire (PDF et WhatsApp).',
+      'Administration : état de chaque PC du magasin, journal d’audit cherchable (personne, produit, mot, dates), « Copier » un utilisateur pour un nouvel employé au même poste.',
+    ],
+  },
+  {
     version: '0.78.0',
     items: [
       'Prix négociés par article : dans la fiche d’un client, un prix convenu pour chaque article. La caisse le prend tout seul quand il est plus bas que le prix du jour.',

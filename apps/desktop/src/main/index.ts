@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { AppError, defaultBackupDir, inspectBackup, installFiche, latestGoodBackup, openServices, restoreDatabase, setSyncClientVersion } from '@superette/db';
 import { type ApiName, type SystemHooks, createApi } from './api';
+import { fixesFor } from './fixes';
 import { createCloudBackup } from './cloudBackup';
 import { createCustomerDisplay } from './customerDisplay';
 import { createDigestMailer } from './digest';
@@ -268,7 +269,7 @@ void app.whenReady().then(() => {
     try {
       return { ok: true, data: await fn(...args) };
     } catch (e) {
-      if (e instanceof AppError) return { ok: false, error: { message: e.message, code: e.code } };
+      if (e instanceof AppError) return { ok: false, error: { message: e.message, code: e.code, fixes: fixesFor(e) } };
       console.error(`[api] ${String(name)}`, e);
       return { ok: false, error: { message: e instanceof Error ? e.message : String(e), code: 'INTERNAL' } };
     }

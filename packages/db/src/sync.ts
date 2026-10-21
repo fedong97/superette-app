@@ -85,6 +85,7 @@ const TABLES: Record<string, string> = {
   account_offset: 'account_offsets',
   payment_allocation: 'payment_allocations',
   sale_edit_request: 'sale_edit_requests',
+  missed_sale: 'missed_sales',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */

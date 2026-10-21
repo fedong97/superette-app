@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Tabs, fcfa, qty, today, useLoad } from '../ui';
+import { Empty, Tabs, fcfa, qty, today, useCan, useLoad } from '../ui';
+import { OwnerReport, PriceReview, TeamBoard } from './Floor';
 import { tx } from '../tax';
 
-export type DashboardTab = 'day' | 'attention';
+export type DashboardTab = 'day' | 'attention' | 'prices' | 'team' | 'owner';
 type Item = Result<'attention.list'>[number];
 /** Fenêtre et onglet qui traitent chaque point d'attention. */
 export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales', string];
@@ -25,18 +26,32 @@ const TARGET: Record<Item['key'], AttentionTarget> = {
 
 /** Tableau de bord : la journée en chiffres, et les points d'attention du gérant. */
 export function Dashboard({ initialTab = 'day', onOpen }: { initialTab?: DashboardTab; onOpen: (target: AttentionTarget) => void }) {
-  const [tab, setTab] = useState<DashboardTab>(initialTab);
+  const can = useCan();
+  // Sans le tableau de bord, seuls les onglets permis (prix, équipe, rapport) restent.
+  const first: DashboardTab = can('dashboard') ? 'day' : can('price_review') ? 'prices' : can('team_board') ? 'team' : 'owner';
+  const [tab, setTab] = useState<DashboardTab>((initialTab === 'day' || initialTab === 'attention') && !can('dashboard') ? first : initialTab);
   return (
     <div className="page">
       <Tabs
         value={tab}
         onChange={setTab}
         tabs={[
-          ['day', 'La journée'],
-          ['attention', "Points d'attention"],
+          ...(can('dashboard')
+            ? ([
+                ['day', 'La journée'],
+                ['attention', "Points d'attention"],
+              ] as [DashboardTab, string][])
+            : []),
+          ...(can('price_review') ? ([['prices', 'Prix à revoir']] as [DashboardTab, string][]) : []),
+          ...(can('team_board') ? ([['team', 'Équipe de la semaine']] as [DashboardTab, string][]) : []),
+          ...(can('owner_report') ? ([['owner', 'Rapport du mois']] as [DashboardTab, string][]) : []),
         ]}
       />
-      {tab === 'day' ? <Day /> : <Attention onOpen={onOpen} />}
+      {tab === 'day' && can('dashboard') && <Day />}
+      {tab === 'attention' && can('dashboard') && <Attention onOpen={onOpen} />}
+      {tab === 'prices' && can('price_review') && <PriceReview />}
+      {tab === 'team' && can('team_board') && <TeamBoard />}
+      {tab === 'owner' && can('owner_report') && <OwnerReport />}
     </div>
   );
 }

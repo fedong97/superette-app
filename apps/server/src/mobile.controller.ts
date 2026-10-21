@@ -74,6 +74,33 @@ export class MobileController {
     return this.mobile.pushCart(await this.mobile.caller(auth, session), body);
   }
 
+  @Post('api/v1/mobile/missed')
+  @HttpCode(200)
+  async missed(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: Parameters<MobileService['recordMissed']>[1]) {
+    return this.mobile.recordMissed(await this.mobile.caller(auth, session), body);
+  }
+
+  @Get('api/v1/mobile/articles/:id/info')
+  async productInfo(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Param('id') id: string) {
+    return this.mobile.productInfo(await this.mobile.caller(auth, session), id);
+  }
+
+  @Get('api/v1/mobile/reception-orders')
+  async receptionOrders(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    return this.mobile.receptionOrders(await this.mobile.caller(auth, session));
+  }
+
+  @Post('api/v1/mobile/receptions')
+  @HttpCode(200)
+  async pushReception(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: Parameters<MobileService['pushReception']>[1]) {
+    return this.mobile.pushReception(await this.mobile.caller(auth, session), body);
+  }
+
+  @Get('api/v1/mobile/receptions')
+  async myReceptions(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    return this.mobile.myReceptions(await this.mobile.caller(auth, session));
+  }
+
   @Get('api/v1/mobile/carts')
   async myCarts(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
     return this.mobile.myCarts(await this.mobile.caller(auth, session));

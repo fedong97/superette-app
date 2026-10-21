@@ -266,10 +266,33 @@ export class MobileService {
     return this.hasRight(userId, role, 'shelf_cart', ['manager', 'cashier', 'seller']);
   }
 
+  /**
+   * Droit qui suit son parent quand il n'est pas réglé (comme sur les PC) :
+   * `chain` va du droit demandé au droit racine, `defaults` sont les rôles de la racine.
+   */
+  private async hasChainRight(userId: string, role: string, chain: string[], defaults: string[]): Promise<boolean> {
+    if (role === 'admin') return true;
+    const ur = await this.one('user_rights', userId);
+    const rr = json<Record<string, boolean>>((await this.one('role_rights', role))?.['rights'], {});
+    const revokes = json<string[]>(ur?.['revokes'], []);
+    const grants = json<string[]>(ur?.['grants'], []);
+    const [right] = chain;
+    if (revokes.includes(right!)) return false;
+    if (grants.includes(right!)) return true;
+    for (const r of chain) if (rr[r] !== undefined) return rr[r]!;
+    return defaults.includes(role);
+  }
+
   /** Ce que la personne connectée peut faire sur le téléphone. */
-  async rights(caller: MobileCaller): Promise<{ count: boolean; cart: boolean }> {
-    if (caller.guest) return { count: true, cart: false };
-    return { count: await this.canCount(caller.user.id, caller.user.role), cart: await this.canCart(caller.user.id, caller.user.role) };
+  async rights(caller: MobileCaller): Promise<{ count: boolean; cart: boolean; missed: boolean; receive: boolean }> {
+    if (caller.guest) return { count: true, cart: false, missed: false, receive: false };
+    const { id, role } = caller.user;
+    return {
+      count: await this.canCount(id, role),
+      cart: await this.canCart(id, role),
+      missed: await this.hasRight(id, role, 'missed_sale', ['manager', 'cashier', 'seller', 'accountant', 'stock']),
+      receive: await this.hasChainRight(id, role, ['mobile_reception', 'order_receive', 'purchase_orders'], ['manager', 'stock', 'buyer']),
+    };
   }
 
   // ——— Rattachement du téléphone ———
@@ -442,8 +465,9 @@ export class MobileService {
     const storeId = user.payload['store_id'] as string | null;
     if (storeId && storeId !== device.store_id) throw new ForbiddenException('Cet utilisateur appartient à un autre magasin');
     const role = str(user.payload['role']);
-    const can = { count: await this.canCount(user.entity_id, role), cart: await this.canCart(user.entity_id, role) };
-    if (!can.count && !can.cart) throw new ForbiddenException('Vous n’avez ni le droit de compter un inventaire ni celui de préparer un panier. Demandez-le au gérant.');
+    const can = await this.rights({ device, user: { id: user.entity_id, name: str(user.payload['name']), role } });
+    if (!can.count && !can.cart && !can.receive)
+      throw new ForbiddenException('Vous n’avez ni le droit de compter un inventaire, ni celui de préparer un panier, ni celui de réceptionner. Demandez-le au gérant.');
     const session = randomBytes(32).toString('base64url');
     await this.pg.query('INSERT INTO mobile_sessions (token_hash, device_id, user_id, last_seen_at) VALUES ($1, $2, $3, now())', [hashToken(session), device.id, user.entity_id]);
     const store = await this.one('store', device.store_id);
@@ -534,6 +558,206 @@ export class MobileService {
     const r = rows[0];
     if (!r) throw new HttpException('Ce panier a déjà été pris par une caisse', HttpStatus.CONFLICT);
     return { id: r.id, number: r.number, label: r.label, sellerId: r.user_id, sellerName: r.user_name, lines: r.lines, at: new Date(r.created_at).toISOString() };
+  }
+
+  // ——— Le client voulait… ———
+
+  /**
+   * Vente manquée notée au rayon : elle part aux PC comme une saisie faite sur
+   * un PC (`missed_sale`) ; le gérant la voit et la commande en tient compte.
+   */
+  async recordMissed(caller: MobileCaller, input: { id?: string; articleId?: string | null; label?: string | null; qty?: number; reason?: string; note?: string | null }) {
+    if (!(await this.rights(caller)).missed) throw new ForbiddenException('Vous n’avez pas le droit de noter une vente manquée. Demandez-le au gérant.');
+    const id = str(input?.id).trim() || randomUUID();
+    if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Demande invalide');
+    const articleId = input?.articleId ? str(input.articleId) : null;
+    const article = articleId ? await this.one('article', articleId) : null;
+    if (articleId && !article) throw new BadRequestException('Produit inconnu');
+    const label = article ? str(article['name']) : str(input?.label).trim().slice(0, 80);
+    if (label.length < 2) throw new BadRequestException('Dites quel produit le client voulait');
+    const qty = Math.round(Number(input?.qty ?? 1000));
+    if (!Number.isSafeInteger(qty) || qty <= 0 || qty > 1_000_000_000) throw new BadRequestException('Quantité invalide');
+    const reason = ['absent', 'rupture', 'prix', 'autre'].includes(str(input?.reason)) ? str(input!.reason) : article ? 'rupture' : 'absent';
+    const { rows: dup } = await this.pg.query("SELECT 1 FROM events WHERE entity = 'missed_sale' AND entity_id = $1 LIMIT 1", [id]);
+    if (dup.length) return { id };
+    const now = new Date().toISOString();
+    const payload = {
+      id,
+      store_id: caller.device.store_id,
+      article_id: articleId,
+      label,
+      qty,
+      reason: !article && reason === 'rupture' ? 'absent' : reason,
+      note: str(input?.note).trim().slice(0, 200) || null,
+      user_id: caller.user.id,
+      source: 'phone',
+      created_at: now,
+      updated_at: now,
+    };
+    await this.pg.query(
+      `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
+       VALUES ($1, $2, 'missed_sale', $3, 'upsert', $4, NULL, $5, now())`,
+      [randomUUID(), caller.device.id, id, caller.device.store_id, JSON.stringify(payload)],
+    );
+    return { id };
+  }
+
+  // ——— Fiche produit : stock ailleurs, prochaine livraison, remplaçant ———
+
+  /** Bons de commande envoyés et pas encore soldés (d'un magasin, ou de tous). */
+  private async openOrders(storeId?: string) {
+    const orders = (await this.latest('purchase_order', storeId ? 'AND store_id = $2' : '', storeId ? [storeId] : [])).filter((r) => r.payload['status'] === 'sent');
+    if (!orders.length) return [];
+    const ids = orders.map((o) => o.entity_id);
+    const receptions = await this.latest('reception', "AND payload->>'order_id' = ANY($2)", [ids]);
+    const received = new Map<string, number>();
+    for (const r of receptions) {
+      for (const l of (r.payload['lines'] as { order_line_id?: string | null; qty?: number }[] | undefined) ?? []) {
+        if (l.order_line_id) received.set(l.order_line_id, (received.get(l.order_line_id) ?? 0) + Number(l.qty ?? 0));
+      }
+    }
+    return orders.map((o) => ({
+      id: o.entity_id,
+      number: str(o.payload['number']),
+      storeId: str(o.payload['store_id']),
+      warehouseId: str(o.payload['warehouse_id']),
+      supplierId: str(o.payload['supplier_id']),
+      orderDate: str(o.payload['order_date']),
+      expectedDate: (o.payload['expected_date'] as string | null) ?? null,
+      lines: ((o.payload['lines'] as { id: string; article_id: string; qty: number }[] | undefined) ?? []).map((l) => ({
+        id: l.id,
+        articleId: l.article_id,
+        qty: Number(l.qty),
+        received: received.get(l.id) ?? 0,
+      })),
+    }));
+  }
+
+  /**
+   * Ce que le vendeur répond au client devant le rayon : stock dans les autres
+   * dépôts et magasins, prochaine livraison attendue, produit de remplacement.
+   */
+  async productInfo(caller: MobileCaller, articleId: string) {
+    const article = await this.one('article', articleId);
+    if (!article) throw new NotFoundException('Produit inconnu');
+    const warehouses = await this.latest('warehouse', '', [], "jsonb_build_object('name', payload->'name', 'store_id', payload->'store_id', 'active', payload->'active')");
+    const stores = new Map((await this.latest('store', '', [], "jsonb_build_object('name', payload->'name')")).map((r) => [r.entity_id, str(r.payload['name'])]));
+    const levels = await this.latest('stock_level', "AND entity_id LIKE '%:' || $2", [articleId]);
+    const qtyOf = new Map(levels.map((r) => [str(r.payload['warehouse_id']), Number(r.payload['qty'] ?? 0)]));
+    const stock = warehouses
+      .filter((w) => w.payload['active'] !== 0 && qtyOf.has(w.entity_id))
+      .map((w) => ({
+        warehouseId: w.entity_id,
+        warehouse: str(w.payload['name']),
+        store: stores.get(str(w.payload['store_id'])) ?? '',
+        here: str(w.payload['store_id']) === caller.device.store_id,
+        qty: qtyOf.get(w.entity_id) ?? 0,
+      }))
+      .sort((a, b) => Number(b.here) - Number(a.here) || b.qty - a.qty);
+    const coming = (await this.openOrders(caller.device.store_id))
+      .flatMap((o) => o.lines.filter((l) => l.articleId === articleId && l.qty > l.received).map((l) => ({ number: o.number, expectedDate: o.expectedDate ?? o.orderDate, qty: l.qty - l.received })))
+      .sort((a, b) => a.expectedDate.localeCompare(b.expectedDate));
+    const subId = article['substitute_id'] ? str(article['substitute_id']) : null;
+    const sub = subId ? await this.one('article', subId) : null;
+    const subStock = subId
+      ? (await this.latest('stock_level', "AND entity_id LIKE '%:' || $2", [subId]))
+          .filter((r) => warehouses.some((w) => w.entity_id === str(r.payload['warehouse_id']) && str(w.payload['store_id']) === caller.device.store_id))
+          .reduce((t, r) => t + Number(r.payload['qty'] ?? 0), 0)
+      : 0;
+    return {
+      id: articleId,
+      name: str(article['name']),
+      unit: str(article['unit']) || 'piece',
+      price: Number(article['sale_price'] ?? 0) || 0,
+      stock,
+      nextDelivery: coming[0] ?? null,
+      substitute: sub ? { id: subId!, name: str(sub['name']), price: Number(sub['sale_price'] ?? 0) || 0, stockHere: subStock } : null,
+    };
+  }
+
+  // ——— Réception sur le téléphone ———
+
+  /** Bons de commande du magasin à réceptionner, avec ce qui reste à recevoir par ligne. */
+  async receptionOrders(caller: MobileCaller) {
+    if (!(await this.rights(caller)).receive) throw new ForbiddenException('Vous n’avez pas le droit de réceptionner. Demandez-le au gérant.');
+    const suppliers = new Map((await this.latest('supplier', '', [], "jsonb_build_object('name', payload->'name')")).map((r) => [r.entity_id, str(r.payload['name'])]));
+    const { rows: waiting } = await this.pg.query<{ order_id: string }>('SELECT order_id FROM mobile_receptions WHERE store_id = $1 AND taken_at IS NULL', [caller.device.store_id]);
+    const pending = new Set(waiting.map((w) => w.order_id));
+    const orders = (await this.openOrders(caller.device.store_id)).filter((o) => o.lines.some((l) => l.qty > l.received));
+    return {
+      orders: orders
+        .map((o) => ({
+          id: o.id,
+          number: o.number,
+          supplier: suppliers.get(o.supplierId) ?? '',
+          expectedDate: o.expectedDate,
+          waitingOnPc: pending.has(o.id),
+          lines: o.lines.filter((l) => l.qty > l.received).map((l) => ({ id: l.id, articleId: l.articleId, ordered: l.qty, remaining: l.qty - l.received })),
+        }))
+        .sort((a, b) => str(a.expectedDate).localeCompare(str(b.expectedDate))),
+    };
+  }
+
+  /** Livraison comptée devant le camion : un PC du magasin la reprend et la valide. */
+  async pushReception(
+    caller: MobileCaller,
+    input: { id: string; orderId: string; deliveryNote?: string | null; note?: string | null; lines: { orderLineId: string; articleId: string; qty: number; damaged?: number; lot?: string | null; expiry?: string | null }[] },
+  ) {
+    if (!(await this.rights(caller)).receive) throw new ForbiddenException('Vous n’avez pas le droit de réceptionner. Demandez-le au gérant.');
+    const id = str(input?.id).trim();
+    if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Réception invalide');
+    const order = (await this.openOrders(caller.device.store_id)).find((o) => o.id === str(input?.orderId));
+    if (!order) throw new BadRequestException('Ce bon de commande n’est plus à réceptionner');
+    const known = new Map(order.lines.map((l) => [l.id, l]));
+    const lines = (Array.isArray(input?.lines) ? input.lines : [])
+      .map((l) => ({
+        orderLineId: str(l?.orderLineId),
+        articleId: str(l?.articleId),
+        qty: Math.round(Number(l?.qty)),
+        damaged: Math.max(0, Math.round(Number(l?.damaged ?? 0))) || 0,
+        lot: str(l?.lot).trim().slice(0, 40) || null,
+        expiry: /^\d{4}-\d{2}-\d{2}$/.test(str(l?.expiry)) ? str(l!.expiry) : null,
+      }))
+      .filter((l) => known.get(l.orderLineId)?.articleId === l.articleId && Number.isSafeInteger(l.qty) && l.qty >= 0);
+    if (!lines.length) throw new BadRequestException('Rien n’a été compté');
+    await this.pg.query(
+      `INSERT INTO mobile_receptions (id, device_id, store_id, order_id, order_number, user_id, user_name, delivery_note, note, lines)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (id) DO NOTHING`,
+      [id, caller.device.id, caller.device.store_id, order.id, order.number, caller.user.id, caller.user.name, str(input?.deliveryNote).trim().slice(0, 40) || null, str(input?.note).trim().slice(0, 200) || null, JSON.stringify(lines)],
+    );
+    return { id };
+  }
+
+  private receptionRow(r: { id: string; order_id: string; order_number: string | null; user_name: string; delivery_note: string | null; note: string | null; lines: unknown; created_at: Date }) {
+    return { id: r.id, orderId: r.order_id, orderNumber: r.order_number, userName: r.user_name, deliveryNote: r.delivery_note, note: r.note, lines: typeof r.lines === 'string' ? JSON.parse(r.lines) : r.lines, at: new Date(r.created_at).toISOString() };
+  }
+
+  /** Réceptions du téléphone qui attendent un PC du magasin. */
+  async waitingReceptions(storeId: string) {
+    const { rows } = await this.pg.query<{ id: string; order_id: string; order_number: string | null; user_name: string; delivery_note: string | null; note: string | null; lines: unknown; created_at: Date }>(
+      "SELECT id, order_id, order_number, user_name, delivery_note, note, lines, created_at FROM mobile_receptions WHERE store_id = $1 AND taken_at IS NULL AND created_at >= now() - interval '7 days' ORDER BY created_at",
+      [storeId],
+    );
+    return { receptions: rows.map((r) => this.receptionRow(r)) };
+  }
+
+  /** Le PC prend la réception : un seul PC l'obtient. */
+  async takeReception(device: { id: string; store_id: string }, id: string) {
+    const { rows } = await this.pg.query<{ id: string; order_id: string; order_number: string | null; user_name: string; delivery_note: string | null; note: string | null; lines: unknown; created_at: Date }>(
+      'UPDATE mobile_receptions SET taken_at = now(), taken_by = $3 WHERE id = $1 AND store_id = $2 AND taken_at IS NULL RETURNING id, order_id, order_number, user_name, delivery_note, note, lines, created_at',
+      [id, device.store_id, device.id],
+    );
+    if (!rows[0]) throw new HttpException('Cette réception a déjà été reprise par un autre PC', HttpStatus.CONFLICT);
+    return this.receptionRow(rows[0]);
+  }
+
+  /** Réceptions envoyées par cette personne ces derniers jours. */
+  async myReceptions(caller: MobileCaller) {
+    const { rows } = await this.pg.query<{ id: string; order_number: string | null; created_at: Date; taken_at: Date | null }>(
+      "SELECT id, order_number, created_at, taken_at FROM mobile_receptions WHERE user_id = $1 AND store_id = $2 AND created_at >= now() - interval '3 days' ORDER BY created_at DESC",
+      [caller.user.id, caller.device.store_id],
+    );
+    return { receptions: rows.map((r) => ({ id: r.id, orderNumber: r.order_number, at: new Date(r.created_at).toISOString(), takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null })) };
   }
 
   // ——— Données pour le téléphone ———

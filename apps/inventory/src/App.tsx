@@ -11,6 +11,7 @@ import {
   csvRows,
   exportCountFile,
   formatQty,
+  parseNumber,
   guestCode,
   levels,
   lookup,
@@ -68,6 +69,12 @@ export function App() {
     setCartMode(on);
     remember('panier', on ? '1' : null);
   };
+  // Réception d'une livraison (magasinier) : à la place des inventaires.
+  const [receiveMode, setReceiveMode] = useState(() => recall('reception') === '1');
+  const receiveOn = (on: boolean) => {
+    setReceiveMode(on);
+    remember('reception', on ? '1' : null);
+  };
   if (!s.ready) return <div className="splash">FEDONIX 360 Inventaire</div>;
   const connected = Boolean(s.config && s.session);
   const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
@@ -76,13 +83,22 @@ export function App() {
   const can = s.session?.can;
   const cartOnly = Boolean(connected && can && can.cart && !can.count);
   let page: ReactNode;
-  if (connected && can?.cart && (cartOnly || cartMode)) page = <ShelfCart onBack={cartOnly ? null : () => cartOn(false)} />;
+  if (connected && can?.receive && receiveMode) page = <Receive onBack={() => receiveOn(false)} />;
+  else if (connected && can?.cart && (cartOnly || cartMode)) page = <ShelfCart onBack={cartOnly ? null : () => cartOn(false)} onReceive={can.receive ? () => receiveOn(true) : undefined} />;
   else if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
   else if (recapFile) page = <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
   else if (inventory && recapId === inventory.id) page = <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
   else if (inventory && !(S.isFile(inventory) && inventory.closed)) page = <Count inventory={inventory} onBack={() => choose(null)} onRecap={() => setRecapId(inventory.id)} />;
   else if (connected || fileMode)
-    page = <Inventories onChoose={choose} onRecap={setRecapId} onLeaveFiles={connected ? undefined : () => files(false)} onCart={connected && can?.cart ? () => cartOn(true) : undefined} />;
+    page = (
+      <Inventories
+        onChoose={choose}
+        onRecap={setRecapId}
+        onLeaveFiles={connected ? undefined : () => files(false)}
+        onCart={connected && can?.cart ? () => cartOn(true) : undefined}
+        onReceive={connected && can?.receive ? () => receiveOn(true) : undefined}
+      />
+    );
   else if (!s.config) page = <Pairing onFiles={() => files(true)} />;
   else page = <Login onFiles={() => files(true)} />;
   return (
@@ -414,7 +430,19 @@ function progress(inv: S.ServerInventory, counts: Record<string, PlaceCount>) {
   return counted.size;
 }
 
-function Inventories({ onChoose, onRecap, onLeaveFiles, onCart }: { onChoose: (id: string) => void; onRecap: (id: string) => void; onLeaveFiles?: () => void; onCart?: () => void }) {
+function Inventories({
+  onChoose,
+  onRecap,
+  onLeaveFiles,
+  onCart,
+  onReceive,
+}: {
+  onChoose: (id: string) => void;
+  onRecap: (id: string) => void;
+  onLeaveFiles?: () => void;
+  onCart?: () => void;
+  onReceive?: () => void;
+}) {
   const s = useStore();
   const [menu, setMenu] = useState(false);
   const [filter, setFilter] = useState<'open' | 'closed'>('open');
@@ -464,6 +492,11 @@ function Inventories({ onChoose, onRecap, onLeaveFiles, onCart }: { onChoose: (i
         </button>
       </header>
       <main>
+        {onReceive ? (
+          <button className="big" onClick={onReceive}>
+            Réceptionner une livraison
+          </button>
+        ) : null}
         {onCart ? (
           <button className="big primary" onClick={onCart}>
             Préparer un panier pour un client
@@ -546,8 +579,11 @@ const fcfa = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
  * le panier à la caisse : le caissier le retrouve dans « Tickets en attente »
  * et l'encaisse ; la vente compte pour le vendeur.
  */
-function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
+function ShelfCart({ onBack, onReceive }: { onBack: (() => void) | null; onReceive?: () => void }) {
   const s = useStore();
+  const [info, setInfo] = useState<Article | null>(null);
+  const [missed, setMissed] = useState<{ article: Article | null; label: string } | null>(null);
+  const canMissed = Boolean(s.session?.can?.missed);
   const [camera, setCamera] = useState(false);
   const [query, setQuery] = useState('');
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
@@ -648,6 +684,16 @@ function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
         </button>
         {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
         <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nom ou code du produit" enterKeyHint="search" />
+        {canMissed && query.trim().length < 2 ? (
+          <button className="big" onClick={() => setMissed({ article: null, label: '' })}>
+            Le client voulait… (produit absent, en rupture, trop cher)
+          </button>
+        ) : null}
+        {onReceive ? (
+          <button className="link" onClick={onReceive}>
+            Réceptionner une livraison
+          </button>
+        ) : null}
         {query.trim().length >= 2 ? (
           <div className="list">
             {results.map((a) => (
@@ -659,10 +705,18 @@ function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
                     {a.price ? ` · ${fcfa(a.price)}` : ''}
                   </small>
                 </div>
+                <button className="small-btn" onClick={(e) => (e.stopPropagation(), setInfo(a))} aria-label="Stock ailleurs, livraison, remplaçant">
+                  ℹ
+                </button>
                 <span className="small-btn">+</span>
               </div>
             ))}
             {!results.length ? <div className="empty">Aucun produit trouvé.</div> : null}
+            {canMissed ? (
+              <button className="link" onClick={() => setMissed({ article: null, label: query.trim() })}>
+                Le client voulait « {query.trim()} » : le noter pour le gérant
+              </button>
+            ) : null}
           </div>
         ) : (
           <>
@@ -676,6 +730,9 @@ function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
                       {l.article.price ? ` · ${fcfa(Math.round((l.article.price * l.qty) / 1000))}` : ''}
                     </small>
                   </div>
+                  <button className="small-btn" onClick={() => setInfo(l.article)} aria-label="Stock ailleurs, livraison, remplaçant">
+                    ℹ
+                  </button>
                   <button className="small-btn" onClick={() => S.setCartQty(l.articleId, l.qty - step(l.article))} aria-label="Moins">
                     −
                   </button>
@@ -743,6 +800,390 @@ function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
           </>
         )}
       </main>
+      {info ? (
+        <InfoSheet
+          article={info}
+          onClose={() => setInfo(null)}
+          onAdd={(a) => (add(a, step(a)), setInfo(null))}
+          onMissed={canMissed ? () => (setMissed({ article: info, label: '' }), setInfo(null)) : undefined}
+        />
+      ) : null}
+      {missed ? <MissedSheet article={missed.article} label={missed.label} onClose={(text) => (setMissed(null), setQuery(''), text && show(text, true))} /> : null}
+    </div>
+  );
+}
+
+const day = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/');
+
+/** Ce que le vendeur répond au client : stock dans les autres dépôts et magasins, prochaine livraison, remplaçant. */
+function InfoSheet({ article, onClose, onAdd, onMissed }: { article: Article; onClose: () => void; onAdd: (a: Article) => void; onMissed?: () => void }) {
+  const s = useStore();
+  const [info, setInfo] = useState<S.ProductInfo | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    S.productInfo(article.id).then(setInfo, (e) => setError(message(e)));
+  }, [article.id]);
+  const sub = info?.substitute ? s.articles.get(info.substitute.id) : undefined;
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <h2>{article.name}</h2>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        {!info && !error ? <div className="muted">Recherche…</div> : null}
+        {info ? (
+          <>
+            <h3>Stock</h3>
+            <div className="list">
+              {info.stock.map((w) => (
+                <div key={w.warehouseId} className="row item">
+                  <div className="grow">
+                    {w.warehouse}
+                    <small>{w.here ? 'ce magasin' : w.store}</small>
+                  </div>
+                  <b className={w.qty > 0 ? '' : 'muted'}>{formatQty(w.qty, article)}</b>
+                </div>
+              ))}
+              {!info.stock.length ? <div className="empty">Aucun stock connu.</div> : null}
+            </div>
+            <h3>Prochaine livraison</h3>
+            <p>{info.nextDelivery ? `${formatQty(info.nextDelivery.qty, article)} attendus le ${day(info.nextDelivery.expectedDate)} (bon ${info.nextDelivery.number})` : 'Aucune commande en cours pour ce produit.'}</p>
+            {info.substitute ? (
+              <>
+                <h3>À la place</h3>
+                <div className="row item">
+                  <div className="grow">
+                    {info.substitute.name}
+                    <small>
+                      {info.substitute.price ? fcfa(info.substitute.price) : ''} · {sub ? formatQty(info.substitute.stockHere, sub) : info.substitute.stockHere / 1000} en stock ici
+                    </small>
+                  </div>
+                  {sub ? (
+                    <button className="small-btn" onClick={() => onAdd(sub)} aria-label="Ajouter le remplaçant au panier">
+                      +
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </>
+        ) : null}
+        {onMissed ? (
+          <button className="big" onClick={onMissed}>
+            Le client le voulait : le noter
+          </button>
+        ) : null}
+        <button className="link" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const MISSED_REASONS: Record<S.MissedReason, string> = { rupture: 'En rupture', absent: 'Pas vendu ici', prix: 'Trop cher pour lui', autre: 'Autre' };
+
+/** « Le client voulait… » : produit demandé qu'on n'a pas pu vendre, pour le gérant et la commande. */
+function MissedSheet({ article, label, onClose }: { article: Article | null; label: string; onClose: (done: string | null) => void }) {
+  const s = useStore();
+  const [picked, setPicked] = useState<Article | null>(article);
+  const [text, setText] = useState(label);
+  const [qty, setQty] = useState('1');
+  const [reason, setReason] = useState<S.MissedReason>(article ? 'rupture' : 'absent');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const results = useMemo(() => (!picked && text.trim().length >= 2 ? search(s.catalog?.articles ?? [], text, 6) : []), [picked, text, s.catalog]);
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const q = parseNumber(qty);
+      await S.recordMissed({ articleId: picked?.id ?? null, label: picked ? null : text.trim(), qty: Math.round((q && q > 0 ? q : 1) * 1000), reason: !picked && reason === 'rupture' ? 'absent' : reason });
+      beepOk();
+      onClose(`Noté : le client voulait ${picked?.name ?? text.trim()}`);
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur : réessayez dans un instant.' : message(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose(null)}>
+      <div className="sheet">
+        <h2>Le client voulait…</h2>
+        {picked ? (
+          <div className="row item">
+            <b className="grow">{picked.name}</b>
+            <button className="link" onClick={() => setPicked(null)}>
+              changer
+            </button>
+          </div>
+        ) : (
+          <>
+            <input className="search" autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Produit demandé (nom, ou ce que dit le client)" />
+            <div className="list">
+              {results.map((a) => (
+                <div key={a.id} className="row item" onClick={() => (setPicked(a), setReason('rupture'))}>
+                  <div className="grow">
+                    {a.name}
+                    <small>{a.code}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        <label className="field">
+          Quantité demandée
+          <input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} />
+        </label>
+        <div className="tabs">
+          {(Object.keys(MISSED_REASONS) as S.MissedReason[])
+            .filter((r) => picked || r !== 'rupture')
+            .map((r) => (
+              <button key={r} className={reason === r ? 'on' : ''} onClick={() => setReason(r)}>
+                {MISSED_REASONS[r]}
+              </button>
+            ))}
+        </div>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        <button className="big primary" disabled={busy || (!picked && text.trim().length < 2)} onClick={() => void save()}>
+          {busy ? 'Envoi…' : 'Noter pour le gérant'}
+        </button>
+        <button className="link" onClick={() => onClose(null)}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ——— Réception d'une livraison ———
+
+/**
+ * Le magasinier compte la livraison devant le camion : il choisit le bon de
+ * commande, scanne chaque produit (un scan = un conditionnement), note les
+ * abîmés, le lot et la date limite, puis envoie. Un PC du magasin reprend ce
+ * comptage, vérifie les prix et valide : le stock n'entre qu'à ce moment.
+ */
+function Receive({ onBack }: { onBack: () => void }) {
+  const s = useStore();
+  const [orders, setOrders] = useState<S.ReceptionOrder[] | null>(null);
+  const [draft, setDraftState] = useState<S.ReceptionDraft | null>(null);
+  const [error, setError] = useState('');
+  const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const [camera, setCamera] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [sent, setSent] = useState('');
+  const reload = () => S.receptionOrders().then(setOrders, (e) => setError(message(e)));
+  useEffect(() => {
+    void reload();
+    void S.loadReceptionDraft().then(setDraftState);
+  }, []);
+  const setDraft = (d: S.ReceptionDraft | null) => {
+    setDraftState(d);
+    void S.saveReceptionDraft(d);
+  };
+  const order = draft ? orders?.find((o) => o.id === draft.orderId) : undefined;
+  const show = (text: string, ok: boolean) => {
+    setFlash({ text, ok });
+    setTimeout(() => setFlash(null), 2500);
+  };
+  const bump = (lineId: string, qty: number) => {
+    if (!draft) return;
+    const cur = draft.lines[lineId] ?? { qty: 0, damaged: 0, lot: '', expiry: '' };
+    setDraft({ ...draft, lines: { ...draft.lines, [lineId]: { ...cur, qty: Math.max(0, cur.qty + qty) } } });
+  };
+  const onCode = (raw: string) => {
+    if (!draft || !order) return;
+    const hit = lookup(S.getState().index, raw.trim());
+    const line = hit ? order.lines.find((l) => l.articleId === hit.article.id) : undefined;
+    if (!hit || !line) {
+      beepError();
+      return show(hit ? `${hit.article.name} n'est pas sur ce bon` : `Code ${raw.trim()} inconnu`, false);
+    }
+    beepOk();
+    bump(line.id, hit.qty);
+    show(`${hit.article.name} : +${formatQty(hit.qty, hit.article)}`, true);
+  };
+  useCamera(camera, onCode, (e) => (setCamera(false), show(message(e), false)));
+  const wedge = useRef(onCode);
+  wedge.current = onCode;
+  useEffect(() => listenWedge((c) => wedge.current(c)), []);
+
+  if (camera)
+    return (
+      <CameraOverlay title={`Bon ${draft?.orderNumber ?? ''}`} hint="Chaque scan ajoute un conditionnement" onStop={() => setCamera(false)}>
+        {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
+      </CameraOverlay>
+    );
+
+  const header = (
+    <header className="bar">
+      <button className="ghost" onClick={onBack} aria-label="Retour">
+        ‹
+      </button>
+      <div className="grow">
+        <b>Réception</b>
+        <small>{draft ? `Bon ${draft.orderNumber} · ${draft.supplier}` : s.session?.user.name}</small>
+      </div>
+      <Status />
+    </header>
+  );
+
+  if (!draft || !order)
+    return (
+      <div className="page">
+        {header}
+        <main>
+          {sent ? <div className="notice info">{sent}</div> : null}
+          {error ? <div className="notice erreur">{error}</div> : null}
+          {draft && orders && !order ? <div className="notice erreur">Le bon {draft.orderNumber} n'est plus à réceptionner (déjà reçu ou annulé sur le PC).</div> : null}
+          {!orders && !error ? <div className="card muted">Chargement des bons de commande…</div> : null}
+          {orders?.map((o) => (
+            <button
+              key={o.id}
+              className="card inventory"
+              onClick={() => (setSent(''), setDraft({ orderId: o.id, orderNumber: o.number, supplier: o.supplier, deliveryNote: '', note: '', lines: {} }))}
+            >
+              <div className="row">
+                <b className="grow">N° {o.number}</b>
+                {o.waitingOnPc ? <span className="pill wait">déjà envoyé, attend le PC</span> : null}
+              </div>
+              <div className="muted">
+                {o.supplier}
+                {o.expectedDate ? ` · attendu le ${day(o.expectedDate)}` : ''} · {o.lines.length} produit(s)
+              </div>
+            </button>
+          ))}
+          {orders && !orders.length ? <div className="card muted">Aucun bon de commande à réceptionner. Le bon est créé et envoyé sur le PC (Achats › Bons de commande).</div> : null}
+          <button className="link" onClick={() => void reload()}>
+            Actualiser
+          </button>
+        </main>
+      </div>
+    );
+
+  const rows = order.lines.map((l) => ({ ...l, article: s.articles.get(l.articleId), got: draft.lines[l.id] }));
+  const counted = rows.filter((r) => r.got && (r.got.qty > 0 || r.got.damaged > 0)).length;
+  const edit = editing ? rows.find((r) => r.id === editing) : undefined;
+  return (
+    <div className="page">
+      {header}
+      <main>
+        <button className="scan" onClick={() => setCamera(true)}>
+          <span className="scan-icon">▥</span>
+          Scanner
+          <small>un scan = un conditionnement</small>
+        </button>
+        {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
+        <label className="field">
+          N° du bon de livraison du fournisseur
+          <input value={draft.deliveryNote} onChange={(e) => setDraft({ ...draft, deliveryNote: e.target.value })} />
+        </label>
+        <div className="list">
+          {rows.map((r) => {
+            const got = r.got?.qty ?? 0;
+            const a = r.article;
+            const f = (q: number) => (a ? formatQty(q, a) : String(q / 1000));
+            return (
+              <div key={r.id} className="row item" onClick={() => setEditing(r.id)}>
+                <div className="grow">
+                  {a?.name ?? 'Produit'}
+                  <small>
+                    attendu {f(r.remaining)} · reçu <b className={got === r.remaining ? '' : got ? 'warn' : ''}>{f(got)}</b>
+                    {r.got?.damaged ? ` · ${f(r.got.damaged)} abîmé(s)` : ''}
+                  </small>
+                </div>
+                <button className="small-btn" onClick={(e) => (e.stopPropagation(), bump(r.id, r.remaining - got))} aria-label="Tout reçu">
+                  ✓
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <label className="field">
+          Remarque pour le PC (facultatif)
+          <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="Carton ouvert, chauffeur pressé…" />
+        </label>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        <button
+          className="big primary"
+          disabled={busy || !counted}
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              await S.sendReception(draft, order);
+              setSent(`Réception du bon ${draft.orderNumber} envoyée : un PC du magasin la vérifie et la valide.`);
+              setDraftState(null);
+              void reload();
+            } catch (e) {
+              setError(e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur : le comptage reste sur le téléphone, réessayez.' : message(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Envoi…' : `Envoyer au PC (${counted}/${rows.length})`}
+        </button>
+        <button className="link" onClick={() => setDraft(null)}>
+          Abandonner cette réception
+        </button>
+      </main>
+      {edit ? (
+        <ReceiveLine
+          name={edit.article?.name ?? 'Produit'}
+          unit={edit.article}
+          value={edit.got ?? { qty: 0, damaged: 0, lot: '', expiry: '' }}
+          onClose={(v) => {
+            if (v) setDraft({ ...draft, lines: { ...draft.lines, [edit.id]: v } });
+            setEditing(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ReceiveLine({ name, unit, value, onClose }: { name: string; unit?: Article; value: S.ReceptionDraft['lines'][string]; onClose: (v: S.ReceptionDraft['lines'][string] | null) => void }) {
+  const [qty, setQty] = useState(String(value.qty / 1000).replace('.', ','));
+  const [damaged, setDamaged] = useState(value.damaged ? String(value.damaged / 1000).replace('.', ',') : '');
+  const [lot, setLot] = useState(value.lot);
+  const [expiry, setExpiry] = useState(value.expiry);
+  const unitName = unit?.unitName || (unit?.unit === 'kg' ? 'kg' : unit?.unit === 'litre' ? 'litres' : 'unités');
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose(null)}>
+      <div className="sheet">
+        <h2>{name}</h2>
+        <label className="field">
+          Reçu en bon état ({unitName})
+          <input inputMode="decimal" autoFocus value={qty} onChange={(e) => setQty(e.target.value)} />
+        </label>
+        <label className="field">
+          Abîmés ou refusés ({unitName})
+          <input inputMode="decimal" value={damaged} onChange={(e) => setDamaged(e.target.value)} />
+        </label>
+        <label className="field">
+          N° de lot
+          <input value={lot} onChange={(e) => setLot(e.target.value)} />
+        </label>
+        <label className="field">
+          Date limite
+          <input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
+        </label>
+        <button
+          className="big primary"
+          onClick={() =>
+            onClose({ qty: Math.max(0, Math.round((parseNumber(qty) ?? 0) * 1000)), damaged: Math.max(0, Math.round((parseNumber(damaged) ?? 0) * 1000)), lot: lot.trim(), expiry })
+          }
+        >
+          OK
+        </button>
+        <button className="link" onClick={() => onClose(null)}>
+          Annuler
+        </button>
+      </div>
     </div>
   );
 }

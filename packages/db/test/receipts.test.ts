@@ -63,7 +63,11 @@ describe('tickets de caisse', () => {
       'dont TVA                     630',
       '-'.repeat(32),
       '    Merci de votre visite !',
+      '     ||| DLA1-1-000001 |||',
     ]);
+    // Code-barres du numéro (Code 128) : la douchette retrouve le ticket pour un retour ou une réimpression.
+    const esc = Buffer.from(receiptToEscPos(s.receipts.ticket(sale.id), { columns: 48, codepage: 'pc850' }));
+    expect(esc.includes(Buffer.from([0x1d, 0x6b, 73, 15, ...Buffer.from('{BDLA1-1-000001')]))).toBe(true);
     // 48 colonnes (80 mm) : le libellé tient sur une ligne.
     expect(receiptToText(s.receipts.ticket(sale.id), 48)).toMatch(/\nRiz parfumé Uncle Ben's 5 kg {15}4 500\n/);
     const bytes = receiptToEscPos(s.receipts.ticket(sale.id), { columns: 48, codepage: 'pc850', kick: true });

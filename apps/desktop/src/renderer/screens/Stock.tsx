@@ -13,11 +13,12 @@ import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQt
 import { tx } from '../tax';
 import { ReceptionLabels } from './barcodePrint';
 import { PurchaseEntry } from './purchaseEntry';
+import { DayTasks, Restock } from './Floor';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle';
+type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle' | 'restock' | 'tasks';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
@@ -43,14 +44,18 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
     clearance: has(user, 'clearance'),
     losses: has(user, 'clearance'),
     cycle: has(user, 'cycle_count'),
+    restock: has(user, 'restock'),
+    tasks: has(user, 'day_tasks'),
   };
   const tabs = (
     [
+      ['tasks', 'Tâches du jour'],
       ['state', 'État du stock'],
       ['multi', 'Stock multi-magasin'],
       ['warehouses', 'Articles par dépôt'],
       ['receive', 'Réception'],
       ['loss', 'Pertes et casse'],
+      ['restock', 'Réassort du rayon'],
       ['transfer', 'Transfert'],
       ['inventory', 'Inventaires'],
       ['expiry', 'Péremptions'],
@@ -82,6 +87,8 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'monitoring' && allowed.monitoring && <Monitoring user={user} />}
       {tab === 'clearance' && allowed.clearance && <Clearance />}
       {tab === 'losses' && allowed.losses && <Losses />}
+      {tab === 'restock' && allowed.restock && <Restock />}
+      {tab === 'tasks' && allowed.tasks && <DayTasks />}
       {tab === 'cycle' && allowed.cycle && <CycleCount onOpenInventory={allowed.inventory ? () => setTab('inventory') : undefined} />}
     </div>
   );

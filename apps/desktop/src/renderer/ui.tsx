@@ -1,7 +1,7 @@
 import { DEFAULT_STORE_SETTINGS, type Permission, type StoreSettings } from '@superette/core';
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { formatFcfa, formatQty } from '@superette/core';
-import { call } from './api';
+import { ApiError, type ErrorFix, call } from './api';
 
 export const fcfa = (v: number) => formatFcfa(v);
 export const qty = formatQty;
@@ -37,23 +37,122 @@ export function parseAmount(input: string): number | null {
 
 // --- Notifications -----------------------------------------------------------
 
-type Toast = { id: number; kind: 'ok' | 'error'; text: string };
-const ToastCtx = createContext<(kind: Toast['kind'], text: string) => void>(() => {});
+type Toast = {
+  id: number;
+  kind: 'ok' | 'error' | 'undo';
+  text: string;
+  /** Solutions proposées avec l'erreur (boutons). */
+  fixes?: ErrorFix[];
+  /** Action retardée : faite à la fin du délai, sauf si « Annuler ». */
+  run?: () => unknown;
+  /** Remet l'écran comme avant quand l'utilisateur annule. */
+  onUndo?: () => void;
+  until?: number;
+};
+type Push = (t: Omit<Toast, 'id'>) => void;
+const ToastCtx = createContext<Push>(() => {});
+
+/** Ouvre un écran depuis n'importe où (solutions des messages d'erreur, tâches du jour…). */
+export const OPEN_EVENT = 'fedonix:open';
+export const openScreen = (kind: string, tab?: string) => window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: [kind, tab] }));
+
+/** Délai pendant lequel une action simple peut être annulée. */
+export const UNDO_SECONDS = 10;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((kind: Toast['kind'], text: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, kind, text }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 6000 : 3000);
-  }, []);
+  const [, tick] = useState(0);
+  const pending = useRef(new Map<number, Toast>());
+  const drop = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  const push = useCallback<Push>(
+    (t) => {
+      const id = Date.now() + Math.random();
+      const toast = { ...t, id };
+      setToasts((list) => [...list, toast]);
+      if (t.kind === 'undo') {
+        pending.current.set(id, toast);
+        setTimeout(() => {
+          const p = pending.current.get(id);
+          if (!p) return;
+          pending.current.delete(id);
+          drop(id);
+          void p.run?.();
+        }, UNDO_SECONDS * 1000);
+        return;
+      }
+      setTimeout(() => drop(id), t.kind === 'error' ? (t.fixes?.length ? 20000 : 6000) : 3000);
+    },
+    [drop],
+  );
+  const undo = useCallback(
+    (id?: number) => {
+      const key = id ?? [...pending.current.keys()].pop();
+      if (key === undefined) return false;
+      const p = pending.current.get(key);
+      pending.current.delete(key);
+      drop(key);
+      p?.onUndo?.();
+      return true;
+    },
+    [drop],
+  );
+  // Ctrl+Z (hors d'un champ de saisie) annule la dernière action encore annulable.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key.toLowerCase() !== 'z' || !pending.current.size) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      e.preventDefault();
+      undo();
+    };
+    // Fermeture du logiciel pendant le délai : l'action est faite tout de suite.
+    const flush = () => {
+      for (const p of pending.current.values()) void p.run?.();
+      pending.current.clear();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('beforeunload', flush);
+    const t = setInterval(() => pending.current.size && tick((n) => n + 1), 1000);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('beforeunload', flush);
+      clearInterval(t);
+    };
+  }, [undo]);
+  const runFix = async (t: Toast, f: ErrorFix) => {
+    drop(t.id);
+    if (f.open) return openScreen(f.open[0], f.open[1]);
+    if (f.run) {
+      try {
+        await (call as (name: string, ...args: unknown[]) => Promise<unknown>)(f.run.api, ...f.run.args);
+        push({ kind: 'ok', text: `${f.label} : fait. Vous pouvez recommencer.` });
+      } catch (e) {
+        push({ kind: 'error', text: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  };
   return (
     <ToastCtx.Provider value={push}>
       {children}
       <div className="toasts">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
-            {t.text}
+          <div key={t.id} className={`toast ${t.kind} ${t.fixes?.length ? 'with-fixes' : ''}`}>
+            <span>{t.text}</span>
+            {t.kind === 'undo' && (
+              <button type="button" className="toast-btn" onClick={() => undo(t.id)} title="Ctrl+Z">
+                Annuler ({Math.max(0, Math.ceil(((t.until ?? 0) - Date.now()) / 1000))} s)
+              </button>
+            )}
+            {t.fixes?.map((f) => (
+              <button key={f.label} type="button" className="toast-btn" onClick={() => void runFix(t, f)}>
+                {f.label}
+              </button>
+            ))}
+            {Boolean(t.fixes?.length) && (
+              <button type="button" className="toast-x" aria-label="Fermer" onClick={() => drop(t.id)}>
+                ✕
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -64,8 +163,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 export function useToast() {
   const push = useContext(ToastCtx);
   return {
-    ok: (text: string) => push('ok', text),
-    error: (e: unknown) => push('error', e instanceof Error ? e.message : String(e)),
+    ok: (text: string) => push({ kind: 'ok', text }),
+    error: (e: unknown) => push({ kind: 'error', text: e instanceof Error ? e.message : String(e), fixes: e instanceof ApiError ? e.fixes : undefined }),
+    /**
+     * Action simple sans « Êtes-vous sûr ? » : elle se fait au bout de
+     * 10 secondes, sauf si l'utilisateur clique « Annuler » ou tape Ctrl+Z.
+     * Jamais pour une vente, un règlement ou une écriture.
+     */
+    later: (text: string, run: () => unknown, onUndo?: () => void) => push({ kind: 'undo', text, run, onUndo, until: Date.now() + UNDO_SECONDS * 1000 }),
   };
 }
 
@@ -382,4 +487,154 @@ export const useStoreSettings = () => useContext(StoreSettingsContext);
 export function useCan(): (...rights: Permission[]) => boolean {
   const rights = useContext(RightsContext);
   return (...wanted) => wanted.some((r) => rights.includes(r));
+}
+
+// --- Brouillons --------------------------------------------------------------
+
+/** Écran qui rouvre un brouillon, d'après sa clé (« order:new », « quote:new »…). */
+export const DRAFT_SCREENS: Record<string, [string, string?]> = {
+  order: ['purchases', 'new-order'],
+  quote: ['quotes', 'new'],
+  article: ['articles', 'new'],
+  reception: ['purchases', 'orders'],
+};
+
+/**
+ * Saisie gardée toute seule sur ce PC (bon de commande, devis, fiche article,
+ * réception) : après une coupure de courant ou une fermeture, elle est
+ * proposée à la réouverture de l'écran. `clear()` après l'enregistrement.
+ */
+export function useDraft<T>(key: string | null, label: string, value: T, restore: (v: T) => void, isEmpty: (v: T) => boolean) {
+  const [found, setFound] = useState<{ data: T; updated_at: string; label: string } | null>(null);
+  const ready = useRef(false);
+  const done = useRef(false);
+  const json = JSON.stringify(value);
+  useEffect(() => {
+    ready.current = false;
+    done.current = false;
+    if (!key) return;
+    call('drafts.get', key).then(
+      (d) => {
+        if (d && !isEmpty(d.data as T)) setFound(d as { data: T; updated_at: string; label: string });
+        ready.current = true;
+      },
+      () => (ready.current = true),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  useEffect(() => {
+    if (!key || found) return;
+    const t = setTimeout(() => {
+      if (!ready.current || done.current) return;
+      if (isEmpty(value)) void call('drafts.clear', key).catch(() => undefined);
+      else void call('drafts.save', key, label, value).catch(() => undefined);
+    }, 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, json, found]);
+  const clear = () => {
+    done.current = true;
+    if (key) void call('drafts.clear', key).catch(() => undefined);
+  };
+  const banner = found ? (
+    <div className="draft-banner">
+      <span>
+        Saisie retrouvée du {dateTime(found.updated_at)} : <b>{found.label}</b>. Elle avait été gardée avant la fermeture.
+      </span>
+      <button type="button" className="primary" onClick={() => (restore(found.data), setFound(null))}>
+        Reprendre
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (key) void call('drafts.clear', key).catch(() => undefined);
+          setFound(null);
+        }}
+      >
+        Jeter
+      </button>
+    </div>
+  ) : null;
+  return { banner, clear };
+}
+
+// --- Clavier ---------------------------------------------------------------------
+
+/** Touche écrite dans l'infobulle d'un bouton : « Valider (F2) », « Ctrl+J »… */
+const KEY_IN_TITLE = /\b(F(?:1[0-2]|[1-9])|Ctrl\+(?:Entrée|[A-Z/]|\w)|Alt\+\w|Suppr|Échap|Entrée)\b/;
+
+/**
+ * Clavier partout : la touche est écrite sur chaque bouton qui en a une ;
+ * dans une fenêtre, Ctrl+Entrée valide (bouton principal) et Échap ferme.
+ */
+export function KeyHints() {
+  useEffect(() => {
+    let pending = false;
+    const mark = () => {
+      pending = false;
+      observer.disconnect();
+      for (const b of document.querySelectorAll<HTMLButtonElement>('button[title]:not([data-kbd]), button.primary:not([data-kbd])')) {
+        if (b.closest('.pos-screen, .rail, .quick-tabs, .lv-tools, .statusbar, .toasts')) {
+          b.dataset.kbd = '';
+          continue;
+        }
+        const m = KEY_IN_TITLE.exec(b.title ?? '');
+        const inModal = b.closest('.modal .actions');
+        const key = m?.[1] ?? (inModal && b.classList.contains('primary') && b.closest('.modal')?.querySelectorAll('.actions button.primary').length === 1 ? 'Ctrl+Entrée' : '');
+        b.dataset.kbd = key && !(b.textContent ?? '').includes(key) ? key : '';
+      }
+      for (const b of document.querySelectorAll<HTMLButtonElement>('.modal .actions button:not(.primary):not([data-kbd])')) {
+        b.dataset.kbd = /^(Annuler|Fermer|Retour)$/.test(b.textContent?.trim() ?? '') ? 'Échap' : '';
+      }
+      observer.observe(document.body, { childList: true, subtree: true });
+    };
+    const observer = new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(mark);
+    });
+    mark();
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key !== 'Enter') return;
+      const modals = document.querySelectorAll('.modal');
+      const top = modals[modals.length - 1];
+      const primary = top?.querySelectorAll<HTMLButtonElement>('.actions button.primary');
+      if (primary?.length === 1 && !primary[0]!.disabled) {
+        e.preventDefault();
+        primary[0]!.click();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+  return null;
+}
+
+/** Raccourcis de la page affichée : ceux du logiciel et ceux des boutons de la fenêtre de devant. */
+export function pageShortcuts(): [string, string][] {
+  const root = document.querySelector('.modal-back:last-of-type .modal') ?? document.querySelector('.mdi.active') ?? document.body;
+  const seen = new Set<string>();
+  const out: [string, string][] = [];
+  for (const b of root.querySelectorAll<HTMLButtonElement>('button')) {
+    const key = b.dataset.kbd || KEY_IN_TITLE.exec(b.title ?? '')?.[1];
+    const label = (b.textContent ?? '').replace(key ?? '', '').trim() || b.title.replace(/\s*\(.*?\)\s*/g, '').trim();
+    if (!key || !label || seen.has(key + label)) continue;
+    seen.add(key + label);
+    out.push([key, label]);
+  }
+  return out;
+}
+
+// --- Thème -----------------------------------------------------------------------
+
+export type Theme = 'light' | 'dark' | 'contrast';
+export const THEMES: Record<Theme, string> = { light: 'Clair (normal)', dark: 'Sombre (le soir)', contrast: 'Contraste fort (plein soleil)' };
+
+export function applyTheme(theme: Theme | undefined): void {
+  const root = document.documentElement;
+  root.classList.toggle('theme-dark', theme === 'dark');
+  root.classList.toggle('theme-contrast', theme === 'contrast');
 }

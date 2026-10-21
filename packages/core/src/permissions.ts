@@ -88,6 +88,7 @@ export const PERMISSIONS = {
   courier_returns: { label: 'Retour des livreurs : encaisser ce qu’ils rapportent, feuille de route', group: 'Facturation', type: 'Bouton', parent: 'deliveries' },
   containers_counter: { label: 'Encaisser ou rendre la consigne des emballages à la caisse', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sales_alerts: { label: 'Alertes sur les ventes (remises, annulations, retours)', group: 'Facturation', type: 'Menu', parent: 'sales' },
+  missed_sale: { label: 'Noter une vente manquée : « le client voulait… » (produit absent, en rupture, trop cher)', group: 'Facturation', type: 'Bouton', roles: [...COUNTER, 'stock'] },
 
   // --- Trésorerie --------------------------------------------------------------
   treasury: { label: 'Opérations de trésorerie (ouverture et clôture des caisses)', group: 'Trésorerie', type: 'Menu', roles: POS },
@@ -131,6 +132,7 @@ export const PERMISSIONS = {
   supplier_articles: { label: "Produits et prix d'achat d'un fournisseur", group: 'Fichier des fournisseurs', type: 'Fonction', parent: 'suppliers' },
   supplier_statement: { label: "Consulter l'extrait de compte et la situation des fournisseurs", group: 'Fichier des fournisseurs', type: 'Menu', parent: 'purchase_invoices' },
   free_goods: { label: 'Bonus fournisseurs : unités gratuites reçues et leur valeur', group: 'Fichier des fournisseurs', type: 'Menu', parent: 'suppliers' },
+  supplier_calendar: { label: 'Calendrier des fournisseurs : jours de passage et commande prête la veille', group: 'Fichier des fournisseurs', type: 'Menu', parent: 'reorder' },
 
   // --- Achat de marchandises ---------------------------------------------------
   purchases: { label: 'Achats : bons de commande et réceptions (consultation)', group: 'Achat de marchandises', type: 'Menu', roles: BUYING },
@@ -143,6 +145,8 @@ export const PERMISSIONS = {
   supplier_pay: { label: 'Payer une facture fournisseur', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   purchase_due: { label: 'Échéancier des fournisseurs', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
   supplier_returns: { label: 'Retours au fournisseur et avoirs attendus', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
+  missed_report: { label: 'Ventes manquées : produits les plus demandés par les clients', group: 'Achat de marchandises', type: 'Menu', parent: 'reorder' },
+  mobile_reception: { label: 'Réceptionner un bon de commande sur le téléphone (le PC valide)', group: 'Achat de marchandises', type: 'Fonction', parent: 'order_receive' },
 
   // --- Configuration des produits ----------------------------------------------
   articles: { label: 'Liste et fiches des produits', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
@@ -155,6 +159,7 @@ export const PERMISSIONS = {
   import: { label: 'Importer le catalogue (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
   article_export: { label: 'Exporter la liste des produits (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   price_update: { label: 'Mettre à jour les prix en masse (hausse en %, coefficient)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
+  price_review: { label: 'Prix à revoir : articles dont le prix d’achat a monté sans que le prix de vente bouge', group: 'Configuration des produits', type: 'Menu', parent: 'price_update' },
   stock_location: { label: 'Noter l’emplacement des produits dans les dépôts', group: 'Configuration des produits', type: 'Fonction', parent: 'article_edit' },
   labels: { label: 'Étiquettes de rayon', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
 
@@ -178,6 +183,8 @@ export const PERMISSIONS = {
   transfer_receive: { label: 'Réceptionner un transfert', group: 'Transferts de marchandises', type: 'Bouton', parent: 'stock' },
   transfer_cancel: { label: 'Annuler un transfert', group: 'Transferts de marchandises', type: 'Bouton', parent: 'stock' },
   transfer_direct: { label: 'Transférer directement sans bon (réserve vers surface)', group: 'Transferts de marchandises', type: 'Fonction', parent: 'stock' },
+  restock: { label: 'Liste de réassort du rayon et transfert de la réserve en un clic', group: 'Transferts de marchandises', type: 'Menu', parent: 'transfer_direct' },
+  day_tasks: { label: 'Tâches du jour à cocher (réceptions, transferts, inventaire, péremptions)', group: 'Gestion des stocks', type: 'Menu', roles: ['manager', 'stock', 'buyer'] },
 
   // --- Inventaire --------------------------------------------------------------
   inventory: { label: 'Créer un inventaire', group: 'Inventaire', type: 'Bouton', roles: MANAGE },
@@ -215,6 +222,7 @@ export const PERMISSIONS = {
   staff_targets: { label: 'Objectifs de vente et commissions des vendeurs', group: 'Personnel', type: 'Menu', parent: 'staff' },
   staff_attendance: { label: 'Pointage du personnel : état du mois, retards, absences et corrections', group: 'Personnel', type: 'Menu', roles: MANAGE },
   staff_leaves: { label: 'Congés et planning du personnel', group: 'Personnel', type: 'Menu', parent: 'staff_attendance' },
+  team_board: { label: 'Tableau de l’équipe sur la semaine (écarts, annulations, remises, panier moyen, vitesse)', group: 'Personnel', type: 'Menu', parent: 'cashier_control' },
 
   // --- Fiscalité ---------------------------------------------------------------
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
@@ -243,11 +251,14 @@ export const PERMISSIONS = {
   dashboard: { label: "Tableau de bord et points d'attention", group: 'Divers', type: 'Menu', roles: MANAGE },
   reports: { label: 'Rapports de ventes', group: 'Divers', type: 'Menu', roles: ACCOUNTING },
   report_export: { label: 'Exporter les rapports de ventes (Excel)', group: 'Divers', type: 'Bouton', parent: 'reports' },
+  owner_report: { label: 'Rapport mensuel du propriétaire (PDF, WhatsApp)', group: 'Divers', type: 'Menu', parent: 'dashboard' },
 
   // --- Paramétrage du système ----------------------------------------------------
   admin: { label: 'Administration (consulter caisses, dépôts, utilisateurs)', group: 'Paramétrage du système', type: 'Menu', roles: MANAGE },
   training: { label: 'Ouvrir le mode formation (caisse d’entraînement sur une copie de la boutique)', group: 'Paramétrage du système', type: 'Fonction', roles: MANAGE },
   users_manage: { label: 'Créer et modifier les utilisateurs', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },
+  user_copy: { label: 'Copier un utilisateur (même poste, mêmes privilèges)', group: 'Paramétrage du système', type: 'Bouton', parent: 'users_manage' },
+  stations: { label: 'État des PC : synchronisation, version, sauvegarde, imprimante, licence', group: 'Paramétrage du système', type: 'Menu', parent: 'admin' },
   warehouses_manage: { label: 'Créer, modifier et désactiver les dépôts', group: 'Paramétrage du système', type: 'Bouton', parent: 'admin' },
   companies: { label: 'Sociétés : regrouper les magasins, chiffres consolidés', group: 'Paramétrage du système', type: 'Fonction' },
   settings_edit: { label: 'Modifier les paramètres (imprimante, ventes, stock, sécurité…)', group: 'Paramétrage du système', type: 'Fonction', parent: 'admin' },

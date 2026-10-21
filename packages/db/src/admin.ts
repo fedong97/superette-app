@@ -156,6 +156,19 @@ export interface BootstrapInput {
  * Administration : magasins, dépôts, caisses, utilisateurs, paramètres.
  * Ajouter un magasin ou une caisse se fait ici, sans développement.
  */
+export interface AuditRow {
+  id: string;
+  user_id: string | null;
+  user_name: string | null;
+  action: string;
+  entity: string | null;
+  entity_id: string | null;
+  /** Nom de la fiche concernée (produit, client, fournisseur, utilisateur, n° de facture). */
+  entity_name: string | null;
+  details: string | null;
+  at: string;
+}
+
 export class AdminService extends Base {
   isInitialized(): boolean {
     return (this.db.prepare('SELECT COUNT(*) FROM stores').pluck().get() as number) > 0;
@@ -967,12 +980,88 @@ export class AdminService extends Base {
     }[];
   }
 
-  auditLog(limit = 200): { id: string; user_name: string | null; action: string; entity: string | null; entity_id: string | null; details: string | null; at: string }[] {
+  auditLog(limit = 200): AuditRow[] {
+    return this.auditSearch({ limit });
+  }
+
+  /**
+   * Journal d'audit cherchable : « qui a changé le prix de la Mutzig ? ».
+   * Filtres par personne, par fiche (produit, client, fournisseur…), par
+   * période et par mot (action, détails, nom de la fiche).
+   */
+  auditSearch(f: { userId?: string | null; entityId?: string | null; text?: string | null; from?: string | null; to?: string | null; action?: string | null; limit?: number } = {}): AuditRow[] {
+    const text = f.text?.trim() ? `%${f.text.trim().toLowerCase()}%` : null;
+    const to = f.to ? new Date(Date.parse(`${f.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : null;
     return this.db
       .prepare(
-        `SELECT a.id, u.name AS user_name, a.action, a.entity, a.entity_id, a.details, a.at
-         FROM audit_log a LEFT JOIN users u ON u.id = a.user_id ORDER BY a.at DESC LIMIT ?`,
+        `SELECT a.id, a.user_id, u.name AS user_name, a.action, a.entity, a.entity_id, a.details, a.at,
+                CASE a.entity WHEN 'article' THEN (SELECT name FROM articles WHERE id = a.entity_id)
+                              WHEN 'customer' THEN (SELECT name FROM customers WHERE id = a.entity_id)
+                              WHEN 'supplier' THEN (SELECT name FROM suppliers WHERE id = a.entity_id)
+                              WHEN 'user' THEN (SELECT name FROM users WHERE id = a.entity_id)
+                              WHEN 'sale' THEN (SELECT number FROM sales WHERE id = a.entity_id)
+                              WHEN 'warehouse' THEN (SELECT name FROM warehouses WHERE id = a.entity_id) END AS entity_name
+         FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+         WHERE (@userId IS NULL OR a.user_id = @userId) AND (@entityId IS NULL OR a.entity_id = @entityId)
+           AND (@action IS NULL OR a.action LIKE @action || '%')
+           AND (@from IS NULL OR a.at >= @from) AND (@to IS NULL OR a.at < @to)
+           AND (@text IS NULL OR lower(a.action) LIKE @text OR lower(COALESCE(a.details, '')) LIKE @text OR lower(COALESCE(u.name, '')) LIKE @text
+                OR (a.entity = 'article' AND a.entity_id IN (SELECT id FROM articles WHERE lower(name) LIKE @text OR lower(code) LIKE @text))
+                OR (a.entity = 'customer' AND a.entity_id IN (SELECT id FROM customers WHERE lower(name) LIKE @text))
+                OR (a.entity = 'supplier' AND a.entity_id IN (SELECT id FROM suppliers WHERE lower(name) LIKE @text)))
+         ORDER BY a.at DESC LIMIT @limit`,
       )
-      .all(limit) as never;
+      .all({ userId: f.userId ?? null, entityId: f.entityId ?? null, action: f.action?.trim() || null, from: f.from ?? null, to, text, limit: Math.min(Math.max(f.limit ?? 300, 1), 2000) }) as AuditRow[];
   }
+
+  /**
+   * Nouvel employé au même poste qu'un autre : rôle, magasin, caisses,
+   * dépôts de vente et privilèges personnels repris. Seuls le nom,
+   * l'identifiant et le code sont à saisir.
+   */
+  copyUser(byUserId: string, fromId: string, input: { name: string; login: string; pin: string }): User {
+    const from = this.getUser(fromId);
+    if (from.deleted_at) throw new AppError('Cet utilisateur a été supprimé', 'INVALID');
+    if (!input.name?.trim()) throw new AppError('Le nom est obligatoire', 'INVALID');
+    return this.tx(() => {
+      const user = this.createUser(byUserId, {
+        name: input.name,
+        login: input.login,
+        pin: input.pin,
+        role: from.role,
+        storeId: from.store_id,
+        registerId: from.register_id,
+        emoneyRegisterId: from.emoney_register_id,
+        bankRegisterId: from.bank_register_id,
+        saleWarehouses: from.sale_warehouses ? (JSON.parse(from.sale_warehouses) as string[]) : null,
+      });
+      const priv = this.privileges(fromId);
+      if (priv.grants.length || priv.revokes.length) this.savePrivileges(byUserId, user.id, priv);
+      this.audit(byUserId, 'user.copy', 'user', user.id, { from: fromId });
+      return this.getUser(user.id);
+    });
+  }
+
+  // --- Brouillons ------------------------------------------------------------------
+
+  /** Saisie en cours gardée sur ce PC : proposée au redémarrage après une coupure. */
+  saveDraft(userId: string, key: string, label: string, data: unknown): void {
+    const json = JSON.stringify(data);
+    if (json.length > 2_000_000) throw new AppError('Brouillon trop volumineux', 'INVALID');
+    this.db.prepare('INSERT OR REPLACE INTO ui_drafts (user_id, key, label, data, updated_at) VALUES (?, ?, ?, ?, ?)').run(userId, key, label.slice(0, 120), json, this.now());
+  }
+
+  draft(userId: string, key: string): { label: string; data: unknown; updated_at: string } | null {
+    const row = this.db.prepare('SELECT label, data, updated_at FROM ui_drafts WHERE user_id = ? AND key = ?').get(userId, key) as { label: string; data: string; updated_at: string } | undefined;
+    return row ? { label: row.label, data: JSON.parse(row.data) as unknown, updated_at: row.updated_at } : null;
+  }
+
+  drafts(userId: string): { key: string; label: string; updated_at: string }[] {
+    return this.db.prepare('SELECT key, label, updated_at FROM ui_drafts WHERE user_id = ? ORDER BY updated_at DESC').all(userId) as never;
+  }
+
+  clearDraft(userId: string, key: string): void {
+    this.db.prepare('DELETE FROM ui_drafts WHERE user_id = ? AND key = ?').run(userId, key);
+  }
+
 }

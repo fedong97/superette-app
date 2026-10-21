@@ -428,10 +428,10 @@ export function CancelDialog({ sessionId, onClose }: { sessionId: string; onClos
   );
 }
 
-export function ReturnDialog({ onClose }: { onClose: () => void }) {
+export function ReturnDialog({ onClose, initialSale = null }: { onClose: () => void; initialSale?: Result<'pos.sale'> | null }) {
   const toast = useToast();
   const [number, setNumber] = useState('');
-  const [sale, setSale] = useState<Result<'pos.sale'> | null>(null);
+  const [sale, setSale] = useState<Result<'pos.sale'> | null>(initialSale && initialSale.kind === 'sale' && initialSale.status === 'completed' ? initialSale : null);
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [refund, setRefund] = useState<PaymentMethod>('CASH');
   const { methods } = useMethods();
@@ -543,6 +543,46 @@ export function ReturnDialog({ onClose }: { onClose: () => void }) {
           }}
         />
       )}
+    </Modal>
+  );
+}
+
+/**
+ * Ticket retrouvé en scannant son code-barres : retour (toujours avec le code
+ * du gérant), réimpression du ticket (DUPLICATA) ou facture A4.
+ */
+export function ScannedTicketDialog({ sale, canReturn, canReprint, onReturn, onClose }: { sale: Result<'pos.sale'>; canReturn: boolean; canReprint: boolean; onReturn: () => void; onClose: () => void }) {
+  const toast = useToast();
+  const returnable = sale.kind === 'sale' && sale.status === 'completed';
+  return (
+    <Modal title={`Ticket ${sale.number}`} onClose={onClose}>
+      <p>
+        {dateTime(sale.created_at)} · <b>{fcfa(sale.total_ttc)}</b> · {sale.lines.length} article{sale.lines.length > 1 ? 's' : ''}
+        {sale.status !== 'completed' && <span className="tag rupture"> annulé</span>}
+        {sale.kind !== 'sale' && <span className="tag alerte"> retour</span>}
+      </p>
+      <ul className="plain">
+        {sale.lines.slice(0, 8).map((l) => (
+          <li key={l.id}>
+            {l.label} <small className="muted">× {qty(l.qty, l.unit)}</small>
+          </li>
+        ))}
+        {sale.lines.length > 8 && <li className="muted">…</li>}
+      </ul>
+      <div className="actions">
+        <button type="button" onClick={onClose}>
+          Fermer
+        </button>
+        <button type="button" disabled={!canReprint} onClick={() => call('pos.printTicket', sale.id).then(onClose, toast.error)} title={canReprint ? '' : "Vous n'avez pas le droit de réimprimer"}>
+          Réimprimer le ticket
+        </button>
+        <button type="button" onClick={() => call('pos.printInvoice', sale.id).then(onClose, toast.error)}>
+          Facture A4
+        </button>
+        <button type="button" className="primary" disabled={!canReturn || !returnable} onClick={onReturn} title="Le retour demande toujours le code du gérant">
+          Retour d'articles…
+        </button>
+      </div>
     </Modal>
   );
 }

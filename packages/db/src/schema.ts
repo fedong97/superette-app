@@ -2253,4 +2253,47 @@ CREATE TABLE companies (
 ALTER TABLE stores ADD COLUMN company_id TEXT;
 `,
   },
+  {
+    version: 57,
+    name: 'ventes manquées, jours de passage des fournisseurs, réassort du rayon, brouillons, tâches du jour',
+    sql: `
+-- Demande d'un client qu'on n'a pas pu servir (produit absent, en rupture, trop cher) : notée à la caisse ou sur le téléphone.
+CREATE TABLE missed_sales (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  article_id TEXT,
+  label TEXT NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 1000,
+  reason TEXT NOT NULL DEFAULT 'absent' CHECK (reason IN ('absent', 'rupture', 'prix', 'autre')),
+  note TEXT,
+  user_id TEXT,
+  source TEXT NOT NULL DEFAULT 'pc',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX missed_sales_store ON missed_sales(store_id, created_at);
+CREATE INDEX missed_sales_article ON missed_sales(article_id);
+-- Jours de passage du fournisseur (1 = lundi … 7 = dimanche), séparés par des virgules.
+ALTER TABLE suppliers ADD COLUMN visit_days TEXT;
+-- Quantité à garder en rayon (surface de vente) : base de la liste de réassort.
+ALTER TABLE articles ADD COLUMN shelf_qty INTEGER;
+-- Saisie en cours gardée sur ce PC (bon de commande, devis, fiche article, réception) : proposée après une coupure.
+CREATE TABLE ui_drafts (
+  user_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+-- Tâches du jour cochées sur ce PC.
+CREATE TABLE day_task_checks (
+  day TEXT NOT NULL,
+  task_key TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  done_at TEXT NOT NULL,
+  PRIMARY KEY (day, task_key)
+);
+`,
+  },
 ];

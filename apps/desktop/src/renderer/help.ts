@@ -32,6 +32,8 @@ const POS_KEYS: [string, string][] = [
   ['+ / −', 'Quantité de la ligne choisie'],
   ['Suppr', 'Enlever la ligne choisie'],
   ['3*code', 'Ajouter 3 fois le produit scanné ou tapé'],
+  ['Ctrl+M', 'Le client voulait… : noter un produit demandé qu’on n’a pas pu vendre'],
+  ['Scanner un ticket', 'Retrouver la vente : retour (code du gérant), réimpression, facture A4'],
 ];
 
 const POS: PageHelp = {
@@ -215,6 +217,25 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Stock',
     intro: 'Quantités par dépôt, réceptions, pertes, transferts, inventaires et péremptions.',
     sections: [
+      {
+        tab: 'tasks',
+        title: 'Tâches du jour',
+        perm: 'day_tasks',
+        steps: [
+          'Ce qui attend le magasinier aujourd’hui : livraisons prévues, transferts à envoyer ou à recevoir, rayon à remplir, inventaires ouverts, inventaire tournant, péremptions proches, passages de fournisseurs, ventes manquées d’hier.',
+          'Cochez une tâche faite ; « Ouvrir » mène à l’écran qui la traite. La liste s’affiche aussi sur l’accueil.',
+        ],
+      },
+      {
+        tab: 'restock',
+        title: 'Réassort du rayon',
+        perm: 'restock',
+        steps: [
+          'La liste de ce qu’il faut monter de la réserve vers le magasin, avec l’emplacement dans la réserve et la quantité arrondie au carton.',
+          'La quantité voulue en rayon se règle dans la fiche du produit ; sans réglage, c’est deux jours de ventes.',
+          'Imprimez la liste pour le manutentionnaire, puis « Faire le transfert » : un transfert par dépôt de départ, le stock suit.',
+        ],
+      },
       { tab: 'state', title: 'État du stock', steps: ['Le stock de chaque produit, en cartons, paquets et unités. Les couleurs signalent rupture, alerte et surstock.'] },
       {
         tab: 'multi',
@@ -283,6 +304,34 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Achats',
     intro: 'Commandes aux fournisseurs, réceptions, factures et paiements.',
     sections: [
+      {
+        tab: 'calendar',
+        title: 'Calendrier des passages fournisseurs',
+        perm: 'supplier_calendar',
+        steps: [
+          'Indiquez les jours de passage de chaque fournisseur (le brasseur le mardi, le grossiste le jeudi).',
+          'La veille du passage, la tâche du jour et « Préparer la commande » ouvrent la proposition de commande de ce fournisseur.',
+        ],
+      },
+      {
+        tab: 'missed',
+        title: 'Ventes manquées',
+        perm: 'missed_report',
+        steps: [
+          'Ce que les clients ont demandé sans pouvoir l’acheter, noté en caisse (Ctrl+M) ou au rayon sur le téléphone : produit en rupture, pas vendu ici, trop cher.',
+          'Les produits les plus demandés d’abord ; ceux que le magasin ne vend pas sont des idées de référencement.',
+          'La proposition de commande compte ces demandes dans les ventes moyennes.',
+        ],
+      },
+      {
+        tab: 'phone',
+        title: 'Réceptions comptées au téléphone',
+        perm: 'mobile_reception',
+        steps: [
+          'Le magasinier compte la livraison devant le camion avec l’application Inventaire : bon de commande, scan des produits, abîmés, lot et date limite.',
+          '« Reprendre et valider » ouvre la réception du bon avec son comptage : vérifiez les prix, puis validez. Le stock n’entre qu’à ce moment.',
+        ],
+      },
       {
         tab: 'orders',
         title: 'Bon de commande',
@@ -697,12 +746,45 @@ export const HELP: Record<WinKind, PageHelp> = {
     sections: [
       { tab: 'day', title: 'La journée', steps: ['CA, tickets, panier moyen, marge par rayon, ventes par heure et meilleures ventes.'] },
       { tab: 'attention', title: 'Points d’attention', steps: ['Une tuile par point à traiter (ruptures, écarts de caisse, factures en retard…). Cliquez une tuile pour ouvrir l’écran concerné.'] },
+      {
+        tab: 'prices',
+        title: 'Prix à revoir',
+        perm: 'price_review',
+        steps: [
+          'Les produits dont le prix d’achat a monté à la dernière réception alors que le prix de vente n’a pas bougé : la marge a fondu.',
+          'Le prix proposé garde l’ancien taux de marge, arrondi à 5 FCFA. « Appliquer » change le prix de vente (cartons et prix par quantité compris).',
+        ],
+      },
+      {
+        tab: 'team',
+        title: 'Équipe de la semaine',
+        perm: 'team_board',
+        steps: ['Pour chaque caissier et vendeur : ventes, tickets, panier moyen, annulations, retours, remises, manquants et temps moyen entre deux tickets. La plus forte valeur à surveiller est en rouge.'],
+      },
+      {
+        tab: 'owner',
+        title: 'Rapport du mois',
+        perm: 'owner_report',
+        steps: [
+          'Les chiffres du mois comparés au mois d’avant : ventes, marge, dépenses, stock, crédit clients, trésorerie, dettes fournisseurs et meilleurs rayons. Ce sont les ventes enregistrées, telles quelles.',
+          '« PDF » enregistre le rapport ; « WhatsApp » ouvre le message prêt à envoyer au propriétaire.',
+        ],
+      },
     ],
   },
   admin: {
     title: 'Administration',
     intro: 'Magasins, caisses, utilisateurs, droits, paramètres et sauvegardes.',
     sections: [
+      {
+        tab: 'stations',
+        title: 'État des PC',
+        perm: 'stations',
+        steps: [
+          'Chaque PC du magasin envoie son état toutes les 5 minutes : dernière sauvegarde, imprimante, opérations pas encore envoyées, licence, version.',
+          'Une ligne rouge demande d’aller voir ce PC (sauvegarde trop ancienne, PC pas vu depuis longtemps, licence).',
+        ],
+      },
       {
         tab: 'warehouses',
         title: 'Dépôts',

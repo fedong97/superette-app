@@ -6,7 +6,7 @@ import { tx } from '../tax';
 export type DashboardTab = 'day' | 'attention';
 type Item = Result<'attention.list'>[number];
 /** Fenêtre et onglet qui traitent chaque point d'attention. */
-export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production', string];
+export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales', string];
 
 const TARGET: Record<Item['key'], AttentionTarget> = {
   rupture: ['stock', 'critical'],
@@ -20,6 +20,7 @@ const TARGET: Record<Item['key'], AttentionTarget> = {
   supplier_invoices: ['purchases', 'due'],
   late_customers: ['customers', 'receivables'],
   production: ['production', 'orders'],
+  sale_edit_requests: ['sales', 'requests'],
 };
 
 /** Tableau de bord : la journée en chiffres, et les points d'attention du gérant. */

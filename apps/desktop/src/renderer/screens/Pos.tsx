@@ -9,6 +9,7 @@ import {
   type Tariff,
   PRICE_LEVELS,
   agreedPrices,
+  parseArticlePrices,
   applyPromotions,
   computeTotals,
   formatFcfa,
@@ -246,8 +247,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     () => {
       // Prix convenus, comme à l'enregistrement : paliers de quantité et remises du client par famille.
       const discounts = parseFamilyDiscounts(customer?.family_discounts);
+      const negotiated = parseArticlePrices(customer?.article_prices);
       return applyPromotions(
-        lines.map((l) => agreedPrices(atLevel(l, level), l, discounts)),
+        lines.map((l) => agreedPrices(atLevel(l, level), { ...l, id: l.articleId }, discounts, negotiated)),
         level === 'retail' ? (promoRules.data ?? []) : [],
       );
     },

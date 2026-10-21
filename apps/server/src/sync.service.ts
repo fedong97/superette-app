@@ -31,9 +31,11 @@ export const GLOBAL_ENTITIES = [
   'loyalty_move',
   // Types d'emballages consignés (casiers, bouteilles) : les mêmes partout.
   'container',
+  // Sociétés : elles regroupent des magasins.
+  'company',
 ];
 
-export const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder', 'customer_order', 'sales_target', 'supplier_return', 'summary_invoice', 'cheque_deposit', 'budget', 'attendance', 'cash_handover', 'fixed_asset', 'opening_balance', 'container_move', 'agent_account', 'agent_operation', 'staff_leave', 'staff_schedule', 'cheque_rejection', 'courier_return']);
+export const KNOWN_ENTITIES = new Set([...GLOBAL_ENTITIES, 'lot', 'stock_movement', 'cash_session', 'cash_operation', 'sale', 'purchase_order', 'reception', 'supplier_invoice', 'supplier_payment', 'customer_payment', 'manual_entry', 'expense', 'quote', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'central_cash_movement', 'emoney_movement', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'rebate_entry', 'production_order', 'staff', 'staff_salary', 'treasury_entry', 'sale_delivery', 'fiscal_year', 'customer_reminder', 'customer_order', 'sales_target', 'supplier_return', 'summary_invoice', 'cheque_deposit', 'budget', 'attendance', 'cash_handover', 'fixed_asset', 'opening_balance', 'container_move', 'agent_account', 'agent_operation', 'staff_leave', 'staff_schedule', 'cheque_rejection', 'courier_return', 'account_offset', 'payment_allocation', 'sale_edit_request', 'consignment_count']);
 
 export interface SyncEvent {
   id: string;

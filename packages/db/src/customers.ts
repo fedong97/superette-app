@@ -1,6 +1,7 @@
 import {
   AGING_LABELS,
   type AgingBucket,
+  type ArticlePrices,
   type DocLang,
   DOC_LANGS,
   type Fcfa,
@@ -37,6 +38,12 @@ export interface Customer {
   family_discounts: string | null;
   /** Interdit de chèque (chèque revenu impayé) : la caisse refuse ses chèques. */
   no_cheque: number;
+  /** Prix négociés par article (JSON : {"<article>": 450}), prix TTC de l'unité de détail. */
+  article_prices: string | null;
+  /** Zone ou tournée (quartier, ligne de livraison). */
+  zone: string | null;
+  /** Fiche fournisseur du même tiers : ses dettes et créances se compensent. */
+  supplier_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +65,11 @@ export interface CustomerInput {
   familyDiscounts?: FamilyDiscounts;
   /** Interdit de chèque ; absent = inchangé. */
   noCheque?: boolean;
+  /** Prix négociés par article ; absent = inchangés. */
+  articlePrices?: ArticlePrices;
+  zone?: string | null;
+  /** Fournisseur du même tiers ; absent = inchangé. */
+  supplierId?: string | null;
 }
 
 export const CUSTOMER_PAYMENT_METHODS = {
@@ -103,7 +115,7 @@ export interface CustomerAccount {
 
 export interface StatementLine {
   date: string;
-  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening' | 'rejected';
+  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening' | 'rejected' | 'offset';
   ref_id: string;
   number: string;
   label: string;
@@ -142,17 +154,18 @@ export class CustomerService extends Base {
 
   listCustomers(
     storeId: string,
-    opts: { search?: string; includeInactive?: boolean; withBalance?: boolean } = {},
+    opts: { search?: string; includeInactive?: boolean; withBalance?: boolean; zone?: string | null } = {},
   ): (Customer & { balance: Fcfa; overdue: Fcfa; last_sale: string | null })[] {
     const rows = this.db
       .prepare(
         `SELECT c.*, (SELECT MAX(s.created_at) FROM sales s WHERE s.customer_id = c.id AND s.store_id = @storeId) AS last_sale
          FROM customers c
          WHERE (@all = 1 OR c.active = 1)
-           AND (@search IS NULL OR c.name LIKE @search OR c.code LIKE @search OR c.phone LIKE @search)
+           AND (@search IS NULL OR c.name LIKE @search OR c.code LIKE @search OR c.phone LIKE @search OR c.zone LIKE @search)
+           AND (@zone IS NULL OR COALESCE(c.zone, '') = @zone)
          ORDER BY c.name`,
       )
-      .all({ storeId, all: opts.includeInactive ? 1 : 0, search: opts.search?.trim() ? `%${opts.search.trim()}%` : null }) as (Customer & {
+      .all({ storeId, all: opts.includeInactive ? 1 : 0, search: opts.search?.trim() ? `%${opts.search.trim()}%` : null, zone: opts.zone ?? null }) as (Customer & {
       last_sale: string | null;
     })[];
     const result = rows.map((c) => {
@@ -196,6 +209,26 @@ export class CustomerService extends Base {
     return Object.keys(clean).length ? JSON.stringify(clean) : null;
   }
 
+  /** Prix négociés contrôlés (article connu, prix entier positif), en JSON ; null sans prix. */
+  private pricesJson(prices: ArticlePrices): string | null {
+    const clean: ArticlePrices = {};
+    for (const [articleId, price] of Object.entries(prices)) {
+      if (!price) continue;
+      if (!Number.isSafeInteger(price) || price < 0) throw new AppError('Prix négocié invalide', 'INVALID');
+      const a = this.db.prepare('SELECT name, purchase_price, unit FROM articles WHERE id = ?').get(articleId) as { name: string; purchase_price: number; unit: string } | undefined;
+      if (!a) throw new AppError('Article inconnu', 'INVALID');
+      clean[articleId] = price;
+    }
+    return Object.keys(clean).length ? JSON.stringify(clean) : null;
+  }
+
+  /** Zones déjà données aux clients, pour les proposer à la saisie et filtrer les listes. */
+  zones(): { zone: string; count: number }[] {
+    return this.db
+      .prepare("SELECT zone, COUNT(*) AS count FROM customers WHERE zone IS NOT NULL AND zone <> '' AND active = 1 GROUP BY zone ORDER BY zone")
+      .all() as { zone: string; count: number }[];
+  }
+
   saveCustomer(userId: string, input: CustomerInput, id?: string): Customer {
     const name = input.name.trim();
     if (!name) throw new AppError('Le nom du client est obligatoire', 'INVALID');
@@ -219,8 +252,13 @@ export class CustomerService extends Base {
       language: input.language ?? (id ? this.getCustomer(id).language : 'fr'),
       family_discounts: input.familyDiscounts === undefined ? (id ? this.getCustomer(id).family_discounts : null) : this.discountsJson(input.familyDiscounts),
       no_cheque: input.noCheque === undefined ? (id ? this.getCustomer(id).no_cheque : 0) : input.noCheque ? 1 : 0,
+      article_prices: input.articlePrices === undefined ? (id ? this.getCustomer(id).article_prices : null) : this.pricesJson(input.articlePrices),
+      zone: input.zone === undefined ? (id ? this.getCustomer(id).zone : null) : input.zone?.trim().replace(/\s+/g, ' ').toUpperCase() || null,
+      supplier_id: input.supplierId === undefined ? (id ? this.getCustomer(id).supplier_id : null) : input.supplierId || null,
       updated_at: now,
     };
+    if (values.supplier_id && !this.db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(values.supplier_id)) throw new AppError('Fournisseur introuvable', 'INVALID');
+    if (values.zone && values.zone.length > 40) throw new AppError('Nom de zone trop long (40 caractères au plus)', 'INVALID');
     if (!(values.price_level in PRICE_LEVELS)) throw new AppError('Tarif inconnu', 'INVALID');
     if (!DOC_LANGS.includes(values.language)) throw new AppError('Langue inconnue', 'INVALID');
     return this.tx(() => {
@@ -232,21 +270,24 @@ export class CustomerService extends Base {
             `UPDATE customers SET name = @name, contact = @contact, phone = @phone, email = @email, address = @address,
                taxpayer_number = @taxpayer_number, credit_limit = @credit_limit, payment_terms_days = @payment_terms_days,
                notes = @notes, active = @active, price_level = @price_level, language = @language, family_discounts = @family_discounts,
-               no_cheque = @no_cheque, updated_at = @updated_at WHERE id = @id`,
+               no_cheque = @no_cheque, article_prices = @article_prices, zone = @zone, supplier_id = @supplier_id, updated_at = @updated_at WHERE id = @id`,
           )
           .run({ ...values, id: customerId });
         if (before.credit_limit !== limit) this.audit(userId, 'customer.credit_limit', 'customer', customerId, { from: before.credit_limit, to: limit });
         if ((before.family_discounts ?? null) !== values.family_discounts) {
           this.audit(userId, 'customer.family_discounts', 'customer', customerId, { from: before.family_discounts, to: values.family_discounts });
         }
+        if ((before.article_prices ?? null) !== values.article_prices) {
+          this.audit(userId, 'customer.article_prices', 'customer', customerId, { from: before.article_prices, to: values.article_prices });
+        }
       } else {
         customerId = newId();
         this.db
           .prepare(
             `INSERT INTO customers (id, code, name, contact, phone, email, address, taxpayer_number, credit_limit, payment_terms_days,
-               notes, active, price_level, language, family_discounts, no_cheque, created_at, updated_at)
+               notes, active, price_level, language, family_discounts, no_cheque, article_prices, zone, supplier_id, created_at, updated_at)
              VALUES (@id, @code, @name, @contact, @phone, @email, @address, @taxpayer_number, @credit_limit, @payment_terms_days,
-               @notes, @active, @price_level, @language, @family_discounts, @no_cheque, @created_at, @updated_at)`,
+               @notes, @active, @price_level, @language, @family_discounts, @no_cheque, @article_prices, @zone, @supplier_id, @created_at, @updated_at)`,
           )
           .run({ ...values, id: customerId, code: this.number('CLI', 'customer.code'), created_at: now });
       }
@@ -294,19 +335,107 @@ export class CustomerService extends Base {
       .prepare(
         `SELECT (SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE store_id = @s AND customer_id = @c)
               + (SELECT COALESCE(SUM(amount), 0) FROM rebate_entries WHERE store_id = @s AND customer_id = @c AND kind = 'credit')
-              - (SELECT COALESCE(SUM(amount), 0) FROM treasury_entries WHERE store_id = @s AND customer_id = @c AND kind = 'customer_refund' AND status = 'active')`,
+              - (SELECT COALESCE(SUM(amount), 0) FROM treasury_entries WHERE store_id = @s AND customer_id = @c AND kind = 'customer_refund' AND status = 'active')
+              + (SELECT COALESCE(SUM(amount), 0) FROM account_offsets WHERE store_id = @s AND customer_id = @c AND status = 'active')`,
       )
       .pluck()
       .get({ s: storeId, c: customerId }) as number;
     const total = debits.reduce((t, d) => t + d.amount, 0);
     const today = this.today();
-    const openItems = allocateOldestFirst(debits, returned + paid + openingCredit)
+    // Lettrage manuel : la part d'un règlement imputée à une vente précise la solde d'abord ; le reste va aux plus anciennes.
+    const lettered = this.lettered(storeId, customerId);
+    let letteredTotal = 0;
+    const afterLetters = debits.map((d) => {
+      const used = Math.min(d.amount, lettered.get(d.id) ?? 0);
+      letteredTotal += used;
+      return { ...d, amount: d.amount - used, original: d.amount };
+    });
+    const openItems = allocateOldestFirst(afterLetters, returned + paid + openingCredit - letteredTotal)
       .filter((d) => d.remaining > 0)
-      .map((d) => {
+      .map(({ original, ...d }) => {
         const due = d.due_date ?? d.created_at.slice(0, 10);
-        return { ...d, due_date: due, days_late: daysLate(due, today), bucket: agingBucket(due, today) };
+        return { ...d, amount: original, due_date: due, days_late: daysLate(due, today), bucket: agingBucket(due, today) };
       });
     return { balance: total - returned - paid - openingCredit, openItems };
+  }
+
+  /** Lettrage manuel du client : vente → montant imputé, chaque règlement plafonné à son montant. */
+  private lettered(storeId: string, customerId: string): Map<string, Fcfa> {
+    const rows = this.db
+      .prepare(
+        `SELECT a.payment_id, a.sale_id, a.amount, p.amount AS paid FROM payment_allocations a JOIN customer_payments p ON p.id = a.payment_id
+         WHERE a.store_id = ? AND a.customer_id = ? AND a.amount > 0 ORDER BY a.payment_id, a.updated_at`,
+      )
+      .all(storeId, customerId) as { payment_id: string; sale_id: string; amount: number; paid: number }[];
+    const left = new Map<string, number>();
+    const out = new Map<string, Fcfa>();
+    for (const r of rows) {
+      const room = left.get(r.payment_id) ?? r.paid;
+      const used = Math.min(room, r.amount);
+      left.set(r.payment_id, room - used);
+      if (used > 0) out.set(r.sale_id, (out.get(r.sale_id) ?? 0) + used);
+    }
+    return out;
+  }
+
+  /** Lettrage d'un règlement : les ventes qu'il solde, et pour combien. */
+  allocations(paymentId: string): { sale_id: string; number: string; amount: Fcfa }[] {
+    return this.db
+      .prepare('SELECT a.sale_id, s.number, a.amount FROM payment_allocations a JOIN sales s ON s.id = a.sale_id WHERE a.payment_id = ? AND a.amount > 0 ORDER BY s.created_at')
+      .all(paymentId) as { sale_id: string; number: string; amount: Fcfa }[];
+  }
+
+  /**
+   * Lettrage manuel d'un règlement sur des ventes à crédit choisies (une facture en litige
+   * reste due, celle que le client désigne est soldée). Remplace le lettrage précédent du
+   * règlement ; ce qui n'est pas lettré continue de solder les ventes les plus anciennes.
+   */
+  setAllocations(ctx: Context, paymentId: string, allocations: { saleId: string; amount: Fcfa }[]): { sale_id: string; number: string; amount: Fcfa }[] {
+    const payment = this.getPayment(paymentId);
+    if (payment.store_id !== ctx.storeId) throw new AppError("Ce règlement est d'un autre magasin", 'FORBIDDEN');
+    const clean = allocations.filter((a) => a.amount !== 0);
+    let total = 0;
+    const credit = this.db.prepare(
+      `SELECT s.number, s.customer_id, s.store_id, s.status, s.kind, COALESCE(SUM(p.amount), 0) AS amount FROM sales s
+       LEFT JOIN sale_payments p ON p.sale_id = s.id AND p.method = 'CUSTOMER_CREDIT' WHERE s.id = ? GROUP BY s.id`,
+    );
+    const others = this.db.prepare('SELECT COALESCE(SUM(amount), 0) FROM payment_allocations WHERE sale_id = ? AND payment_id <> ?').pluck();
+    const seen = new Set<string>();
+    for (const a of clean) {
+      if (!Number.isSafeInteger(a.amount) || a.amount < 0) throw new AppError('Montant lettré invalide', 'INVALID');
+      if (seen.has(a.saleId)) throw new AppError('La même facture est lettrée deux fois', 'INVALID');
+      seen.add(a.saleId);
+      const sale = credit.get(a.saleId) as { number: string; customer_id: string | null; store_id: string; status: string; kind: string; amount: number } | undefined;
+      if (!sale || sale.customer_id !== payment.customer_id || sale.store_id !== ctx.storeId || sale.status !== 'completed' || sale.kind !== 'sale' || sale.amount <= 0) {
+        throw new AppError('Seules les ventes à crédit de ce client se lettrent', 'INVALID');
+      }
+      const free = sale.amount - (others.get(a.saleId, paymentId) as number);
+      if (a.amount > free) throw new AppError(`La facture ${sale.number} n'a plus que ${formatFcfa(Math.max(0, free))} à lettrer`, 'INVALID');
+      total += a.amount;
+    }
+    if (total > payment.amount) throw new AppError(`Le lettrage dépasse le règlement (${formatFcfa(payment.amount)})`, 'INVALID');
+    return this.tx(() => {
+      const now = this.now();
+      const before = this.db.prepare('SELECT id FROM payment_allocations WHERE payment_id = ? AND amount > 0').pluck().all(paymentId) as string[];
+      const upsert = this.db.prepare(
+        `INSERT INTO payment_allocations (id, payment_id, sale_id, store_id, customer_id, amount, user_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET amount = excluded.amount, user_id = excluded.user_id, updated_at = excluded.updated_at`,
+      );
+      const kept = new Set<string>();
+      for (const a of clean) {
+        const id = `${paymentId}:${a.saleId}`;
+        kept.add(id);
+        upsert.run(id, paymentId, a.saleId, ctx.storeId, payment.customer_id, a.amount, ctx.userId, now);
+        this.enqueue(ctx, 'payment_allocation', id, 'upsert', {});
+      }
+      // Une imputation retirée passe à zéro : elle voyage comme les autres vers les autres PC.
+      for (const id of before.filter((x) => !kept.has(x))) {
+        this.db.prepare('UPDATE payment_allocations SET amount = 0, user_id = ?, updated_at = ? WHERE id = ?').run(ctx.userId, now, id);
+        this.enqueue(ctx, 'payment_allocation', id, 'upsert', {});
+      }
+      this.audit(ctx.userId, 'customer.lettering', 'customer_payment', paymentId, { number: payment.number, allocations: clean });
+      return this.allocations(paymentId);
+    });
   }
 
   account(storeId: string, customerId: string): CustomerAccount {
@@ -374,6 +503,8 @@ export class CustomerService extends Base {
          SELECT at, 'refund', id, number, amount FROM treasury_entries WHERE store_id = @storeId AND customer_id = @customerId AND kind = 'customer_refund' AND status = 'active'
          UNION ALL
          SELECT rejected_on, 'rejected', id, number, amount + fees FROM cheque_rejections WHERE store_id = @storeId AND customer_id = @customerId AND status = 'active'
+         UNION ALL
+         SELECT offset_date, 'offset', id, number, -amount FROM account_offsets WHERE store_id = @storeId AND customer_id = @customerId AND status = 'active'
          ORDER BY 1, 4`,
       )
       .all({ storeId, customerId }) as { date: string; kind: StatementLine['kind']; ref_id: string; number: string; amount: number }[];
@@ -411,6 +542,8 @@ export class CustomerService extends Base {
                 ? 'Avoir remboursé au client'
                 : r.kind === 'rejected'
                   ? 'Chèque revenu impayé (frais compris)'
+                : r.kind === 'offset'
+                  ? 'Compensation avec son compte fournisseur'
                   : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }
@@ -425,7 +558,16 @@ export class CustomerService extends Base {
    */
   receivePayment(
     ctx: Context,
-    input: { customerId: string; method: CustomerPaymentMethod; amount: Fcfa; reference?: string | null; notes?: string | null; sessionId?: string | null },
+    input: {
+      customerId: string;
+      method: CustomerPaymentMethod;
+      amount: Fcfa;
+      reference?: string | null;
+      notes?: string | null;
+      sessionId?: string | null;
+      /** Lettrage manuel : les factures que ce règlement solde ; sinon les plus anciennes. */
+      allocations?: { saleId: string; amount: Fcfa }[] | null;
+    },
   ): CustomerPayment {
     if (!(input.method in CUSTOMER_PAYMENT_METHODS)) throw new AppError(`Mode de règlement inconnu : ${input.method}`, 'INVALID');
     if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new AppError('Montant invalide', 'INVALID');
@@ -466,6 +608,7 @@ export class CustomerService extends Base {
         );
       this.enqueue(ctx, 'customer_payment', id, 'upsert', {});
       this.audit(ctx.userId, 'customer.payment', 'customer', input.customerId, { amount: input.amount, method: input.method });
+      if (input.allocations?.length) this.setAllocations(ctx, id, input.allocations);
       return this.getPayment(id);
     });
   }
@@ -507,7 +650,17 @@ export class CustomerService extends Base {
 
   /** Balance âgée du magasin : ce que doivent les clients, par ancienneté du retard. */
   receivables(storeId: string): {
-    customers: { id: string; code: string; name: string; phone: string | null; credit_limit: Fcfa; balance: Fcfa; buckets: Record<AgingBucket, Fcfa>; last_reminder: CustomerReminder | null }[];
+    customers: {
+      id: string;
+      code: string;
+      name: string;
+      phone: string | null;
+      zone: string | null;
+      credit_limit: Fcfa;
+      balance: Fcfa;
+      buckets: Record<AgingBucket, Fcfa>;
+      last_reminder: CustomerReminder | null;
+    }[];
     totals: Record<AgingBucket, Fcfa> & { balance: Fcfa };
     labels: typeof AGING_LABELS;
   } {
@@ -519,6 +672,7 @@ export class CustomerService extends Base {
       )
       .pluck()
       .all(storeId, storeId, storeId) as string[];
+    const zones = new Map((this.db.prepare('SELECT id, zone FROM customers').all() as { id: string; zone: string | null }[]).map((c) => [c.id, c.zone]));
     const empty = (): Record<AgingBucket, Fcfa> => ({ current: 0, d30: 0, d60: 0, d90: 0, older: 0 });
     const totals = { ...empty(), balance: 0 };
     const reminders = this.lastReminders(storeId);
@@ -528,7 +682,7 @@ export class CustomerService extends Base {
         const { balance, openItems } = this.ledger(storeId, id);
         const buckets = empty();
         for (const i of openItems) buckets[i.bucket] += i.remaining;
-        return { id, code: c.code, name: c.name, phone: c.phone, credit_limit: c.credit_limit, balance, buckets, last_reminder: reminders.get(id) ?? null };
+        return { id, code: c.code, name: c.name, phone: c.phone, zone: zones.get(id) ?? null, credit_limit: c.credit_limit, balance, buckets, last_reminder: reminders.get(id) ?? null };
       })
       .filter((c) => c.balance !== 0)
       .sort((a, b) => b.balance - a.balance);

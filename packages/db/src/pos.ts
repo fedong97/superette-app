@@ -10,6 +10,7 @@ import {
   PAYMENT_METHODS,
   type RegisterKind,
   agreedPrices,
+  parseArticlePrices,
   applyPromotions,
   paymentRegisterKind,
   ELECTRONIC_METHODS,
@@ -191,6 +192,8 @@ export interface SaleInput {
   delivery?: DeliveryInput | null;
   /** Vendeur qui a préparé le panier au rayon : la vente compte pour lui (commission). */
   sellerId?: string | null;
+  /** Facture d'une fiche de contrôle de dépôt-vente : la marchandise sort du dépôt du revendeur. */
+  fromConsignment?: boolean;
 }
 
 export interface Sale {
@@ -359,10 +362,13 @@ export class PosService extends Base {
   }
 
   /** Dépôt de sortie d'une vente : celui choisi à la caisse (du magasin, actif) ou le dépôt de vente. */
-  saleWarehouse(storeId: string, warehouseId?: string | null) {
+  saleWarehouse(storeId: string, warehouseId?: string | null, opts: { consignment?: boolean } = {}) {
     if (!warehouseId) return this.admin.salesWarehouse(storeId);
     const wh = this.admin.listWarehouses(storeId).find((w) => w.id === warehouseId);
     if (!wh) throw new AppError('Dépôt indisponible pour ce magasin', 'INVALID');
+    if (wh.purpose === 'damaged') throw new AppError(`« ${wh.name} » contient les avaries : rien ne s'y vend`, 'INVALID');
+    // Un dépôt-vente ne se facture que par sa fiche de contrôle, au client qui le détient.
+    if (wh.purpose === 'consignment' && !opts.consignment) throw new AppError(`« ${wh.name} » est un dépôt-vente : facturez-le par sa fiche de contrôle`, 'INVALID');
     return wh;
   }
 
@@ -589,7 +595,9 @@ export class PosService extends Base {
     // Magasin non assujetti (régime simplifié) : aucune TVA sur ses ventes.
     const vat = this.admin.getStore(storeId).vat_enabled === 1;
     // Prix convenus : paliers de quantité de l'article, remises du client par famille.
-    const discounts = customerId ? parseFamilyDiscounts(this.customers.getCustomer(customerId).family_discounts) : {};
+    const customer = customerId ? this.customers.getCustomer(customerId) : null;
+    const discounts = customer ? parseFamilyDiscounts(customer.family_discounts) : {};
+    const negotiated = customer ? parseArticlePrices(customer.article_prices) : {};
     const lines = input.map((l) => {
       if (!Number.isSafeInteger(l.qty) || l.qty === 0) throw new AppError('Quantité invalide', 'INVALID');
       const article = this.catalogue.getArticle(l.articleId, storeId);
@@ -630,7 +638,7 @@ export class PosService extends Base {
         ...(price !== null && !pack ? { unitPrice: price } : {}),
         ...(price !== null ? { priceSet: true } : {}),
       };
-      const agreed = agreedPrices(line, { tiers: parseQtyTiers(article.qty_tiers), familyId: article.family_id }, discounts);
+      const agreed = agreedPrices(line, { tiers: parseQtyTiers(article.qty_tiers), familyId: article.family_id, id: article.id }, discounts, negotiated);
       if (lineTotal(agreed) < 0) throw new AppError(`Remise supérieure au prix : ${article.name}`, 'INVALID');
       return agreed;
     });
@@ -798,7 +806,7 @@ export class PosService extends Base {
       throw new AppError('Ce client est interdit de chèque (chèque revenu impayé) : choisissez un autre moyen de paiement', 'NO_CHEQUE');
     }
     const set = this.admin.storeSettings(ctx.storeId);
-    const warehouse = this.saleWarehouse(ctx.storeId, input.warehouseId);
+    const warehouse = this.saleWarehouse(ctx.storeId, input.warehouseId, { consignment: input.fromConsignment === true });
     const lines = this.priceLines(ctx.storeId, input.lines, level, input.customerId ?? null);
     if (input.delivery) {
       this.deliveries.check(input.delivery);
@@ -837,7 +845,7 @@ export class PosService extends Base {
         throw new AppError(`Référence de transaction obligatoire pour ${PAYMENT_METHODS[p.method]}`, 'REFERENCE_REQUIRED');
       }
     }
-    const plan = this.planStock(ctx.storeId, this.saleSources(ctx.storeId, ctx.userId, warehouse), lines, this.orders.reserved(ctx.storeId, input.orderId));
+    const plan = this.planStock(ctx.storeId, input.fromConsignment ? [warehouse] : this.saleSources(ctx.storeId, ctx.userId, warehouse), lines, this.orders.reserved(ctx.storeId, input.orderId));
     const withoutStock = plan.short;
     // Chaque paiement va à la journée de la caisse de son type (espèces, électronique, banque).
     const paymentSessions = input.payments.map((p) => this.sessionFor(ctx, p.method, session.id));

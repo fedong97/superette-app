@@ -57,6 +57,10 @@ import { CashierControlService } from './cashierControl';
 import { ClearanceService } from './clearance';
 import { CycleCountService } from './cycleCount';
 import { CourierService } from './couriers';
+import { OffsetService } from './offsets';
+import { SaleEditRequestService } from './editRequests';
+import { ConsignmentService } from './consignment';
+import { CompanyService } from './companies';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -119,6 +123,10 @@ export * from './cashierControl';
 export * from './clearance';
 export * from './cycleCount';
 export * from './couriers';
+export * from './offsets';
+export * from './editRequests';
+export * from './consignment';
+export * from './companies';
 export { AppError, type Clock, type Context } from './util';
 
 export interface Services {
@@ -181,6 +189,10 @@ export interface Services {
   clearance: ClearanceService;
   cycleCount: CycleCountService;
   couriers: CourierService;
+  offsets: OffsetService;
+  editRequests: SaleEditRequestService;
+  consignment: ConsignmentService;
+  companies: CompanyService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -242,7 +254,11 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const summaryInvoices = new SummaryInvoiceService(db, clock);
   const cheques = new ChequeService(db, clock);
   const planning = new PlanningService(db, clock, accounting, customers, purchases, charges, reports);
-  return { db, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const offsets = new OffsetService(db, clock, customers, purchases);
+  const editRequests = new SaleEditRequestService(db, clock, pos);
+  const consignment = new ConsignmentService(db, clock, admin, stock, pos, customers);
+  const companies = new CompanyService(db, clock, admin, accounting, stock);
+  return { db, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

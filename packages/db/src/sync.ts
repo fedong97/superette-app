@@ -81,6 +81,10 @@ const TABLES: Record<string, string> = {
   staff_schedule: 'staff_schedules',
   cheque_rejection: 'cheque_rejections',
   courier_return: 'courier_returns',
+  company: 'companies',
+  account_offset: 'account_offsets',
+  payment_allocation: 'payment_allocations',
+  sale_edit_request: 'sale_edit_requests',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -101,6 +105,8 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   agent_operations: { active: 0, cancelled: 1 },
   staff_leaves: { requested: 0, approved: 1, refused: 1, cancelled: 2 },
   cheque_rejections: { active: 0, cancelled: 1 },
+  account_offsets: { active: 0, cancelled: 1 },
+  sale_edit_requests: { pending: 0, approved: 1, rejected: 2, used: 2 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
@@ -112,6 +118,7 @@ const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> =
   customer_order: { table: 'customer_orders', lines: 'customer_order_lines', fk: 'order_id' },
   supplier_return: { table: 'supplier_returns', lines: 'supplier_return_lines', fk: 'return_id' },
   cheque_deposit: { table: 'cheque_deposits', lines: 'cheque_deposit_lines', fk: 'deposit_id' },
+  consignment_count: { table: 'consignment_counts', lines: 'consignment_count_lines', fk: 'count_id' },
 };
 
 /**
@@ -122,6 +129,7 @@ const WITH_LINES: Record<string, { table: string; lines: string; fk: string }> =
  */
 const RESEND: { entity: string; ids: string; store?: boolean }[] = [
   { entity: 'vat_rate', ids: 'SELECT id FROM vat_rates' },
+  { entity: 'company', ids: 'SELECT id FROM companies' },
   { entity: 'store', ids: 'SELECT id FROM stores' },
   { entity: 'warehouse', ids: 'SELECT id FROM warehouses' },
   { entity: 'register', ids: 'SELECT id FROM registers' },

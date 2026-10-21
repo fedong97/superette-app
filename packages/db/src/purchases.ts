@@ -46,6 +46,9 @@ export interface SupplierArticle {
   unit_cost: Fcfa;
   pack_qty: Milli;
   is_main: number;
+  /** Bonus convenu : « promo_buy achetés, promo_pay payés » (12/10), proposé à la commande et à la réception. */
+  promo_buy: number | null;
+  promo_pay: number | null;
   /** Dernier coût réellement payé à ce fournisseur (réceptions). */
   last_cost: Fcfa | null;
 }
@@ -273,7 +276,8 @@ export class PurchaseService extends Base {
         `SELECT s.*,
                 (SELECT COUNT(*) FROM supplier_articles sa WHERE sa.supplier_id = s.id) AS article_count,
                 COALESCE((SELECT SUM(CASE WHEN i.kind = 'invoice' THEN i.total_ttc ELSE -i.total_ttc END) FROM supplier_invoices i WHERE i.supplier_id = s.id), 0)
-                - COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.supplier_id = s.id), 0) AS balance
+                - COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.supplier_id = s.id), 0)
+                - COALESCE((SELECT SUM(o.amount) FROM account_offsets o WHERE o.supplier_id = s.id AND o.status = 'active'), 0) AS balance
          FROM suppliers s
          WHERE (@all = 1 OR s.active = 1) AND (@search IS NULL OR s.name LIKE @search OR s.code LIKE @search OR s.phone LIKE @search)
          ORDER BY s.name`,
@@ -339,7 +343,7 @@ export class PurchaseService extends Base {
   private supplierArticleQuery(where: string) {
     return this.db.prepare(
       `SELECT sa.id, sa.supplier_id, s.name AS supplier_name, sa.article_id, a.code AS article_code, a.name AS article_name, a.unit,
-              sa.supplier_ref, sa.unit_cost, sa.pack_qty, sa.is_main,
+              sa.supplier_ref, sa.unit_cost, sa.pack_qty, sa.is_main, sa.promo_buy, sa.promo_pay,
               (SELECT rl.unit_cost FROM reception_lines rl JOIN receptions r ON r.id = rl.reception_id
                 WHERE rl.article_id = sa.article_id AND r.supplier_id = sa.supplier_id ORDER BY r.received_at DESC LIMIT 1) AS last_cost
        FROM supplier_articles sa JOIN suppliers s ON s.id = sa.supplier_id JOIN articles a ON a.id = sa.article_id
@@ -358,9 +362,27 @@ export class PurchaseService extends Base {
   /** Référence un article chez un fournisseur (ou met à jour sa référence, son prix, son colisage). */
   setSupplierArticle(
     userId: string,
-    input: { supplierId: string; articleId: string; supplierRef?: string | null; unitCost: Fcfa; packQty?: Milli; isMain?: boolean },
+    input: {
+      supplierId: string;
+      articleId: string;
+      supplierRef?: string | null;
+      unitCost: Fcfa;
+      packQty?: Milli;
+      isMain?: boolean;
+      /** Bonus convenu (« 12 achetés, 10 payés ») ; null le retire, absent le garde. */
+      promoBuy?: number | null;
+      promoPay?: number | null;
+    },
   ): SupplierArticle {
     if (!Number.isSafeInteger(input.unitCost) || input.unitCost < 0) throw new AppError("Prix d'achat invalide", 'INVALID');
+    if (input.promoBuy !== undefined || input.promoPay !== undefined) {
+      const buy = input.promoBuy ?? null;
+      const pay = input.promoPay ?? null;
+      if ((buy === null) !== (pay === null)) throw new AppError('Bonus : indiquez les quantités achetées et payées', 'INVALID');
+      if (buy !== null && (!Number.isInteger(buy) || !Number.isInteger(pay) || pay! < 1 || buy <= pay! || buy > 1000)) {
+        throw new AppError('Bonus invalide : la quantité achetée doit dépasser la quantité payée (12 achetés, 10 payés)', 'INVALID');
+      }
+    }
     const pack = input.packQty ?? 1000;
     if (!Number.isSafeInteger(pack) || pack <= 0) throw new AppError('Colisage invalide', 'INVALID');
     this.getSupplier(input.supplierId);
@@ -383,16 +405,19 @@ export class PurchaseService extends Base {
         }
       }
       const id = existing ?? newId();
+      const kept = existing ? (this.db.prepare('SELECT promo_buy, promo_pay FROM supplier_articles WHERE id = ?').get(existing) as { promo_buy: number | null; promo_pay: number | null }) : null;
+      const promoBuy = input.promoBuy !== undefined ? input.promoBuy : (kept?.promo_buy ?? null);
+      const promoPay = input.promoPay !== undefined ? input.promoPay : (kept?.promo_pay ?? null);
       this.db
         .prepare(
-          `INSERT INTO supplier_articles (id, supplier_id, article_id, supplier_ref, unit_cost, pack_qty, is_main, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO supplier_articles (id, supplier_id, article_id, supplier_ref, unit_cost, pack_qty, is_main, promo_buy, promo_pay, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET supplier_ref = excluded.supplier_ref, unit_cost = excluded.unit_cost,
-             pack_qty = excluded.pack_qty, is_main = excluded.is_main, updated_at = excluded.updated_at`,
+             pack_qty = excluded.pack_qty, is_main = excluded.is_main, promo_buy = excluded.promo_buy, promo_pay = excluded.promo_pay, updated_at = excluded.updated_at`,
         )
-        .run(id, input.supplierId, input.articleId, input.supplierRef?.trim() || null, input.unitCost, pack, isMain ? 1 : 0, now);
+        .run(id, input.supplierId, input.articleId, input.supplierRef?.trim() || null, input.unitCost, pack, isMain ? 1 : 0, promoBuy, promoPay, now);
       this.enqueue(null, 'supplier_article', id, 'upsert', {});
-      this.audit(userId, 'supplier.article', 'supplier', input.supplierId, { articleId: input.articleId, unitCost: input.unitCost });
+      this.audit(userId, 'supplier.article', 'supplier', input.supplierId, { articleId: input.articleId, unitCost: input.unitCost, promoBuy, promoPay });
       return this.supplierArticleQuery('sa.id = ?').get(id) as SupplierArticle;
     });
   }
@@ -957,7 +982,8 @@ export class PurchaseService extends Base {
   private invoiceQuery(where: string) {
     return this.db.prepare(
       `SELECT i.*, s.name AS supplier_name,
-              COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.invoice_id = i.id), 0) AS paid
+              COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.invoice_id = i.id), 0)
+              + COALESCE((SELECT SUM(o.amount) FROM account_offsets o WHERE o.invoice_id = i.id AND o.status = 'active'), 0) AS paid
        FROM supplier_invoices i JOIN suppliers s ON s.id = i.supplier_id
        WHERE ${where} ORDER BY i.due_date, i.invoice_date`,
     );
@@ -1046,6 +1072,27 @@ export class PurchaseService extends Base {
     });
   }
 
+  /**
+   * Gratuits reçus des fournisseurs (bonus « N achetés, M payés » et unités offertes) sur une
+   * période : quantité et valeur au prix du fournisseur, par fournisseur et par article.
+   */
+  freeGoods(storeId: string, from: string, to: string): {
+    rows: { supplier_id: string | null; supplier_name: string; article_id: string; article_name: string; unit: string; free_qty: Milli; value: Fcfa; receptions: number }[];
+    total: Fcfa;
+  } {
+    const rows = this.db
+      .prepare(
+        `SELECT r.supplier_id, COALESCE(s.name, 'Sans fournisseur') AS supplier_name, l.article_id, a.name AS article_name, a.unit,
+                SUM(l.free_qty) AS free_qty, CAST(ROUND(SUM(l.free_qty * COALESCE(l.gross_cost, l.unit_cost) / 1000.0)) AS INTEGER) AS value,
+                COUNT(DISTINCT r.id) AS receptions
+         FROM reception_lines l JOIN receptions r ON r.id = l.reception_id JOIN articles a ON a.id = l.article_id LEFT JOIN suppliers s ON s.id = r.supplier_id
+         WHERE r.store_id = ? AND l.free_qty > 0 AND date(r.received_at, 'localtime') BETWEEN ? AND ?
+         GROUP BY r.supplier_id, l.article_id ORDER BY supplier_name, value DESC`,
+      )
+      .all(storeId, from, to) as { supplier_id: string | null; supplier_name: string; article_id: string; article_name: string; unit: string; free_qty: Milli; value: Fcfa; receptions: number }[];
+    return { rows, total: rows.reduce((t, r) => t + r.value, 0) };
+  }
+
   /** Échéancier : factures restant à payer, par date d'échéance. */
   dueSchedule(storeId: string): { invoices: SupplierInvoice[]; overdue: Fcfa; dueThisWeek: Fcfa; total: Fcfa } {
     const invoices = this.listInvoices(storeId, { unpaid: true }).filter((i) => i.kind === 'invoice');
@@ -1082,7 +1129,7 @@ export class PurchaseService extends Base {
         `SELECT a.id AS article_id, a.code AS article_code, a.name AS article_name, a.unit, a.unit_name, a.min_qty, a.alert_qty, a.max_qty,
                 a.purchase_price, f.name AS family_name, d.id AS department_id, d.name AS department_name,
                 COALESCE((SELECT SUM(s.qty) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id
-                           WHERE s.article_id = a.id AND w.store_id = @storeId), 0) AS stock,
+                           WHERE s.article_id = a.id AND w.store_id = @storeId AND w.purpose = 'stock'), 0) AS stock,
                 COALESCE((SELECT SUM(MAX(l.qty - COALESCE((SELECT SUM(rl.qty) FROM reception_lines rl WHERE rl.order_line_id = l.id), 0), 0))
                            FROM purchase_order_lines l JOIN purchase_orders o ON o.id = l.order_id
                            WHERE l.article_id = a.id AND o.store_id = @storeId AND o.status IN ('draft', 'sent')), 0) AS on_order,

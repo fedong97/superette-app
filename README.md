@@ -287,6 +287,16 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Déstockage avant péremption (paliers `clearanceRules`, promotions de prix du magasin), démarque par rayon (casse, vol, périmés, consommation interne, écarts d'inventaire) et inventaire tournant (score valeur, écarts passés, ancienneté du comptage).
 - Proposition de commande « saison » (ventes N-1 des semaines à venir × tendance récente bornée de 0,5 à 2, majoration −50 à +300 %) ; commandes groupées `CG-` : un bon de commande par magasin (`purchase_orders.group_ref`).
 - Serveur : boutique en ligne `/boutique/<code magasin>` (commandes `web_orders`, reprises par un seul PC en commande client `web`), vérificateur de prix `/prix/<code magasin>`, sauvegardes des postes chiffrées sur le PC (AES-256-GCM, clé tirée de la phrase secrète par scrypt) et gardées par le serveur (10 par poste).
+**Négoce et pilotage multi-sociétés (0.78.0)**
+- Bonus fournisseur convenu par article (`supplier_articles.promo_buy/promo_pay`, « 12 achetés, 10 payés »), proposé sur les bons de commande ; rapport des unités gratuites reçues et de leur valeur (`purchases.freeGoods`).
+- Prix négocié client × article (`customers.article_prices`) : la caisse le prend quand il est plus bas que le prix du jour (`agreedPrices`, vérifié à l'enregistrement).
+- Zones ou tournées des clients (`customers.zone`) : filtres de la liste et de la balance âgée.
+- Lettrage manuel (`payment_allocations`) : un règlement solde d'abord les factures choisies, le reste va aux plus anciennes.
+- Compensation client / fournisseur `CP-` (`account_offsets`, fiche client reliée à la fiche fournisseur) : règle une facture fournisseur et le compte client sans argent, écriture OD 401 / 411 ; annulable avec motif.
+- Dépôt d'avaries (`warehouses.purpose = 'damaged'`) : jamais vendu, hors propositions de commande.
+- Demande de modification d'une facture validée `DM-` : le vendeur sans le droit la demande avec un motif, le gérant l'accorde ou la refuse (point d'attention) ; accordée, une seule modification par le demandeur.
+- Dépôt-vente chez un revendeur (`warehouses.purpose = 'consignment'`) : marchandise confiée par transfert, fiche de contrôle `FC-` qui facture le vendu à crédit et reprend le reste.
+- Courbe du patrimoine (trésorerie + créances + stock − dettes fournisseurs, fin de mois) et sociétés (`companies`, `stores.company_id`) avec chiffres consolidés.
 
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.

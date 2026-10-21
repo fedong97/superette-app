@@ -421,6 +421,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Impôt sur le résultat', open: ['accounting', 'tax'], perm: ['tax', 'tax_settings'] },
       SEP,
       { label: 'Préparation fiscale (état tiré des ventes et de la comptabilité)', open: ['fiscalPrep', 'state'], perm: 'fiscal_prep' },
+      { label: 'Rapprochement réel / déclaré', open: ['fiscalPrep', 'reconciliation'], perm: 'fiscal_prep' },
+      { label: 'Simulateur des régimes fiscaux', open: ['fiscalPrep', 'simulator'], perm: 'fiscal_prep' },
       { label: 'États fiscaux générés', open: ['fiscalPrep', 'statements'], perm: 'fiscal_prep' },
       { label: 'Ventes réelles (source)', open: ['realSales', 'operations'], perm: 'real_sales' },
     ],

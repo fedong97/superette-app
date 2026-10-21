@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.80.0',
+    items: [
+      'Rapprochement : Fiscal › Rapprochement réel / déclaré. Pour chaque mois, les ventes réelles, ce que vous avez déclaré et l’écart. Un écart se justifie par une vraie pièce (avoir, ticket annulé, écriture) et se régularise par une déclaration rectificative ; le réel ne bouge jamais.',
+      'Dossier de contrôle en PDF ou CSV (Préparation fiscale › État fiscal) : registre des ventes, avoirs, TVA, contrôle comptable, rapprochement et états figés, dans l’ordre du contrôleur.',
+      'Simulateur des régimes : Fiscal › Simulateur des régimes fiscaux. Ce que coûteraient l’impôt libératoire, le simplifié et le réel sur vos ventes réelles de l’année, d’après un barème daté.',
+      'Une seule vérité : l’état fiscal vérifie que le journal des ventes, les rapports de gestion et l’état totalisent le même chiffre d’affaires. Vue de gestion et vue fiscale sont deux droits séparés.',
+    ],
+  },
+  {
     version: '0.79.0',
     items: [
       'Ventes réelles : Vente › Ventes réelles. Toutes les opérations de vente telles qu’enregistrées à la caisse (ventes, paiements, annulations, remboursements), en lecture seule, avec une synthèse et des exports CSV qui portent l’identifiant de chaque vente.',

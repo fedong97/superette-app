@@ -8,6 +8,8 @@ export const EN: Record<string, string> = {
   "Ventes réelles (opérations, paiements, annulations, remboursements)": "Actual sales (transactions, payments, cancellations, refunds)",
   "Préparation fiscale (état tiré des ventes et de la comptabilité)": "Tax preparation (statement drawn from sales and the books)",
   "États fiscaux générés": "Generated tax statements",
+  "Rapprochement réel / déclaré": "Actual vs. declared reconciliation",
+  "Simulateur des régimes fiscaux": "Tax regime simulator",
   "Ventes réelles (source)": "Actual sales (source)",
   "Bonus fournisseurs (unités gratuites)": "Supplier bonuses (free units)",
   "Courbe du patrimoine": "Net worth curve",

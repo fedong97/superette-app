@@ -1043,10 +1043,31 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Un avoir est un retour client fait à la caisse (Action › Retour) : il est déjà dans les ventes réelles et en comptabilité. Une correction se passe en comptabilité.',
           'Le contrôle avec la comptabilité compare les comptes de ventes et de TVA collectée aux ventes réelles ; un écart signale une écriture manuelle à vérifier.',
           '« Générer l’état » le fige avec son empreinte : il ne se modifie plus, on en génère un nouveau si besoin.',
+          'La ligne de concordance vérifie que le journal des ventes, la vue de gestion (rapports) et l’état totalisent le même chiffre d’affaires.',
+          '« Dossier de contrôle » (PDF ou CSV) rassemble, dans l’ordre du contrôleur : registre des ventes, avoirs, catégories, TVA, contrôle comptable, concordance, rapprochement, montants à reporter et états figés.',
+        ],
+      },
+      {
+        tab: 'reconciliation',
+        title: 'Rapprochement',
+        steps: [
+          'Pour chaque mois : les ventes réelles, ce que vous avez déclaré et l’écart.',
+          '« Inscrire la déclaration » recopie les montants de la déclaration déposée, avec son numéro : ils ne changent ni les ventes ni l’état.',
+          'Un écart s’explique par une pièce réelle (avoir, ticket annulé, écriture comptable, déclaration rectificative) ; il se régularise par une déclaration rectificative.',
+          'Déclarations et justifications ne se modifient ni ne se suppriment ; elles sont inscrites au journal chaîné.',
+        ],
+      },
+      {
+        tab: 'simulator',
+        title: 'Simulateur des régimes',
+        steps: [
+          'Ce que coûterait chaque régime (impôt libératoire, simplifié, réel) sur vos ventes réelles et votre résultat comptable de l’année.',
+          'Le barème est daté : chaque loi de finances en ajoute un nouveau, les anciennes années gardent le leur.',
+          'On peut opter pour un régime plus exigeant, jamais pour un régime inférieur à celui qu’impose le chiffre d’affaires.',
         ],
       },
       { tab: 'statements', title: 'États générés', steps: ['Les états figés, avec leur empreinte vérifiée et leur export CSV.'] },
-      { tab: 'journal', title: 'Journal et contrôle', steps: ['Chaque génération, chaînée par empreinte. « Vérifier le journal » signale toute ligne changée ou retirée.'] },
+      { tab: 'journal', title: 'Journal et contrôle', steps: ['Chaque état généré, déclaration inscrite et justification, chaîné par empreinte. « Vérifier le journal » signale toute ligne changée ou retirée.'] },
     ],
   },
 };

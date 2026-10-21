@@ -140,6 +140,9 @@ import {
   type MobileMethod,
   type MtnConfig,
   type OrangeConfig,
+  type RealSaleFilter,
+  type DeclarationInput,
+  type JustificationInput,
 } from '@superette/db';
 import { createCloudBackup } from './cloudBackup';
 
@@ -225,6 +228,8 @@ export interface Printer {
   /** Registre des immobilisations à une date, puis le plan d'amortissement de chaque bien. */
   assets(storeId: string, at: string, id?: string | null): Promise<void>;
   statements(storeId: string, from: string, to: string): Promise<void>;
+  /** Dossier de contrôle fiscal de la période, enregistré en PDF (false : enregistrement annulé). */
+  fiscalControl(storeId: string, from: string, to: string): Promise<boolean>;
   reconciliation(storeId: string, accountId: string, date: string, statementBalance: number | null): Promise<void>;
   taxAssessment(storeId: string, year: number): Promise<void>;
   notes(storeId: string, year: number): Promise<void>;
@@ -2373,6 +2378,66 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       );
       return formatEntries(lines, f);
     },
+    // Ventes réelles : la source, en lecture seule.
+    'realSales.operations': (p: { from: string; to: string; filter?: RealSaleFilter; q?: string | null }) => s.realSales.operations(ctx(['real_sales']).storeId, p),
+    'realSales.detail': (id: string) => {
+      if (s.db.prepare('SELECT store_id FROM sales WHERE id = ?').pluck().get(id) !== ctx(['real_sales']).storeId) throw new AppError('Vente introuvable', 'NOT_FOUND');
+      return s.realSales.detail(id);
+    },
+    'realSales.payments': (p: { from: string; to: string }) => s.realSales.payments(ctx(['real_sales']).storeId, p),
+    'realSales.summary': (p: { from: string; to: string }) => s.realSales.summary(ctx(['real_sales']).storeId, p),
+    'realSales.exportCsv': (p: { from: string; to: string }, what: 'operations' | 'lines' | 'payments') => s.realSales.exportCsv(ctx(['real_sales']).storeId, p, what),
+    // Préparation fiscale : un état lu dans les ventes réelles et la comptabilité, sans opération propre.
+    'fiscalPrep.statement': (from: string, to: string) => s.fiscalPrep.statement(ctx(['fiscal_prep']).storeId, from, to),
+    'fiscalPrep.generate': (from: string, to: string) => s.fiscalPrep.generate(ctx(['fiscal_prep']), from, to),
+    'fiscalPrep.statements': () => s.fiscalPrep.statements(ctx(['fiscal_prep']).storeId),
+    'fiscalPrep.getStatement': (id: string) => {
+      const st = s.fiscalPrep.getStatement(id);
+      if (st.statement.store.id !== ctx(['fiscal_prep']).storeId) throw new AppError('État fiscal introuvable', 'NOT_FOUND');
+      return st;
+    },
+    'fiscalPrep.journal': () => s.fiscalPrep.journal(ctx(['fiscal_prep']).storeId),
+    'fiscalPrep.verify': () => s.fiscalPrep.verify(ctx(['fiscal_prep']).storeId),
+    'fiscalPrep.exportCsv': (from: string, to: string) => {
+      const storeId = ctx(['fiscal_prep']).storeId;
+      return s.fiscalPrep.exportCsv(s.fiscalPrep.statement(storeId, from, to));
+    },
+    'fiscalPrep.exportStatementCsv': (id: string) => {
+      const st = s.fiscalPrep.getStatement(id);
+      if (st.statement.store.id !== ctx(['fiscal_prep']).storeId) throw new AppError('État fiscal introuvable', 'NOT_FOUND');
+      return s.fiscalPrep.exportCsv(st.statement, st);
+    },
+    'fiscalPrep.reconciliation': (from: string, to: string) => s.fiscalPrep.reconciliation(ctx(['fiscal_prep']).storeId, from, to),
+    'fiscalPrep.declarations': () => s.fiscalPrep.declarations(ctx(['fiscal_prep']).storeId),
+    // Inscrire ce qui a été déposé ou justifier un écart ne change aucun montant : droit à part.
+    'fiscalPrep.recordDeclaration': (input: DeclarationInput) => s.fiscalPrep.recordDeclaration(ctx(['fiscal_declare']), input),
+    'fiscalPrep.justify': (input: JustificationInput) => s.fiscalPrep.justify(ctx(['fiscal_declare']), input),
+    /** Pièces qui peuvent expliquer un écart du mois : avoirs, tickets annulés, écritures manuelles, rectificatives. */
+    'fiscalPrep.pieces': (period: string) => {
+      const storeId = ctx(['fiscal_declare']).storeId;
+      if (!/^\d{4}-\d{2}$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
+      const sales = s.db
+        .prepare(
+          `SELECT id, number, kind, status, total_ttc FROM sales WHERE store_id = ? AND strftime('%Y-%m', created_at, 'localtime') = ?
+           AND ((kind = 'return' AND status = 'completed') OR status = 'cancelled') ORDER BY created_at`,
+        )
+        .all(storeId, period) as { id: string; number: string; kind: string; status: string; total_ttc: number }[];
+      const entries = s.db
+        .prepare(`SELECT id, number, label FROM manual_entries WHERE store_id = ? AND substr(entry_date, 1, 7) = ? ORDER BY entry_date, number`)
+        .all(storeId, period) as { id: string; number: string; label: string }[];
+      return {
+        credit_note: sales.filter((x) => x.status === 'completed').map((x) => ({ id: x.id, label: `Avoir ${x.number} (${x.total_ttc} FCFA)` })),
+        cancellation: sales.filter((x) => x.status === 'cancelled').map((x) => ({ id: x.id, label: `Ticket annulé ${x.number} (${x.total_ttc} FCFA)` })),
+        entry: entries.map((e) => ({ id: e.id, label: `Écriture ${e.number} : ${e.label}` })),
+        rectificative: s.fiscalPrep
+          .declarations(storeId)
+          .filter((d) => d.period === period && d.kind === 'rectificative')
+          .map((d) => ({ id: d.id, label: `Déclaration rectificative ${d.reference} du ${d.filed_on}` })),
+      };
+    },
+    'fiscalPrep.controlCsv': (from: string, to: string) => s.fiscalPrep.exportControlCsv(s.fiscalPrep.controlFile(ctx(['fiscal_prep']).storeId, from, to)),
+    'fiscalPrep.controlPdf': (from: string, to: string) => printer.fiscalControl(ctx(['fiscal_prep']).storeId, from, to),
+    'fiscalPrep.simulate': (year: number) => s.fiscalPrep.simulate(ctx(['fiscal_prep']).storeId, year),
     'tax.assessment': (year: number) => s.tax.assessment(ctx(['tax', 'tax_settings']).storeId, year),
     'tax.instalment': (month: string) => s.tax.instalment(ctx(['tax', 'tax_settings']).storeId, month),
     'tax.saveSettings': (year: number, input: Parameters<typeof s.tax.saveSettings>[2]) => s.tax.saveSettings(ctx(['tax_settings']), year, input),

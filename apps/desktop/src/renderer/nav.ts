@@ -24,7 +24,9 @@ export type WinKind =
   | 'staff'
   | 'containers'
   | 'agent'
-  | 'control';
+  | 'control'
+  | 'realSales'
+  | 'fiscalPrep';
 
 /** Onglet rapide : une fenêtre, éventuellement ouverte sur un de ses onglets. */
 export interface QuickTab {

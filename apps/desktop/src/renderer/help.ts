@@ -1013,4 +1013,61 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
     ],
   },
+  realSales: {
+    title: 'Ventes réelles',
+    intro: 'La source de référence : toutes les opérations de vente telles qu’elles ont eu lieu à la caisse. Rien n’y est masqué ni modifié.',
+    sections: [
+      {
+        tab: 'operations',
+        title: 'Opérations',
+        steps: [
+          'Choisissez la période, puis filtrez : ventes, remboursements (retours) ou annulations. Les factures « supprimées » du registre y figurent, annulées.',
+          'Cliquez une ligne pour le détail : articles, TVA, paiements, documents liés et identifiant de la vente.',
+          'L’identifiant de la vente est celui que cite la préparation fiscale : il relie les deux modules.',
+        ],
+      },
+      { tab: 'payments', title: 'Paiements', steps: ['Chaque paiement des ventes et chaque règlement client reçu, avec le moyen et la référence.'] },
+      { tab: 'summary', title: 'Synthèse', steps: ['Ventes, remboursements et chiffre d’affaires réel ; les annulations sont montrées à part, hors chiffre d’affaires.'] },
+      { tab: 'export', title: 'Exports', steps: ['Opérations, lignes d’articles ou paiements en CSV, chaque ligne avec l’identifiant de la vente.'] },
+    ],
+  },
+  fiscalPrep: {
+    title: 'Préparation fiscale',
+    intro: 'Un état comptable et fiscal lu dans les ventes réelles et la comptabilité. Ce module n’enregistre aucune opération : son chiffre est toujours celui des livres.',
+    sections: [
+      {
+        tab: 'state',
+        title: 'État fiscal',
+        steps: [
+          'Choisissez la période : le chiffre d’affaires est réparti par catégorie fiscale (taux de TVA), ventes moins avoirs clients.',
+          'Un avoir est un retour client fait à la caisse (Action › Retour) : il est déjà dans les ventes réelles et en comptabilité. Une correction se passe en comptabilité.',
+          'Le contrôle avec la comptabilité compare les comptes de ventes et de TVA collectée aux ventes réelles ; un écart signale une écriture manuelle à vérifier.',
+          '« Générer l’état » le fige avec son empreinte : il ne se modifie plus, on en génère un nouveau si besoin.',
+          'La ligne de concordance vérifie que le journal des ventes, la vue de gestion (rapports) et l’état totalisent le même chiffre d’affaires.',
+          '« Dossier de contrôle » (PDF ou CSV) rassemble, dans l’ordre du contrôleur : registre des ventes, avoirs, catégories, TVA, contrôle comptable, concordance, rapprochement, montants à reporter et états figés.',
+        ],
+      },
+      {
+        tab: 'reconciliation',
+        title: 'Rapprochement',
+        steps: [
+          'Pour chaque mois : les ventes réelles, ce que vous avez déclaré et l’écart.',
+          '« Inscrire la déclaration » recopie les montants de la déclaration déposée, avec son numéro : ils ne changent ni les ventes ni l’état.',
+          'Un écart s’explique par une pièce réelle (avoir, ticket annulé, écriture comptable, déclaration rectificative) ; il se régularise par une déclaration rectificative.',
+          'Déclarations et justifications ne se modifient ni ne se suppriment ; elles sont inscrites au journal chaîné.',
+        ],
+      },
+      {
+        tab: 'simulator',
+        title: 'Simulateur des régimes',
+        steps: [
+          'Ce que coûterait chaque régime (impôt libératoire, simplifié, réel) sur vos ventes réelles et votre résultat comptable de l’année.',
+          'Le barème est daté : chaque loi de finances en ajoute un nouveau, les anciennes années gardent le leur.',
+          'On peut opter pour un régime plus exigeant, jamais pour un régime inférieur à celui qu’impose le chiffre d’affaires.',
+        ],
+      },
+      { tab: 'statements', title: 'États générés', steps: ['Les états figés, avec leur empreinte vérifiée et leur export CSV.'] },
+      { tab: 'journal', title: 'Journal et contrôle', steps: ['Chaque état généré, déclaration inscrite et justification, chaîné par empreinte. « Vérifier le journal » signale toute ligne changée ou retirée.'] },
+    ],
+  },
 };

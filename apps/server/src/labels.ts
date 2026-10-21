@@ -72,6 +72,10 @@ export const ENTITY_LABELS: Record<string, string> = {
   payment_allocation: 'Lettrage de règlement',
   sale_edit_request: 'Demande de modification de facture',
   consignment_count: 'Fiche de contrôle dépôt-vente',
+  fiscal_log: 'Journal de la préparation fiscale',
+  fiscal_statement: 'État fiscal généré',
+  fiscal_declaration: 'Déclaration fiscale déposée',
+  fiscal_justification: 'Justification d’un écart fiscal',
 };
 
 /** Familles du journal d'activité. */
@@ -93,7 +97,7 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
   {
     key: 'compta',
     label: 'Comptabilité',
-    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'cheque_rejection', 'budget', 'fixed_asset', 'opening_balance', 'account_offset'],
+    entities: ['account', 'manual_entry', 'bank_line', 'tax_year', 'dsf_disclosure', 'charge_plan', 'fiscal_year', 'rebate_entry', 'cheque_deposit', 'cheque_rejection', 'budget', 'fixed_asset', 'opening_balance', 'account_offset', 'fiscal_log', 'fiscal_statement', 'fiscal_declaration', 'fiscal_justification'],
   },
 ];
 

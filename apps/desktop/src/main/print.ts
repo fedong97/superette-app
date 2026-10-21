@@ -27,7 +27,7 @@ import {
   translateDocHtml,
   translateReceipt,
 } from '@superette/core';
-import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, SUPPLIER_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, type InventorySheetModel } from '@superette/db';
+import { CUSTOMER_PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, SUPPLIER_PAYMENT_METHODS, INVENTORY_SHEET_MODELS, JOURNALS, JUSTIFICATION_LABEL, STATUS_LABEL, type InventorySheetModel } from '@superette/db';
 import type { Services } from '@superette/db';
 import type { Printer } from './api';
 import { sendNetwork, sendWindowsRaw } from './rawPrint';
@@ -1086,6 +1086,52 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         <table><thead><tr><th>Code</th><th>Bien</th><th>Compte</th><th>Mise en service</th><th class="r">Durée</th><th class="r">Valeur d'origine</th><th class="r">Dotation de l'exercice</th><th class="r">Amort. cumulés</th><th class="r">Valeur nette</th></tr></thead>
         <tbody>${register}<tr class="total"><td colspan="5">Totaux</td>${cell(sum('cost'))}${cell(sum('year_charge'))}${cell(sum('cumulated'))}${cell(sum('net'))}</tr></tbody></table>
         ${plans ? `<div style="page-break-before: always"></div><h2>Plans d'amortissement</h2>${plans}` : ''}`);
+    },
+
+    async fiscalControl(storeId, from, to) {
+      const store = s.admin.getStore(storeId);
+      const f = s.fiscalPrep.controlFile(storeId, from, to);
+      const st = f.statement;
+      const v = (n: number) => (n ? (n < 0 ? `- ${money(-n)}` : money(n)) : '0');
+      const r = (cells: (string | number)[], cls = '') => `<tr${cls ? ` class="${cls}"` : ''}>${cells.map((c) => (typeof c === 'number' ? `<td class="r">${v(c)}</td>` : `<td>${c}</td>`)).join('')}</tr>`;
+      const th = (cols: string[]) => `<thead><tr>${cols.map((c) => `<th${c.startsWith('>') ? ' class="r"' : ''}>${esc(c.replace(/^>/, ''))}</th>`).join('')}</tr></thead>`;
+      const rate = (bp: number) => `${(bp / 100).toLocaleString('fr-FR')} %`;
+      const section = (n: number, t: string) => `<h2>${n}. ${t}</h2>`;
+      const register = f.register
+        .map((x) => r([esc(x.number), dateFr(x.created_at), x.kind === 'return' ? 'Avoir' : 'Vente', x.status === 'cancelled' ? 'Annulée' : 'Validée', esc(x.customer_name ?? ''), esc(x.original_number ?? ''), x.ht, x.tva, x.ttc], x.status === 'cancelled' ? 'muted' : ''))
+        .join('');
+      const credits = st.creditNotes.map((a) => r([esc(a.number), dateFr(a.created_at), esc(a.original_number ?? ''), esc(a.customer_name ?? ''), a.ht, a.tva, a.ttc, esc(a.reason ?? '')])).join('');
+      const recon = f.reconciliation
+        .map((m) => {
+          const d = m.declared;
+          const head = r([m.period, m.real.ht, m.real.tva, d ? d.turnover_ht : '-', d ? d.vat : '-', d ? m.gapHt : '-', d ? m.gapTva : '-', esc(STATUS_LABEL[m.status]), d ? `${d.kind === 'rectificative' ? 'Rectificative' : 'Initiale'} ${esc(d.reference)} du ${dayFr(d.filed_on)}` : ''], m.status === 'under' || m.status === 'over' ? 'total' : '');
+          const just = m.justifications.map((j) => `<tr><td></td><td colspan="8" class="muted">${esc(JUSTIFICATION_LABEL[j.kind])}${j.ref_label ? ` · ${esc(j.ref_label)}` : ''} : ${esc(j.explanation)} (${esc(j.user_name ?? '')}, ${dateFr(j.created_at)})</td></tr>`).join('');
+          return head + just;
+        })
+        .join('');
+      const body = `${a4Head(store)}<h1>Dossier de contrôle fiscal</h1>
+        <div>Du ${dayFr(from)} au ${dayFr(to)} · régime ${st.regime === 'reel' ? 'du réel' : 'simplifié'} · montants en FCFA · édité le ${dateFr(f.editedAt)}</div>
+        <p class="muted">Tous les montants sortent du journal des ventes et de la comptabilité. Le chiffre d’affaires de ce dossier est celui du journal, de la vue de gestion et des comptes.</p>
+        ${section(1, 'Registre des ventes')}
+        <table>${th(['N°', 'Date', 'Type', 'Statut', 'Client', 'Origine', '>HT', '>TVA', '>TTC'])}<tbody>${register || '<tr><td colspan="9">Aucune vente</td></tr>'}</tbody></table>
+        <p class="muted">${st.counts.sales} ventes, ${st.counts.creditNotes} avoirs, ${st.counts.cancelled} tickets annulés hors chiffre d’affaires (${money(st.counts.cancelledTtc)}).</p>
+        ${section(2, 'Avoirs clients')}
+        <table>${th(['N°', 'Date', 'Facture d’origine', 'Client', '>HT', '>TVA', '>TTC', 'Motif'])}<tbody>${credits || '<tr><td colspan="8">Aucun avoir</td></tr>'}</tbody></table>
+        ${section(3, 'Chiffre d’affaires par catégorie fiscale')}
+        <table>${th(['Catégorie', '>HT', '>TVA', '>TTC'])}<tbody>${st.categories.map((c) => r([esc(c.label), c.ht, c.tva, c.ttc])).join('')}${r(['Total', st.totals.ht, st.totals.tva, st.totals.ttc], 'total')}</tbody></table>
+        ${section(4, 'TVA')}
+        <table>${th(['Mois', '>Collectée', '>Déductible', '>À payer', '>Crédit reporté'])}<tbody>${f.vat.map((x) => r([x.month, x.collected, x.deductible, x.due, x.credit])).join('')}</tbody></table>
+        ${section(5, 'Contrôle avec la comptabilité')}
+        <table>${th(['', 'Compte', '>Comptabilité', '>Ventes réelles', '>Écart'])}<tbody>${r(['Ventes HT', st.books.salesAccount, st.books.salesHt, st.totals.ht, st.books.differenceHt])}${r(['TVA collectée', st.books.vatAccount, st.books.vatCollected, st.totals.tva, st.books.differenceTva])}</tbody></table>
+        ${section(6, 'Concordance des vues (TTC)')}
+        <table>${th(['>Journal des ventes', '>Vue de gestion', '>État fiscal', 'Concordent'])}<tbody>${r([st.concordance.journalTtc, st.concordance.managementTtc, st.concordance.fiscalTtc, st.concordance.ok ? 'Oui' : 'Non'])}</tbody></table>
+        ${section(7, 'Rapprochement avec les déclarations déposées')}
+        <table>${th(['Mois', '>Réel HT', '>Réel TVA', '>Déclaré HT', '>Déclaré TVA', '>Écart HT', '>Écart TVA', 'Situation', 'Déclaration'])}<tbody>${recon}</tbody></table>
+        ${section(8, 'Montants à reporter')}
+        <table><tbody>${r(['TVA collectée', st.obligations.vatCollected])}${r([`Acompte : minimum de perception ${rate(st.obligations.instalment.rate)} + CAC`, st.obligations.instalment.total])}</tbody></table>
+        ${section(9, 'États figés de la période')}
+        <table>${th(['N°', 'Période', '>Chiffre d’affaires HT', 'Généré le', 'Empreinte'])}<tbody>${f.generated.map((g) => r([esc(g.number), `${dayFr(g.period_from)} au ${dayFr(g.period_to)}`, g.turnover_ht, dateFr(g.generated_at), `<small>${g.hash}</small>`])).join('') || '<tr><td colspan="5">Aucun état figé</td></tr>'}</tbody></table>`;
+      return saveA4Pdf(body, `dossier-controle_${from}_${to}.pdf`);
     },
 
     async statements(storeId, from, to) {

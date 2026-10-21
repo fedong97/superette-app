@@ -88,6 +88,7 @@ export const PERMISSIONS = {
   courier_returns: { label: 'Retour des livreurs : encaisser ce qu’ils rapportent, feuille de route', group: 'Facturation', type: 'Bouton', parent: 'deliveries' },
   containers_counter: { label: 'Encaisser ou rendre la consigne des emballages à la caisse', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sales_alerts: { label: 'Alertes sur les ventes (remises, annulations, retours)', group: 'Facturation', type: 'Menu', parent: 'sales' },
+  real_sales: { label: 'Ventes réelles : toutes les opérations (ventes, paiements, annulations, remboursements) et leurs exports', group: 'Facturation', type: 'Menu', parent: 'sales' },
 
   // --- Trésorerie --------------------------------------------------------------
   treasury: { label: 'Opérations de trésorerie (ouverture et clôture des caisses)', group: 'Trésorerie', type: 'Menu', roles: POS },
@@ -220,6 +221,8 @@ export const PERMISSIONS = {
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
   tax: { label: 'Impôt sur le résultat, acomptes et notes de la DSF', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
   tax_settings: { label: 'Préparer les déclarations fiscales (paramètres, comptabiliser l’impôt)', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
+  fiscal_prep: { label: 'Vue fiscale : état tiré des ventes réelles et de la comptabilité, rapprochement, dossier de contrôle, simulateur des régimes', group: 'Fiscalité', type: 'Menu', parent: 'accounting' },
+  fiscal_declare: { label: 'Inscrire une déclaration déposée et justifier un écart par une pièce', group: 'Fiscalité', type: 'Fonction', parent: 'tax_settings' },
 
   // --- Comptabilité ------------------------------------------------------------
   accounting: { label: 'Comptabilité : journaux, grand livre, balance', group: 'Comptabilité', type: 'Menu', roles: ACCOUNTING },

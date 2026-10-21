@@ -2253,4 +2253,122 @@ CREATE TABLE companies (
 ALTER TABLE stores ADD COLUMN company_id TEXT;
 `,
   },
+  {
+    // 55 : les 53 et 54 sont prises par la version 0.78.0.
+    version: 55,
+    name: 'ventes réelles et préparation fiscale',
+    sql: `
+-- Préparation fiscale : un état lu dans les ventes réelles (sales, sale_lines) et la comptabilité,
+-- sans aucune opération propre. Seul l'état d'une période peut être figé (« généré »), avec son
+-- empreinte ; ces tables ne se modifient ni ne se suppriment.
+CREATE TABLE fiscal_statements (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  period_from TEXT NOT NULL,
+  period_to TEXT NOT NULL,
+  turnover_ht INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  generated_by TEXT NOT NULL,
+  generated_at TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX fiscal_statements_store ON fiscal_statements(store_id, period_from);
+CREATE TRIGGER fiscal_statements_no_update BEFORE UPDATE ON fiscal_statements
+BEGIN SELECT RAISE(ABORT, 'Un état fiscal généré ne se modifie pas : générez-en un nouveau'); END;
+CREATE TRIGGER fiscal_statements_no_delete BEFORE DELETE ON fiscal_statements
+BEGIN SELECT RAISE(ABORT, 'Un état fiscal généré ne se supprime pas'); END;
+
+-- Journal des états générés, chaîné par empreinte SHA-256 (prev_hash) : une ligne retirée ou changée se voit.
+CREATE TABLE fiscal_log (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  entity TEXT NOT NULL CHECK (entity IN ('statement')),
+  entity_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('generate')),
+  user_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  at TEXT NOT NULL,
+  prev_hash TEXT,
+  hash TEXT NOT NULL
+);
+CREATE INDEX fiscal_log_store ON fiscal_log(store_id, at);
+CREATE TRIGGER fiscal_log_no_update BEFORE UPDATE ON fiscal_log
+BEGIN SELECT RAISE(ABORT, 'Le journal de la préparation fiscale ne se modifie pas'); END;
+CREATE TRIGGER fiscal_log_no_delete BEFORE DELETE ON fiscal_log
+BEGIN SELECT RAISE(ABORT, 'Le journal de la préparation fiscale ne se supprime pas'); END;
+`,
+  },
+  {
+    version: 56,
+    name: 'déclarations déposées, justifications des écarts',
+    rebuild: true,
+    sql: `
+-- Déclarations réellement déposées à l'administration (montants reportés sur le formulaire),
+-- pour les rapprocher des ventes réelles. Elles ne changent jamais l'état fiscal : elles
+-- servent à montrer l'écart. Une erreur se régularise par une déclaration rectificative.
+CREATE TABLE fiscal_declarations (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  period TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('initial', 'rectificative')),
+  turnover_ht INTEGER NOT NULL,
+  vat INTEGER NOT NULL,
+  reference TEXT NOT NULL,
+  filed_on TEXT NOT NULL,
+  note TEXT,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX fiscal_declarations_period ON fiscal_declarations(store_id, period);
+CREATE TRIGGER fiscal_declarations_no_update BEFORE UPDATE ON fiscal_declarations
+BEGIN SELECT RAISE(ABORT, 'Une déclaration déposée ne se modifie pas : enregistrez une déclaration rectificative'); END;
+CREATE TRIGGER fiscal_declarations_no_delete BEFORE DELETE ON fiscal_declarations
+BEGIN SELECT RAISE(ABORT, 'Une déclaration déposée ne se supprime pas'); END;
+
+-- Explication d'un écart entre le déclaré et le réel, rattachée à une vraie pièce (avoir,
+-- annulation, écriture, déclaration rectificative). Elle documente, elle ne change aucun montant.
+CREATE TABLE fiscal_justifications (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  declaration_id TEXT NOT NULL REFERENCES fiscal_declarations(id),
+  kind TEXT NOT NULL CHECK (kind IN ('credit_note', 'cancellation', 'entry', 'rectificative', 'other')),
+  ref_id TEXT,
+  ref_label TEXT,
+  explanation TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX fiscal_justifications_declaration ON fiscal_justifications(declaration_id);
+CREATE TRIGGER fiscal_justifications_no_update BEFORE UPDATE ON fiscal_justifications
+BEGIN SELECT RAISE(ABORT, 'Une justification ne se modifie pas : ajoutez-en une autre'); END;
+CREATE TRIGGER fiscal_justifications_no_delete BEFORE DELETE ON fiscal_justifications
+BEGIN SELECT RAISE(ABORT, 'Une justification ne se supprime pas'); END;
+
+-- Le journal chaîné inscrit aussi les déclarations et les justifications : on le reconstruit
+-- avec ses lignes telles quelles (les empreintes ne portent que sur leurs valeurs).
+DROP TRIGGER fiscal_log_no_update;
+DROP TRIGGER fiscal_log_no_delete;
+CREATE TABLE fiscal_log_new (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  entity TEXT NOT NULL CHECK (entity IN ('statement', 'declaration', 'justification')),
+  entity_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('generate', 'record', 'justify')),
+  user_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  at TEXT NOT NULL,
+  prev_hash TEXT,
+  hash TEXT NOT NULL
+);
+INSERT INTO fiscal_log_new SELECT id, store_id, entity, entity_id, action, user_id, data, at, prev_hash, hash FROM fiscal_log ORDER BY rowid;
+DROP TABLE fiscal_log;
+ALTER TABLE fiscal_log_new RENAME TO fiscal_log;
+CREATE INDEX fiscal_log_store ON fiscal_log(store_id, at);
+CREATE TRIGGER fiscal_log_no_update BEFORE UPDATE ON fiscal_log
+BEGIN SELECT RAISE(ABORT, 'Le journal de la préparation fiscale ne se modifie pas'); END;
+CREATE TRIGGER fiscal_log_no_delete BEFORE DELETE ON fiscal_log
+BEGIN SELECT RAISE(ABORT, 'Le journal de la préparation fiscale ne se supprime pas'); END;
+`,
+  },
 ];

@@ -73,10 +73,13 @@ const TABLES: Record<string, string> = {
   sales_target: 'sales_targets',
   summary_invoice: 'summary_invoices',
   budget: 'budgets',
+  fiscal_adjustment: 'fiscal_adjustments',
+  fiscal_log: 'fiscal_log',
+  fiscal_statement: 'fiscal_statements',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
-const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement', 'emoney_movement', 'inventory_entry', 'rebate_entry', 'loyalty_move', 'customer_reminder', 'opening_balance']);
+const IMMUTABLE = new Set(['stock_movement', 'cash_operation', 'supplier_payment', 'customer_payment', 'central_cash_movement', 'emoney_movement', 'inventory_entry', 'rebate_entry', 'loyalty_move', 'customer_reminder', 'opening_balance', 'fiscal_adjustment', 'fiscal_log', 'fiscal_statement']);
 
 /** Ordre des statuts : une version plus ancienne reçue d'un autre PC ne fait jamais reculer un document. */
 const STATUS_RANK: Record<string, Record<string, number>> = {

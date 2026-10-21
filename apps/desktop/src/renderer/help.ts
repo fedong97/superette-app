@@ -729,4 +729,48 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
     ],
   },
+  realSales: {
+    title: 'Ventes réelles',
+    intro: 'La source de référence : toutes les opérations de vente telles qu’elles ont eu lieu à la caisse. Rien n’y est masqué ni modifié.',
+    sections: [
+      {
+        tab: 'operations',
+        title: 'Opérations',
+        steps: [
+          'Choisissez la période, puis filtrez : ventes, remboursements (retours) ou annulations. Les factures « supprimées » du registre y figurent, annulées.',
+          'Cliquez une ligne pour le détail : articles, TVA, paiements, documents liés et identifiant de la vente.',
+          'L’identifiant de la vente est celui que cite la préparation fiscale : il relie les deux modules.',
+        ],
+      },
+      { tab: 'payments', title: 'Paiements', steps: ['Chaque paiement des ventes et chaque règlement client reçu, avec le moyen et la référence.'] },
+      { tab: 'summary', title: 'Synthèse', steps: ['Ventes, remboursements et chiffre d’affaires réel ; les annulations sont montrées à part, hors chiffre d’affaires.'] },
+      { tab: 'export', title: 'Exports', steps: ['Opérations, lignes d’articles ou paiements en CSV, chaque ligne avec l’identifiant de la vente.'] },
+    ],
+  },
+  fiscalPrep: {
+    title: 'Préparation fiscale',
+    intro: 'Un état comptable et fiscal tiré des ventes réelles, sans jamais les modifier. Le chiffre déclaré est le chiffre réel plus les seuls avoirs et corrections approuvés.',
+    sections: [
+      {
+        tab: 'state',
+        title: 'État fiscal',
+        steps: [
+          'Choisissez la période : les ventes réelles sont réparties par catégorie fiscale (taux de TVA), avec les ajustements approuvés et le déclaré.',
+          'Le rapprochement montre CA réel + ajustements = CA déclaré ; l’écart non justifié est toujours 0.',
+          '« Générer l’état » le fige avec son empreinte : il ne se modifie plus, on en génère un nouveau si besoin.',
+        ],
+      },
+      {
+        tab: 'adjustments',
+        title: 'Avoirs et corrections',
+        steps: [
+          'Un avoir, une correction ou un reclassement se fait sur une vente réelle (son n°), sans dépasser ce qui en reste après retours et ajustements.',
+          'Motif et pièce justificative sont obligatoires. L’ajustement ne compte qu’une fois approuvé par un autre utilisateur que son auteur, dans le mois de son approbation.',
+          'Une décision est définitive : pour revenir sur un ajustement approuvé, proposez-en un autre en sens inverse.',
+        ],
+      },
+      { tab: 'statements', title: 'États générés', steps: ['Les états figés, avec leur empreinte vérifiée et leur export CSV.'] },
+      { tab: 'journal', title: 'Journal et contrôle', steps: ['Toutes les propositions, décisions et générations, chaînées par empreinte. « Vérifier le journal » signale toute ligne changée ou retirée.'] },
+    ],
+  },
 };

@@ -19,6 +19,8 @@ import { Production, type ProductionTab } from './screens/Production';
 import { Promotions } from './screens/Promotions';
 import { Reports } from './screens/Reports';
 import { Quotes } from './screens/Quotes';
+import { RealSales, type RealSalesTab } from './screens/RealSales';
+import { FiscalPrep, type FiscalPrepTab } from './screens/FiscalPrep';
 import { Purchases, type PurchasesTab } from './screens/Purchases';
 import { EDIT_SALE_EVENT, SaleDetail, Sales, type SalesTab } from './screens/Sales';
 import { Setup } from './screens/Setup';
@@ -79,6 +81,8 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
   staff: { label: 'Collaborateurs', perm: ['staff', 'staff_edit', 'staff_salaries', 'staff_targets', 'staff_attendance'] },
+  realSales: { label: 'Ventes réelles', perm: ['real_sales'] },
+  fiscalPrep: { label: 'Préparation fiscale', perm: ['fiscal_prep', 'fiscal_adjust', 'fiscal_approve'] },
 };
 
 interface MenuItem {
@@ -189,6 +193,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Facture à crédit (client en compte)', open: ['credit'] },
       { label: 'Mes dernières factures', open: ['sales', 'tickets'] },
       { label: 'Registre des ventes', open: ['sales', 'register'] },
+      { label: 'Ventes réelles (opérations, paiements, annulations, remboursements)', open: ['realSales', 'operations'], perm: 'real_sales' },
       SEP,
       { label: "Retours d'articles des clients", open: ['sales', 'returns'] },
       { label: 'Tickets et factures annulés', open: ['sales', 'cancelled'] },
@@ -383,6 +388,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'États financiers et DSF', open: ['accounting', 'statements'], perm: 'statements' },
       { label: 'Notes déclaratives de la DSF', open: ['accounting', 'dsf'], perm: ['tax', 'tax_settings'] },
       { label: 'Impôt sur le résultat', open: ['accounting', 'tax'], perm: ['tax', 'tax_settings'] },
+      SEP,
+      { label: 'Préparation fiscale (état tiré des ventes réelles)', open: ['fiscalPrep', 'state'], perm: 'fiscal_prep' },
+      { label: 'Avoirs et corrections à approuver', open: ['fiscalPrep', 'adjustments'], perm: ['fiscal_adjust', 'fiscal_approve'] },
+      { label: 'États fiscaux générés', open: ['fiscalPrep', 'statements'], perm: 'fiscal_prep' },
+      { label: 'Ventes réelles (source)', open: ['realSales', 'operations'], perm: 'real_sales' },
     ],
   ],
   [
@@ -1017,6 +1027,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} />}
+            {w.kind === 'realSales' && <RealSales initialTab={w.tab as RealSalesTab | undefined} />}
+            {w.kind === 'fiscalPrep' && <FiscalPrep user={user} initialTab={w.tab as FiscalPrepTab | undefined} />}
             {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
             {w.kind === 'orders' && <Orders user={user} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}

@@ -31,6 +31,8 @@ import { QuoteService } from './quotes';
 import { ReportService } from './reports';
 import { ReconciliationService } from './reconciliation';
 import { TaxService } from './tax';
+import { RealSalesService } from './realSales';
+import { FiscalPrepService } from './fiscalPrep';
 import { NotesService } from './notes';
 import { FinancialStatementsService } from './statements';
 import { StockService } from './stock';
@@ -90,6 +92,8 @@ export * from './quotes';
 export * from './reports';
 export * from './reconciliation';
 export * from './tax';
+export * from './realSales';
+export * from './fiscalPrep';
 export * from './notes';
 export * from './statements';
 export * from './stock';
@@ -145,6 +149,8 @@ export interface Services {
   fiscal: FiscalYearService;
   reconciliation: ReconciliationService;
   tax: TaxService;
+  realSales: RealSalesService;
+  fiscalPrep: FiscalPrepService;
   notes: NotesService;
   disclosures: DisclosureService;
   sync: SyncService;
@@ -197,6 +203,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const fiscal = new FiscalYearService(db, clock, accounting, statements);
   const reconciliation = new ReconciliationService(db, clock, accounting);
   const tax = new TaxService(db, clock, accounting, statements);
+  const realSales = new RealSalesService(db, clock);
+  const fiscalPrep = new FiscalPrepService(db, clock, tax);
   const disclosures = new DisclosureService(db, clock);
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
   const attention = new AttentionService(db, clock, stock, pos, purchases, customers, rebates);
@@ -214,7 +222,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const summaryInvoices = new SummaryInvoiceService(db, clock);
   const cheques = new ChequeService(db, clock);
   const planning = new PlanningService(db, clock, accounting, customers, purchases, charges, reports);
-  return { db, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  return { db, attendance, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, realSales, fiscalPrep, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

@@ -84,6 +84,7 @@ export const PERMISSIONS = {
   sale_warehouse: { label: 'Vendre depuis un autre dépôt que la surface de vente sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
   deliveries: { label: 'Livraisons du jour (préparer, partir, livrée)', group: 'Facturation', type: 'Menu', parent: 'cash' },
   sales_alerts: { label: 'Alertes sur les ventes (remises, annulations, retours)', group: 'Facturation', type: 'Menu', parent: 'sales' },
+  real_sales: { label: 'Ventes réelles : toutes les opérations (ventes, paiements, annulations, remboursements) et leurs exports', group: 'Facturation', type: 'Menu', parent: 'sales' },
 
   // --- Trésorerie --------------------------------------------------------------
   treasury: { label: 'Opérations de trésorerie (ouverture et clôture des caisses)', group: 'Trésorerie', type: 'Menu', roles: POS },
@@ -203,6 +204,9 @@ export const PERMISSIONS = {
   vat_return: { label: 'Consulter et imprimer la déclaration de TVA', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
   tax: { label: 'Impôt sur le résultat, acomptes et notes de la DSF', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
   tax_settings: { label: 'Préparer les déclarations fiscales (paramètres, comptabiliser l’impôt)', group: 'Fiscalité', type: 'Fonction', parent: 'accounting' },
+  fiscal_prep: { label: 'Préparation fiscale : état tiré des ventes réelles, rapprochement, états générés et exports', group: 'Fiscalité', type: 'Menu', parent: 'accounting' },
+  fiscal_adjust: { label: 'Proposer un avoir ou une correction justifiée sur une vente réelle', group: 'Fiscalité', type: 'Bouton', parent: 'fiscal_prep' },
+  fiscal_approve: { label: 'Approuver ou refuser les avoirs et corrections proposés par un autre utilisateur', group: 'Fiscalité', type: 'Bouton', roles: MANAGE },
 
   // --- Comptabilité ------------------------------------------------------------
   accounting: { label: 'Comptabilité : journaux, grand livre, balance', group: 'Comptabilité', type: 'Menu', roles: ACCOUNTING },

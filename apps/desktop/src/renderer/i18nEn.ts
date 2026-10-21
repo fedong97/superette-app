@@ -3,6 +3,13 @@
  * Les textes qui portent un nombre ou un nom passent par EN_PATTERNS.
  */
 export const EN: Record<string, string> = {
+  "Ventes réelles": "Actual sales",
+  "Préparation fiscale": "Tax preparation",
+  "Ventes réelles (opérations, paiements, annulations, remboursements)": "Actual sales (transactions, payments, cancellations, refunds)",
+  "Préparation fiscale (état tiré des ventes réelles)": "Tax preparation (statement drawn from actual sales)",
+  "Avoirs et corrections à approuver": "Credit notes and corrections to approve",
+  "États fiscaux générés": "Generated tax statements",
+  "Ventes réelles (source)": "Actual sales (source)",
   "% Remise": "% Discount",
   "(coût de revient)": "(cost price)",
   "(elle n'était pas encore préparée)": "(it was not prepared yet)",

@@ -1916,4 +1916,80 @@ CREATE TABLE cheque_deposit_lines (
 CREATE INDEX cheque_deposit_lines_payment ON cheque_deposit_lines(payment_id);
 `,
   },
+  {
+    version: 52,
+    name: 'ventes réelles et préparation fiscale',
+    sql: `
+-- Préparation fiscale : un état dérivé des ventes réelles (tables sales, sale_lines, sale_payments),
+-- qu'elle lit sans jamais les modifier. Les seuls écarts possibles avec les ventes réelles sont des
+-- avoirs et des corrections justifiés, chacun rattaché à une vente existante (sale_id, identifiant
+-- commun aux deux modules) et approuvé par un autre utilisateur que son auteur.
+-- Ces tables ne se modifient ni ne se suppriment : on ajoute, on n'efface pas.
+CREATE TABLE fiscal_adjustments (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  kind TEXT NOT NULL CHECK (kind IN ('credit_note', 'correction', 'reclass')),
+  sale_id TEXT NOT NULL,
+  sale_number TEXT NOT NULL,
+  vat_rate_bp INTEGER NOT NULL,
+  to_vat_rate_bp INTEGER,
+  -- Avoir et reclassement : montant positif ; correction : signé (en plus ou en moins).
+  amount_ttc INTEGER NOT NULL CHECK (amount_ttc <> 0),
+  reason TEXT NOT NULL,
+  reference TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX fiscal_adjustments_sale ON fiscal_adjustments(sale_id);
+CREATE INDEX fiscal_adjustments_store ON fiscal_adjustments(store_id, created_at);
+CREATE TRIGGER fiscal_adjustments_no_update BEFORE UPDATE ON fiscal_adjustments
+BEGIN SELECT RAISE(ABORT, 'Un ajustement fiscal ne se modifie pas : faites-en un autre'); END;
+CREATE TRIGGER fiscal_adjustments_no_delete BEFORE DELETE ON fiscal_adjustments
+BEGIN SELECT RAISE(ABORT, 'Un ajustement fiscal ne se supprime pas'); END;
+
+-- États fiscaux générés : photographie figée d'une période (ventes réelles, ajustements, déclaré).
+CREATE TABLE fiscal_statements (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  period_from TEXT NOT NULL,
+  period_to TEXT NOT NULL,
+  real_ht INTEGER NOT NULL,
+  declared_ht INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  generated_by TEXT NOT NULL,
+  generated_at TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX fiscal_statements_store ON fiscal_statements(store_id, period_from);
+CREATE TRIGGER fiscal_statements_no_update BEFORE UPDATE ON fiscal_statements
+BEGIN SELECT RAISE(ABORT, 'Un état fiscal généré ne se modifie pas : générez-en un nouveau'); END;
+CREATE TRIGGER fiscal_statements_no_delete BEFORE DELETE ON fiscal_statements
+BEGIN SELECT RAISE(ABORT, 'Un état fiscal généré ne se supprime pas'); END;
+
+-- Journal de la préparation fiscale : chaque proposition, approbation, refus, retrait et état
+-- généré, chaîné par empreinte SHA-256 (prev_hash) pour qu'une ligne retirée ou changée se voie.
+CREATE TABLE fiscal_log (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  entity TEXT NOT NULL CHECK (entity IN ('adjustment', 'statement')),
+  entity_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('propose', 'approve', 'reject', 'withdraw', 'generate')),
+  user_id TEXT NOT NULL,
+  reason TEXT,
+  data TEXT NOT NULL,
+  at TEXT NOT NULL,
+  prev_hash TEXT,
+  hash TEXT NOT NULL
+);
+CREATE INDEX fiscal_log_entity ON fiscal_log(entity_id, at);
+CREATE INDEX fiscal_log_store ON fiscal_log(store_id, at);
+CREATE TRIGGER fiscal_log_no_update BEFORE UPDATE ON fiscal_log
+BEGIN SELECT RAISE(ABORT, 'Le journal de la préparation fiscale ne se modifie pas'); END;
+CREATE TRIGGER fiscal_log_no_delete BEFORE DELETE ON fiscal_log
+BEGIN SELECT RAISE(ABORT, 'Le journal de la préparation fiscale ne se supprime pas'); END;
+`,
+  },
 ];

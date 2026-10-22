@@ -69,6 +69,9 @@ export const ENTITY_LABELS: Record<string, string> = {
   entrance: 'Entrée du magasin',
   staff_team: 'Équipe',
   staff_document: 'Pièce du dossier du personnel',
+  fingerprint_device: 'Pointeuse à empreinte',
+  staff_warning: 'Avertissement',
+  staff_alert: 'Alerte du personnel',
   cash_handover: 'Relève de caisse',
   fixed_asset: 'Immobilisation',
   opening_balance: "Solde d'ouverture",
@@ -95,7 +98,7 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
     label: 'Articles et prix',
     entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules', 'container'],
   },
-  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['company', 'store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'attendance', 'time_punch', 'staff_agency', 'entrance', 'staff_team', 'staff_document', 'staff_leave', 'staff_schedule', 'expense_category'] },
+  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['company', 'store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'attendance', 'time_punch', 'staff_agency', 'entrance', 'staff_team', 'staff_document', 'fingerprint_device', 'staff_warning', 'staff_alert', 'staff_leave', 'staff_schedule', 'expense_category'] },
   {
     key: 'compta',
     label: 'Comptabilité',

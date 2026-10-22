@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PUNCH_METHODS, type PunchMethod } from '@superette/core';
+import { PUNCH_METHODS, type PunchMethod, WARNING_KINDS, type WarningKind, whatsappLink } from '@superette/core';
 import { type Result, call } from '../api';
 import { askConfirm, askText, Empty, Field, Modal, dateFr, has, today, useLoad, useStoreSettings, useToast } from '../ui';
 import { CameraDialog, readPortrait } from './AdminBrand';
@@ -92,6 +92,7 @@ export function PresenceBoard() {
           <b>{count('left')}</b>
         </div>
       </div>
+      {settings.staffAlerts && <AlertsPanel reloadKey={list.data} />}
       <p className="muted">
         {settings.punchKiosk ? 'Passages à la borne de l’entrée' : 'Arrivées notées à la connexion au logiciel'}, comparés à l’horaire prévu de chacun{settings.staffTeams ? ' (équipe ou rotation)' : ''}. Mis à jour
         toutes les 30 secondes.
@@ -726,8 +727,9 @@ export function TeamsAndEntrances({ user }: { user: User }) {
           </Field>
         </section>
       )}
-      {!settings.staffTeams && !settings.multiEntrances && !(settings.punchKiosk && canKiosk) && (
-        <Empty>Activez les équipes, plusieurs entrées ou la borne de pointage dans Administration › Paramètres › Pointage du personnel.</Empty>
+      {settings.fingerprint && <Fingerprints user={user} entrances={(entrances.data ?? []).filter((x) => x.active)} />}
+      {!settings.staffTeams && !settings.multiEntrances && !settings.fingerprint && !(settings.punchKiosk && canKiosk) && (
+        <Empty>Activez les équipes, plusieurs entrées, la borne ou la pointeuse à empreinte dans Administration › Paramètres › Pointage du personnel.</Empty>
       )}
       {edit && (
         <TeamDialog
@@ -956,6 +958,423 @@ function AgencyDialog({ agency, onClose, onDone }: { agency: Agency | null; onCl
             Annuler
           </button>
           <button type="submit" className="primary" disabled={!f.name.trim()}>
+            Enregistrer
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+type Alert = Result<'staffWatch.alerts'>[number];
+
+/**
+ * Retards et absences signalés : le message WhatsApp est prêt pour le
+ * responsable, la société prestataire (envoyer un remplaçant) ou la personne.
+ */
+function AlertsPanel({ reloadKey }: { reloadKey: unknown }) {
+  const settings = useStoreSettings();
+  const toast = useToast();
+  const alerts = useLoad(() => call('staffWatch.alerts'), [reloadKey]);
+  const open = (alerts.data ?? []).filter((a) => !a.handled_at);
+  const done = (alerts.data ?? []).filter((a) => a.handled_at);
+  if (!alerts.data?.length) return null;
+  const send = (phone: string | null, text: string) => {
+    const link = whatsappLink(phone, text);
+    if (link) window.open(link);
+    else toast.error('Numéro WhatsApp manquant');
+  };
+  return (
+    <section className="warn-box">
+      <h3>Alertes du personnel ({open.length})</h3>
+      {open.map((a: Alert) => (
+        <div key={a.id} className="alert-row">
+          <span>
+            {a.day !== today() && <b>{dateFr(a.day)} · </b>}
+            {a.text}
+          </span>
+          <span className="nowrap">
+            {settings.alertWhatsapp && (
+              <button type="button" className="link" onClick={() => send(settings.alertWhatsapp, `ONIX 360 · ${a.text}`)}>
+                WhatsApp au responsable
+              </button>
+            )}
+            {a.category === 'contractor' && a.agency_phone && (
+              <button
+                type="button"
+                className="link"
+                onClick={() =>
+                  send(
+                    a.agency_phone,
+                    a.kind === 'absent'
+                      ? `Bonjour, votre agent ${a.staff_name} n’est pas venu à son poste aujourd’hui. Merci d’envoyer un remplaçant au plus vite.`
+                      : `Bonjour, votre agent ${a.staff_name} n’est pas encore à son poste (${a.minutes} min de retard). Merci de nous dire quand il arrive ou d’envoyer un remplaçant.`,
+                  )
+                }
+              >
+                WhatsApp à {a.agency_name}
+              </button>
+            )}
+            {a.staff_phone && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => send(a.staff_phone, `Bonjour ${a.staff_name}, vous étiez attendu aujourd’hui et nous n’avons pas de passage à l’entrée. Pouvez-vous nous dire où vous en êtes ?`)}
+              >
+                WhatsApp à la personne
+              </button>
+            )}
+            <button
+              type="button"
+              className="ghost"
+              onClick={async () => {
+                try {
+                  await call('staffWatch.handle', a.id);
+                  alerts.reload();
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              Traité
+            </button>
+          </span>
+        </div>
+      ))}
+      {done.length > 0 && (
+        <small className="muted block">
+          Traitées : {done.map((a) => `${a.staff_name} (${a.kind === 'absent' ? 'absence' : 'retard'}, ${a.handler_name ?? ''} à ${hm(a.handled_at)})`).join(' · ')}
+        </small>
+      )}
+    </section>
+  );
+}
+
+type Device = Result<'fingerprint.devices'>[number];
+
+/**
+ * Pointeuses à empreinte : ce PC reçoit leurs passages par le réseau, ou on
+ * importe le fichier de la clé USB. Chaque personne est enregistrée dans la
+ * pointeuse sous son numéro de pointage.
+ */
+function Fingerprints({ user, entrances }: { user: User; entrances: { id: string; name: string }[] }) {
+  const settings = useStoreSettings();
+  const toast = useToast();
+  const devices = useLoad(() => call('fingerprint.devices'), []);
+  const state = useLoad(() => (has(user, 'staff_kiosk') ? call('fingerprint.state') : Promise.resolve(null)), []);
+  const [port, setPort] = useState('');
+  const [result, setResult] = useState<Result<'fingerprint.import'> | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const st = state.data;
+  return (
+    <section>
+      <h3>Pointeuses à empreinte</h3>
+      <p className="muted">
+        Enregistrez chaque personne dans la pointeuse sous son numéro de pointage (fiche du collaborateur › Badge et pointage). Les empreintes restent dans l’appareil ; seuls le numéro
+        et l’heure arrivent ici, arrivée ou départ selon le passage précédent.
+      </p>
+      {st && (
+        <div className="box">
+          <b>Réception par le réseau sur ce PC</b>
+          {st.listening ? (
+            <p>
+              Ce PC reçoit les pointeuses. Dans la pointeuse : Menu › Communication › Serveur cloud (ADMS), adresse du serveur <b>{st.addresses.join(' ou ') || 'IP de ce PC'}</b>, port{' '}
+              <b>{st.port}</b>.{st.lastAt ? ` Dernier envoi reçu à ${hm(st.lastAt)}.` : ' Aucun envoi reçu depuis le démarrage.'}
+            </p>
+          ) : (
+            <p className="muted">
+              {st.error ?? 'Ce PC ne reçoit pas les pointeuses.'} Choisissez un PC toujours allumé (la borne ou le PC du gérant), branché au même réseau que la pointeuse.
+            </p>
+          )}
+          <div className="toolbar">
+            <input className="qty" style={{ width: 90, flex: 'none' }} inputMode="numeric" title="Port" placeholder={String(st.port ?? 8081)} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} />
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await call('fingerprint.configure', Number(port || st.port || 8081));
+                  state.reload();
+                  toast.ok('Ce PC reçoit les pointeuses');
+                } catch (err) {
+                  toast.error(err);
+                }
+              }}
+            >
+              {st.listening ? 'Changer de port' : 'Recevoir les pointeuses sur ce PC'}
+            </button>
+            {st.port && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={async () => {
+                  await call('fingerprint.configure', null).catch(toast.error);
+                  state.reload();
+                }}
+              >
+                Arrêter
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {has(user, 'staff_attendance') && (
+        <div className="toolbar">
+          <input
+            ref={file}
+            type="file"
+            accept=".dat,.txt,.log"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (!f) return;
+              try {
+                const r = await call('fingerprint.import', await f.text());
+                setResult(r);
+                devices.reload();
+                toast.ok(`${r.added} passage(s) ajouté(s)`);
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          />
+          <button type="button" onClick={() => file.current?.click()}>
+            Importer le fichier de la clé USB…
+          </button>
+          <small className="muted">Dans la pointeuse : Menu › Clé USB › Télécharger › Pointages (fichier « attlog »).</small>
+        </div>
+      )}
+      {result && (
+        <p className={result.unknown.length ? 'warn-box' : 'muted'}>
+          {result.added} passage(s) ajouté(s), {result.duplicates} déjà noté(s)
+          {result.unreadable ? `, ${result.unreadable} ligne(s) illisible(s) ou à une date future` : ''}
+          {result.inactive ? `, ${result.inactive} de personnes parties` : ''}.
+          {result.unknown.length > 0 && ` Numéros sans collaborateur : ${result.unknown.join(', ')}. Donnez ces numéros de pointage aux bonnes fiches, puis réimportez le fichier.`}
+        </p>
+      )}
+      {devices.data?.length ? (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Pointeuse</th>
+              <th>N° de série</th>
+              {settings.multiEntrances && <th>Entrée</th>}
+              <th>Dernier contact</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {devices.data.map((d: Device) => (
+              <tr key={d.id} className={d.active ? '' : 'muted'}>
+                <td>{d.name}</td>
+                <td>{d.serial}</td>
+                {settings.multiEntrances && (
+                  <td>
+                    <select
+                      disabled={!has(user, 'staff_kiosk')}
+                      value={d.entrance_id ?? ''}
+                      onChange={async (e) => {
+                        await call('fingerprint.saveDevice', d.id, { name: d.name, entranceId: e.target.value || null, active: Boolean(d.active) }).catch(toast.error);
+                        devices.reload();
+                      }}
+                    >
+                      <option value="">Entrée principale</option>
+                      {entrances.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                )}
+                <td>{d.last_seen_at ? `${new Date(d.last_seen_at).toLocaleDateString('fr-FR')} ${hm(d.last_seen_at)}` : ''}</td>
+                <td className="nowrap">
+                  {has(user, 'staff_kiosk') && (
+                    <>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={async () => {
+                          const name = await askText(`Nouveau nom de « ${d.name} »`);
+                          if (!name) return;
+                          await call('fingerprint.saveDevice', d.id, { name, entranceId: d.entrance_id, active: Boolean(d.active) }).catch(toast.error);
+                          devices.reload();
+                        }}
+                      >
+                        Renommer
+                      </button>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={async () => {
+                          await call('fingerprint.saveDevice', d.id, { name: d.name, entranceId: d.entrance_id, active: !d.active }).catch(toast.error);
+                          devices.reload();
+                        }}
+                      >
+                        {d.active ? 'Retirer' : 'Remettre'}
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="muted">Aucune pointeuse encore : elle apparaît ici à son premier envoi par le réseau.</p>
+      )}
+    </section>
+  );
+}
+
+type Warning = Result<'staffWatch.warnings'>[number];
+
+/** Avertissements donnés au personnel, et ceux à envisager après trop de retards. */
+export function Warnings({ user }: { user: User }) {
+  const toast = useToast();
+  const settings = useStoreSettings();
+  const period = today().slice(0, 7);
+  const list = useLoad(() => call('staffWatch.warnings'), []);
+  const suggestions = useLoad(() => (has(user, 'staff_edit') ? call('staffWatch.suggestions', period) : Promise.resolve([])), [list.data]);
+  const staff = useLoad(() => call('staff.list'), []);
+  const [edit, setEdit] = useState<{ staffId: string; reason: string } | null>(null);
+  const canEdit = has(user, 'staff_edit');
+  return (
+    <>
+      <div className="toolbar">
+        <span className="muted">Avertissement oral, écrit, blâme ou mise à pied : gardé au dossier, avec la lettre à faire signer.</span>
+        <span className="spacer" />
+        {canEdit && (
+          <button className="primary" onClick={() => setEdit({ staffId: '', reason: '' })}>
+            Nouvel avertissement…
+          </button>
+        )}
+      </div>
+      {suggestions.data && suggestions.data.length > 0 && (
+        <div className="warn-box">
+          <b>À envisager ({settings.warnLateCount} retards ou plus ce mois) :</b>{' '}
+          {suggestions.data.map((x) => (
+            <button
+              key={x.staff_id}
+              type="button"
+              className="link"
+              onClick={() => setEdit({ staffId: x.staff_id, reason: `${x.late} retards ce mois-ci (${x.late_minutes} minutes en tout).` })}
+            >
+              {x.name} ({x.late} retards)
+            </button>
+          ))}
+        </div>
+      )}
+      {list.data?.length ? (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Collaborateur</th>
+              <th>Sorte</th>
+              <th>Motif</th>
+              <th>Donné par</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.data.map((w: Warning) => (
+              <tr key={w.id}>
+                <td>{dateFr(w.day)}</td>
+                <td>{w.staff_name}</td>
+                <td>{WARNING_KINDS[w.kind] ?? w.kind}</td>
+                <td>{w.reason}</td>
+                <td>{w.user_name ?? ''}</td>
+                <td className="nowrap">
+                  {canEdit && (
+                    <>
+                      <button type="button" className="link" onClick={() => call('staffWatch.printWarning', w.id).catch(toast.error)}>
+                        Imprimer la lettre
+                      </button>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={async () => {
+                          if (!(await askConfirm(`Retirer l’avertissement de ${w.staff_name} ?`))) return;
+                          await call('staffWatch.cancelWarning', w.id).catch(toast.error);
+                          list.reload();
+                        }}
+                      >
+                        Retirer
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <Empty>Aucun avertissement.</Empty>
+      )}
+      {edit && (
+        <WarningDialog
+          staff={(staff.data ?? []).filter((x) => x.active)}
+          initial={edit}
+          onClose={() => setEdit(null)}
+          onDone={() => {
+            setEdit(null);
+            list.reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function WarningDialog({ staff, initial, onClose, onDone }: { staff: StaffRow[]; initial: { staffId: string; reason: string }; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [f, setF] = useState({ staffId: initial.staffId, day: today(), kind: 'oral' as WarningKind, reason: initial.reason });
+  return (
+    <Modal title="Nouvel avertissement" onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            const w = await call('staffWatch.addWarning', f.staffId, { day: f.day, kind: f.kind, reason: f.reason });
+            toast.ok('Avertissement gardé au dossier');
+            if (f.kind !== 'oral' && (await askConfirm('Imprimer la lettre à faire signer ?'))) await call('staffWatch.printWarning', w.id);
+            onDone();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <Field label="Collaborateur">
+          <select required value={f.staffId} onChange={(e) => setF({ ...f, staffId: e.target.value })}>
+            <option value="">Choisir…</option>
+            {staff.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Sorte">
+          <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as WarningKind })}>
+            {(Object.entries(WARNING_KINDS) as [WarningKind, string][]).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Date">
+          <input type="date" max={today()} value={f.day} onChange={(e) => setF({ ...f, day: e.target.value })} />
+        </Field>
+        <Field label="Motif">
+          <textarea rows={3} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="Retards répétés, absence sans prévenir…" />
+        </Field>
+        <div className="actions">
+          <button type="button" className="ghost" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!f.staffId || !f.reason.trim()}>
             Enregistrer
           </button>
         </div>

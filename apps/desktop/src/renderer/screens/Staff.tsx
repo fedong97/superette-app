@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react';
 import { CONTRACT_TYPES, computePayroll, type ContractType, STAFF_KINDS, STAFF_KINDS_PLURAL, STAFF_KINDS_SHORT, type StaffKind } from '@superette/core';
 import { type Result, call } from '../api';
 import { Leaves, WeekPlanning } from './StaffTime';
-import { Agencies, DayPunches, DocumentsDialog, PresenceBoard, StaffPunchDialog, TeamsAndEntrances } from './Personnel';
+import { Agencies, DayPunches, DocumentsDialog, PresenceBoard, StaffPunchDialog, TeamsAndEntrances, Warnings } from './Personnel';
 import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useStoreSettings, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
 type MonthRow = Result<'staff.month'>[number];
-export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement' | 'leaves' | 'planning' | 'presence' | 'teams' | 'agencies';
+export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement' | 'leaves' | 'planning' | 'presence' | 'teams' | 'agencies' | 'warnings';
 
 const OFFICE_METHODS = { CASH: 'Espèces (caisse centrale)', MTN_MOMO: 'MTN MoMo (caisse électronique centrale)', ORANGE_MONEY: 'Orange Money (caisse électronique centrale)', BANK_TRANSFER: 'Virement', CHEQUE: 'Chèque' } as const;
 type OfficeMethod = keyof typeof OFFICE_METHODS;
@@ -25,7 +25,8 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
   const leaves = has(user, 'staff_leaves');
   const settings = useStoreSettings();
   const presence = has(user, 'staff_presence') || attendance;
-  const teams = has(user, 'staff_teams') && (settings.staffTeams || settings.multiEntrances || settings.punchKiosk);
+  const teams = has(user, 'staff_teams') && (settings.staffTeams || settings.multiEntrances || settings.punchKiosk || settings.fingerprint);
+  const warnings = has(user, 'staff_edit') || attendance;
   const agencies = has(user, 'staff_agencies') && settings.contractorStaff;
   /** Pointage du mois des agents d'une société prestataire (depuis l'onglet des sociétés). */
   const [agencyFilter, setAgencyFilter] = useState<string | null>(null);
@@ -36,6 +37,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
       (initialTab === 'presence' && !presence) ||
       (initialTab === 'teams' && !teams) ||
       (initialTab === 'agencies' && !agencies) ||
+      (initialTab === 'warnings' && !warnings) ||
       ((initialTab === 'leaves' || initialTab === 'planning') && !leaves)
       ? 'list'
       : initialTab,
@@ -61,6 +63,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
             : []),
           ...(teams ? ([['teams', 'Équipes et entrées']] as [StaffTab, string][]) : []),
           ...(agencies ? ([['agencies', 'Sociétés prestataires']] as [StaffTab, string][]) : []),
+          ...(warnings ? ([['warnings', 'Avertissements']] as [StaffTab, string][]) : []),
           ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []),
           ...(targets ? ([['targets', 'Objectifs et commissions']] as [StaffTab, string][]) : []),
           ['statement', 'Extrait de compte'],
@@ -88,6 +91,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
           }}
         />
       )}
+      {tab === 'warnings' && warnings && <Warnings user={user} />}
       {tab === 'leaves' && leaves && <Leaves />}
       {tab === 'planning' && leaves && <WeekPlanning />}
       {tab === 'statement' && <Statement initial={shown} />}
@@ -315,6 +319,8 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
     phone: staff?.phone ?? '',
     idCard: staff?.id_card ?? '',
     baseSalary: staff ? String(staff.base_salary) : '',
+    dailyRate: staff?.daily_rate ? String(staff.daily_rate) : '',
+    allowance: staff?.allowance ? String(staff.allowance) : '',
     hiredOn: staff?.hired_on ?? '',
     userId: staff?.user_id ?? '',
     active: staff ? staff.active === 1 : true,
@@ -338,6 +344,8 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
                 phone: f.phone || null,
                 idCard: f.idCard || null,
                 baseSalary: parseAmount(f.baseSalary) ?? 0,
+                dailyRate: parseAmount(f.dailyRate) ?? 0,
+                allowance: parseAmount(f.allowance) ?? 0,
                 hiredOn: f.hiredOn || null,
                 userId: f.userId || null,
                 parentAccount: f.parentAccount,
@@ -416,6 +424,16 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
           {f.category !== 'contractor' && (
             <Field label={f.category === 'daily' ? 'Salaire de base mensuel (FCFA, 0 si payé à la journée)' : 'Salaire de base mensuel (FCFA)'}>
               <input inputMode="numeric" className="r" value={f.baseSalary} onChange={set('baseSalary')} />
+            </Field>
+          )}
+          {f.category !== 'contractor' && (f.category === 'daily' || Boolean(staff?.daily_rate)) && (
+            <Field label="Tarif d’une journée (FCFA)" hint="Avec un salaire de base à 0 : payé par jour de présence pointé.">
+              <input inputMode="numeric" className="r" value={f.dailyRate} onChange={set('dailyRate')} />
+            </Field>
+          )}
+          {f.category !== 'contractor' && (
+            <Field label="Primes fixes du mois (FCFA)" hint="Transport, logement… ajoutées au salaire proposé d’après le pointage.">
+              <input inputMode="numeric" className="r" value={f.allowance} onChange={set('allowance')} />
             </Field>
           )}
           <Field label="Date d'entrée">
@@ -580,7 +598,12 @@ function Salaries() {
   const commissions = useLoad(() => call('staff.commissions', period), [period]);
   const [lines, setLines] = useState<Record<string, { gross: string; deducted: string }>>({});
   const [paying, setPaying] = useState<MonthRow | null>(null);
-  const rules = useStoreSettings().payroll;
+  const settings = useStoreSettings();
+  const rules = settings.payroll;
+  // Salaire proposé d'après le pointage (règles des paramètres), si le magasin l'a choisi.
+  const proposals = useLoad(() => (settings.payFromAttendance ? call('staff.payProposals', period) : Promise.resolve([])), [period, settings.payFromAttendance]);
+  const proposal = (staffId: string) => proposals.data?.find((p) => p.staff_id === staffId) ?? null;
+  const [detail, setDetail] = useState<{ name: string; p: PayProposal } | null>(null);
   const decl = useLoad(() => call('staff.declarations', period), [period, month.data]);
   const rows = month.data ?? [];
   /** Retenues légales prévues pour un brut saisi, comme les calculera l'enregistrement. */
@@ -595,12 +618,12 @@ function Salaries() {
         rows
           .filter((r) => !r.salary)
           .map((r) => {
-            const gross = r.staff.base_salary + (commissions.data?.[r.staff.id] ?? 0);
+            const gross = (proposal(r.staff.id)?.gross ?? r.staff.base_salary) + (commissions.data?.[r.staff.id] ?? 0);
             return [r.staff.id, { gross: String(gross || ''), deducted: String(Math.min(Math.max(0, r.staff.advances), gross - legalFor(r, gross)) || '') }];
           }),
       ),
     );
-  }, [month.data, commissions.data]);
+  }, [month.data, commissions.data, proposals.data]);
   const todo = rows.filter((r) => !r.salary);
   const amount = (v?: string) => parseAmount(v ?? '') ?? 0;
   return (
@@ -620,7 +643,14 @@ function Salaries() {
                   period,
                   todo.map((r) => {
                     const gross = amount(lines[r.staff.id]?.gross);
-                    return { staffId: r.staff.id, gross, deducted: amount(lines[r.staff.id]?.deducted), commission: Math.min(gross, commissions.data?.[r.staff.id] ?? 0) };
+                    const p = proposal(r.staff.id);
+                    return {
+                      staffId: r.staff.id,
+                      gross,
+                      deducted: amount(lines[r.staff.id]?.deducted),
+                      commission: Math.min(gross, commissions.data?.[r.staff.id] ?? 0),
+                      attendance: p ? { lines: p.lines, facts: p.facts, proposed: p.gross } : null,
+                    };
                   }),
                 );
                 toast.ok(`${done.length} salaire(s) de ${periodFr(period)} constaté(s)`);
@@ -634,6 +664,12 @@ function Salaries() {
           </button>
         )}
       </div>
+      {settings.payFromAttendance && (
+        <p className="muted">
+          Brut proposé d’après le pointage du mois : absences, retards, heures supplémentaires, fériés travaillés et primes, selon Administration › Paramètres › Paie d’après le pointage. Vérifiez-le,
+          corrigez-le si besoin, puis constatez.
+        </p>
+      )}
       <p className="muted">
         Constater un salaire le passe en charge (661) et au sous-compte du collaborateur. Les avances retenues soldent son compte d’avances. Le net se paie ici (bureau) ou à la caisse avec « Décaisser ».{' '}
         {rules.enabled
@@ -668,6 +704,7 @@ function Salaries() {
               <th className="r">Salaire de base</th>
               <th className="r">Avances à rembourser</th>
               <th className="r">Commission</th>
+              {settings.payFromAttendance && <th className="r">D’après le pointage</th>}
               <th className="r">Brut du mois</th>
               <th className="r">Retenues légales</th>
               <th className="r">Avances retenues</th>
@@ -691,6 +728,19 @@ function Salaries() {
                   <td className="r">{fcfa(r.staff.base_salary)}</td>
                   <td className="r">{r.staff.advances > 0 ? fcfa(r.staff.advances) : ''}</td>
                   <td className="r">{x ? (x.commission ? fcfa(x.commission) : '') : commissions.data?.[r.staff.id] ? fcfa(commissions.data[r.staff.id]!) : ''}</td>
+                  {settings.payFromAttendance && (
+                    <td className="r nowrap">
+                      {!x && proposal(r.staff.id) ? (
+                        <button type="button" className="link" title="Voir le calcul" onClick={() => setDetail({ name: r.staff.name, p: proposal(r.staff.id)! })}>
+                          {fcfa(proposal(r.staff.id)!.gross)}
+                        </button>
+                      ) : x?.attendance ? (
+                        <small className="muted">voir le bulletin</small>
+                      ) : (
+                        ''
+                      )}
+                    </td>
+                  )}
                   <td className="r">
                     {x ? (
                       fcfa(x.gross)
@@ -767,7 +817,67 @@ function Salaries() {
           }}
         />
       )}
+      {detail && <PayDetail name={detail.name} p={detail.p} period={period} onClose={() => setDetail(null)} />}
     </>
+  );
+}
+
+type PayProposal = Result<'staff.payProposals'>[number];
+
+/** Calcul du salaire proposé d'après le pointage : ce que dit le mois, puis chaque ligne. */
+function PayDetail({ name, p, period, onClose }: { name: string; p: PayProposal; period: string; onClose: () => void }) {
+  const f = p.facts;
+  return (
+    <Modal title={`Salaire d’après le pointage : ${name}, ${periodFr(period)}`} onClose={onClose}>
+      <div className="staff-cards">
+        <div>
+          <small>Jours de présence</small>
+          <b>
+            {f.presentDays} / {f.plannedDays}
+          </b>
+        </div>
+        <div>
+          <small>Absences</small>
+          <b className={f.absences ? 'neg' : ''}>{f.absences}</b>
+        </div>
+        <div>
+          <small>Retards</small>
+          <b className={f.lateCount ? 'neg' : ''}>
+            {f.lateCount} ({hours(f.lateMinutes)})
+          </b>
+        </div>
+        <div>
+          <small>Heures supplémentaires</small>
+          <b>{hours(f.overtimeMinutes)}</b>
+        </div>
+      </div>
+      <table className="list">
+        <tbody>
+          {p.lines.map((l) => (
+            <tr key={l.code}>
+              <td>{l.label}</td>
+              <td className={`r ${l.amount < 0 ? 'neg' : ''}`}>{fcfa(l.amount)}</td>
+            </tr>
+          ))}
+          <tr className="total">
+            <td>
+              <b>Brut proposé</b>
+            </td>
+            <td className="r">
+              <b>{fcfa(p.gross)}</b>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="muted">
+        Fériés travaillés : {hours(f.holidayMinutes)}. La commission sur les ventes s’ajoute dans le tableau. Le gérant peut corriger le brut avant de constater ; le calcul figure sur le bulletin.
+      </p>
+      <div className="actions">
+        <button type="button" className="primary" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </Modal>
   );
 }
 

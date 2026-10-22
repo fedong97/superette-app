@@ -700,6 +700,23 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
             </span>
           ),
         },
+        {
+          label: 'Pointeuse à empreinte (ZKTeco)',
+          hint: 'La pointeuse envoie les passages à un PC du magasin par le réseau, ou on importe le fichier de sa clé USB. Les empreintes restent dans l’appareil. Réglage du PC : Personnel › Équipes et entrées.',
+          render: () => yes('fingerprint'),
+        },
+        {
+          label: 'Alertes de retard et d’absence',
+          hint: 'Le PC ouvert signale qui n’est pas arrivé à l’heure ou pas venu ; le message WhatsApp est prêt pour le responsable ou la société de gardiennage, et le téléphone du gérant est prévenu.',
+          render: () => yes('staffAlerts'),
+        },
+        ...(sv('staffAlerts')
+          ? [
+              { label: '… retard signalé après', hint: '0 : seulement les absences.', render: () => num('alertLateMinutes', 'minutes') },
+              { label: '… WhatsApp du responsable', hint: 'Le numéro qui reçoit les alertes du personnel.', render: () => text('alertWhatsapp', '6 99 00 00 00') },
+            ]
+          : []),
+        { label: 'Proposer un avertissement après', hint: 'Nombre de retards dans le mois. 0 : jamais.', render: () => num('warnLateCount', 'retards') },
         { label: 'Signaler les fins de contrat et de pièces', hint: 'CDD, essai, stage, CNI, contrat de prestation : signalés dans la liste du personnel. 0 : jamais.', render: () => num('contractAlertDays', 'jours avant') },
         { label: 'Heure d’arrivée attendue', hint: 'Pour ceux qui n’ont ni semaine type ni équipe.', render: () => <input type="time" disabled={!canEdit} value={String(sv('workStart'))} onChange={(e) => e.target.value && sset('workStart', e.target.value)} /> },
         { label: 'Tolérance avant un retard', render: () => num('lateToleranceMinutes', 'minutes') },
@@ -734,6 +751,29 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
             </span>
           ),
         },
+      ],
+    ],
+    [
+      'Paie d’après le pointage',
+      'Le salaire du mois est proposé d’après les passages, avec les règles cochées ici ; le gérant le vérifie et le corrige avant de le constater (Personnel › Salaires du mois). Le détail figure sur le bulletin.',
+      [
+        { label: 'Proposer les salaires d’après le pointage', hint: 'Sinon, le salaire de base est proposé chaque mois.', render: () => yes('payFromAttendance') },
+        ...(sv('payFromAttendance')
+          ? [
+              { label: 'Retenir les absences', hint: 'Une journée de salaire par absence non justifiée et par jour de congé sans solde (salaire du mois divisé par les jours prévus).', render: () => yes('payAbsence') },
+              { label: 'Retenir les minutes de retard', hint: 'Au taux horaire : salaire du mois divisé par les heures du mois.', render: () => yes('payLate') },
+              { label: 'Payer les heures supplémentaires', hint: 'Le temps passé au-delà de l’horaire du jour, ou un jour de repos.', render: () => yes('payOvertime') },
+              ...(sv('payOvertime')
+                ? [
+                    { label: '… majorées de', hint: 'Code du travail : 20 % pour les premières heures.', render: () => num('overtimeRatePct', '%') },
+                    { label: '… à partir de', hint: 'Un dépassement plus court n’est pas compté.', render: () => num('overtimeMinMinutes', 'minutes par jour') },
+                  ]
+                : []),
+              { label: 'Majoration des jours fériés travaillés', hint: '100 % : les heures d’un jour férié sont payées double. 0 : pas de majoration.', render: () => num('holidayRatePct', '%') },
+              { label: 'Prime d’assiduité', hint: 'Ajoutée au mois sans absence ni retard. 0 : pas de prime.', render: () => num('attendanceBonus', 'FCFA') },
+              { label: 'Heures d’un mois complet', hint: '40 heures par semaine : 173 heures. Sert au taux horaire.', render: () => num('monthlyHours', 'heures') },
+            ]
+          : []),
       ],
     ],
     [

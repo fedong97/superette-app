@@ -1,4 +1,4 @@
-import { STAFF_KINDS_SHORT, type PunchMethod, type StaffKind } from '@superette/core';
+import { attendancePay, type AttendancePayFacts, type PayLine, STAFF_KINDS_SHORT, type PunchMethod, type StaffKind } from '@superette/core';
 import type { AdminService } from './admin';
 import type { Db } from './database';
 import type { PersonnelService } from './personnel';
@@ -66,6 +66,15 @@ export interface AttendanceMonthRow {
   holidays: string[];
   /** Jours fériés où il a travaillé. */
   worked_holidays: number;
+}
+
+/** Salaire du mois proposé d'après le pointage, pour un collaborateur. */
+export interface PayProposal {
+  staff_id: string;
+  name: string;
+  facts: AttendancePayFacts;
+  lines: PayLine[];
+  gross: number;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -254,6 +263,65 @@ export class AttendanceService extends Base {
     });
     if (opts.category || opts.agencyId) return rows;
     return [...rows, ...this.usersWithoutFiche(storeId, period, monthDays, holidays)].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Salaires du mois (AAAA-MM) proposés d'après le pointage, avec les règles
+   * choisies dans les paramètres : base ou jours de présence (journaliers),
+   * retenues d'absence et de retard, heures supplémentaires, fériés
+   * travaillés, prime d'assiduité et primes fixes. Les agents des sociétés
+   * prestataires n'y sont pas : leur société les paie.
+   */
+  payProposals(storeId: string, period: string): PayProposal[] {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
+    const set = this.admin.storeSettings(storeId);
+    const today = this.today();
+    const [y, m] = period.split('-').map(Number);
+    const allDays: string[] = [];
+    for (let d = new Date(y!, m! - 1, 1); d.getMonth() === m! - 1; d.setDate(d.getDate() + 1)) allDays.push(localDay(d));
+    const first = allDays[0]!;
+    const last = allDays[allDays.length - 1]!;
+    const holidays = this.personnel.holidays(storeId, first, last);
+    const staff = this.db
+      .prepare(
+        `SELECT id, name, base_salary, daily_rate, allowance, COALESCE(hired_on, substr(created_at, 1, 10)) AS since FROM staff
+         WHERE store_id = ? AND active = 1 AND category <> 'contractor' ORDER BY name`,
+      )
+      .all(storeId) as { id: string; name: string; base_salary: number; daily_rate: number; allowance: number; since: string }[];
+    return staff.map((st) => {
+      const leaves = this.time.leaveDays(st.id, first, last);
+      const plans = new Map(allDays.filter((d) => d >= st.since).map((d) => [d, this.personnel.plan(st.id, d, { holidays })]));
+      const planned = [...plans.entries()].filter(([, p]) => p.shift);
+      const days = this.punches.days(st.id, first, last, holidays);
+      const seen = new Set(days.filter((d) => d.arrived_at || d.left_at).map((d) => d.day));
+      let overtime = 0;
+      let holidayMinutes = 0;
+      for (const d of days) {
+        if (!d.minutes) continue;
+        if (d.holiday) {
+          holidayMinutes += d.minutes;
+          continue;
+        }
+        const shift = plans.get(d.day)?.shift;
+        const extra = shift ? d.minutes - shift.minutes : d.minutes;
+        if (extra > 0 && extra >= set.overtimeMinMinutes) overtime += extra;
+      }
+      const facts: AttendancePayFacts = {
+        base: st.base_salary,
+        dailyRate: st.daily_rate,
+        allowance: st.allowance,
+        plannedDays: planned.length,
+        presentDays: seen.size,
+        absences: planned.filter(([d]) => d < today && !seen.has(d) && !leaves.has(d)).length,
+        unpaidLeave: planned.filter(([d]) => leaves.get(d) === 'unpaid').length,
+        lateMinutes: days.reduce((t, d) => t + d.late_minutes, 0),
+        lateCount: days.filter((d) => d.late_minutes > 0).length,
+        overtimeMinutes: overtime,
+        holidayMinutes,
+      };
+      const { lines, gross } = attendancePay(facts, set);
+      return { staff_id: st.id, name: st.name, facts, lines, gross };
+    });
   }
 
   /** Utilisateurs qui n'ont pas de fiche collaborateur : pointés à la connexion, d'après les jours et l'heure du magasin. */

@@ -142,6 +142,31 @@ export interface StoreSettings {
   /** Les contrats qui finissent dans ce nombre de jours sont signalés ; 0 : jamais. */
   contractAlertDays: number;
 
+  /**
+   * Paie d'après le pointage : le salaire du mois est proposé avec les règles
+   * choisies (retenues d'absence et de retard, heures supplémentaires, fériés
+   * travaillés, prime d'assiduité), puis vérifié par le gérant.
+   */
+  payFromAttendance: boolean;
+  payAbsence: boolean;
+  payLate: boolean;
+  payOvertime: boolean;
+  overtimeRatePct: number;
+  overtimeMinMinutes: number;
+  holidayRatePct: number;
+  attendanceBonus: number;
+  monthlyHours: number;
+
+  /** Pointeuse à empreinte (ZKTeco) : envoi par le réseau à un PC du magasin, ou fichier de la clé USB. */
+  fingerprint: boolean;
+  /** Alertes du personnel : retard au-delà de ce nombre de minutes, absence à la fin de l'horaire prévu ; 0 : pas d'alerte de retard. */
+  staffAlerts: boolean;
+  alertLateMinutes: number;
+  /** WhatsApp du responsable qui reçoit les alertes du personnel. */
+  alertWhatsapp: string;
+  /** Un avertissement est proposé à partir de ce nombre de retards dans le mois ; 0 : jamais. */
+  warnLateCount: number;
+
   /** Congés payés acquis par mois de service, en dixièmes de jour (15 = 1,5 jour, Code du travail). */
   leaveDaysPerMonth: number;
   /** Avances sur salaire : encours maximal en % du salaire de base ; 0 : sans plafond. */
@@ -242,6 +267,20 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   holidaysCameroon: true,
   holidaysExtra: '',
   contractAlertDays: 30,
+  payFromAttendance: false,
+  payAbsence: true,
+  payLate: false,
+  payOvertime: false,
+  overtimeRatePct: 20,
+  overtimeMinMinutes: 30,
+  holidayRatePct: 100,
+  attendanceBonus: 0,
+  monthlyHours: 173,
+  fingerprint: false,
+  staffAlerts: false,
+  alertLateMinutes: 30,
+  alertWhatsapp: '',
+  warnLateCount: 3,
   leaveDaysPerMonth: 15,
   advanceMaxPct: 0,
   clearanceRules: '14:10,7:20,3:30',
@@ -281,13 +320,20 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   lateToleranceMinutes: [0, 240],
   punchGapMinutes: [0, 120],
   contractAlertDays: [0, 365],
+  overtimeRatePct: [0, 200],
+  overtimeMinMinutes: [0, 240],
+  holidayRatePct: [0, 200],
+  attendanceBonus: [0, 1e7],
+  monthlyHours: [40, 300],
+  alertLateMinutes: [0, 600],
+  warnLateCount: [0, 31],
   leaveDaysPerMonth: [0, 50],
   advanceMaxPct: [0, 100],
   cycleCountPerWeek: [5, 500],
   onlineShopDeliveryFee: [0, 1e7],
   onlineShopMinOrder: [0, 1e8],
 };
-const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500, onlineShopMessage: 300, holidaysExtra: 3000 };
+const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500, onlineShopMessage: 300, holidaysExtra: 3000, alertWhatsapp: 30 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
 
 /**
@@ -346,6 +392,7 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
           .join('\n');
         parseHolidays(s);
       }
+      if (k === 'alertWhatsapp') s = s.replace(/[^\d+ ]/g, '').trim();
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);

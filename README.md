@@ -315,6 +315,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Jours fériés légaux du Cameroun (Pâques calculée) et jours ajoutés dans les paramètres : ni absence ni retard, fériés travaillés comptés à part.
 - Qui est là : présents, retards à appeler, attendus, absents et congés du jour.
 
+**Paie d'après le pointage, empreinte et alertes (0.85.0)**
+- Paie (`attendance.payProposals`, `attendancePay` dans core) : brut proposé d'après les passages du mois, règles au choix (`payAbsence`, `payLate`, `payOvertime` avec `overtimeRatePct` et `overtimeMinMinutes`, `holidayRatePct`, `attendanceBonus`, `monthlyHours`) ; journaliers au tarif du jour (`staff.daily_rate`), primes fixes (`staff.allowance`). Le détail est gardé avec le salaire (`staff_salaries.attendance`) et imprimé sur le bulletin.
+- Pointeuse ZKTeco : réception ADMS (`/iclock/cdata`, `/iclock/getrequest`) sur le port réglé pour le PC (réglage local `fingerprint.port`), ou fichier « attlog » de la clé USB. Le numéro de la pointeuse est le numéro de pointage ; un passage a pour identifiant `fp:<collaborateur>:<heure>`, donc reçu deux fois il ne compte qu'une fois. Pointeuses connues : `fingerprint_devices`.
+- Alertes (`staff_alerts`, une par personne, jour et sorte) : levées chaque minute d'après « Qui est là », notification sur le PC, alerte « Retards et absences du personnel » sur le téléphone du gérant, messages WhatsApp prêts (responsable, société prestataire, personne).
+- Avertissements (`staff_warnings`) avec lettre A4 ; proposés à partir de `warnLateCount` retards dans le mois.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

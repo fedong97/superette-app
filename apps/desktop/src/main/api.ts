@@ -55,6 +55,7 @@ import {
   type CustomerDisplayState,
   CUSTOMER_DISPLAY_MODES,
   type DocLang,
+  type WarningKind,
 } from '@superette/core';
 import {
   AppError,
@@ -154,6 +155,7 @@ import {
   type MobileMethod,
   type MtnConfig,
   type OrangeConfig,
+  type SalaryAttendance,
 } from '@superette/db';
 import { createCloudBackup } from './cloudBackup';
 
@@ -195,6 +197,8 @@ export interface SystemHooks {
   customerDisplay?: CustomerDisplay;
   /** Fenêtre de choix d'un fichier d'un type donné (modèle de boutique, fichier de journée). */
   chooseOpenFile?(title: string, name: string, extensions: string[]): Promise<string | null>;
+  /** Réception des pointeuses à empreinte par le réseau (absente dans les tests). */
+  fingerprint?: { apply(): void; state(): { port: number | null; listening: boolean; error: string | null; lastAt: string | null; addresses: string[] } };
 }
 
 export interface InvoicePrintOptions {
@@ -251,6 +255,8 @@ export interface Printer {
   /** Décharge A4 à faire signer par le bénéficiaire d'une sortie. */
   discharge(sessionId: string, source: string, id: string): Promise<void>;
   salarySlip(salaryId: string): Promise<void>;
+  /** Lettre d'avertissement à remettre au collaborateur. */
+  staffWarning(warningId: string): Promise<void>;
   payrollDeclarations(storeId: string, period: string): Promise<void>;
   staffStatement(staffId: string, from?: string | null, to?: string | null): Promise<void>;
   /** Bon d'une avance, d'un salaire ou d'un remboursement fait au bureau. */
@@ -2084,7 +2090,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'staff.statement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), s.staff.statement(id, { from: from ?? undefined, to: to ?? undefined })),
     'staff.printStatement': (id: string, from?: string | null, to?: string | null) => (requireUser(STAFF), printer.staffStatement(id, from, to)),
     'staff.month': (period: string) => s.staff.month(ctx(['staff_salaries']).storeId, period),
-    'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa; commission?: Fcfa }[]) => s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
+    'staff.recordSalaries': (period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa; commission?: Fcfa; attendance?: SalaryAttendance | null }[]) =>
+      s.staff.recordSalaries(ctx(['staff_salaries']), period, lines),
+    /** Salaires du mois proposés d'après le pointage (règles des paramètres). */
+    'staff.payProposals': (period: string) => s.attendance.payProposals(ctx(['staff_salaries']).storeId, period),
     'staff.targets': (period: string) => s.commissions.month(ctx(['staff_targets']).storeId, period),
     'staff.setTarget': (staffId: string, input: SalesTargetInput) => s.commissions.setTarget(ctx(['staff_targets']), staffId, input),
     'staff.commissions': (period: string) => s.commissions.commissions(ctx(['staff_salaries']).storeId, period),
@@ -2145,6 +2154,43 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return [...map.entries()].map(([day, label]) => ({ day, label }));
     },
     'punches.presence': () => s.punches.presence(ctx(['staff_presence', 'staff_attendance']).storeId),
+    /** Retards et absences signalés (aujourd'hui et la veille). */
+    'staffWatch.alerts': () => {
+      const c = ctx(['staff_presence', 'staff_attendance']);
+      // Sans attendre le tour de la minute : l'écran montre tout de suite les retards nouveaux.
+      s.staffWatch.scan(c.storeId);
+      return s.staffWatch.alerts(c.storeId);
+    },
+    'staffWatch.handle': (id: string) => s.staffWatch.handle(ctx(['staff_presence', 'staff_attendance']), id),
+    'staffWatch.warnings': (staffId?: string | null) => s.staffWatch.warnings(ctx(['staff', 'staff_edit', 'staff_attendance']).storeId, { staffId: staffId ?? null }),
+    'staffWatch.addWarning': (staffId: string, input: { day: string; kind: WarningKind; reason: string }) => s.staffWatch.addWarning(ctx(['staff_edit']), staffId, input),
+    'staffWatch.cancelWarning': (id: string) => s.staffWatch.cancelWarning(ctx(['staff_edit']), id),
+    'staffWatch.printWarning': (id: string) => (requireUser(['staff_edit']), printer.staffWarning(id)),
+    /** Avertissements à envisager : trop de retards dans le mois. */
+    'staffWatch.suggestions': (period: string) => {
+      const c = ctx(['staff_edit', 'staff_attendance']);
+      return s.staffWatch.suggestions(c.storeId, s.attendance.month(c.storeId, period), period);
+    },
+
+    // --- Pointeuses à empreinte --------------------------------------------------------------------
+    'fingerprint.devices': () => s.fingerprint.devices(ctx(['staff_kiosk', 'staff_teams', 'staff_attendance']).storeId),
+    'fingerprint.saveDevice': (id: string, input: { name: string; entranceId?: string | null; active?: boolean }) => s.fingerprint.saveDevice(ctx(['staff_kiosk']), id, input),
+    /** Ce PC reçoit-il les pointeuses, sur quel port et à quelles adresses ? */
+    'fingerprint.state': () => (requireUser(['staff_kiosk', 'staff_teams']), system.fingerprint?.state() ?? { port: null, listening: false, error: null, lastAt: null, addresses: [] }),
+    /** Fait écouter ce PC (port) ou l'arrête (null). */
+    'fingerprint.configure': (port: number | null) => {
+      requireUser(['staff_kiosk']);
+      if (port !== null && (!Number.isInteger(port) || port < 1024 || port > 65535)) throw new AppError('Port entre 1024 et 65535', 'INVALID');
+      s.admin.setSetting('fingerprint.port', port ? String(port) : '');
+      system.fingerprint?.apply();
+      return system.fingerprint?.state() ?? null;
+    },
+    /** Fichier « attlog » de la clé USB de la pointeuse. */
+    'fingerprint.import': (text: string) => {
+      const c = ctx(['staff_attendance']);
+      if (typeof text !== 'string' || text.length > 20_000_000) throw new AppError('Fichier trop gros', 'INVALID');
+      return s.fingerprint.importFile(c, text);
+    },
     'punches.day': (staffId: string, day: string) => (requireUser(['staff_attendance']), s.punches.dayPunches(staffId, day)),
     'punches.correctDay': (staffId: string, day: string, input: { arrived: string | null; left: string | null; reason: string }) => s.punches.correctDay(ctx(['staff_attendance']), staffId, day, input),
     'punches.cancel': (id: string, reason: string) => s.punches.cancel(ctx(['staff_attendance']), id, reason),

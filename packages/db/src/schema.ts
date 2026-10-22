@@ -2407,4 +2407,60 @@ CREATE TABLE staff_documents (
 CREATE INDEX staff_documents_staff ON staff_documents(staff_id);
 `,
   },
+  {
+    version: 60,
+    name: 'paie d’après le pointage, pointeuse à empreinte, alertes et avertissements du personnel',
+    sql: `
+-- Journaliers payés à la journée ; primes fixes du mois (transport, logement…).
+ALTER TABLE staff ADD COLUMN daily_rate INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE staff ADD COLUMN allowance INTEGER NOT NULL DEFAULT 0;
+-- Détail du salaire proposé d'après le pointage (JSON : lignes et faits du mois), pour le bulletin.
+ALTER TABLE staff_salaries ADD COLUMN attendance TEXT;
+
+-- Pointeuses à empreinte (ZKTeco) connues : numéro de série, entrée où elles sont posées.
+CREATE TABLE fingerprint_devices (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  serial TEXT NOT NULL,
+  name TEXT NOT NULL,
+  entrance_id TEXT,
+  last_seen_at TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX fingerprint_devices_serial ON fingerprint_devices(store_id, serial);
+
+-- Avertissements donnés à un collaborateur (oral, écrit, blâme, mise à pied).
+CREATE TABLE staff_warnings (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  staff_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX staff_warnings_staff ON staff_warnings(staff_id, day);
+
+-- Alertes du personnel (retard, absence) : une par personne, jour et sorte, quel que soit le PC qui la lève.
+CREATE TABLE staff_alerts (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  staff_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('late', 'absent')),
+  minutes INTEGER NOT NULL DEFAULT 0,
+  text TEXT NOT NULL,
+  handled_by TEXT,
+  handled_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX staff_alerts_store ON staff_alerts(store_id, day);
+`,
+  },
 ];

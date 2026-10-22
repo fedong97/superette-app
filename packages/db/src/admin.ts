@@ -3,8 +3,11 @@ import {
   EDITABLE_ROLES,
   PERMISSIONS,
   type Permission,
+  ELECTRONIC_METHODS,
+  PAYMENT_METHODS,
   type RegisterKind,
   type StoreSettings,
+  registerMethods,
   TVA_CAMEROUN_NORMAL,
   type UserPrivileges,
   mergeStoreSettings,
@@ -37,8 +40,10 @@ export interface User {
   store_id: string | null;
   /** Caisse espèces attribuée : l'utilisateur y vend depuis n'importe quel PC. */
   register_id: string | null;
-  /** Caisse électronique (Mobile Money, carte) qui reçoit ses paiements électroniques. */
+  /** Première de ses caisses électroniques (gardée pour les anciennes versions). */
   emoney_register_id: string | null;
+  /** Caisses électroniques (Mobile Money, carte) qui reçoivent ses paiements électroniques, en JSON d'ids. */
+  emoney_register_ids?: string | null;
   /** Caisse banque (virements, chèques) qui reçoit ses paiements bancaires. */
   bank_register_id: string | null;
   /** Dépôts où il vend et complète une ligne (JSON d'ids) ; null = selon son droit « vendre depuis un autre dépôt ». */
@@ -56,11 +61,26 @@ export const REGISTER_KINDS: Record<RegisterKind, string> = {
   bank: 'Banque (virement, chèque)',
 };
 
-/** Caisses attribuées à un utilisateur, une de chaque type au plus. */
+/** Caisses attribuées à un utilisateur : une espèces, une banque et plusieurs électroniques. */
 export interface UserRegisters {
   registerId?: string | null;
+  /** Une seule caisse électronique (anciens appels) ; emoneyRegisterIds l'emporte. */
   emoneyRegisterId?: string | null;
+  emoneyRegisterIds?: string[] | null;
   bankRegisterId?: string | null;
+}
+
+/** Caisses électroniques d'un utilisateur, dans l'ordre choisi. */
+export function emoneyRegisterIds(u: Pick<User, 'emoney_register_id' | 'emoney_register_ids'>): string[] {
+  if (u.emoney_register_ids) {
+    try {
+      const ids = JSON.parse(u.emoney_register_ids) as unknown;
+      if (Array.isArray(ids)) return ids.filter((x): x is string => typeof x === 'string');
+    } catch {
+      // Valeur illisible : on retombe sur la caisse unique.
+    }
+  }
+  return u.emoney_register_id ? [u.emoney_register_id] : [];
 }
 
 export interface Store {
@@ -99,6 +119,8 @@ export interface Register {
   activated_at: string | null;
   active: number;
   kind: RegisterKind;
+  /** Caisse électronique : moyens qu'elle reçoit (« MTN_MOMO,CARD ») ; vide : tous. */
+  methods?: string | null;
 }
 
 export interface Warehouse {
@@ -346,7 +368,7 @@ export class AdminService extends Base {
       // La centrale électronique est une caisse électronique du magasin que personne ne tient au quotidien.
       const reg = this.getRegister(patch.emoneyCentralRegisterId);
       if (reg.store_id !== storeId || reg.kind !== 'electronic') throw new AppError('Choisissez une caisse électronique de ce magasin', 'INVALID');
-      const holder = this.db.prepare('SELECT name FROM users WHERE emoney_register_id = ? AND active = 1').pluck().get(reg.id) as string | undefined;
+      const holder = this.emoneyHolders(reg.id)[0]?.name;
       if (holder) throw new AppError(`${reg.name} est la caisse électronique de ${holder} : choisissez une caisse que personne ne tient`, 'INVALID');
     }
     this.tx(() => {
@@ -580,7 +602,7 @@ export class AdminService extends Base {
   }
 
   /** Renomme ou désactive une caisse. Une caisse ouverte se clôture avant d'être désactivée. */
-  updateRegister(userId: string, id: string, patch: { name?: string; active?: boolean }): Register {
+  updateRegister(userId: string, id: string, patch: { name?: string; active?: boolean; methods?: string[] | null }): Register {
     const current = this.getRegister(id);
     const name = patch.name === undefined ? current.name : patch.name.trim();
     if (!name) throw new AppError('Nom de caisse obligatoire', 'INVALID');
@@ -588,7 +610,16 @@ export class AdminService extends Base {
       const open = this.db.prepare("SELECT 1 FROM cash_sessions WHERE register_id = ? AND status = 'open'").get(id);
       if (open) throw new AppError('Clôturez la caisse avant de la désactiver', 'SESSION_OPEN');
     }
-    this.db.prepare('UPDATE registers SET name = ?, active = ? WHERE id = ?').run(name, patch.active === undefined ? current.active : patch.active ? 1 : 0, id);
+    let methods = current.methods ?? null;
+    if (patch.methods !== undefined && current.kind === 'electronic') {
+      const list = [...new Set(patch.methods ?? [])];
+      if (list.some((m) => !(ELECTRONIC_METHODS as readonly string[]).includes(m))) throw new AppError('Moyen de paiement inconnu', 'INVALID');
+      if (patch.methods && !list.length) throw new AppError('Cochez au moins un moyen reçu par la caisse', 'INVALID');
+      methods = list.length && list.length < ELECTRONIC_METHODS.length ? ELECTRONIC_METHODS.filter((m) => list.includes(m)).join(',') : null;
+      // Chaque caissier qui tient cette caisse ne doit pas recevoir un moyen dans deux caisses.
+      for (const u of this.emoneyHolders(id)) this.checkEmoneyOverlap(emoneyRegisterIds(u), { [id]: methods });
+    }
+    this.db.prepare('UPDATE registers SET name = ?, active = ?, methods = ? WHERE id = ?').run(name, patch.active === undefined ? current.active : patch.active ? 1 : 0, methods, id);
     const reg = this.getRegister(id);
     this.enqueue({ storeId: reg.store_id, registerId: null }, 'register', id, 'upsert', reg);
     this.audit(userId, 'register.update', 'register', id, patch);
@@ -598,7 +629,7 @@ export class AdminService extends Base {
   /** Utilisateurs à qui une caisse est attribuée. */
   registerUsers(registerId: string): User[] {
     return this.db
-      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
+      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, sale_warehouses, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
       .all(registerId) as User[];
   }
 
@@ -626,11 +657,11 @@ export class AdminService extends Base {
   // --- Utilisateurs ---------------------------------------------------------
 
   listUsers(): User[] {
-    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active, badge FROM users WHERE deleted_at IS NULL ORDER BY name').all() as User[];
+    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, sale_warehouses, active, badge FROM users WHERE deleted_at IS NULL ORDER BY name').all() as User[];
   }
 
   getUser(id: string): User {
-    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, bank_register_id, sale_warehouses, active, badge, deleted_at FROM users WHERE id = ?').get(id) as User | undefined;
+    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, sale_warehouses, active, badge, deleted_at FROM users WHERE id = ?').get(id) as User | undefined;
     if (!user) throw new AppError('Utilisateur introuvable', 'NOT_FOUND');
     return user;
   }
@@ -645,14 +676,14 @@ export class AdminService extends Base {
     }
     const id = newId();
     const registerId = this.checkRegister(input.registerId ?? null, 'cash');
-    const emoneyId = this.checkRegister(input.emoneyRegisterId ?? null, 'electronic');
+    const emoneyIds = this.checkEmoneyRegisters(input.emoneyRegisterIds ?? (input.emoneyRegisterId ? [input.emoneyRegisterId] : []));
     const bankId = this.checkRegister(input.bankRegisterId ?? null, 'bank');
     try {
       this.db
         .prepare(
-          'INSERT INTO users (id, name, login, pin_hash, role, store_id, register_id, emoney_register_id, bank_register_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO users (id, name, login, pin_hash, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(id, input.name.trim(), input.login.trim().toLowerCase(), hashPin(input.pin), input.role, input.storeId, registerId, emoneyId, bankId, this.now());
+        .run(id, input.name.trim(), input.login.trim().toLowerCase(), hashPin(input.pin), input.role, input.storeId, registerId, emoneyIds[0] ?? null, emoneyIds.length ? JSON.stringify(emoneyIds) : null, bankId, this.now());
     } catch (e) {
       if (String(e).includes('UNIQUE')) throw new AppError('Identifiant déjà utilisé', 'DUPLICATE');
       throw e;
@@ -685,14 +716,21 @@ export class AdminService extends Base {
       this.db.prepare('UPDATE users SET sale_warehouses = ? WHERE id = ?').run(ids ? JSON.stringify(ids) : null, id);
     }
     if (patch.pin) this.checkPinLength(patch.pin, patch.storeId === undefined ? current.store_id : patch.storeId);
+    const emoneyIds =
+      patch.emoneyRegisterIds !== undefined
+        ? this.checkEmoneyRegisters(patch.emoneyRegisterIds ?? [])
+        : patch.emoneyRegisterId !== undefined
+          ? this.checkEmoneyRegisters(patch.emoneyRegisterId ? [patch.emoneyRegisterId] : [])
+          : emoneyRegisterIds(current);
     this.db
-      .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, emoney_register_id = ?, bank_register_id = ?, active = ? WHERE id = ?')
+      .prepare('UPDATE users SET name = ?, role = ?, store_id = ?, register_id = ?, emoney_register_id = ?, emoney_register_ids = ?, bank_register_id = ?, active = ? WHERE id = ?')
       .run(
         patch.name ?? current.name,
         patch.role ?? current.role,
         patch.storeId === undefined ? current.store_id : patch.storeId,
         patch.registerId === undefined ? current.register_id : this.checkRegister(patch.registerId, 'cash'),
-        patch.emoneyRegisterId === undefined ? current.emoney_register_id : this.checkRegister(patch.emoneyRegisterId, 'electronic'),
+        emoneyIds[0] ?? null,
+        emoneyIds.length ? JSON.stringify(emoneyIds) : null,
         patch.bankRegisterId === undefined ? current.bank_register_id : this.checkRegister(patch.bankRegisterId, 'bank'),
         patch.active === undefined ? current.active : patch.active ? 1 : 0,
         id,
@@ -749,7 +787,7 @@ export class AdminService extends Base {
         this.enqueue(null, 'user', id, 'delete', null);
       } else {
         this.db
-          .prepare('UPDATE users SET active = 0, deleted_at = ?, badge = NULL, photo = NULL, login = ?, register_id = NULL, emoney_register_id = NULL, bank_register_id = NULL WHERE id = ?')
+          .prepare('UPDATE users SET active = 0, deleted_at = ?, badge = NULL, photo = NULL, login = ?, register_id = NULL, emoney_register_id = NULL, emoney_register_ids = NULL, bank_register_id = NULL WHERE id = ?')
           .run(this.now(), `${user.login}~${id.slice(0, 8)}`, id);
         this.enqueue(null, 'user', id, 'upsert', this.getUser(id));
       }
@@ -819,6 +857,33 @@ export class AdminService extends Base {
       throw new AppError(`${reg.name} est la caisse électronique centrale : elle reçoit les versements et n'est attribuée à personne`, 'INVALID');
     }
     return registerId;
+  }
+
+  /** Caisses électroniques attribuables à un utilisateur : chaque moyen (MTN, Orange, carte) ne va qu'à une de ses caisses. */
+  private checkEmoneyRegisters(ids: string[]): string[] {
+    const list = [...new Set(ids.filter(Boolean))].map((id) => this.checkRegister(id, 'electronic')!);
+    this.checkEmoneyOverlap(list);
+    return list;
+  }
+
+  /** Refuse deux caisses d'un même utilisateur qui reçoivent le même moyen ; `override` donne des moyens pas encore enregistrés. */
+  private checkEmoneyOverlap(ids: string[], override: Record<string, string | null> = {}): void {
+    const taken = new Map<string, string>();
+    for (const id of ids) {
+      const reg = this.getRegister(id);
+      for (const m of registerMethods(id in override ? override[id] : reg.methods)) {
+        const other = taken.get(m);
+        if (other) {
+          throw new AppError(`${other} et ${reg.name} reçoivent toutes les deux ${PAYMENT_METHODS[m]} : réglez les moyens de chaque caisse électronique (Administration › Caisses)`, 'INVALID');
+        }
+        taken.set(m, reg.name);
+      }
+    }
+  }
+
+  /** Utilisateurs actifs qui tiennent une caisse électronique. */
+  emoneyHolders(registerId: string): User[] {
+    return this.listUsers().filter((u) => u.active && emoneyRegisterIds(u).includes(registerId));
   }
 
   login(login: string, pin: string): User {
@@ -1031,7 +1096,7 @@ export class AdminService extends Base {
         role: from.role,
         storeId: from.store_id,
         registerId: from.register_id,
-        emoneyRegisterId: from.emoney_register_id,
+        emoneyRegisterIds: emoneyRegisterIds(from),
         bankRegisterId: from.bank_register_id,
         saleWarehouses: from.sale_warehouses ? (JSON.parse(from.sale_warehouses) as string[]) : null,
       });

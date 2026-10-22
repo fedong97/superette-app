@@ -13,6 +13,7 @@ import {
   parseArticlePrices,
   applyPromotions,
   paymentRegisterKind,
+  registerMethods,
   ELECTRONIC_METHODS,
   BANK_METHODS,
   closingDifference,
@@ -28,7 +29,7 @@ import {
   parseQtyTiers,
   tariffPrice,
 } from '@superette/core';
-import type { AdminService } from './admin';
+import { type AdminService, emoneyRegisterIds } from './admin';
 import type { CatalogueService } from './catalogue';
 import type { CustomerService } from './customers';
 import type { LoyaltyService } from './loyalty';
@@ -443,10 +444,25 @@ export class PosService extends Base {
     return this.lastClosedSession(registerId)?.float_left ?? null;
   }
 
-  /** Caisses électronique et banque attribuées à l'utilisateur (null : pas de caisse de ce type). */
-  linkedRegisters(userId: string): Record<Exclude<RegisterKind, 'cash'>, string | null> {
+  /** Caisses électroniques et caisse banque attribuées à l'utilisateur (null : pas de caisse banque). */
+  linkedRegisters(userId: string): { electronic: string[]; bank: string | null } {
     const u = this.admin.getUser(userId);
-    return { electronic: u.emoney_register_id, bank: u.bank_register_id };
+    return { electronic: emoneyRegisterIds(u), bank: u.bank_register_id };
+  }
+
+  /** Toutes ses caisses électroniques et banque. */
+  linkedRegisterIds(userId: string): string[] {
+    const { electronic, bank } = this.linkedRegisters(userId);
+    return bank ? [...electronic, bank] : electronic;
+  }
+
+  /** Caisse de l'utilisateur qui reçoit un moyen de paiement (null : aucune, le paiement reste sur la journée du ticket). */
+  registerFor(userId: string, method: string): string | null {
+    const kind = paymentRegisterKind(method);
+    if (kind === 'cash') return null;
+    const linked = this.linkedRegisters(userId);
+    if (kind === 'bank') return linked.bank;
+    return linked.electronic.find((id) => (registerMethods(this.admin.getRegister(id).methods) as string[]).includes(method)) ?? null;
   }
 
   /**
@@ -455,9 +471,7 @@ export class PosService extends Base {
    * fermée refuse le paiement plutôt que de le ranger dans le tiroir.
    */
   sessionFor(ctx: Context, method: string, cashSessionId: string): string {
-    const kind = paymentRegisterKind(method);
-    if (kind === 'cash') return cashSessionId;
-    const registerId = this.linkedRegisters(ctx.userId)[kind];
+    const registerId = this.registerFor(ctx.userId, method);
     if (!registerId) return cashSessionId;
     const open = this.currentSession(registerId);
     if (!open) throw new AppError(`${this.admin.getRegister(registerId).name} est fermée : ouvrez-la dans Trésorerie › Opérations de trésorerie`, 'SESSION_CLOSED');
@@ -470,8 +484,8 @@ export class PosService extends Base {
    */
   openLinked(ctx: Context): CashSession[] {
     const opened: CashSession[] = [];
-    for (const registerId of Object.values(this.linkedRegisters(ctx.userId))) {
-      if (!registerId || this.currentSession(registerId)) continue;
+    for (const registerId of this.linkedRegisterIds(ctx.userId)) {
+      if (this.currentSession(registerId)) continue;
       const reg = this.admin.getRegister(registerId);
       if (!reg.active) continue;
       const id = newId();

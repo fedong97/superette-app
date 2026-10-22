@@ -22,6 +22,13 @@ export type PaymentMethod = keyof typeof PAYMENT_METHODS;
 export type RegisterKind = 'cash' | 'electronic' | 'bank';
 export const ELECTRONIC_METHODS = ['MTN_MOMO', 'ORANGE_MONEY', 'CARD'] as const;
 export const BANK_METHODS = ['BANK_TRANSFER', 'CHEQUE'] as const;
+export type ElectronicMethod = (typeof ELECTRONIC_METHODS)[number];
+
+/** Moyens reçus par une caisse électronique (« MTN_MOMO,CARD ») ; vide : tous. */
+export function registerMethods(methods: string | null | undefined): ElectronicMethod[] {
+  const list = (methods ?? '').split(',').filter((m): m is ElectronicMethod => (ELECTRONIC_METHODS as readonly string[]).includes(m));
+  return list.length ? list : [...ELECTRONIC_METHODS];
+}
 export function paymentRegisterKind(method: string): RegisterKind {
   if ((ELECTRONIC_METHODS as readonly string[]).includes(method)) return 'electronic';
   if ((BANK_METHODS as readonly string[]).includes(method)) return 'bank';

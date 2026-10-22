@@ -28,8 +28,10 @@ function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1366,
     height: 800,
-    minWidth: 1024,
-    minHeight: 700,
+    // Un portable 1366 × 768 avec le zoom Windows à 125 % n'offre qu'environ 1090 × 580 :
+    // au-delà, le bas du logiciel passerait sous la barre des tâches, impossible à voir.
+    minWidth: 800,
+    minHeight: 500,
     show: false,
     title: 'ONIX 360',
     autoHideMenuBar: true,

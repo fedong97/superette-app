@@ -1,5 +1,6 @@
 import {
   type DenominationCount,
+  ELECTRONIC_METHODS,
   type BarcodeLabelFormatId,
   type BarcodeLabelOptions,
   type LabelFormatId,
@@ -460,7 +461,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const deskCtx = (sessionId: string): Context => {
     const c = ctx(['cash_desk']);
     const se = s.pos.getSession(sessionId);
-    const mine = se.register_id === c.registerId || Object.values(s.pos.linkedRegisters(user!.id)).includes(se.register_id);
+    const mine = se.register_id === c.registerId || s.pos.linkedRegisterIds(user!.id).includes(se.register_id);
     if (!mine && !can(user!, ['cash_open'])) throw new AppError("Seuls le caissier de cette caisse et le gérant y encaissent ou décaissent", 'FORBIDDEN');
     return { ...c, registerId: se.register_id };
   };
@@ -593,10 +594,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       canChooseRegister: Boolean(user && isSupervisor(user) && !s.admin.getUser(user.id).register_id),
       /** Caisses électronique et banque de l'utilisateur : leurs paiements y vont. */
       linkedRegisters: (() => {
-        if (!user) return { electronic: null, bank: null };
-        const ids = s.pos.linkedRegisters(user.id);
+        if (!user) return { electronic: [], byMethod: {} as Record<string, { id: string; name: string } | null>, bank: null };
+        const u = user;
+        const ids = s.pos.linkedRegisters(u.id);
         const named = (id: string | null) => (id ? { id, name: s.admin.getRegister(id).name } : null);
-        return { electronic: named(ids.electronic), bank: named(ids.bank) };
+        // Pour chaque moyen électronique, la caisse qui le reçoit.
+        const byMethod = Object.fromEntries(ELECTRONIC_METHODS.map((m) => [m, named(s.pos.registerFor(u.id, m))]));
+        return { electronic: ids.electronic.map((id) => named(id)!), byMethod, bank: named(ids.bank) };
       })(),
       /** Préférences de l'utilisateur : onglets rapides épinglés, dernière version vue. */
       prefs: user ? s.admin.prefs(user.id) : {},
@@ -980,7 +984,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'admin.registers': (storeId: string) => (requireUser(ADMIN), s.admin.listRegisters(storeId)),
     'admin.createRegister': (storeId: string, name?: string, kind?: RegisterKind) => s.admin.createRegister(requireAdmin().id, storeId, name, kind),
-    'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean }) => s.admin.updateRegister(requireAdmin().id, id, patch),
+    'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean; methods?: string[] | null }) => s.admin.updateRegister(requireAdmin().id, id, patch),
     'admin.warehouses': (opts?: { includeInactive?: boolean }) => s.admin.listWarehouses(ctx().storeId, opts),
     'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold', opts?: { purpose?: WarehousePurpose; customerId?: string | null }) =>
       s.admin.createWarehouse(ctx(['warehouses_manage']).storeId, name, kind, false, opts),
@@ -1739,8 +1743,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         gapThreshold: s.admin.getStore(c.storeId).cash_gap_threshold,
         canSeeAmounts: can(user!, AMOUNTS),
         /** Caisses électronique et banque de l'utilisateur, avec leur journée. */
-        linked: Object.values(s.pos.linkedRegisters(user!.id))
-          .filter((id): id is string => Boolean(id))
+        linked: s.pos
+          .linkedRegisterIds(user!.id)
           .map((id) => {
             const { activation_code: _, ...r } = s.admin.getRegister(id);
             const open = s.pos.currentSession(id);
@@ -1761,7 +1765,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     ) => {
       const c = ctx(TREASURY);
       const u = user!;
-      const mine = Object.values(s.pos.linkedRegisters(u.id)).includes(registerId);
+      const mine = s.pos.linkedRegisterIds(u.id).includes(registerId);
       if (!mine && !can(u, ['cash_close_other'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
       const z = s.pos.closeDeclared(c, registerId, declared, { gapReason: opts?.gapReason ?? null, gapApprovedBy: can(u, ['cash_open']) ? u.id : null, deposit: opts?.deposit });
       const threshold = s.admin.getStore(c.storeId).cash_gap_threshold;
@@ -1779,7 +1783,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.emoneyDay': (registerId: string) => {
       const c = ctx(TREASURY);
       const u = user!;
-      const mine = Object.values(s.pos.linkedRegisters(u.id)).includes(registerId);
+      const mine = s.pos.linkedRegisterIds(u.id).includes(registerId);
       if (!mine && !can(u, ['cash_close_other'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
       const session = s.pos.currentSession(registerId);
       const mode = s.emoney.mode(c.storeId);
@@ -1827,9 +1831,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         entries: s.pos.cashJournal(last.id).entries.filter((r) => r.user_id === u.id && r.source !== 'sale'),
         /** Sorties faites par le compte MoMo/OM du caissier dans sa journée électronique. */
         emoneyExits: (() => {
-          const reg = s.pos.linkedRegisters(u.id).electronic;
-          const se = reg ? s.pos.listSessions(c.storeId, 1, reg)[0] : undefined;
-          return se ? s.emoney.sessionExits(se.id).filter((e) => !e.closing && e.user_id === u.id) : [];
+          return s.pos.linkedRegisters(u.id).electronic.flatMap((reg) => {
+            const se = s.pos.listSessions(c.storeId, 1, reg)[0];
+            return se ? s.emoney.sessionExits(se.id).filter((e) => !e.closing && e.user_id === u.id) : [];
+          });
         })(),
         vouchers: s.treasury
           .sessionMovements(last.id)
@@ -1961,7 +1966,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         .filter((r) => r.active && r.kind === 'electronic')
         .map((r) => {
           const open = s.pos.currentSession(r.id);
-          const holder = s.admin.listUsers().find((x) => x.emoney_register_id === r.id && x.active);
+          const holder = s.admin.emoneyHolders(r.id)[0];
           // Journée ouverte : son attendu ; sinon le solde laissé à la dernière clôture et les mouvements depuis.
           const balance = open
             ? (Object.fromEntries((s.pos.zReport(open.id).declared ?? []).map((l) => [l.method, l.expected])) as Record<string, Fcfa>)
@@ -2075,7 +2080,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (can(u, AMOUNTS)) return printer.sessionReport(sessionId);
       // Le caissier imprime le bon de clôture de sa caisse électronique ou banque, sans l'attendu.
       const se = s.pos.getSession(sessionId);
-      if (!Object.values(s.pos.linkedRegisters(u.id)).includes(se.register_id)) requireAmounts();
+      if (!s.pos.linkedRegisterIds(u.id).includes(se.register_id)) requireAmounts();
       return printer.sessionReport(sessionId, true);
     },
     /**

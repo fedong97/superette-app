@@ -1,4 +1,5 @@
-import { ELECTRONIC_METHODS, type Fcfa, PAYMENT_METHODS, type PaymentMethod, parseStoreSettings } from '@superette/core';
+import { ELECTRONIC_METHODS, type Fcfa, PAYMENT_METHODS, type PaymentMethod, parseStoreSettings, registerMethods } from '@superette/core';
+import { type User, emoneyRegisterIds } from './admin';
 import { AppError, Base, type Context, newId } from './util';
 
 /**
@@ -116,10 +117,13 @@ export class EmoneyService extends Base {
     return r;
   }
 
-  /** Caisse électronique attribuée à un utilisateur, et sa journée ouverte. */
-  userRegister(userId: string): { registerId: string | null; sessionId: string | null } {
-    const id = (this.db.prepare('SELECT emoney_register_id FROM users WHERE id = ?').pluck().get(userId) as string | null | undefined) ?? null;
-    return { registerId: id, sessionId: id ? this.openSessionId(id) : null };
+  /** Caisse électronique de l'utilisateur qui reçoit ce moyen (MoMo, OM), et sa journée ouverte. */
+  userRegister(userId: string, method: string): { registerId: string | null; sessionId: string | null; any: boolean } {
+    const u = this.db.prepare('SELECT emoney_register_id, emoney_register_ids FROM users WHERE id = ?').get(userId) as Pick<User, 'emoney_register_id' | 'emoney_register_ids'> | undefined;
+    const ids = u ? emoneyRegisterIds(u) : [];
+    const methodsOf = (id: string) => registerMethods(this.db.prepare('SELECT methods FROM registers WHERE id = ?').pluck().get(id) as string | null) as string[];
+    const id = ids.find((r) => methodsOf(r).includes(method)) ?? null;
+    return { registerId: id, sessionId: id ? this.openSessionId(id) : null, any: ids.length > 0 };
   }
 
   /**

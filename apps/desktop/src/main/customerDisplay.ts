@@ -85,9 +85,24 @@ export function createCustomerDisplay(): CustomerDisplay {
   let last = '';
   let shownHead = '';
 
-  const ensureWindow = (index: number): Promise<void> => {
-    const displays = screen.getAllDisplays();
-    const target = displays[index - 1] ?? displays.find((d) => d.id !== screen.getPrimaryDisplay().id) ?? displays[0]!;
+  /**
+   * Écran du client : jamais celui de la caisse. Sans deuxième écran branché
+   * (portable seul, câble débranché), il n'y en a pas : la fenêtre sans bord
+   * recouvrirait sinon l'écran du caissier sans moyen de la fermer.
+   */
+  const clientScreen = (index: number) => {
+    const primary = screen.getPrimaryDisplay().id;
+    const others = screen.getAllDisplays().filter((d) => d.id !== primary);
+    const chosen = screen.getAllDisplays()[index - 1];
+    return chosen && chosen.id !== primary ? chosen : others[0] ?? null;
+  };
+
+  const ensureWindow = (index: number): Promise<void> | null => {
+    const target = clientScreen(index);
+    if (!target) {
+      win?.destroy();
+      return null;
+    }
     if (win && !win.isDestroyed()) {
       const b = win.getBounds();
       if (b.x !== target.bounds.x || b.y !== target.bounds.y) win.setBounds(target.bounds);
@@ -155,7 +170,9 @@ export function createCustomerDisplay(): CustomerDisplay {
       }
       const head = `${s.logo ? `<img src="${esc(s.logo)}">` : ''}<h1>${esc(s.storeName)}</h1>`;
       const fresh = !win || win.isDestroyed();
-      void ensureWindow(s.screen)
+      const opening = ensureWindow(s.screen);
+      if (!opening) return;
+      void opening
         .then(() => {
           // Le logo ne repart pas à chaque article scanné.
           const sendHead = fresh || head !== shownHead;

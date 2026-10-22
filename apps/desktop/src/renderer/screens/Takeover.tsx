@@ -26,7 +26,7 @@ async function readCells(file: File): Promise<string[][]> {
 }
 
 /**
- * Reprise d'un magasin qui passe à FEDONIX 360 : un fichier par sujet, vérifié
+ * Reprise d'un magasin qui passe à ONIX 360 : un fichier par sujet, vérifié
  * en aperçu avant d'être importé d'un bloc, avec les écritures d'à-nouveaux
  * passées toutes seules.
  */

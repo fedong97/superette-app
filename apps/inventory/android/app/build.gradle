@@ -1,6 +1,6 @@
 apply plugin: 'com.android.application'
 
-// Version de l'application : celle de FEDONIX 360 (package.json à la racine du dépôt), 0.55.0 → 5500.
+// Version de l'application : celle d’ONIX 360 (package.json à la racine du dépôt), 0.55.0 → 5500.
 def appVersion = new groovy.json.JsonSlurper().parse(file('../../../../package.json')).version
 def (vMajor, vMinor, vPatch) = appVersion.tokenize('.').collect { it as int }
 

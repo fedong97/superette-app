@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Result, call } from '../api';
 import logo from '../assets/logo.png';
-import { Field, useToast } from '../ui';
+import { Field, Mascot, useToast } from '../ui';
 import { DossierPicker } from './Dossiers';
 import { type Lang, currentLang, setLang } from '../i18n';
 
@@ -11,7 +11,13 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
   const toast = useToast();
   const [login, setLogin] = useState('');
   const [pin, setPin] = useState('');
+  // L'aigle veille, baisse les yeux pendant la saisie du code et sursaute en cas d'erreur.
+  const [oops, setOops] = useState(false);
   const pinRef = useRef<HTMLInputElement>(null);
+  const failed = () => {
+    setOops(true);
+    setTimeout(() => setOops(false), 3000);
+  };
   const loginRef = useRef<HTMLInputElement>(null);
   useEffect(() => loginRef.current?.focus(), []);
   const submit = async (e: React.FormEvent) => {
@@ -22,17 +28,19 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
     } catch (err) {
       setPin('');
       pinRef.current?.focus();
+      failed();
       toast.error(err);
     }
   };
   return (
     <div className="center-page">
       <form className="card login" onSubmit={submit}>
+        <Mascot mood={oops ? 'alerte' : pin ? 'compte' : 'veille'} size={92} className="login-aigle" />
         <div className="brand">
           <img src={logo} alt="" width={40} height={40} />
-          <span>FEDONIX 360</span>
+          <span>ONIX 360</span>
         </div>
-        <h1>{station?.store.name ?? 'FEDONIX 360'}</h1>
+        <h1>{station?.store.name ?? 'ONIX 360'}</h1>
         <p className="muted">{station?.register?.name ?? 'Poste de gestion'}</p>
         {fiche && fiche.kind !== 'installation' && <p className="warn-text">{fiche.banner}</p>}
         <Field label="Identifiant">
@@ -50,6 +58,7 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
                 const found = await call('auth.badge', login.trim()).catch(() => null);
                 if (!found) {
                   setLogin('');
+                  failed();
                   toast.error(new Error('Badge inconnu ou désactivé'));
                   return;
                 }

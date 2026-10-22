@@ -25,7 +25,7 @@ export interface FixedAsset {
   account: string;
   /** Mise en service : point de départ de l'amortissement. */
   in_service_on: string;
-  /** Entrée dans FEDONIX 360 : achat, ou reprise d'un bien déjà amorti en partie. */
+  /** Entrée dans ONIX 360 : achat, ou reprise d'un bien déjà amorti en partie. */
   recorded_on: string;
   cost: Fcfa;
   /** Durée d'amortissement en mois ; 0 : non amortissable (terrain). */
@@ -66,7 +66,7 @@ export interface AssetInput {
 export interface ScheduleRow {
   from: string;
   to: string;
-  /** Exercice antérieur à l'entrée du bien dans FEDONIX 360 (amortissement déjà pratiqué). */
+  /** Exercice antérieur à l'entrée du bien dans ONIX 360 (amortissement déjà pratiqué). */
   prior: boolean;
   opening: Fcfa;
   charge: Fcfa;
@@ -187,7 +187,7 @@ export class AssetService extends Base {
     if (!validDate(input.inServiceOn)) throw new AppError('Date de mise en service invalide', 'INVALID');
     const recordedOn = input.recordedOn || input.inServiceOn;
     if (!validDate(recordedOn)) throw new AppError("Date d'entrée invalide", 'INVALID');
-    if (recordedOn < input.inServiceOn) throw new AppError("Le bien ne peut pas entrer dans FEDONIX 360 avant sa mise en service", 'INVALID');
+    if (recordedOn < input.inServiceOn) throw new AppError("Le bien ne peut pas entrer dans ONIX 360 avant sa mise en service", 'INVALID');
     if (recordedOn > this.today()) throw new AppError('Un bien futur ne s’enregistre pas encore', 'INVALID');
     if (recordedOn > input.inServiceOn && input.funding !== 'opening' && input.funding !== 'none') {
       throw new AppError('Un bien déjà en service avant son entrée se reprend en à-nouveaux (« Bien repris »)', 'INVALID');

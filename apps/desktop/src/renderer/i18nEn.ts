@@ -373,6 +373,10 @@ export const EN: Record<string, string> = {
   "Compte client": "Customer account",
   "Compter par coupures": "Count by denomination",
   "Comptez les espèces du tiroir par coupure.": "Count the cash in the drawer by denomination.",
+  "Caisse fermée. Bon repos, à demain !": "Register closed. Rest well, see you tomorrow!",
+  "Caisse juste : le comptage tombe pile sur l’attendu.": "Register balanced: the count matches the expected amount exactly.",
+  "Il y a en trop": "There is an excess of",
+  ": recomptez avant de clôturer.": ": recount before closing.",
   "Comptez les espèces du tiroir par coupure. L'attendu s'affiche après le comptage.": "Count the cash in the drawer by denomination. The expected amount shows after the count.",
   "Compté": "Counted",
   "Cond.": "Pack",
@@ -542,7 +546,7 @@ export const EN: Record<string, string> = {
   "Fermer": "Close",
   "Fermer (Échap)": "Close (Esc)",
   "Fermer cette fenêtre": "Close this window",
-  "Fermer FEDONIX 360 et installer la version": "Close FEDONIX 360 and install version",
+  "Fermer ONIX 360 et installer la version": "Close ONIX 360 and install version",
   "Fermer la caisse": "Close the register",
   "Fermer la caisse…": "Close the register…",
   "Fermer la fiche": "Close the sheet",
@@ -1326,7 +1330,7 @@ export const EN: Record<string, string> = {
   "Mode formation (caisse d’entraînement)…": "Training mode (practice register)…",
   "Pointage du personnel": "Staff time clock",
   "Vous êtes déjà en mode formation": "You are already in training mode",
-  "Ouvrir le mode formation ? FEDONIX 360 redémarre sur une copie de la boutique : on y vend pour s'entraîner, avec les vrais articles et les vrais comptes, mais rien ne compte dans la boutique (ni stock, ni caisse, ni comptabilité, ni serveur). « Quitter la formation » ramène à la boutique.": "Open training mode? FEDONIX 360 restarts on a copy of the shop: you sell there to practise, with the real items and accounts, but nothing counts in the shop (no stock, cash, accounting or server). \"Leave training\" brings you back to the shop.",
+  "Ouvrir le mode formation ? ONIX 360 redémarre sur une copie de la boutique : on y vend pour s'entraîner, avec les vrais articles et les vrais comptes, mais rien ne compte dans la boutique (ni stock, ni caisse, ni comptabilité, ni serveur). « Quitter la formation » ramène à la boutique.": "Open training mode? ONIX 360 restarts on a copy of the shop: you sell there to practise, with the real items and accounts, but nothing counts in the shop (no stock, cash, accounting or server). \"Leave training\" brings you back to the shop.",
   "Noter votre départ (pointage) et vous déconnecter ?": "Record your departure (time clock) and log out?",
   "Départ noté à": "Departure recorded at",
   "Note votre départ pour le pointage, puis vous déconnecte": "Records your departure for the time clock, then logs you out",
@@ -1556,6 +1560,8 @@ export const EN: Record<string, string> = {
 
 /** Textes avec un nombre, un numéro ou un nom : le premier motif qui correspond s'applique. */
 export const EN_PATTERNS: [RegExp, string | ((m: RegExpExecArray, t: (fr: string) => string) => string)][] = [
+  [/^Il manque (.+) : recomptez avant de clôturer\.$/, 'Short by $1: recount before closing.'],
+  [/^Il y a en trop (.+) : recomptez avant de clôturer\.$/, 'Over by $1: recount before closing.'],
   [/^Annuler \((\d+) s\)$/, 'Undo ($1 s)'],
   [/^Fiche vidée \(1 article\)$/, 'Ticket cleared (1 item)'],
   [/^Fiche vidée \((\d+) articles\)$/, 'Ticket cleared ($1 items)'],

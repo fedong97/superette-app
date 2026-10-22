@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { call, type Result } from '../api';
-import logo from '../assets/logo.png';
-import { Field, askConfirm, useToast } from '../ui';
+import { Field, Mascot, askConfirm, useToast } from '../ui';
 import { DossierPicker } from './Dossiers';
 
 /** Premier démarrage : création du premier magasin et du compte administrateur. */
@@ -39,7 +38,7 @@ function Join({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
           catalogue, les utilisateurs et le stock du magasin depuis le serveur central.
         </p>
         <div className="grid2">
-          <Field label="Adresse du serveur central" hint="ex. http://192.168.1.20:3000 (affichée dans FEDONIX 360 Serveur)">
+          <Field label="Adresse du serveur central" hint="ex. http://192.168.1.20:3000 (affichée dans ONIX 360 Serveur)">
             <input value={url} onChange={(e) => setUrl(e.target.value)} required />
           </Field>
           <Field label="Code d'activation de la caisse" hint="6 chiffres">
@@ -66,9 +65,9 @@ async function installPrepared(toast: ReturnType<typeof useToast>) {
     if (!info) return;
     if (!info.ok) return toast.error(info.error ?? 'Fichier illisible');
     if (info.fiche?.kind !== 'installation') return toast.error("Ce fichier n'est pas une installation préparée : au bureau, faites Administration › Fiches boutique › Préparer l'installation");
-    if (!(await askConfirm(`Installer sur ce PC la boutique « ${info.store_name} » (${info.articles} articles) ? FEDONIX 360 redémarre dessus ; connectez-vous avec les utilisateurs créés au bureau.`))) return;
+    if (!(await askConfirm(`Installer sur ce PC la boutique « ${info.store_name} » (${info.articles} articles) ? ONIX 360 redémarre dessus ; connectez-vous avec les utilisateurs créés au bureau.`))) return;
     await call('setup.installFiche', info.file);
-    toast.ok('Installation… FEDONIX 360 redémarre');
+    toast.ok('Installation… ONIX 360 redémarre');
   } catch (err) {
     toast.error(err);
   }
@@ -114,8 +113,8 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
     <div className="center-page">
       <form className="card setup" onSubmit={submit}>
         <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src={logo} alt="" width={44} height={44} />
-          Bienvenue dans FEDONIX 360
+          <Mascot mood="bonjour" size={64} branch={false} />
+          Bienvenue dans ONIX 360
         </h1>
         <p>Première installation : renseignez votre magasin et le compte administrateur. Vous pourrez ajouter d'autres magasins et caisses ensuite.</p>
         <p className="muted">

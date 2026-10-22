@@ -20,7 +20,7 @@ import {
   tariffPrice,
 } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Mascot, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
 import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
@@ -2359,6 +2359,7 @@ function ClosedRegister({ canOpen, onTreasury, onReload }: { canOpen: boolean; o
   return (
     <div className="center-page">
       <div className="card closed-register">
+        <Mascot mood="dort" size={110} className="login-aigle" />
         <h2>La caisse est fermée</h2>
         <p>Aucune vente n'est possible tant que la caisse n'est pas ouverte. L'ouverture se fait dans Trésorerie › Opérations de trésorerie, avec le comptage du fond de caisse.</p>
         <div className="row">

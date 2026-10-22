@@ -131,7 +131,7 @@ async function readCells(file: File, separator: Separator | null): Promise<strin
 }
 
 /**
- * Import du catalogue : fichier Excel ou CSV, aux en-têtes de FEDONIX (ceux
+ * Import du catalogue : fichier Excel ou CSV, aux en-têtes d'ONIX (ceux
  * de l'export), d'autres logiciels de gestion, ou selon un format paramétrable. Chaque
  * fichier est d'abord vérifié en aperçu (créations, mises à jour, erreurs) ;
  * rien n'est enregistré avant « Importer ».
@@ -254,7 +254,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       {!format && (
         <p className="muted small">
           La première ligne porte les en-têtes : Désignation, Code, Code-barres, Rayon, Famille, Prix d'achat, Prix de vente, Prix de gros, TVA, Unité… et jusqu'à trois
-          conditionnements (Cond. 1 nom, Cond. 1 contient, Cond. 1 prix, Cond. 1 code-barres…), du plus grand au plus petit. Un catalogue exporté depuis FEDONIX, un export
+          conditionnements (Cond. 1 nom, Cond. 1 contient, Cond. 1 prix, Cond. 1 code-barres…), du plus grand au plus petit. Un catalogue exporté depuis ONIX, un export
           d’un autre logiciel de gestion ou un tableur maison se lisent tels quels. Chaque ligne retrouve sa fiche par le code article, un code-barres ou la désignation exacte ; une
           colonne vide garde ce qui est sur la fiche.{' '}
           <button type="button" className="link" onClick={downloadImportTemplate}>

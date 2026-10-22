@@ -1,6 +1,6 @@
 /**
  * Fichiers du catalogue : lecture d'un fichier d'articles (Excel ou CSV, avec
- * les en-têtes de FEDONIX ou d'autres logiciels de gestion, ou selon un format paramétrable)
+ * les en-têtes d'ONIX ou d'autres logiciels de gestion, ou selon un format paramétrable)
  * et modèles d'export de la liste des produits. Une ligne = un article, avec
  * jusqu'à trois conditionnements dans des colonnes « Cond. 1 nom », « Cond. 1
  * contient »… Le catalogue exporté se réimporte tel quel.
@@ -71,7 +71,7 @@ const PACK_KEYS = {
   Barcode: ['codebarres', 'codebarre', 'ean'],
 } as const;
 
-/** En-têtes reconnus pour chaque colonne (FEDONIX, autres logiciels de gestion, tableurs). */
+/** En-têtes reconnus pour chaque colonne (ONIX 360, autres logiciels de gestion, tableurs). */
 export const ARTICLE_HEADERS: Record<ImportField, string[]> = {
   code: ['code', 'codearticle', 'reference', 'referencearticle', 'ref', 'refarticle'],
   name: ['designation', 'designation1', 'nom', 'libelle', 'intitule', 'produit', 'nomduproduit', 'designationarticle', 'article'],

@@ -1,4 +1,4 @@
-# FEDONIX 360 Serveur sur internet : le serveur central et Caddy, qui obtient tout seul
+# ONIX 360 Serveur sur internet : le serveur central et Caddy, qui obtient tout seul
 # le certificat HTTPS de votre nom de domaine (Let's Encrypt). Réglages dans le fichier .env.
 services:
   fedonix:

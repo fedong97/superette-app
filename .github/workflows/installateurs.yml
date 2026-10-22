@@ -1,6 +1,6 @@
-# Installateurs Windows : FEDONIX 360 (caisse) et FEDONIX 360 Serveur, construits sur Windows
+# Installateurs Windows : ONIX 360 (caisse) et ONIX 360 Serveur, construits sur Windows
 # à chaque demande de fusion ou à la demande (Actions › Installateurs › Run workflow).
-# L'application Android FEDONIX 360 Inventaire (.apk) est construite sur Linux.
+# L'application Android ONIX 360 Inventaire (.apk) est construite sur Linux.
 # Les fichiers .exe et .apk se téléchargent dans l'onglet « Summary » de l'exécution (Artifacts).
 name: Installateurs
 
@@ -24,15 +24,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: FEDONIX 360
+      - name: ONIX 360
         working-directory: apps/desktop
         run: npx electron-vite build && npx electron-builder --win --x64 --publish never
-      - name: FEDONIX 360 Serveur
+      - name: ONIX 360 Serveur
         working-directory: apps/server-app
         run: npm run build && npx electron-builder --win --x64 --publish never
       - uses: actions/upload-artifact@v4
         with:
-          name: FEDONIX-360-installateurs
+          name: ONIX-360-installateurs
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/latest.yml
@@ -79,10 +79,10 @@ jobs:
           ./gradlew assembleRelease --no-daemon
           version=$(node -p "require('../../../package.json').version")
           mkdir -p ../release
-          cp app/build/outputs/apk/release/app-release.apk "../release/Fedonix360-Inventaire-$version.apk"
+          cp app/build/outputs/apk/release/app-release.apk "../release/Onix360-Inventaire-$version.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: FEDONIX-360-Inventaire-android
+          name: ONIX-360-Inventaire-android
           path: apps/inventory/release/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -106,7 +106,7 @@ jobs:
           docker rm -f essai
       - name: Paquet à copier sur le serveur
         run: |
-          dir="FEDONIX-360-serveur-internet-$VERSION"
+          dir="ONIX-360-serveur-internet-$VERSION"
           mkdir "$dir"
           cp deploy/docker-compose.yml deploy/Caddyfile deploy/installer.sh deploy/env.exemple docs/serveur-internet.md "$dir/"
           docker save "fedonix360-serveur:$VERSION" | gzip > "$dir/fedonix360-serveur-$VERSION.tar.gz"

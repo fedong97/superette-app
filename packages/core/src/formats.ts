@@ -133,7 +133,7 @@ export const BUILTIN_IMPORT_FORMATS: ImportFormat[] = [
 export const BUILTIN_EXPORT_FORMATS: ExportFormat[] = [
   {
     id: 'fedonix',
-    name: 'FEDONIX 360 (CSV)',
+    name: 'ONIX 360 (CSV)',
     kind: 'ecritures',
     separator: ';',
     dateFormat: 'dd/mm/yyyy',

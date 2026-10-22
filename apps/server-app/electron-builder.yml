@@ -1,5 +1,5 @@
 appId: cm.superette.serveur
-productName: FEDONIX 360 Serveur
+productName: ONIX 360 Serveur
 copyright: © FEDONG
 directories:
   output: release
@@ -14,13 +14,13 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  artifactName: Fedonix360-Serveur-Setup-${version}.exe
+  artifactName: Onix360-Serveur-Setup-${version}.exe
 nsis:
   oneClick: false
   perMachine: true
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: FEDONIX 360 Serveur
+  shortcutName: ONIX 360 Serveur
   language: '1036'
   runAfterFinish: true
   # Ouvre le pare-feu Windows pour que les autres PC joignent le serveur.

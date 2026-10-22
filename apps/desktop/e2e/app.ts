@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type ElectronApplication, type Page, _electron as electron } from '@playwright/test';
 
-/** Lance FEDONIX 360 sur une base neuve, dans un dossier temporaire (réglages et langue du PC compris). */
+/** Lance ONIX 360 sur une base neuve, dans un dossier temporaire (réglages et langue du PC compris). */
 export async function launch(): Promise<{ app: ElectronApplication; page: Page; errors: string[] }> {
   const dir = mkdtempSync(join(tmpdir(), 'fedonix-ecrans-'));
   const app = await electron.launch({

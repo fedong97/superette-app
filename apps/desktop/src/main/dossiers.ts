@@ -26,6 +26,7 @@ const MAX_RECENT = 12;
 export function createDossiers(userData: string, documents: string) {
   const posteFile = join(userData, 'poste.json');
   const mainFile = join(userData, 'superette.db');
+  // Dossier gardé sous l'ancien nom du logiciel : les boutiques déjà créées restent à leur place.
   const dir = join(documents, 'FEDONIX 360', 'Dossiers');
 
   const read = (): Poste => {
@@ -102,7 +103,7 @@ export function createDossiers(userData: string, documents: string) {
       for (const f of files) if (!seen.some((s) => same(s, f))) seen.push(f);
       return seen.map((file) => ({ ...inspectDossier(file), current: same(file, open), main: same(file, mainFile) }));
     },
-    /** Fichier vide d'une nouvelle boutique : FEDONIX 360 la crée en l'ouvrant (écran de premier démarrage). */
+    /** Fichier vide d'une nouvelle boutique : ONIX 360 la crée en l'ouvrant (écran de premier démarrage). */
     newFile(name: string): string {
       const file = freeName(name);
       writeFileSync(file, '');

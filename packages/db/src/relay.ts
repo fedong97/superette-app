@@ -178,7 +178,7 @@ export class RelayService extends Base {
     try {
       data = JSON.parse(gunzipSync(readFileSync(file)).toString('utf8')) as RelayFile;
     } catch {
-      throw new AppError("Ce fichier n'est pas une remontée ni une mise à jour FEDONIX 360 (ou il est incomplet)", 'INVALID');
+      throw new AppError("Ce fichier n'est pas une remontée ni une mise à jour ONIX 360 (ou il est incomplet)", 'INVALID');
     }
     if (data?.v !== 1 || !Array.isArray(data.events) || !['remontee', 'miseajour'].includes(data.kind)) throw new AppError('Fichier de journée inconnu', 'INVALID');
     return data;

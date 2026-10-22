@@ -1,6 +1,6 @@
 {
   "appId": "cm.fedonix.inventaire",
-  "appName": "FEDONIX Inventaire",
+  "appName": "ONIX Inventaire",
   "webDir": "dist",
   "android": {
     "allowMixedContent": true

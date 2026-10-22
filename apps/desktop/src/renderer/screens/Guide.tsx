@@ -3,7 +3,7 @@ import type { Permission } from '@superette/core';
 import { GETTING_STARTED, type GuideStep, WHATS_NEW } from '../guide';
 import { HELP } from '../help';
 import { type QuickTab, type WinKind, fold } from '../nav';
-import { Modal } from '../ui';
+import { Mascot, Modal } from '../ui';
 
 /**
  * Aide de la page affichée : à quoi elle sert, comment faire, raccourcis.
@@ -14,7 +14,10 @@ export function HelpDialog({ kind, tab, rights, onClose, onGuide }: { kind: WinK
     return (
       <Modal title="Aide : page d'accueil" onClose={onClose}>
         <div className="help">
-          <p className="help-intro">Les grosses tuiles ouvrent les écrans que vous utilisez le plus. La barre verte à gauche ouvre les menus ; « Tous les menus » les montre tous d'un coup.</p>
+          <div className="aigle-bulle">
+            <Mascot mood="bonjour" size={64} branch={false} />
+            <p className="help-intro">Les grosses tuiles ouvrent les écrans que vous utilisez le plus. La barre verte à gauche ouvre les menus ; « Tous les menus » les montre tous d'un coup.</p>
+          </div>
           <ul>
             <li>Ctrl+K : chercher un écran en tapant son nom (« clôture », « inventaire »…).</li>
             <li>Clic droit sur un onglet rapide : l'épingler, le retirer ou le déplacer.</li>
@@ -36,7 +39,10 @@ export function HelpDialog({ kind, tab, rights, onClose, onGuide }: { kind: WinK
   return (
     <Modal title={`Aide : ${page.title}`} onClose={onClose} wide>
       <div className="help">
-        <p className="help-intro">{page.intro}</p>
+        <div className="aigle-bulle">
+          <Mascot mood="veille" size={64} branch={false} />
+          <p className="help-intro">{page.intro}</p>
+        </div>
         {sections.map((s, i) => (
           <section key={`${s.title}-${i}`} className={tab && s.tab === tab ? 'help-current' : ''}>
             <h3>{s.title}</h3>
@@ -275,6 +281,10 @@ export function GettingStarted({ role, canOpen, onOpen, onClose }: { role: keyof
   const steps: GuideStep[] = GETTING_STARTED[role];
   return (
     <Modal title="Guide de démarrage" onClose={onClose} wide>
+      <div className="aigle-bulle">
+        <Mascot mood="bonjour" size={64} branch={false} />
+        <p>Bienvenue ! Voici les premières choses à faire. Chaque bouton ouvre le bon écran.</p>
+      </div>
       <ol className="guide-steps">
         {steps.map((s) => (
           <li key={s.text}>
@@ -307,6 +317,10 @@ export function WhatsNew({ version, onClose }: { version: string; onClose: () =>
   return (
     <Modal title={`Quoi de neuf dans la version ${version}`} onClose={onClose} wide>
       <div className="help">
+        <div className="aigle-bulle">
+          <Mascot mood="bravo" size={64} branch={false} />
+          <p>Le logiciel vient d'être mis à jour. Voici ce qui change.</p>
+        </div>
         {WHATS_NEW.map((v) => (
           <section key={v.version} className={v.version === version ? 'help-current' : ''}>
             <h3>Version {v.version}</h3>

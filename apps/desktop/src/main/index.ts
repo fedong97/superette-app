@@ -31,7 +31,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     show: false,
-    title: 'FEDONIX 360',
+    title: 'ONIX 360',
     autoHideMenuBar: true,
     backgroundColor: '#f4f5f7',
     webPreferences: {
@@ -80,7 +80,7 @@ function recoverFromBackup(dbFile: string, error: unknown): boolean {
   if (found && choice === 0) file = found.file;
   else if (choice === (found ? 1 : 0)) {
     file =
-      dialog.showOpenDialogSync({ title: 'Choisir la sauvegarde à restaurer', filters: [{ name: 'Sauvegarde FEDONIX 360', extensions: ['db'] }], properties: ['openFile'] })?.[0] ?? null;
+      dialog.showOpenDialogSync({ title: 'Choisir la sauvegarde à restaurer', filters: [{ name: 'Sauvegarde ONIX 360', extensions: ['db'] }], properties: ['openFile'] })?.[0] ?? null;
   }
   if (!file) return false;
   const info = inspectBackup(file);
@@ -108,7 +108,7 @@ void app.whenReady().then(() => {
   } catch (e) {
     // Une boutique illisible (clé retirée, fichier abîmé) ne doit pas empêcher le PC de démarrer sur la sienne.
     if (dbFile !== dossiers.mainFile && !process.env['SUPERETTE_DB']) {
-      dialog.showErrorBox('Boutique inaccessible', `${dbFile}\n\n${String(e)}\n\nFEDONIX 360 ouvre la boutique principale de ce PC.`);
+      dialog.showErrorBox('Boutique inaccessible', `${dbFile}\n\n${String(e)}\n\nONIX 360 ouvre la boutique principale de ce PC.`);
       dossiers.remember(dossiers.mainFile);
       app.relaunch();
       app.exit(0);
@@ -170,7 +170,7 @@ void app.whenReady().then(() => {
     clearInterval(backupTimer);
     services.db.close();
   };
-  /** Rouvre FEDONIX 360 sur la boutique retenue, après la réponse à l'écran. */
+  /** Rouvre ONIX 360 sur la boutique retenue, après la réponse à l'écran. */
   const relaunch = () =>
     setTimeout(() => {
       shutdown();
@@ -187,7 +187,7 @@ void app.whenReady().then(() => {
       const r = await dialog.showOpenDialog({
         title: 'Choisir la sauvegarde à restaurer',
         defaultPath: services.backups.status().dir ?? undefined,
-        filters: [{ name: 'Sauvegarde FEDONIX 360', extensions: ['db'] }],
+        filters: [{ name: 'Sauvegarde ONIX 360', extensions: ['db'] }],
         properties: ['openFile'],
       });
       return r.canceled ? null : (r.filePaths[0] ?? null);
@@ -239,8 +239,8 @@ void app.whenReady().then(() => {
         const r = await dialog.showOpenDialog({
           title,
           filters: [
-            { name: 'Fiche FEDONIX 360', extensions: ['fedonix', 'fedonixz'] },
-            { name: 'Base FEDONIX 360', extensions: ['db'] },
+            { name: 'Fiche ONIX 360', extensions: ['fedonix', 'fedonixz'] },
+            { name: 'Base ONIX 360', extensions: ['db'] },
           ],
           properties: ['openFile'],
         });

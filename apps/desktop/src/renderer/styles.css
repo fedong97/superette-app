@@ -138,12 +138,12 @@ pre.help { background: var(--bg); padding: 10px; border-radius: var(--radius); f
 ul.errors { color: var(--danger); }
 
 .toasts { position: fixed; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 20; }
-.toast { padding: 12px 16px; border-radius: var(--radius); color: #fff; max-width: 420px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
+.toast { display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 10px; border-radius: var(--radius); color: #fff; max-width: 420px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
 .toast.ok { background: var(--ok); }
 .toast.error { background: var(--danger); }
 .toast.undo { background: #1f2937; }
 .toast.with-fixes, .toast.undo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
-.toast.with-fixes > span, .toast.undo > span { flex: 1 1 100%; }
+.toast.with-fixes > span, .toast.undo > span { flex: 1 1 calc(100% - 48px); }
 .toast.undo > span { flex: 1 1 auto; }
 .toast-btn { background: #fff; color: var(--ink); border: none; padding: 6px 12px; font-weight: 700; }
 .toast.error .toast-btn { color: var(--danger); }
@@ -647,7 +647,7 @@ input.qty.promo { width: 64px; }
 .stock-mm td.low button.link { color: var(--warn); }
 .stock-mm td small.block { font-size: 11px; }
 
-/* Logo FEDONIX 360 sur l'écran de connexion */
+/* Logo ONIX 360 sur l'écran de connexion */
 .card.login .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: var(--brand); }
 pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.5; max-height: 65vh; overflow-y: auto; margin: 0; }
 .digest { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
@@ -1281,3 +1281,24 @@ ul.plain li { padding: 3px 0; }
 .pos-rayons { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 0; }
 .pos-rayons button { min-height: 40px; padding: 6px 16px; border-radius: 20px; font-size: 15px; }
 .pos-rayons button.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+
+/* Aigle ONIX : la mascotte et ses humeurs */
+.aigle { display: block; flex: none; overflow: visible; }
+.aigle-veille, .aigle-bonjour { animation: aigle-plane 4s ease-in-out infinite; }
+.aigle-bravo { animation: aigle-saut 0.9s ease-out 2; }
+.aigle-alerte { animation: aigle-sursaut 0.5s ease-in-out 2; }
+.aigle-dort { animation: aigle-souffle 3.5s ease-in-out infinite; transform-origin: 50% 100%; }
+.aigle-compte { animation: aigle-plane 2.4s ease-in-out infinite; }
+@keyframes aigle-plane { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes aigle-saut { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-8px) rotate(-3deg); } 70% { transform: translateY(0) rotate(2deg); } }
+@keyframes aigle-sursaut { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
+@keyframes aigle-souffle { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.97); } }
+@media (prefers-reduced-motion: reduce) { .aigle { animation: none !important; } }
+.empty .aigle { margin: 0 auto 8px; opacity: 0.95; }
+.toast-aigle { background: rgba(255, 255, 255, 0.92); border-radius: 50%; padding: 3px 2px 0; width: 38px; height: 38px; }
+.home-aigle { margin: -6px auto 6px; }
+.login-aigle { margin: 0 auto 4px; }
+.aigle-bulle { display: flex; align-items: center; gap: 14px; text-align: left; }
+.aigle-bulle .aigle { flex: none; }
+.aigle-bulle > :not(.aigle) { margin: 0; background: var(--brand-soft, #e2f5ec); border-radius: 14px; padding: 10px 14px; position: relative; }
+.aigle-bulle > :not(.aigle)::before { content: ''; position: absolute; left: -8px; top: 50%; margin-top: -8px; border: 8px solid transparent; border-left: 0; border-right-color: var(--brand-soft, #e2f5ec); }

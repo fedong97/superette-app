@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Générateur de licences</title>
 <!--
-  Générateur de licences FEDONIX 360, réservé à l'éditeur.
+  Générateur de licences ONIX 360, réservé à l'éditeur.
   S'ouvre dans Chrome ou Edge, sans Internet. La clé secrète est chargée une
   fois depuis son fichier .pem puis gardée par le navigateur sans pouvoir être
   relue ; elle ne quitte jamais ce PC. Le logiciel des clients ne contient que
@@ -55,7 +55,7 @@
 <body>
 <main>
   <h1>Générateur de licences</h1>
-  <p class="muted">FEDONIX 360 · réservé à l'éditeur. Gardez une copie du fichier de clé secrète sur une clé USB rangée en lieu sûr.</p>
+  <p class="muted">ONIX 360 · réservé à l'éditeur. Gardez une copie du fichier de clé secrète sur une clé USB rangée en lieu sûr.</p>
   <p id="dueBanner" class="banner" hidden></p>
 
   <section class="card">
@@ -205,7 +205,7 @@ async function showKeyState() {
   const ok = await matchesSoftware(privateKey);
   el.className = ok ? 'ok' : 'bad';
   el.textContent = ok
-    ? 'Clé secrète chargée : elle correspond au logiciel FEDONIX 360.'
+    ? 'Clé secrète chargée : elle correspond au logiciel ONIX 360.'
     : 'Cette clé ne correspond pas au logiciel : les licences créées seraient refusées.';
 }
 
@@ -366,7 +366,7 @@ function showResult(key, phone, payload) {
   $('result').hidden = false;
   $('keyOut').value = key;
   const until = payload.expires ? `jusqu'au ${fr(payload.expires)}` : 'à vie';
-  $('sendWa').href = waLink(phone, `Bonjour, voici votre licence FEDONIX 360 (${PLAN_LABELS[payload.plan].toLowerCase()}, ${until}). Collez-la dans Administration › Licence :\n\n${key}`);
+  $('sendWa').href = waLink(phone, `Bonjour, voici votre licence ONIX 360 (${PLAN_LABELS[payload.plan].toLowerCase()}, ${until}). Collez-la dans Administration › Licence :\n\n${key}`);
   $('keyOut').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 $('copyKey').addEventListener('click', () => {
@@ -408,7 +408,7 @@ function reminderText(r) {
   const end = n >= 0 ? `se termine le ${fr(r.expires)}.`
     : n < -GRACE ? `s'est terminée le ${fr(r.expires)} et la caisse ne vend plus depuis le ${stop}.`
     : `s'est terminée le ${fr(r.expires)}. Sans renouvellement, la caisse s'arrêtera de vendre le ${stop}.`;
-  return `Bonjour ${r.client}, votre licence FEDONIX 360 ${plan} ${end} Pour la renouveler${price}, ${who} et nous vous enverrons la nouvelle clé. Merci de votre confiance.`;
+  return `Bonjour ${r.client}, votre licence ONIX 360 ${plan} ${end} Pour la renouveler${price}, ${who} et nous vous enverrons la nouvelle clé. Merci de votre confiance.`;
 }
 function renderRegister() {
   const reg = store.get('register', []);

@@ -1,4 +1,4 @@
-# FEDONIX 360
+# ONIX 360
 
 Logiciel de FEDONG (anciennement « Superette Gestion »).
 
@@ -40,7 +40,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Fiche d'inventaire : stock à l'ouverture, mouvements de la période, stock attendu, compté, écart, CMUP, montant de l'écart et valeur comptée, en rose les déficitaires, en bleu les excédentaires, en vert les produits sans écart. Filtres, historique des saisies, export Excel et CSV, import d'un CSV de comptage, impression du résultat A4 avec signatures.
 - Date d'inventaire antidatée possible (31/12) : le stock est arrêté à la fin de ce jour. La clôture corrige le stock (mouvements « Inventaire n° X ») ; dans un inventaire global les produits non comptés passent à zéro après confirmation, dans un partiel ils ne changent pas. Droits séparés « compter » (magasinier) et « créer, clôturer, annuler » (gérant).
 - Alertes de péremption (J-7, J-3, J-1, périmé), niveaux rupture/alerte/surstock.
-- Inventaire sur téléphone Android (0.55.0, application FEDONIX 360 Inventaire, `apps/inventory`, Capacitor) : le gérant relie un téléphone au magasin avec le QR code de `/gerant/inventaire` (code d'une seule utilisation, 15 minutes ; le téléphone n'entre pas dans le nombre de PC de la licence et ne lit que le catalogue et les inventaires ouverts). Le compteur se connecte avec son identifiant et son code (droit « Saisir le stock physique »), scanne avec l'appareil photo (ML Kit), une douchette Bluetooth ou un terminal à scanner, saisit en conditionnements et unités, et compte hors ligne. Les quantités sont gardées par endroit (rayon, réserve…) : la dernière saisie d'un endroit l'emporte et le total des endroits devient la saisie de l'inventaire, envoyée aux PC (`inventory_line`, `inventory_entry`). Mode rafale (+1 par scan), annulation de la dernière saisie, codes inconnus avec photo, rayons confiés à chaque compteur, avancement et produits par heure, gros écarts (2 unités et 10 % du stock attendu) proposés à un autre compteur, stock attendu masqué sauf réglage. L'heure du téléphone est corrigée par celle du serveur. L'APK signé se construit dans GitHub Actions (Installateurs › artefact FEDONIX-360-Inventaire-android). Depuis 0.56.0 : catalogue envoyé sans les photos (la vignette d'une fiche est demandée à part, `/api/v1/mobile/articles/:id/thumb`) et recherche de secours sur le serveur (`/api/v1/mobile/find?q=`) quand un code ou un nom n'est pas sur le téléphone ; mode fichier sans serveur (fiche à remplir du PC en Excel ou CSV, ou fichier texte « code;nom (conditionnement);quantité »), export de la fiche remplie pour le bouton Importer du PC ; onglet Produits avec filtres À compter / Comptés ; remise à 0 d'un endroit ou de tout l'inventaire ; récapitulatif par endroit partagé en CSV ; inventaires clôturés gardés en lecture seule. Aides sans compte : `/gerant/inventaire` › « Ajouter un aide » crée un accès (table `mobile_guests`) à un seul inventaire, avec un code à 6 chiffres et un QR code `FEDONIX360:{"u":[...],"g":"123456"}` qui relie aussi le téléphone de l'aide ; 24 h au plus, fin à la clôture ou sur « Couper » ; sans prix ni stock attendu ; les saisies partent aux PC au nom du responsable choisi (`counted_by`, `user_id`) et gardent l'aide dans `counter` pour le suivi du gérant. Depuis 0.57.0 : à la première synchronisation avec un serveur, puis sur Administration › Serveur central › « Renvoyer au serveur ce qui lui manque », le PC demande au serveur les identifiants qu'il a pour chaque donnée de référence (`POST /api/v1/sync/known`) et remet dans sa file d'envoi ce qui manque (serveur réinstallé ou vidé, sauvegarde restaurée : la file était vide alors que le serveur n'avait pas les produits, et le téléphone recevait un catalogue vide).
+- Inventaire sur téléphone Android (0.55.0, application ONIX 360 Inventaire, `apps/inventory`, Capacitor) : le gérant relie un téléphone au magasin avec le QR code de `/gerant/inventaire` (code d'une seule utilisation, 15 minutes ; le téléphone n'entre pas dans le nombre de PC de la licence et ne lit que le catalogue et les inventaires ouverts). Le compteur se connecte avec son identifiant et son code (droit « Saisir le stock physique »), scanne avec l'appareil photo (ML Kit), une douchette Bluetooth ou un terminal à scanner, saisit en conditionnements et unités, et compte hors ligne. Les quantités sont gardées par endroit (rayon, réserve…) : la dernière saisie d'un endroit l'emporte et le total des endroits devient la saisie de l'inventaire, envoyée aux PC (`inventory_line`, `inventory_entry`). Mode rafale (+1 par scan), annulation de la dernière saisie, codes inconnus avec photo, rayons confiés à chaque compteur, avancement et produits par heure, gros écarts (2 unités et 10 % du stock attendu) proposés à un autre compteur, stock attendu masqué sauf réglage. L'heure du téléphone est corrigée par celle du serveur. L'APK signé se construit dans GitHub Actions (Installateurs › artefact ONIX-360-Inventaire-android). Depuis 0.56.0 : catalogue envoyé sans les photos (la vignette d'une fiche est demandée à part, `/api/v1/mobile/articles/:id/thumb`) et recherche de secours sur le serveur (`/api/v1/mobile/find?q=`) quand un code ou un nom n'est pas sur le téléphone ; mode fichier sans serveur (fiche à remplir du PC en Excel ou CSV, ou fichier texte « code;nom (conditionnement);quantité »), export de la fiche remplie pour le bouton Importer du PC ; onglet Produits avec filtres À compter / Comptés ; remise à 0 d'un endroit ou de tout l'inventaire ; récapitulatif par endroit partagé en CSV ; inventaires clôturés gardés en lecture seule. Aides sans compte : `/gerant/inventaire` › « Ajouter un aide » crée un accès (table `mobile_guests`) à un seul inventaire, avec un code à 6 chiffres et un QR code `FEDONIX360:{"u":[...],"g":"123456"}` qui relie aussi le téléphone de l'aide ; 24 h au plus, fin à la clôture ou sur « Couper » ; sans prix ni stock attendu ; les saisies partent aux PC au nom du responsable choisi (`counted_by`, `user_id`) et gardent l'aide dans `counter` pour le suivi du gérant. Depuis 0.57.0 : à la première synchronisation avec un serveur, puis sur Administration › Serveur central › « Renvoyer au serveur ce qui lui manque », le PC demande au serveur les identifiants qu'il a pour chaque donnée de référence (`POST /api/v1/sync/known`) et remet dans sa file d'envoi ce qui manque (serveur réinstallé ou vidé, sauvegarde restaurée : la file était vide alors que le serveur n'avait pas les produits, et le téléphone recevait un catalogue vide).
 - Inventaires à plusieurs PC : chaque PC compte sa partie et voit les comptages des autres ; pour un même produit, la saisie la plus récente l'emporte. Transferts, demandes de correction et leur validation passent aussi d'un PC à l'autre. Les numéros portent le code du poste (DLA11-4, DLA12-1) pour ne jamais se doubler.
 
 **Fabrication**
@@ -213,7 +213,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 
 **Export, import complet et dépôts (0.63.0)**
 - Produits › « Exporter Excel » / « Exporter CSV » : modèles catalogue complet (ré-importable tel quel), tarifs, codes-barres, comptage, terminal d'inventaire (.txt), valeur du stock, et modèles de colonnes enregistrés par magasin. Filtres rayon, famille, fournisseur, état ; choix du dépôt ; séparateur et décimale du CSV.
-- Import des produits : tous les prix (achat, vente, gros, super gros), seuils mini / alerte / maxi, 3 conditionnements avec nombre, prix et code-barres, remplaçant. Modes créer + mettre à jour, créer seulement, mettre à jour seulement ; vérification ligne par ligne avant import ; reconnaissance des en-têtes de FEDONIX et des logiciels de gestion courants, et format intégré à colonnes fixes.
+- Import des produits : tous les prix (achat, vente, gros, super gros), seuils mini / alerte / maxi, 3 conditionnements avec nombre, prix et code-barres, remplaçant. Modes créer + mettre à jour, créer seulement, mettre à jour seulement ; vérification ligne par ligne avant import ; reconnaissance des en-têtes d'ONIX et des logiciels de gestion courants, et format intégré à colonnes fixes.
 - Dépôts : modification (nom, type, responsable, téléphone, adresse), désactivation refusée tant que le dépôt a du stock, un transfert ou un inventaire en cours, ou qu'il est le dépôt des ventes.
 - Mise à jour des prix en masse (pourcentage, montant, coefficient sur l'achat, arrondi) avec aperçu, produit remplaçant proposé en caisse, emplacements par dépôt, codification automatique par famille (paramètre), palmarès avec classes ABC et produits sans vente, en-têtes des logiciels de gestion courants reconnus dans la reprise des clients et fournisseurs.
 
@@ -234,7 +234,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 
 **Serveur sur internet (0.66.0)**
 - Image Docker du serveur (base intégrée, sauvegardes quotidiennes) et Caddy pour le HTTPS automatique ; `installer.sh` installe Docker, charge l'image, demande le domaine et le mot de passe, crée la clé d'enrôlement.
-- Paquet `FEDONIX-360-serveur-internet-<version>` produit avec les installateurs ; guide pas à pas dans [docs/serveur-internet.md](docs/serveur-internet.md).
+- Paquet `ONIX-360-serveur-internet-<version>` produit avec les installateurs ; guide pas à pas dans [docs/serveur-internet.md](docs/serveur-internet.md).
 
 **Version anglaise (0.67.0)**
 - Langue choisie par utilisateur (français par défaut), bouton « English / Français » dans la barre d'état et sur l'écran de connexion.
@@ -320,7 +320,7 @@ packages/core     Règles métier pures : FCFA, TVA, codes-barres, ticket, paiem
 packages/db       Base SQLite locale, migrations et services (admin, catalogue, stock, caisse, rapports)
 apps/desktop      Application Electron : processus principal, impression, synchronisation, interface React
 apps/server       Serveur central NestJS + PostgreSQL : enrôlement des PC, journal des opérations
-apps/server-app   FEDONIX 360 Serveur : le serveur central en application Windows (base intégrée, interface, sauvegardes)
+apps/server-app   ONIX 360 Serveur : le serveur central en application Windows (base intégrée, interface, sauvegardes)
 ```
 
 Montants en FCFA entiers, quantités en millièmes (1 pièce = 1000, 1,250 kg = 1250), identifiants UUID pour fusionner sans collision les données de plusieurs magasins.
@@ -352,31 +352,31 @@ Sur un PC Windows :
 
 ```bash
 npm install
-npm run build:win        # produit apps/desktop/release/Fedonix360-Setup-<version>.exe
+npm run build:win        # produit apps/desktop/release/Onix360-Setup-<version>.exe
 ```
 
 Page du gérant : `/gerant` sur l'adresse du serveur est faite pour le téléphone et s'installe comme une application (manifeste et service worker, « Ajouter à l'écran d'accueil »). Après connexion avec le mot de passe de l'interface (case « Rester connecté » : 30 jours), elle montre pour chaque magasin, à partir du dernier état des fiches reçues des PC : chiffre du jour et de la veille, tickets et panier moyen, paiements par moyen, ventes par heure, meilleures ventes, état de chaque caisse (caissier, ouverture, dernière vente, PC muet), écarts des clôtures, ruptures (stock du magasin à zéro) et stock sous le seuil d'alerte, et les alertes. Elle s'actualise chaque minute ; un autre jour se choisit en haut.
 
-Mise à jour automatique : on dépose `Fedonix360-Setup-<version>.exe` dans l'interface de FEDONIX 360 Serveur, onglet « Mises à jour ». Le serveur écrit lui-même `latest.yml` (version, empreinte SHA-512, taille) et sert les deux fichiers à l'adresse `/mises-a-jour/`. Chaque PC relié y cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge et l'installe à sa fermeture (Administration › Mises à jour : état, « Installer maintenant », adresse internet pour une boutique sans serveur). Le serveur affiche la version de chaque PC.
+Mise à jour automatique : on dépose `Onix360-Setup-<version>.exe` dans l'interface d'ONIX 360 Serveur, onglet « Mises à jour ». Le serveur écrit lui-même `latest.yml` (version, empreinte SHA-512, taille) et sert les deux fichiers à l'adresse `/mises-a-jour/`. Chaque PC relié y cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge et l'installe à sa fermeture (Administration › Mises à jour : état, « Installer maintenant », adresse internet pour une boutique sans serveur). Le serveur affiche la version de chaque PC.
 
 ## Installer le serveur central
 
-### FEDONIX 360 Serveur pour Windows (le plus simple)
+### ONIX 360 Serveur pour Windows (le plus simple)
 
-`apps/server-app` emballe le serveur dans une application Windows, **FEDONIX 360 Serveur**, avec sa base intégrée ([PGlite](https://pglite.dev), PostgreSQL compilé en WebAssembly) : rien d'autre à installer, ni PostgreSQL ni Node.js.
+`apps/server-app` emballe le serveur dans une application Windows, **ONIX 360 Serveur**, avec sa base intégrée ([PGlite](https://pglite.dev), PostgreSQL compilé en WebAssembly) : rien d'autre à installer, ni PostgreSQL ni Node.js.
 
 ```bash
-npm run build:win -w @superette/server-app   # → apps/server-app/release/Fedonix360-Serveur-Setup-<version>.exe
+npm run build:win -w @superette/server-app   # → apps/server-app/release/Onix360-Serveur-Setup-<version>.exe
 ```
 
-- L'installateur ouvre le pare-feu Windows pour l'application, et FEDONIX 360 Serveur démarre avec Windows (icône près de l'horloge ; fermer la fenêtre laisse le serveur tourner).
+- L'installateur ouvre le pare-feu Windows pour l'application, et ONIX 360 Serveur démarre avec Windows (icône près de l'horloge ; fermer la fenêtre laisse le serveur tourner).
 - La base est dans `%APPDATA%\FEDO Serveur\donnees`, les sauvegardes dans `Documents\FEDO Serveur\Sauvegardes` (une par jour, les 30 dernières gardées ; dossier et nombre réglables).
 - L'interface (`http://localhost:3000/`, ou l'adresse du PC depuis un autre PC ou un téléphone, avec un mot de passe) montre l'état des postes, les ventes du jour par magasin, le journal de tout ce que les PC envoient, les ventes des 14 derniers jours, les sauvegardes (télécharger, restaurer) et la clé d'enrôlement, créée au premier démarrage.
 - Le port (3000) se change dans `%APPDATA%\FEDO Serveur\reglages.json`.
 
 ### Serveur sur internet (VPS, Docker)
 
-`deploy/` contient l'image Docker du serveur (base intégrée, sauvegardes quotidiennes), Caddy pour le HTTPS automatique et `installer.sh`, qui installe tout sur un serveur Ubuntu ou Debian en posant deux questions (nom de domaine, mot de passe). Le paquet `FEDONIX-360-serveur-internet-<version>` (image comprise) est construit par l'action Installateurs ; le pas-à-pas est dans [docs/serveur-internet.md](docs/serveur-internet.md).
+`deploy/` contient l'image Docker du serveur (base intégrée, sauvegardes quotidiennes), Caddy pour le HTTPS automatique et `installer.sh`, qui installe tout sur un serveur Ubuntu ou Debian en posant deux questions (nom de domaine, mot de passe). Le paquet `ONIX-360-serveur-internet-<version>` (image comprise) est construit par l'action Installateurs ; le pas-à-pas est dans [docs/serveur-internet.md](docs/serveur-internet.md).
 
 ```bash
 docker build -f deploy/Dockerfile -t fedonix360-serveur .

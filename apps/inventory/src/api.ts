@@ -1,4 +1,4 @@
-/** Appels à FEDONIX 360 Serveur (`/api/v1/mobile/…`). */
+/** Appels à ONIX 360 Serveur (`/api/v1/mobile/…`). */
 
 export class ApiError extends Error {
   constructor(

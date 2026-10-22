@@ -5,7 +5,7 @@ import type { Readable } from 'node:stream';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CONFIG, type ServerConfig } from './config';
 
-/** Installateur de FEDONIX 360 : « Fedonix360-Setup-0.49.0.exe » (le nom donne la version). */
+/** Installateur d’ONIX 360 : « Onix360-Setup-0.49.0.exe » (le nom donne la version). */
 const INSTALLER = /^[\w.-]+-(\d+\.\d+\.\d+)\.exe$/;
 const MAX_BYTES = 600 * 1024 * 1024;
 /** Installateurs gardés : la version publiée et la précédente (un PC peut être en train de la télécharger). */
@@ -57,7 +57,7 @@ export class UpdatesService {
     const match = INSTALLER.exec(name ?? '');
     if (!match) {
       body.resume();
-      throw new BadRequestException('Choisissez l\'installateur de FEDONIX 360, par exemple Fedonix360-Setup-0.49.0.exe');
+      throw new BadRequestException('Choisissez l\'installateur d’ONIX 360, par exemple Onix360-Setup-0.49.0.exe');
     }
     if (this.busy) {
       body.resume();

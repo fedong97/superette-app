@@ -92,7 +92,7 @@ export function inspectBackup(file: string): BackupInfo {
     const check = db.pragma('quick_check', { simple: true });
     if (check !== 'ok') return { ...info, error: `Fichier abîmé (${String(check)})` };
     const hasMigrations = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").pluck().get();
-    if (!hasMigrations) return { ...info, error: "Ce fichier n'est pas une base FEDONIX 360" };
+    if (!hasMigrations) return { ...info, error: "Ce fichier n'est pas une base ONIX 360" };
     info.version = (db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() as number | null) ?? 0;
     info.store_name =
       (db.prepare("SELECT s.name FROM settings k JOIN stores s ON s.id = k.value WHERE k.key = 'station.storeId'").pluck().get() as string | undefined) ?? null;

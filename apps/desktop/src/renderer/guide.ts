@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.82.0',
+    items: [
+      'Le logiciel s’appelle maintenant ONIX 360. Vos boutiques, votre licence et vos réglages sont gardés tels quels.',
+      'Nouveau logo : l’aigle gardien. Le logiciel et le serveur ont chacun leur icône sur le bureau (verte pour la caisse, noire et or avec un serveur pour ONIX 360 Serveur).',
+      'L’aigle vous accompagne : il veille à la connexion, dit bonjour à l’accueil, compte avec vous à la clôture, applaudit quand la caisse est juste, sursaute en cas d’erreur ou d’écart et dort quand la caisse est fermée.',
+      'Installation de la mise à jour : installez d’abord ONIX 360 Serveur ; il redémarre avec Windows et garde l’accès des PC à travers le pare-feu, comme avant.',
+    ],
+  },
+  {
     version: '0.81.0',
     items: [
       'Listes : survolez un tableau pour filtrer, choisir et ranger les colonnes (☰), trier en cliquant un titre, garder des vues, imprimer, exporter vers Excel ou en PDF.',
@@ -202,7 +211,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.69.0',
     items: [
       'Accueil › « Ma journée » pour le caissier et le vendeur : ses ventes du jour, ses tickets, son panier moyen, la barre de son objectif et sa commission du mois.',
-      'Fichier › « Mode formation… » : FEDONIX 360 s’ouvre sur une copie de la boutique avec un bandeau orange. On y vend pour s’entraîner ; rien ne compte dans la boutique ni ne part au serveur. « Quitter la formation » ramène à la boutique.',
+      'Fichier › « Mode formation… » : ONIX 360 s’ouvre sur une copie de la boutique avec un bandeau orange. On y vend pour s’entraîner ; rien ne compte dans la boutique ni ne part au serveur. « Quitter la formation » ramène à la boutique.',
     ],
   },
   {
@@ -224,7 +233,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.66.0',
     items: [
-      'FEDONIX 360 Serveur sur internet : un serveur loué (VPS) et un nom de domaine suffisent. Le paquet « serveur-internet » s’installe avec un seul script, le cadenas HTTPS se met tout seul, la page du gérant marche partout sur son téléphone et la base est sauvegardée chaque jour. Le guide pas à pas est dans le paquet.',
+      'ONIX 360 Serveur sur internet : un serveur loué (VPS) et un nom de domaine suffisent. Le paquet « serveur-internet » s’installe avec un seul script, le cadenas HTTPS se met tout seul, la page du gérant marche partout sur son téléphone et la base est sauvegardée chaque jour. Le guide pas à pas est dans le paquet.',
     ],
   },
   {
@@ -298,7 +307,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Un PC peut tenir plusieurs boutiques : l’écran de connexion propose « Changer de boutique », et chaque boutique garde ses utilisateurs, sa licence et ses réglages de PC.',
       'Envoyer une fiche sans clé USB : « Envoyer… » la compresse (5 à 10 fois plus petite) et ouvre son dossier, prête à joindre à un e-mail ou un message WhatsApp. Le technicien la renvoie de la même façon.',
       'Dossier partagé (réseau, OneDrive, Google Drive) : la copie du comptable s’y dépose seule (toutes les heures, chaque jour…), et le technicien y dépose sa fiche dans « Retours » ; la barre d’état annonce « 1 fiche à rapporter ».',
-      'Administration › Réparation : vérifie le fichier de la boutique et recalcule le stock et les lots à partir des mouvements, après une sauvegarde, sans arrêter la caisse. Si la base ne s’ouvre plus au démarrage, FEDONIX 360 propose de restaurer la dernière bonne sauvegarde.',
+      'Administration › Réparation : vérifie le fichier de la boutique et recalcule le stock et les lots à partir des mouvements, après une sauvegarde, sans arrêter la caisse. Si la base ne s’ouvre plus au démarrage, ONIX 360 propose de restaurer la dernière bonne sauvegarde.',
     ],
   },
   {
@@ -316,14 +325,14 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Onglet Produits : tous les produits de l’inventaire à toucher pour les compter, avec « 120 / 450 comptés » et les filtres À compter, Comptés, Tous et par rayon.',
       'Menu ☰ de l’inventaire : remettre à 0 un endroit ou tout l’inventaire (après confirmation), et mon récapitulatif par endroit à partager en fichier.',
       'Inventaires En cours et Clôturés : quand le gérant clôture sur le PC, mes comptages restent consultables sur le téléphone.',
-      'Aides sans compte (famille, intérimaires) : sur FEDONIX 360 Gérant › Inventaire, « Ajouter un aide » donne un QR code et un code à 6 chiffres. L’aide compte tout de suite, sans identifiant, seulement cet inventaire, sans prix ni stock attendu ; l’accès s’arrête à la clôture ou après 24 h, et « Couper » l’arrête aussitôt. Sur le PC ses comptages sont signés au nom du responsable choisi, le gérant voit son nom.',
+      'Aides sans compte (famille, intérimaires) : sur ONIX 360 Gérant › Inventaire, « Ajouter un aide » donne un QR code et un code à 6 chiffres. L’aide compte tout de suite, sans identifiant, seulement cet inventaire, sans prix ni stock attendu ; l’accès s’arrête à la clôture ou après 24 h, et « Couper » l’arrête aussitôt. Sur le PC ses comptages sont signés au nom du responsable choisi, le gérant voit son nom.',
     ],
   },
   {
     version: '0.55.0',
     items: [
-      'Application Android FEDONIX 360 Inventaire : le compteur scanne les codes-barres avec l’appareil photo (ou une douchette Bluetooth), tape la quantité en cartons et unités, et compte même sans réseau ; tout part au serveur dès que le Wi-Fi revient.',
-      'Le téléphone se relie au magasin avec le QR code de FEDONIX 360 Gérant › Inventaire ; chaque compteur se connecte avec son identifiant et son code (droit « Saisir le stock physique »).',
+      'Application Android ONIX 360 Inventaire : le compteur scanne les codes-barres avec l’appareil photo (ou une douchette Bluetooth), tape la quantité en cartons et unités, et compte même sans réseau ; tout part au serveur dès que le Wi-Fi revient.',
+      'Le téléphone se relie au magasin avec le QR code d’ONIX 360 Gérant › Inventaire ; chaque compteur se connecte avec son identifiant et son code (droit « Saisir le stock physique »).',
       'Un même produit compté au rayon et en réserve s’additionne. Mode rafale : chaque scan ajoute 1. Code inconnu : photo et nom envoyés au gérant.',
       'Le gérant suit l’avancement par rayon et par compteur (produits par heure), confie des rayons à chacun, et fait recompter par un collègue les gros écarts. La clôture reste sur le PC.',
     ],
@@ -339,7 +348,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.53.0',
     items: [
-      'Page du gérant sur le téléphone : ouvrez l’adresse du serveur suivie de /gerant (par exemple http://192.168.1.10:8080/gerant), avec le mot de passe de FEDONIX 360 Serveur.',
+      'Page du gérant sur le téléphone : ouvrez l’adresse du serveur suivie de /gerant (par exemple http://192.168.1.10:8080/gerant), avec le mot de passe d’ONIX 360 Serveur.',
       'Ventes du jour et comparaison avec la veille, paiements, ventes par heure, meilleures ventes, caisses ouvertes ou fermées, écarts de caisse, ruptures et stock bas, pour chaque magasin.',
       'Alertes : manque à la clôture, caisse ouverte dont le PC ne répond plus, ruptures, PC pas à jour. « Ajouter à l’écran d’accueil » l’installe comme une application.',
     ],
@@ -366,15 +375,15 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Carte de fidélité (Administration › Paramètres › Carte de fidélité) : le client enregistré gagne 1 point par tranche d’achat (1 000 FCFA par défaut) et paie avec ses points à l’encaissement (« Points fidélité »).',
       'À la caisse, scanner la carte du client ou taper son téléphone le choisit tout de suite ; ses points s’affichent à côté de son solde et s’impriment sur le ticket.',
       'Fiche client › Fidélité : solde, mouvements, impression de la carte à code-barres, correction avec motif (droit « Corriger les points de fidélité »).',
-      'Les points valent dans tous les magasins. Mettez à jour FEDONIX 360 Serveur avant les PC.',
+      'Les points valent dans tous les magasins. Mettez à jour ONIX 360 Serveur avant les PC.',
     ],
   },
   {
     version: '0.49.0',
     items: [
-      'Mises à jour automatiques : déposez le nouvel installateur dans FEDONIX 360 Serveur (onglet « Mises à jour ») et chaque PC relié le télécharge tout seul, puis l’installe à sa fermeture.',
+      'Mises à jour automatiques : déposez le nouvel installateur dans ONIX 360 Serveur (onglet « Mises à jour ») et chaque PC relié le télécharge tout seul, puis l’installe à sa fermeture.',
       'Administration › Mises à jour : version du PC, état du téléchargement, « Installer maintenant », et une adresse internet pour les boutiques sans serveur.',
-      'La barre du bas annonce « Mise à jour prête » ; FEDONIX 360 Serveur montre la version de chaque PC.',
+      'La barre du bas annonce « Mise à jour prête » ; ONIX 360 Serveur montre la version de chaque PC.',
     ],
   },
   {

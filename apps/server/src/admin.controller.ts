@@ -23,7 +23,7 @@ const setCookie = (res: Response, token: string, maxAgeMs = 12 * 3_600_000) =>
 
 /** Le téléphone du gérant installe la page comme une application. */
 const MANIFEST = {
-  name: 'FEDONIX 360 Gérant',
+  name: 'ONIX 360 Gérant',
   short_name: 'Gérant',
   description: 'Ventes du jour, caisses, écarts, ruptures et alertes de vos magasins',
   start_url: '/gerant',
@@ -43,11 +43,11 @@ const SERVICE_WORKER = `self.addEventListener('install', () => self.skipWaiting(
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (e) => {
   if (e.request.mode !== 'navigate') return;
-  e.respondWith(fetch(e.request).catch(() => new Response('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font:16px system-ui;padding:24px">Pas de connexion au serveur FEDONIX 360. Vérifiez le réseau puis rouvrez l’application.</p>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
+  e.respondWith(fetch(e.request).catch(() => new Response('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font:16px system-ui;padding:24px">Pas de connexion au serveur ONIX 360. Vérifiez le réseau puis rouvrez l’application.</p>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
 });
 self.addEventListener('push', (e) => {
-  const d = (() => { try { return e.data.json(); } catch { return { title: 'FEDONIX 360', body: e.data ? e.data.text() : '' }; } })();
-  e.waitUntil(self.registration.showNotification(d.title || 'FEDONIX 360', { body: d.body || '', tag: d.tag, icon: '/gerant/icon.png', badge: '/gerant/icon.png', data: { url: d.url || '/gerant' }, renotify: true }));
+  const d = (() => { try { return e.data.json(); } catch { return { title: 'ONIX 360', body: e.data ? e.data.text() : '' }; } })();
+  e.waitUntil(self.registration.showNotification(d.title || 'ONIX 360', { body: d.body || '', tag: d.tag, icon: '/gerant/icon.png', badge: '/gerant/icon.png', data: { url: d.url || '/gerant' }, renotify: true }));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
@@ -59,7 +59,7 @@ self.addEventListener('notificationclick', (e) => {
 });
 `;
 
-/** Interface du serveur dans le navigateur (ou dans la fenêtre de FEDONIX 360 Serveur). */
+/** Interface du serveur dans le navigateur (ou dans la fenêtre d’ONIX 360 Serveur). */
 @Controller()
 export class AdminController {
   constructor(

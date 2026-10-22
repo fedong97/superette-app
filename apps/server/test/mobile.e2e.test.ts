@@ -8,7 +8,7 @@ import { createApp } from '../src/main';
 
 const LOCAL = 'jeton-de-la-fenetre-du-serveur';
 
-/** Un PC du magasin, le serveur, et l'application FEDONIX 360 Inventaire simulée par ses appels. */
+/** Un PC du magasin, le serveur, et l'application ONIX 360 Inventaire simulée par ses appels. */
 describe('inventaire sur téléphone', () => {
   let app: INestApplication;
   let url: string;

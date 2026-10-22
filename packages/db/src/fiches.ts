@@ -196,7 +196,7 @@ export function inspectDossier(file: string): DossierInfo {
   try {
     db = new Database(file, { readonly: true, fileMustExist: true });
     const hasMigrations = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").pluck().get();
-    if (!hasMigrations) return { ...info, error: "Ce fichier n'est pas un dossier FEDONIX 360" };
+    if (!hasMigrations) return { ...info, error: "Ce fichier n'est pas un dossier ONIX 360" };
     info.version = (db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() as number | null) ?? 0;
     const store = db
       .prepare("SELECT s.name, s.code FROM settings k JOIN stores s ON s.id = k.value WHERE k.key = 'station.storeId'")
@@ -563,7 +563,7 @@ export class FicheService extends Base {
     const info = inspectDossier(file);
     if (!info.ok) throw new AppError(info.error ?? 'Fiche invalide', 'INVALID');
     const meta = readFicheFile(file);
-    if (!meta) throw new AppError("Ce fichier n'est pas une fiche FEDONIX 360", 'INVALID');
+    if (!meta) throw new AppError("Ce fichier n'est pas une fiche ONIX 360", 'INVALID');
     if (meta.kind === 'installation') throw new AppError("Une installation préparée s'installe au premier démarrage d'un PC : elle ne se rapporte pas", 'INVALID');
     if (meta.kind === 'formation') throw new AppError('Une copie de formation ne se rapporte jamais : ce qui y est fait ne compte pas', 'INVALID');
     if (!this.db.prepare('SELECT 1 FROM stores WHERE id = ?').get(meta.storeId)) {

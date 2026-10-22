@@ -11,7 +11,7 @@ export const MANAGER_PAGE = readFileSync(join(__dirname, 'manager.page.html'), '
 export const INVENTORY_PAGE = readFileSync(join(__dirname, 'inventory.page.html'), 'utf8');
 
 let icon: Buffer | null | undefined;
-/** Icône de l'application du gérant : celle de FEDONIX 360 Serveur. */
+/** Icône de l'application du gérant : celle d’ONIX 360 Serveur. */
 export function MANAGER_ICON(): Buffer | null {
   if (icon === undefined) {
     const file = [join(__dirname, 'icon.png'), join(__dirname, '..', '..', 'server-app', 'build', 'icon.png')].find((f) => existsSync(f));

@@ -63,7 +63,7 @@ export interface WebOrderLine {
   price: number;
 }
 
-/** Commande de la boutique, au format des postes (FEDONIX 360 sur PC). */
+/** Commande de la boutique, au format des postes (ONIX 360 sur PC). */
 export interface WebOrder {
   id: string;
   number: string;
@@ -110,7 +110,7 @@ export function shopSettings(raw: unknown): ShopSettings {
   const fcfa = (v: unknown) => Math.max(0, Math.round(num(v)));
   return {
     onlineShop: s['onlineShop'] === true,
-    // Comme dans FEDONIX 360 : la livraison est proposée tant qu'elle n'est pas décochée.
+    // Comme dans ONIX 360 : la livraison est proposée tant qu'elle n'est pas décochée.
     delivery: s['onlineShopDelivery'] !== false,
     deliveryFee: fcfa(s['onlineShopDeliveryFee']),
     minOrder: fcfa(s['onlineShopMinOrder']),

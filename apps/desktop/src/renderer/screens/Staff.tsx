@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { computePayroll } from '@superette/core';
+import { CONTRACT_TYPES, computePayroll, type ContractType, STAFF_KINDS, STAFF_KINDS_PLURAL, STAFF_KINDS_SHORT, type StaffKind } from '@superette/core';
 import { type Result, call } from '../api';
 import { Leaves, WeekPlanning } from './StaffTime';
+import { Agencies, DayPunches, DocumentsDialog, PresenceBoard, StaffPunchDialog, TeamsAndEntrances } from './Personnel';
 import { askConfirm, askText, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, has, parseAmount, today, useLoad, useStoreSettings, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StaffRow = Result<'staff.list'>[number];
 type MonthRow = Result<'staff.month'>[number];
-export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement' | 'leaves' | 'planning';
+export type StaffTab = 'list' | 'salaries' | 'targets' | 'attendance' | 'statement' | 'leaves' | 'planning' | 'presence' | 'teams' | 'agencies';
 
 const OFFICE_METHODS = { CASH: 'Espèces (caisse centrale)', MTN_MOMO: 'MTN MoMo (caisse électronique centrale)', ORANGE_MONEY: 'Orange Money (caisse électronique centrale)', BANK_TRANSFER: 'Virement', CHEQUE: 'Chèque' } as const;
 type OfficeMethod = keyof typeof OFFICE_METHODS;
@@ -22,10 +23,19 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
   const targets = has(user, 'staff_targets');
   const attendance = has(user, 'staff_attendance');
   const leaves = has(user, 'staff_leaves');
+  const settings = useStoreSettings();
+  const presence = has(user, 'staff_presence') || attendance;
+  const teams = has(user, 'staff_teams') && (settings.staffTeams || settings.multiEntrances || settings.punchKiosk);
+  const agencies = has(user, 'staff_agencies') && settings.contractorStaff;
+  /** Pointage du mois des agents d'une société prestataire (depuis l'onglet des sociétés). */
+  const [agencyFilter, setAgencyFilter] = useState<string | null>(null);
   const [tab, setTab] = useState<StaffTab>(
     (initialTab === 'salaries' && !pay) ||
       (initialTab === 'targets' && !targets) ||
       (initialTab === 'attendance' && !attendance) ||
+      (initialTab === 'presence' && !presence) ||
+      (initialTab === 'teams' && !teams) ||
+      (initialTab === 'agencies' && !agencies) ||
       ((initialTab === 'leaves' || initialTab === 'planning') && !leaves)
       ? 'list'
       : initialTab,
@@ -41,8 +51,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
         onChange={setTab}
         tabs={[
           ['list', 'Collaborateurs'],
-          ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []),
-          ...(targets ? ([['targets', 'Objectifs et commissions']] as [StaffTab, string][]) : []),
+          ...(presence ? ([['presence', 'Qui est là']] as [StaffTab, string][]) : []),
           ...(attendance ? ([['attendance', 'Pointage']] as [StaffTab, string][]) : []),
           ...(leaves
             ? ([
@@ -50,6 +59,10 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
                 ['planning', 'Planning'],
               ] as [StaffTab, string][])
             : []),
+          ...(teams ? ([['teams', 'Équipes et entrées']] as [StaffTab, string][]) : []),
+          ...(agencies ? ([['agencies', 'Sociétés prestataires']] as [StaffTab, string][]) : []),
+          ...(pay ? ([['salaries', 'Salaires du mois']] as [StaffTab, string][]) : []),
+          ...(targets ? ([['targets', 'Objectifs et commissions']] as [StaffTab, string][]) : []),
           ['statement', 'Extrait de compte'],
         ]}
       />
@@ -64,7 +77,17 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
       )}
       {tab === 'salaries' && pay && <Salaries />}
       {tab === 'targets' && targets && <Targets />}
-      {tab === 'attendance' && attendance && <AttendanceMonth />}
+      {tab === 'attendance' && attendance && <AttendanceMonth agencyId={agencyFilter} onClearAgency={() => setAgencyFilter(null)} />}
+      {tab === 'presence' && presence && <PresenceBoard />}
+      {tab === 'teams' && teams && <TeamsAndEntrances user={user} />}
+      {tab === 'agencies' && agencies && (
+        <Agencies
+          onAgents={(id) => {
+            setAgencyFilter(id);
+            setTab('attendance');
+          }}
+        />
+      )}
       {tab === 'leaves' && leaves && <Leaves />}
       {tab === 'planning' && leaves && <WeekPlanning />}
       {tab === 'statement' && <Statement initial={shown} />}
@@ -76,11 +99,21 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
   const toast = useToast();
   const [inactive, setInactive] = useState(false);
   const list = useLoad(() => call('staff.list', inactive), [inactive]);
+  const alerts = useLoad(() => call('personnel.alerts'), []);
   const [edit, setEdit] = useState<StaffRow | 'new' | null>(null);
   const [paying, setPaying] = useState<StaffRow | null>(null);
-  const rows = list.data ?? [];
+  const [punching, setPunching] = useState<string | null>(null);
+  const [docs, setDocs] = useState<StaffRow | null>(null);
+  const [kind, setKind] = useState<StaffKind | ''>('');
+  const settings = useStoreSettings();
+  const all = list.data ?? [];
+  const rows = kind ? all.filter((r) => r.category === kind) : all;
   const canEdit = has(user, 'staff_edit');
   const canPay = has(user, 'staff_salaries');
+  const canBadge = has(user, 'staff_badges') || has(user, 'staff_teams');
+  const canDocs = has(user, 'staff_documents');
+  const shownPunch = punching ? all.find((r) => r.id === punching) : null;
+  const kinds = (Object.keys(STAFF_KINDS) as StaffKind[]).filter((k) => k !== 'contractor' || settings.contractorStaff || all.some((r) => r.category === k));
   return (
     <>
       <div className="toolbar">
@@ -92,11 +125,51 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
         <label className="check">
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Voir aussi ceux qui sont partis
         </label>
+        <select value={kind} onChange={(e) => setKind(e.target.value as StaffKind | '')} title="Catégorie">
+          <option value="">Tout le personnel</option>
+          {kinds.map((k) => (
+            <option key={k} value={k}>
+              {STAFF_KINDS[k]}
+            </option>
+          ))}
+        </select>
+        {canBadge && rows.some((r) => r.active && (r.badge || r.user_badge)) && (
+          <button
+            onClick={() =>
+              call(
+                'personnel.printBadges',
+                rows.filter((r) => r.active && (r.badge || r.user_badge)).map((r) => r.id),
+              ).catch(toast.error)
+            }
+          >
+            Imprimer les badges
+          </button>
+        )}
       </div>
+      {Boolean(alerts.data?.length) && (
+        <div className="warn-box">
+          <b>À renouveler :</b>{' '}
+          {alerts.data!.map((a, i) => (
+            <span key={`${a.kind}-${a.staff_id}-${a.label}`}>
+              {i > 0 && ' · '}
+              {a.name}, {a.label.toLowerCase()} {a.days < 0 ? `dépassée depuis le ${dateFr(a.date)}` : a.days === 0 ? 'aujourd’hui' : `le ${dateFr(a.date)} (dans ${a.days} j)`}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="staff-cards">
         <div>
           <small>Collaborateurs</small>
           <b>{rows.filter((r) => r.active).length}</b>
+          {!kind && rows.some((r) => r.category !== 'employee') && (
+            <small className="muted block">
+              {kinds
+                .map((k) => [k, rows.filter((r) => r.active && r.category === k).length] as const)
+                .filter(([, n]) => n)
+                .map(([k, n]) => `${n} ${n > 1 ? STAFF_KINDS_PLURAL[k] : STAFF_KINDS_SHORT[k].toLowerCase()}`)
+                .join(', ')}
+            </small>
+          )}
         </div>
         <div>
           <small>Masse salariale de base</small>
@@ -117,6 +190,7 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
             <tr>
               <th>Matricule</th>
               <th>Nom</th>
+              <th>Catégorie</th>
               <th>Poste</th>
               <th>Téléphone</th>
               <th className="r">Salaire de base</th>
@@ -136,13 +210,27 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
                   {r.user_name && <small className="muted"> · utilisateur {r.user_name}</small>}
                   {!r.active && <span className="tag">Parti</span>}
                 </td>
-                <td>{r.position ?? ''}</td>
-                <td>{r.phone ?? ''}</td>
-                <td className="r">{fcfa(r.base_salary)}</td>
-                <td>{r.parent_label ?? r.parent_account}</td>
-                <td className="muted">
-                  {r.salary_account} · {r.advance_account}
+                <td>
+                  {STAFF_KINDS_SHORT[r.category] ?? r.category}
+                  {r.category === 'contractor' && r.agency_name && <small className="muted block">{r.agency_name}</small>}
+                  {r.contract_end && (
+                    <small className={`block ${r.contract_end < today() ? 'neg' : 'muted'}`}>
+                      {r.contract_type ? `${CONTRACT_TYPES[r.contract_type as ContractType] ?? r.contract_type} ` : ''}jusqu’au {dateFr(r.contract_end)}
+                    </small>
+                  )}
                 </td>
+                <td>
+                  {r.position ?? ''}
+                  {(r.badge || r.user_badge) && (
+                    <small className="muted block" title="Badge de pointage">
+                      🪪 badge{r.punch_number && settings.punchPin ? ` · n° ${r.punch_number}` : ''}
+                    </small>
+                  )}
+                </td>
+                <td>{r.phone ?? ''}</td>
+                <td className="r">{r.category === 'contractor' ? '' : fcfa(r.base_salary)}</td>
+                <td>{r.salary_account ? (r.parent_label ?? r.parent_account) : ''}</td>
+                <td className="muted">{r.salary_account ? `${r.salary_account} · ${r.advance_account}` : 'Payé par sa société'}</td>
                 <td className="r">{r.due ? fcfa(r.due) : ''}</td>
                 <td className={`r ${r.advances > 0 ? 'neg' : ''}`}>{r.advances ? fcfa(r.advances) : ''}</td>
                 <td className="nowrap">
@@ -151,10 +239,22 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
                       Modifier
                     </button>
                   )}
-                  <button className="link" onClick={() => onStatement(r.id)}>
-                    Extrait
-                  </button>
-                  {canPay && r.active && (
+                  {canBadge && r.active === 1 && (
+                    <button className="link" onClick={() => setPunching(r.id)}>
+                      Badge et pointage
+                    </button>
+                  )}
+                  {canDocs && (
+                    <button className="link" onClick={() => setDocs(r)}>
+                      Dossier
+                    </button>
+                  )}
+                  {r.salary_account && (
+                    <button className="link" onClick={() => onStatement(r.id)}>
+                      Extrait
+                    </button>
+                  )}
+                  {canPay && r.active && r.category !== 'contractor' && (
                     <button className="link" onClick={() => setPaying(r)}>
                       Avance…
                     </button>
@@ -166,7 +266,7 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
         </table>
       ) : (
         <Empty action={canEdit ? { label: 'Nouveau collaborateur…', onClick: () => setEdit('new') } : undefined}>
-          Aucun collaborateur. Ajoutez vos employés : chacun reçoit ses sous-comptes en comptabilité pour régler ses salaires et ses avances.
+          Aucun collaborateur. Ajoutez tout votre personnel, même ceux qui n’utilisent pas le logiciel (nettoyage, vigiles) : chacun a sa fiche, son badge et son pointage.
         </Empty>
       )}
       {edit && (
@@ -179,6 +279,8 @@ function StaffList({ user, onStatement }: { user: User; onStatement: (id: string
           }}
         />
       )}
+      {shownPunch && <StaffPunchDialog staff={shownPunch} user={user} onClose={() => setPunching(null)} onChanged={list.reload} />}
+      {docs && <DocumentsDialog staff={docs} onClose={() => (setDocs(null), alerts.reload())} />}
       {paying && (
         <OfficePayDialog
           kind="staff_advance"
@@ -199,7 +301,14 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
   const toast = useToast();
   const users = useLoad(() => call('staff.users'), []);
   const parents = useLoad(() => call('staff.parents'), []);
+  const settings = useStoreSettings();
+  const agencies = useLoad(() => (settings.contractorStaff ? call('personnel.agencies') : Promise.resolve([])), []);
   const [f, setF] = useState({
+    category: (staff?.category ?? 'employee') as StaffKind,
+    agencyId: staff?.agency_id ?? '',
+    contractType: (staff?.contract_type ?? '') as ContractType | '',
+    contractEnd: staff?.contract_end ?? '',
+    emergencyContact: staff?.emergency_contact ?? '',
     parentAccount: staff?.parent_account ?? '4211',
     name: staff?.name ?? '',
     position: staff?.position ?? '',
@@ -236,10 +345,15 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
                 declared: f.declared,
                 cnpsNumber: f.cnpsNumber || null,
                 notes: f.notes || null,
+                category: f.category,
+                agencyId: f.category === 'contractor' ? f.agencyId || null : null,
+                contractType: f.contractType || null,
+                contractEnd: f.contractEnd || null,
+                emergencyContact: f.emergencyContact || null,
               },
               staff?.id ?? null,
             );
-            toast.ok(staff ? 'Fiche enregistrée' : 'Collaborateur ajouté, avec ses sous-comptes');
+            toast.ok(staff ? 'Fiche enregistrée' : f.category === 'contractor' ? 'Agent ajouté : donnez-lui un badge (Badge et pointage)' : 'Collaborateur ajouté, avec ses sous-comptes');
             onDone();
           } catch (err) {
             toast.error(err);
@@ -251,7 +365,47 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
             <input autoFocus value={f.name} onChange={set('name')} />
           </Field>
           <Field label="Poste">
-            <input value={f.position} onChange={set('position')} placeholder="Caissière, magasinier, livreur…" />
+            <input value={f.position} onChange={set('position')} placeholder="Caissière, vigile, agent de nettoyage…" />
+          </Field>
+          <Field label="Catégorie" hint="Personne qui n’utilise pas le logiciel : laissez « Compte utilisateur » sur Aucun.">
+            <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value as StaffKind })}>
+              {(Object.keys(STAFF_KINDS) as StaffKind[])
+                .filter((k) => k !== 'contractor' || settings.contractorStaff || f.category === 'contractor')
+                .map((k) => (
+                  <option key={k} value={k}>
+                    {STAFF_KINDS[k]}
+                  </option>
+                ))}
+            </select>
+          </Field>
+          {f.category === 'contractor' ? (
+            <Field label="Société prestataire" hint="Payé par sa société : pas de salaire ni de sous-compte ici.">
+              <select value={f.agencyId} onChange={set('agencyId')}>
+                <option value="">Choisir…</option>
+                {(agencies.data ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <Field label="Type de contrat">
+              <select value={f.contractType} onChange={set('contractType')}>
+                <option value="">Non précisé</option>
+                {(Object.keys(CONTRACT_TYPES) as ContractType[]).map((k) => (
+                  <option key={k} value={k}>
+                    {CONTRACT_TYPES[k]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="Fin du contrat (facultatif)" hint="CDD, essai, stage : signalée avant l’échéance.">
+            <input type="date" value={f.contractEnd} onChange={set('contractEnd')} />
+          </Field>
+          <Field label="Personne à prévenir en cas d’urgence">
+            <input value={f.emergencyContact} onChange={set('emergencyContact')} placeholder="Nom et téléphone" />
           </Field>
           <Field label="Téléphone">
             <input value={f.phone} onChange={set('phone')} />
@@ -259,9 +413,11 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
           <Field label="N° CNI">
             <input value={f.idCard} onChange={set('idCard')} />
           </Field>
-          <Field label="Salaire de base mensuel (FCFA)">
-            <input inputMode="numeric" className="r" value={f.baseSalary} onChange={set('baseSalary')} />
-          </Field>
+          {f.category !== 'contractor' && (
+            <Field label={f.category === 'daily' ? 'Salaire de base mensuel (FCFA, 0 si payé à la journée)' : 'Salaire de base mensuel (FCFA)'}>
+              <input inputMode="numeric" className="r" value={f.baseSalary} onChange={set('baseSalary')} />
+            </Field>
+          )}
           <Field label="Date d'entrée">
             <input type="date" value={f.hiredOn} onChange={set('hiredOn')} />
           </Field>
@@ -278,14 +434,19 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
           <Field label="Notes">
             <input value={f.notes} onChange={set('notes')} />
           </Field>
+          {f.category !== 'contractor' && (
           <Field label="N° d'immatriculation CNPS">
             <input value={f.cnpsNumber} onChange={set('cnpsNumber')} />
           </Field>
+          )}
+          {f.category !== 'contractor' && (
           <Field label="Retenues légales" hint={payroll.enabled ? 'CNPS, IRPP, CAC, CFC, RAV et TDL retenus sur ses salaires' : 'La paie avec retenues s’active dans Administration › Paramètres'}>
             <label className="check">
               <input type="checkbox" checked={f.declared} onChange={(e) => setF({ ...f, declared: e.target.checked })} /> Déclaré à la CNPS et aux impôts
             </label>
           </Field>
+          )}
+          {f.category !== 'contractor' && (
           <Field label="Compte de rattachement" hint="Son sous-compte est créé sous ce compte : salaires constatés, paiements et extrait passent par lui">
             <select value={f.parentAccount} onChange={set('parentAccount')}>
               <optgroup label="Proposés">
@@ -308,11 +469,12 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
               </optgroup>
             </select>
           </Field>
+          )}
         </div>
         {staff && (
           <>
             <p className="muted">
-              Sous-comptes : {staff.salary_account} ({staff.parent_label ?? 'rattachement'}) et {staff.advance_account} (avances).
+              {staff.salary_account ? `Sous-comptes : ${staff.salary_account} (${staff.parent_label ?? 'rattachement'}) et ${staff.advance_account} (avances).` : 'Pas de sous-compte : agent payé par sa société.'}
               {f.parentAccount !== staff.parent_account && ' Changer le rattachement crée un nouveau sous-compte ; refusé si le collaborateur a déjà des écritures.'}
             </p>
             <label className="check">
@@ -320,12 +482,12 @@ function StaffDialog({ staff, onClose, onDone }: { staff: StaffRow | null; onClo
             </label>
           </>
         )}
-        {!staff && <p className="muted">Ses sous-comptes {f.parentAccount}… (compte de rattachement) et 4251… (avances) sont créés à son nom dans le plan comptable.</p>}
+        {!staff && f.category !== 'contractor' && <p className="muted">Ses sous-comptes {f.parentAccount}… (compte de rattachement) et 4251… (avances) sont créés à son nom dans le plan comptable.</p>}
         <div className="actions">
           <button type="button" onClick={onClose}>
             Annuler
           </button>
-          <button type="submit" className="primary" disabled={!f.name.trim()}>
+          <button type="submit" className="primary" disabled={!f.name.trim() || (f.category === 'contractor' && !f.agencyId)}>
             Enregistrer
           </button>
         </div>
@@ -886,38 +1048,64 @@ const hours = (minutes: number) => `${Math.floor(minutes / 60)} h ${String(minut
 const early = (r: AttendanceRow) => r.days.reduce((t, d) => t + d.early_minutes, 0);
 
 /**
- * Pointage du mois : arrivée à la première connexion du jour, départ à la
- * clôture de caisse ou par « Je pars ». Retards au-delà de l'heure et de la
- * tolérance réglées dans Administration › Paramètres › Pointage.
+ * Pointage du mois de tout le personnel, avec ou sans accès au logiciel :
+ * passages à la borne (badge, numéro et code), connexion au logiciel ou
+ * corrections du gérant. Retards et absences d'après l'horaire de chacun
+ * (semaine type ou équipe), jours fériés et congés exclus.
  */
-function AttendanceMonth() {
+function AttendanceMonth({ agencyId, onClearAgency }: { agencyId: string | null; onClearAgency: () => void }) {
   const toast = useToast();
   const settings = useStoreSettings();
   const [period, setPeriod] = useState(today().slice(0, 7));
-  const rows = useLoad(() => call('attendance.month', period), [period]);
-  const [open, setOpen] = useState<AttendanceRow | null>(null);
-  const [fix, setFix] = useState<{ userId: string; name: string; day: string; arrived: string; left: string; reason: string } | null>(null);
+  const [kind, setKind] = useState<StaffKind | ''>('');
+  const rows = useLoad(() => call('attendance.month', period, { category: kind || null, agencyId }), [period, kind, agencyId]);
+  const agencies = useLoad(() => (settings.contractorStaff ? call('personnel.agencies', true) : Promise.resolve([])), []);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [punches, setPunches] = useState<{ staffId: string; name: string; day: string } | null>(null);
+  const [fix, setFix] = useState<{ staffId: string | null; userId: string | null; name: string; day: string; arrived: string; left: string; reason: string } | null>(null);
   const list = rows.data ?? [];
+  const open = openKey ? (list.find((r) => r.key === openKey) ?? null) : null;
+  const ways = [settings.punchLogin && 'la connexion au logiciel', settings.punchKiosk && 'la borne de l’entrée'].filter(Boolean).join(' et ');
   return (
     <>
       <div className="toolbar">
         <Field label="Mois">
           <input type="month" value={period} max={today().slice(0, 7)} onChange={(e) => setPeriod(e.target.value || today().slice(0, 7))} />
         </Field>
+        <Field label="Personnel">
+          <select value={kind} onChange={(e) => setKind(e.target.value as StaffKind | '')}>
+            <option value="">Tout le personnel</option>
+            {(Object.keys(STAFF_KINDS) as StaffKind[])
+              .filter((k) => k !== 'contractor' || settings.contractorStaff)
+              .map((k) => (
+                <option key={k} value={k}>
+                  {STAFF_KINDS[k]}
+                </option>
+              ))}
+          </select>
+        </Field>
+        {agencyId && (
+          <span className="tag info">
+            {(agencies.data ?? []).find((a) => a.id === agencyId)?.name ?? 'Société'}{' '}
+            <button className="link" onClick={onClearAgency}>
+              ✕
+            </button>
+          </span>
+        )}
         <span className="spacer" />
         <button onClick={() => window.print()} disabled={!list.length}>
           Imprimer l’état
         </button>
       </div>
       <p className="muted">
-        Arrivée attendue à {settings.workStart} (retard au-delà de {settings.lateToleranceMinutes} min). L’arrivée est notée à la première connexion du jour, le départ à la
-        clôture de la caisse ou par « Je pars » en bas de l’écran. Cliquez une ligne pour voir les jours et corriger un oubli.
+        Pointage par {ways || 'les corrections du gérant seulement'}. Retards au-delà de la tolérance ({settings.lateToleranceMinutes} min{settings.staffTeams ? ', ou celle de l’équipe' : ''}) d’après
+        l’horaire de chacun ; jours fériés et congés ne sont pas des absences. Cliquez une ligne pour voir les jours, les passages et corriger un oubli.
       </p>
       {list.length ? (
         <table className="list">
           <thead>
             <tr>
-              <th>Employé</th>
+              <th>Personne</th>
               <th className="r">Jours présents</th>
               <th className="r">Heures</th>
               <th className="r">Retards</th>
@@ -925,13 +1113,15 @@ function AttendanceMonth() {
               <th className="r">Départs anticipés</th>
               <th className="r">Absences</th>
               <th className="r">Jours de congé</th>
+              <th className="r">Fériés travaillés</th>
             </tr>
           </thead>
           <tbody>
             {list.map((r) => (
-              <tr key={r.user_id} className="clickable" onClick={() => setOpen(r)}>
+              <tr key={r.key} className="clickable" onClick={() => setOpenKey(r.key)}>
                 <td>
                   <b>{r.name}</b>
+                  <small className="muted block">{[r.category ? r.role : null, r.agency_name, r.position].filter(Boolean).join(' · ') || (r.staff_id ? '' : 'Utilisateur sans fiche')}</small>
                 </td>
                 <td className="r">{r.present}</td>
                 <td className="r">
@@ -949,6 +1139,7 @@ function AttendanceMonth() {
                 <td className="r" title={r.leave_days.map(dateFr).join(', ')}>
                   {r.leave_days.length || ''}
                 </td>
+                <td className="r">{r.worked_holidays || ''}</td>
               </tr>
             ))}
           </tbody>
@@ -957,7 +1148,7 @@ function AttendanceMonth() {
         <Empty>Personne à pointer dans ce magasin.</Empty>
       )}
       {open && (
-        <Modal title={`Pointage de ${open.name}`} onClose={() => setOpen(null)} wide>
+        <Modal title={`Pointage de ${open.name}`} onClose={() => setOpenKey(null)} wide>
           <table className="list">
             <thead>
               <tr>
@@ -973,25 +1164,35 @@ function AttendanceMonth() {
             <tbody>
               {[
                 ...open.days.map((d) => ({ ...d, absent: false, leave: false })),
-                ...open.absences.map((day) => ({ day, arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, early_minutes: 0, corrected: false, correction_reason: null, absent: true, leave: false })),
-                ...open.leave_days
-                  .filter((day) => !open.days.some((d) => d.day === day))
-                  .map((day) => ({ day, arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, early_minutes: 0, corrected: false, correction_reason: null, absent: false, leave: true })),
+                ...open.absences.map((day) => ({ ...EMPTY_DAY, day, absent: true, leave: false })),
+                ...open.leave_days.filter((day) => !open.days.some((d) => d.day === day)).map((day) => ({ ...EMPTY_DAY, day, absent: false, leave: true })),
               ]
                 .sort((a, b) => a.day.localeCompare(b.day))
                 .map((d) => (
                   <tr key={d.day} className={d.absent ? 'inactive' : ''}>
-                    <td>{dateFr(d.day)}</td>
+                    <td>
+                      {dateFr(d.day)}
+                      {d.holiday && <small className="muted block">{d.holiday}</small>}
+                    </td>
                     <td>{d.absent ? <span className="tag rupture">absent</span> : d.leave ? <span className="tag info">congé</span> : hm(d.arrived_at)}</td>
-                    <td>{hm(d.left_at)}</td>
+                    <td>
+                      {hm(d.left_at)}
+                      {d.open && <span className="tag rupture">départ non pointé</span>}
+                      {(d.sessions ?? 0) > 1 && <small className="muted block">{d.sessions} présences</small>}
+                    </td>
                     <td className="r">{d.minutes ? hours(d.minutes) : ''}</td>
                     <td className={`r ${d.late_minutes ? 'neg' : ''}`}>{d.late_minutes ? `${d.late_minutes} min` : ''}</td>
                     <td className={`r ${d.early_minutes ? 'neg' : ''}`}>{d.early_minutes ? `${d.early_minutes} min` : ''}</td>
-                    <td>
+                    <td className="nowrap">
                       {d.corrected && <small className="muted" title={d.correction_reason ?? ''}>corrigé </small>}
+                      {open.staff_id && !d.absent && !d.leave && (
+                        <button className="link" onClick={() => setPunches({ staffId: open.staff_id!, name: open.name, day: d.day })}>
+                          Passages
+                        </button>
+                      )}
                       <button
                         className="link"
-                        onClick={() => setFix({ userId: open.user_id, name: open.name, day: d.day, arrived: hm(d.arrived_at), left: hm(d.left_at), reason: '' })}
+                        onClick={() => setFix({ staffId: open.staff_id, userId: open.user_id, name: open.name, day: d.day, arrived: hm(d.arrived_at), left: hm(d.left_at), reason: '' })}
                       >
                         Corriger…
                       </button>
@@ -1002,16 +1203,18 @@ function AttendanceMonth() {
           </table>
         </Modal>
       )}
+      {punches && <DayPunches {...punches} onClose={() => setPunches(null)} onChanged={rows.reload} />}
       {fix && (
         <Modal title={`${fix.name}, ${dateFr(fix.day)}`} onClose={() => setFix(null)}>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
               try {
-                await call('attendance.correct', fix.userId, fix.day, { arrived: fix.arrived || null, left: fix.left || null, reason: fix.reason });
+                const input = { arrived: fix.arrived || null, left: fix.left || null, reason: fix.reason };
+                if (fix.staffId) await call('punches.correctDay', fix.staffId, fix.day, input);
+                else await call('attendance.correct', fix.userId!, fix.day, input);
                 toast.ok('Pointage corrigé');
                 setFix(null);
-                setOpen(null);
                 rows.reload();
               } catch (err) {
                 toast.error(err);
@@ -1022,13 +1225,14 @@ function AttendanceMonth() {
               <Field label="Arrivée">
                 <input type="time" value={fix.arrived} onChange={(e) => setFix({ ...fix, arrived: e.target.value })} />
               </Field>
-              <Field label="Départ">
+              <Field label="Départ" hint={fix.arrived && fix.left && fix.left <= fix.arrived ? 'Garde de nuit : départ le lendemain' : undefined}>
                 <input type="time" value={fix.left} onChange={(e) => setFix({ ...fix, left: e.target.value })} />
               </Field>
             </div>
             <Field label="Motif">
               <input value={fix.reason} required placeholder="Badge oublié, mission à l’extérieur…" onChange={(e) => setFix({ ...fix, reason: e.target.value })} />
             </Field>
+            {fix.staffId && <p className="muted">Les passages de ce jour sont gardés, marqués annulés, et remplacés par cette arrivée et ce départ.</p>}
             <div className="actions">
               <button className="primary" type="submit">
                 Enregistrer
@@ -1040,3 +1244,5 @@ function AttendanceMonth() {
     </>
   );
 }
+
+const EMPTY_DAY = { arrived_at: null, left_at: null, minutes: 0, late_minutes: 0, early_minutes: 0, corrected: false, correction_reason: null, sessions: 0, open: false, holiday: null };

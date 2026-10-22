@@ -86,6 +86,11 @@ const TABLES: Record<string, string> = {
   payment_allocation: 'payment_allocations',
   sale_edit_request: 'sale_edit_requests',
   missed_sale: 'missed_sales',
+  staff_agency: 'staff_agencies',
+  entrance: 'entrances',
+  staff_team: 'staff_teams',
+  time_punch: 'time_punches',
+  staff_document: 'staff_documents',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -108,6 +113,9 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   cheque_rejections: { active: 0, cancelled: 1 },
   account_offsets: { active: 0, cancelled: 1 },
   sale_edit_requests: { pending: 0, approved: 1, rejected: 2, used: 2 },
+  // Un passage annulé (correction du gérant) ne redevient pas actif.
+  time_punches: { active: 0, cancelled: 1 },
+  staff_documents: { active: 0, cancelled: 1 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */

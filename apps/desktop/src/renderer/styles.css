@@ -1304,3 +1304,42 @@ ul.plain li { padding: 3px 0; }
 .aigle-bulle .aigle { flex: none; }
 .aigle-bulle > :not(.aigle) { margin: 0; background: var(--brand-soft, #e2f5ec); border-radius: 14px; padding: 10px 14px; position: relative; }
 .aigle-bulle > :not(.aigle)::before { content: ''; position: absolute; left: -8px; top: 50%; margin-top: -8px; border: 8px solid transparent; border-left: 0; border-right-color: var(--brand-soft, #e2f5ec); }
+
+/* Borne de pointage : plein écran, grands caractères, lisible de loin. */
+.kiosk { position: relative; min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 32px; background: var(--bg); color: var(--ink); }
+.kiosk.overlay { position: fixed; inset: 0; z-index: 900; overflow: auto; }
+.kiosk > header { width: 100%; display: flex; align-items: center; gap: 16px; font-size: 18px; color: var(--muted); }
+.kiosk > header .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--brand); font-size: 20px; margin-right: auto; }
+.kiosk > footer { width: 100%; display: flex; align-items: flex-end; gap: 12px; margin-top: auto; }
+.kiosk-clock { display: flex; flex-direction: column; align-items: center; }
+.kiosk-clock b { font-size: 84px; line-height: 1; letter-spacing: 2px; color: var(--brand); font-variant-numeric: tabular-nums; }
+.kiosk-clock span { font-size: 22px; color: var(--muted); text-transform: capitalize; }
+.kiosk-ask { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.kiosk-ask h2 { font-size: 32px; margin: 0; }
+.kiosk-scan { font-size: 26px; text-align: center; width: 360px; padding: 12px; letter-spacing: 3px; }
+.kiosk-digits { font-size: 44px; letter-spacing: 8px; min-height: 56px; font-variant-numeric: tabular-nums; }
+.kiosk-pad { display: grid; grid-template-columns: repeat(3, 96px); gap: 10px; }
+.kiosk-pad button { height: 72px; font-size: 28px; }
+.kiosk-result { display: flex; align-items: center; gap: 28px; padding: 28px 40px; border-radius: 20px; background: var(--panel); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08); max-width: 860px; }
+.kiosk-result img { width: 150px; height: 150px; object-fit: cover; border-radius: 50%; border: 4px solid var(--brand); }
+.kiosk-result h2 { font-size: 38px; margin: 0 0 6px; }
+.kiosk-result.in { border-left: 12px solid var(--ok); }
+.kiosk-result.out { border-left: 12px solid var(--brand2, #0284c7); }
+.kiosk-result.refused { border-left: 12px solid var(--danger); }
+.kiosk-big { font-size: 28px; margin: 0; }
+.kiosk-warn { font-size: 22px; color: var(--danger); margin: 8px 0 0; }
+.kiosk-cam { display: flex; flex-direction: column; gap: 4px; }
+.kiosk-cam video { width: 160px; height: 120px; object-fit: cover; border-radius: 10px; background: #000; }
+.presence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.presence-card { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--panel); border-left: 6px solid var(--line); }
+.presence-card img, .presence-card .ph { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg); display: grid; place-items: center; font-weight: 700; color: var(--muted); }
+.presence-card.present { border-left-color: var(--ok); }
+.presence-card.late, .presence-card.absent { border-left-color: var(--danger); }
+.presence-card.left { border-left-color: var(--brand2, #0284c7); }
+.presence-card.expected { border-left-color: #e0a800; }
+.punch-photos { display: flex; flex-wrap: wrap; gap: 10px; }
+.punch-photos figure { margin: 0; text-align: center; font-size: 12px; }
+.punch-photos img { width: 120px; height: 90px; object-fit: cover; border-radius: 8px; display: block; }
+.staff-photo { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; background: var(--bg); }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
+.warn-box { color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 8px 12px; margin: 0 0 10px; }

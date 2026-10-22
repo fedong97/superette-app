@@ -1,5 +1,8 @@
+import { STAFF_KINDS_SHORT, type PunchMethod, type StaffKind } from '@superette/core';
 import type { AdminService } from './admin';
 import type { Db } from './database';
+import type { PersonnelService } from './personnel';
+import type { PunchService } from './punches';
 import type { StaffTimeService } from './staffTime';
 import { AppError, Base, type Clock } from './util';
 
@@ -28,12 +31,26 @@ export interface AttendanceDay {
   early_minutes: number;
   corrected: boolean;
   correction_reason: string | null;
+  /** Présences du jour (deux avec une pause pointée). */
+  sessions?: number;
+  /** Arrivée sans départ pointé. */
+  open?: boolean;
+  methods?: PunchMethod[];
+  /** Jour férié travaillé. */
+  holiday?: string | null;
 }
 
 export interface AttendanceMonthRow {
-  user_id: string;
+  /** « staff:… » pour une fiche collaborateur, « user:… » pour un utilisateur sans fiche. */
+  key: string;
+  staff_id: string | null;
+  user_id: string | null;
   name: string;
+  /** Rôle de l'utilisateur, ou catégorie du collaborateur (Employé, Journalier…). */
   role: string;
+  category: StaffKind | null;
+  agency_name: string | null;
+  position: string | null;
   days: AttendanceDay[];
   present: number;
   minutes: number;
@@ -45,6 +62,10 @@ export interface AttendanceMonthRow {
   leave_days: string[];
   /** Heures prévues au planning sur les jours passés du mois (congés exclus), en minutes. */
   scheduled_minutes: number;
+  /** Jours fériés du mois (ni absence ni retard). */
+  holidays: string[];
+  /** Jours fériés où il a travaillé. */
+  worked_holidays: number;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -68,6 +89,8 @@ export class AttendanceService extends Base {
     clock: Clock,
     private readonly admin: AdminService,
     private readonly time: StaffTimeService,
+    private readonly personnel: PersonnelService,
+    private readonly punches: PunchService,
   ) {
     super(db, clock);
   }
@@ -89,8 +112,15 @@ export class AttendanceService extends Base {
     return row;
   }
 
+  /** Pointage à la connexion : désactivable dans les paramètres (la borne de l'entrée suffit alors). */
+  private loginPunches(storeId: string | null): boolean {
+    return !storeId || this.admin.storeSettings(storeId).punchLogin;
+  }
+
   /** Première connexion du jour : l'arrivée est notée (une seule fois par jour). */
-  arrive(userId: string, storeId: string | null): Attendance {
+  arrive(userId: string, storeId: string | null): Attendance | null {
+    if (!this.loginPunches(storeId)) return null;
+    if (storeId) this.punches.loginArrive(userId, storeId);
     const day = this.today();
     const cur = this.get(userId, day);
     if (cur?.arrived_at) return cur;
@@ -109,7 +139,9 @@ export class AttendanceService extends Base {
   }
 
   /** Départ : clôture de sa caisse ou « Je pars ». Un second départ remplace le premier (il est revenu). */
-  leave(userId: string, storeId: string | null): Attendance {
+  leave(userId: string, storeId: string | null): Attendance | null {
+    if (!this.loginPunches(storeId)) return null;
+    if (storeId) this.punches.loginLeave(userId, storeId);
     const day = this.today();
     const cur = this.get(userId, day);
     const now = this.now();
@@ -158,67 +190,115 @@ export class AttendanceService extends Base {
     return row;
   }
 
-  /** État du mois (AAAA-MM) : présence, heures, retards et absences de chaque employé du magasin, d'après son planning. */
-  month(storeId: string, period: string): AttendanceMonthRow[] {
+  /**
+   * État du mois (AAAA-MM) : chaque collaborateur du magasin (avec ou sans accès
+   * au logiciel), et les utilisateurs sans fiche. Présences, heures, retards,
+   * absences, congés et jours fériés, d'après l'horaire prévu de chacun.
+   */
+  month(storeId: string, period: string, opts: { category?: StaffKind | null; agencyId?: string | null } = {}): AttendanceMonthRow[] {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new AppError('Mois invalide', 'INVALID');
-    const settings = this.admin.storeSettings(storeId);
     const today = this.today();
     const [y, m] = period.split('-').map(Number);
-    const monthDays: { day: string; weekday: number }[] = [];
+    const monthDays: string[] = [];
     for (let d = new Date(y!, m! - 1, 1); d.getMonth() === m! - 1; d.setDate(d.getDate() + 1)) {
       const day = localDay(d);
       if (day >= today) break;
-      monthDays.push({ day, weekday: d.getDay() });
+      monthDays.push(day);
     }
     const first = `${period}-01`;
     const last = `${period}-31`;
+    const holidays = this.personnel.holidays(storeId, first, last);
+    const staff = this.db
+      .prepare(
+        `SELECT s.id, s.name, s.position, s.category, s.user_id, s.active, COALESCE(s.hired_on, substr(s.created_at, 1, 10)) AS since, ag.name AS agency_name FROM staff s LEFT JOIN staff_agencies ag ON ag.id = s.agency_id
+         WHERE s.store_id = @store AND (s.active = 1 OR EXISTS (SELECT 1 FROM time_punches p WHERE p.staff_id = s.id AND p.at >= @first AND p.status = 'active'))
+           AND (@category IS NULL OR s.category = @category) AND (@agency IS NULL OR s.agency_id = @agency) ORDER BY s.name`,
+      )
+      .all({ store: storeId, first: `${first}T00:00:00`, category: opts.category ?? null, agency: opts.agencyId ?? null }) as {
+      id: string;
+      name: string;
+      position: string | null;
+      category: StaffKind;
+      user_id: string | null;
+      active: number;
+      since: string;
+      agency_name: string | null;
+    }[];
+    const rows: AttendanceMonthRow[] = staff.map((s) => {
+      const days: AttendanceDay[] = this.punches.days(s.id, first, last, holidays);
+      const leaves = this.time.leaveDays(s.id, first, last);
+      const seen = new Set(days.map((d) => d.day));
+      // Pas d'absence avant son entrée au magasin.
+      const plans = monthDays.filter((day) => day >= s.since).map((day) => ({ day, plan: this.personnel.plan(s.id, day, { holidays }) }));
+      const expected = plans.filter((p) => p.plan.shift);
+      return {
+        key: `staff:${s.id}`,
+        staff_id: s.id,
+        user_id: s.user_id,
+        name: s.name,
+        role: STAFF_KINDS_SHORT[s.category] ?? s.category,
+        category: s.category,
+        agency_name: s.agency_name,
+        position: s.position,
+        days,
+        present: days.filter((d) => d.arrived_at || d.left_at).length,
+        minutes: days.reduce((a, d) => a + d.minutes, 0),
+        late: days.filter((d) => d.late_minutes > 0).length,
+        late_minutes: days.reduce((a, d) => a + d.late_minutes, 0),
+        absences: expected.filter((p) => !seen.has(p.day) && !leaves.has(p.day)).map((p) => p.day),
+        leave_days: [...leaves.keys()].filter((d) => d.startsWith(period)).sort(),
+        scheduled_minutes: expected.filter((p) => !leaves.has(p.day)).reduce((t, p) => t + p.plan.shift!.minutes, 0),
+        holidays: [...holidays.keys()].sort(),
+        worked_holidays: days.filter((d) => d.holiday && d.minutes > 0).length,
+      };
+    });
+    if (opts.category || opts.agencyId) return rows;
+    return [...rows, ...this.usersWithoutFiche(storeId, period, monthDays, holidays)].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Utilisateurs qui n'ont pas de fiche collaborateur : pointés à la connexion, d'après les jours et l'heure du magasin. */
+  private usersWithoutFiche(storeId: string, period: string, monthDays: string[], holidays: Map<string, string>): AttendanceMonthRow[] {
+    const settings = this.admin.storeSettings(storeId);
     const users = this.db
-      .prepare("SELECT id, name, role FROM users WHERE deleted_at IS NULL AND active = 1 AND role <> 'admin' AND (store_id = ? OR store_id IS NULL) ORDER BY name")
-      .all(storeId) as { id: string; name: string; role: string }[];
+      .prepare(
+        `SELECT id, name, role FROM users u WHERE deleted_at IS NULL AND active = 1 AND role <> 'admin' AND (store_id = ? OR store_id IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM staff s WHERE s.user_id = u.id AND s.store_id = ?) ORDER BY name`,
+      )
+      .all(storeId, storeId) as { id: string; name: string; role: string }[];
     const rows = this.db.prepare("SELECT * FROM attendance WHERE day LIKE ? || '-%' ORDER BY day").all(period) as Attendance[];
     const byUser = new Map<string, Attendance[]>();
     for (const r of rows) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), r]);
-    const staffOf = this.db.prepare('SELECT id FROM staff WHERE user_id = ? AND active = 1 ORDER BY created_at LIMIT 1').pluck();
+    const isWorkday = (day: string) => settings.workDays.includes(String(new Date(`${day}T12:00:00`).getDay())) && !holidays.has(day);
     return users.map((u) => {
-      const staffId = staffOf.get(u.id) as string | undefined;
-      // Planning du collaborateur ; sans fiche, les jours et l'heure du magasin.
-      const schedule = staffId ? this.time.schedule(staffId).schedule : null;
-      const shiftOf = (weekday: number) =>
-        schedule ? (schedule[String(weekday) as '0'] ?? null) : settings.workDays.includes(String(weekday)) ? { start: settings.workStart, end: null as string | null } : null;
-      const leaves = staffId ? this.time.leaveDays(staffId, first, last) : new Map<string, string>();
       const days: AttendanceDay[] = (byUser.get(u.id) ?? [])
         .filter((r) => r.arrived_at || r.left_at)
         .map((r) => {
           const minutes = r.arrived_at && r.left_at ? Math.max(0, Math.round((Date.parse(r.left_at) - Date.parse(r.arrived_at)) / 60_000)) : 0;
-          const shift = shiftOf(new Date(`${r.day}T12:00:00`).getDay());
-          const start = shift ? toMinutes(shift.start) : null;
+          const start = isWorkday(r.day) ? toMinutes(settings.workStart) : null;
           const arrived = r.arrived_at ? localMinutes(r.arrived_at) : null;
           const late = start !== null && arrived !== null && arrived > start + settings.lateToleranceMinutes ? arrived - start : 0;
-          const end = shift?.end ? toMinutes(shift.end) : null;
-          const left = r.left_at ? localMinutes(r.left_at) : null;
-          const early = end !== null && left !== null && left < end ? end - left : 0;
-          return { day: r.day, arrived_at: r.arrived_at, left_at: r.left_at, minutes, late_minutes: late, early_minutes: early, corrected: Boolean(r.corrected_by), correction_reason: r.correction_reason };
+          return { day: r.day, arrived_at: r.arrived_at, left_at: r.left_at, minutes, late_minutes: late, early_minutes: 0, corrected: Boolean(r.corrected_by), correction_reason: r.correction_reason, holiday: holidays.get(r.day) ?? null };
         });
       const seen = new Set(days.map((d) => d.day));
-      const expected = monthDays.filter((d) => shiftOf(d.weekday));
-      const scheduled = expected
-        .filter((d) => !leaves.has(d.day))
-        .reduce((t, d) => {
-          const sh = shiftOf(d.weekday)!;
-          return t + (sh.end ? Math.max(0, toMinutes(sh.end) - toMinutes(sh.start)) : 0);
-        }, 0);
       return {
+        key: `user:${u.id}`,
+        staff_id: null,
         user_id: u.id,
         name: u.name,
         role: u.role,
+        category: null,
+        agency_name: null,
+        position: null,
         days,
         present: days.length,
         minutes: days.reduce((a, d) => a + d.minutes, 0),
         late: days.filter((d) => d.late_minutes > 0).length,
         late_minutes: days.reduce((a, d) => a + d.late_minutes, 0),
-        absences: expected.filter((d) => !seen.has(d.day) && !leaves.has(d.day)).map((d) => d.day),
-        leave_days: [...leaves.keys()].filter((d) => d.startsWith(period)).sort(),
-        scheduled_minutes: scheduled,
+        absences: monthDays.filter((d) => isWorkday(d) && !seen.has(d)),
+        leave_days: [],
+        scheduled_minutes: 0,
+        holidays: [...holidays.keys()].sort(),
+        worked_holidays: days.filter((d) => d.holiday && d.minutes > 0).length,
       };
     });
   }

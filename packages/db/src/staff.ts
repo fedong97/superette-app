@@ -1,4 +1,4 @@
-import { computePayroll, type Fcfa, type Payroll } from '@superette/core';
+import { computePayroll, CONTRACT_TYPES, type ContractType, type Fcfa, type Payroll, STAFF_KINDS, type StaffKind } from '@superette/core';
 import type { AdminService, Role, User, UserRegisters } from './admin';
 import type { Db } from './database';
 import { AppError, Base, type Clock, type Context, newId } from './util';
@@ -41,6 +41,23 @@ export interface Staff {
   declared: number;
   cnps_number: string | null;
   notes: string | null;
+  /** Employé, journalier, stagiaire ou agent d'une société prestataire. */
+  category: StaffKind;
+  contract_type: ContractType | null;
+  contract_end: string | null;
+  agency_id: string | null;
+  agency_name: string | null;
+  emergency_contact: string | null;
+  /** Badge de pointage (FP…) ; celui de son compte utilisateur (FX…) pointe aussi. */
+  badge: string | null;
+  user_badge: string | null;
+  /** Numéro court tapé à la borne avec son code personnel. */
+  punch_number: number | null;
+  has_punch_pin: number;
+  has_photo: number;
+  team_id: string | null;
+  team_name: string | null;
+  rotation: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -62,6 +79,13 @@ export interface StaffInput {
   declared?: boolean;
   cnpsNumber?: string | null;
   notes?: string | null;
+  category?: StaffKind;
+  contractType?: ContractType | null;
+  /** AAAA-MM-JJ : fin du contrat (CDD, essai, stage, prestation). */
+  contractEnd?: string | null;
+  /** Société prestataire de l'agent (catégorie « contractor »). */
+  agencyId?: string | null;
+  emergencyContact?: string | null;
 }
 
 /** Ce que le magasin doit au collaborateur (salaires constatés non payés) et ce qu'il doit (avances non remboursées). */
@@ -134,8 +158,12 @@ export class StaffService extends Base {
 
   private query(where: string) {
     return this.db.prepare(
-      `SELECT s.*, u.name AS user_name, pa.label AS parent_label FROM staff s LEFT JOIN users u ON u.id = s.user_id
-       LEFT JOIN accounts pa ON pa.id = s.parent_account WHERE ${where} ORDER BY s.active DESC, s.name`,
+      `SELECT s.id, s.store_id, s.code, s.name, s.position, s.phone, s.id_card, s.base_salary, s.hired_on, s.user_id, s.salary_account, s.parent_account,
+              s.advance_account, s.active, s.declared, s.cnps_number, s.notes, s.category, s.contract_type, s.contract_end, s.agency_id, s.emergency_contact,
+              s.badge, s.punch_number, s.punch_pin_hash IS NOT NULL AS has_punch_pin, s.photo IS NOT NULL AS has_photo, s.team_id, s.rotation, s.created_at, s.updated_at,
+              u.name AS user_name, u.badge AS user_badge, pa.label AS parent_label, ag.name AS agency_name, t.name AS team_name
+       FROM staff s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN accounts pa ON pa.id = s.parent_account
+       LEFT JOIN staff_agencies ag ON ag.id = s.agency_id LEFT JOIN staff_teams t ON t.id = s.team_id WHERE ${where} ORDER BY s.active DESC, s.name`,
     );
   }
 
@@ -269,6 +297,19 @@ export class StaffService extends Base {
       if (linked) throw new AppError('Cet utilisateur est déjà rattaché à un autre collaborateur', 'INVALID');
     }
     const current = id ? this.get(id) : null;
+    const category: StaffKind = input.category ?? current?.category ?? 'employee';
+    if (!(category in STAFF_KINDS)) throw new AppError('Catégorie de personnel inconnue', 'INVALID');
+    const contractType = input.contractType === undefined ? (current?.contract_type ?? null) : input.contractType || null;
+    if (contractType && !(contractType in CONTRACT_TYPES)) throw new AppError('Type de contrat inconnu', 'INVALID');
+    const contractEnd = input.contractEnd === undefined ? (current?.contract_end ?? null) : input.contractEnd || null;
+    if (contractEnd && !/^\d{4}-\d{2}-\d{2}$/.test(contractEnd)) throw new AppError('Date de fin de contrat invalide', 'INVALID');
+    if (contractEnd && input.hiredOn && contractEnd < input.hiredOn) throw new AppError("La fin du contrat précède la date d'entrée", 'INVALID');
+    const agencyId = category === 'contractor' ? (input.agencyId === undefined ? (current?.agency_id ?? null) : input.agencyId || null) : null;
+    if (category === 'contractor') {
+      if (!agencyId) throw new AppError('Choisissez la société prestataire de cet agent', 'INVALID');
+      const ag = this.db.prepare('SELECT store_id FROM staff_agencies WHERE id = ?').get(agencyId) as { store_id: string } | undefined;
+      if (!ag) throw new AppError('Société prestataire introuvable', 'NOT_FOUND');
+    }
     if (current && input.active === false && (current.due || current.advances)) {
       throw new AppError('Soldez son compte (salaire dû, avances) avant de le marquer parti', 'INVALID');
     }
@@ -295,6 +336,11 @@ export class StaffService extends Base {
         declared: input.declared === undefined ? (current?.declared ?? 1) : input.declared ? 1 : 0,
         cnps_number: input.cnpsNumber === undefined ? (current?.cnps_number ?? null) : input.cnpsNumber?.trim() || null,
         notes: input.notes?.trim() || null,
+        category,
+        contract_type: contractType,
+        contract_end: contractEnd,
+        agency_id: agencyId,
+        emergency_contact: input.emergencyContact === undefined ? (current?.emergency_contact ?? null) : input.emergencyContact?.trim() || null,
         now,
       };
       let staffId = id;
@@ -302,11 +348,17 @@ export class StaffService extends Base {
         this.db
           .prepare(
             `UPDATE staff SET name = @name, position = @position, phone = @phone, id_card = @id_card, base_salary = @base_salary,
-               hired_on = @hired_on, user_id = @user_id, active = @active, notes = @notes, updated_at = @now WHERE id = @id`,
+               hired_on = @hired_on, user_id = @user_id, active = @active, notes = @notes, category = @category, contract_type = @contract_type,
+               contract_end = @contract_end, agency_id = @agency_id, emergency_contact = @emergency_contact, updated_at = @now WHERE id = @id`,
           )
           .run({ ...values, id: current.id });
+        // Un agent prestataire devenu employé reçoit ses sous-comptes.
+        if (!current.salary_account && category !== 'contractor') {
+          const accounts = this.nextAccounts(parent.id);
+          this.db.prepare('UPDATE staff SET parent_account = ?, salary_account = ?, advance_account = ? WHERE id = ?').run(parent.id, accounts.salary, accounts.advance, current.id);
+        }
         // Nouveau rattachement, sans écriture encore : nouveau sous-compte, l'ancien est désactivé.
-        if (moving) {
+        else if (moving && current.salary_account) {
           const sub = this.nextSub(parent.id);
           this.db.prepare('UPDATE staff SET parent_account = ?, salary_account = ? WHERE id = ?').run(parent.id, sub, current.id);
           this.db.prepare('UPDATE accounts SET active = 0, updated_at = ? WHERE id = ?').run(now, current.salary_account);
@@ -314,11 +366,14 @@ export class StaffService extends Base {
         }
       } else {
         staffId = newId();
-        const accounts = this.nextAccounts(parent.id);
+        // L'agent d'une société prestataire est payé par sa société : pas de sous-comptes à son nom.
+        const accounts = category === 'contractor' ? { salary: '', advance: '' } : this.nextAccounts(parent.id);
         this.db
           .prepare(
-            `INSERT INTO staff (id, store_id, code, name, position, phone, id_card, base_salary, hired_on, user_id, salary_account, advance_account, active, notes, created_at, updated_at)
-             VALUES (@id, @store, @code, @name, @position, @phone, @id_card, @base_salary, @hired_on, @user_id, @salary, @advance, @active, @notes, @now, @now)`,
+            `INSERT INTO staff (id, store_id, code, name, position, phone, id_card, base_salary, hired_on, user_id, salary_account, advance_account, active, notes,
+               category, contract_type, contract_end, agency_id, emergency_contact, punch_number, created_at, updated_at)
+             VALUES (@id, @store, @code, @name, @position, @phone, @id_card, @base_salary, @hired_on, @user_id, @salary, @advance, @active, @notes,
+               @category, @contract_type, @contract_end, @agency_id, @emergency_contact, @punch_number, @now, @now)`,
           )
           .run({
             ...values,
@@ -327,18 +382,25 @@ export class StaffService extends Base {
             code: `COL-${this.stationPrefix()}-${String(this.nextCounter('staff.code')).padStart(4, '0')}`,
             salary: accounts.salary,
             advance: accounts.advance,
+            punch_number: this.nextPunchNumber(ctx.storeId),
           });
       }
       if (!current) this.db.prepare('UPDATE staff SET parent_account = ? WHERE id = ?').run(parent.id, staffId);
       this.db.prepare('UPDATE staff SET declared = ?, cnps_number = ? WHERE id = ?').run(values.declared, values.cnps_number, staffId);
       const s = this.query('s.id = ?').get(staffId) as Staff;
       // Les libellés des sous-comptes suivent le nom du collaborateur.
-      this.saveAccount(s.salary_account, this.subLabel(parent, name), now);
-      this.saveAccount(s.advance_account, `Avances, ${name}`, now);
+      if (s.salary_account) this.saveAccount(s.salary_account, this.subLabel(parent, name), now);
+      if (s.advance_account) this.saveAccount(s.advance_account, `Avances, ${name}`, now);
       this.enqueue(ctx, 'staff', s.id, 'upsert', {});
       this.audit(ctx.userId, current ? 'staff.update' : 'staff.create', 'staff', s.id, { name, baseSalary });
       return this.get(s.id);
     });
+  }
+
+  /** Prochain numéro de pointage libre du magasin (1, 2, 3…), tapé à la borne avec le code personnel. */
+  nextPunchNumber(storeId: string): number {
+    const max = this.db.prepare('SELECT MAX(punch_number) FROM staff WHERE store_id = ?').pluck().get(storeId) as number | null;
+    return (max ?? 0) + 1;
   }
 
   // --- Soldes et extrait de compte ---------------------------------------------------
@@ -439,6 +501,7 @@ export class StaffService extends Base {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
     const done = this.salaries(storeId, { period }).filter((x) => x.status === 'active');
     return this.list(storeId, { includeInactive: true })
+      .filter((s) => s.category !== 'contractor')
       .filter((s) => s.active || done.some((d) => d.staff_id === s.id))
       .map((s) => ({ staff: s, salary: done.find((d) => d.staff_id === s.id) ?? null }));
   }

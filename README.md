@@ -306,6 +306,15 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Serveur (migration 10) : état des PC (`devices.status`), réceptions comptées au téléphone (`mobile_receptions`, reprises par un seul PC), fiche produit du téléphone (stock des autres dépôts, prochaine livraison, remplaçant).
 - Administration : état des PC, journal d'audit cherchable, copie d'un utilisateur (rôle, caisse, dépôts, privilèges).
 
+**Personnel et borne de pointage (0.84.0)**
+- Menu Personnel : fiche pour tout le personnel, même sans compte (nettoyage, vigiles) ; catégorie (employé, journalier, stagiaire, agent d'une société prestataire), type et fin de contrat, contact d'urgence, photo, dossier de pièces (CNI, contrat, certificat médical ; image ou PDF) avec alerte d'échéance.
+- Borne de pointage (`kiosk.*`) : badge `FP` + 8 chiffres à la douchette, ou numéro et code personnel (5 essais puis 5 min de blocage), photo webcam facultative, double passage ignoré (`punchGapMinutes`). Un PC réglé en borne (réglage local `kiosk.entrance`) l'affiche à la place de l'écran de connexion.
+- Passages (`time_punches`) : arrivée/départ alternés, rattachés au jour de l'arrivée (gardes de nuit), annulés et non supprimés lors d'une correction ; la connexion au logiciel reste un mode de pointage au choix (`punchLogin`).
+- Équipes (`staff_teams`) avec horaire, jours, tolérance ; rotation entre équipes par semaines ; une ou plusieurs entrées (`entrances`).
+- Sociétés prestataires (`staff_agencies`) : leurs agents pointent sans salaire ni sous-compte ; pointage du mois filtrable par société.
+- Jours fériés légaux du Cameroun (Pâques calculée) et jours ajoutés dans les paramètres : ni absence ni retard, fériés travaillés comptés à part.
+- Qui est là : présents, retards à appeler, attendus, absents et congés du jour.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

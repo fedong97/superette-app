@@ -222,6 +222,12 @@ export const PERMISSIONS = {
   staff_targets: { label: 'Objectifs de vente et commissions des vendeurs', group: 'Personnel', type: 'Menu', parent: 'staff' },
   staff_attendance: { label: 'Pointage du personnel : état du mois, retards, absences et corrections', group: 'Personnel', type: 'Menu', roles: MANAGE },
   staff_leaves: { label: 'Congés et planning du personnel', group: 'Personnel', type: 'Menu', parent: 'staff_attendance' },
+  staff_presence: { label: 'Présences du jour : qui est là, retards et absents', group: 'Personnel', type: 'Menu', parent: 'staff_attendance' },
+  staff_teams: { label: 'Équipes, rotations et entrées du magasin', group: 'Personnel', type: 'Menu', parent: 'staff_attendance' },
+  staff_kiosk: { label: 'Ouvrir la borne de pointage sur ce PC', group: 'Personnel', type: 'Menu', roles: MANAGE },
+  staff_badges: { label: 'Badges et codes de pointage du personnel', group: 'Personnel', type: 'Bouton', parent: 'staff_edit' },
+  staff_agencies: { label: 'Sociétés prestataires (gardiennage, nettoyage)', group: 'Personnel', type: 'Menu', parent: 'staff_edit' },
+  staff_documents: { label: 'Pièces du dossier du personnel (CNI, contrat, certificat)', group: 'Personnel', type: 'Bouton', parent: 'staff_edit' },
   team_board: { label: 'Tableau de l’équipe sur la semaine (écarts, annulations, remises, panier moyen, vitesse)', group: 'Personnel', type: 'Menu', parent: 'cashier_control' },
 
   // --- Fiscalité ---------------------------------------------------------------

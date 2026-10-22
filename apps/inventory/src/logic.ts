@@ -2,7 +2,7 @@
  * Règles de l'application d'inventaire, sans écran ni réseau : lecture du QR
  * code, recherche d'un code-barres, quantités en conditionnements, total d'un
  * produit par endroit. Les quantités sont en millièmes de l'unité de stock,
- * comme dans FEDONIX 360 (1 pièce = 1000, 1,5 kg = 1500).
+ * comme dans ONIX 360 (1 pièce = 1000, 1,5 kg = 1500).
  */
 
 export interface Article {

@@ -18,7 +18,7 @@ const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toF
 
 /**
  * « Ouvrir une boutique » : les boutiques de ce PC.
- * Ouvrir une autre boutique relance FEDONIX 360 dessus ; on s'y connecte avec ses propres utilisateurs.
+ * Ouvrir une autre boutique relance ONIX 360 dessus ; on s'y connecte avec ses propres utilisateurs.
  */
 export function DossierPicker({ onClose }: { onClose: () => void }) {
   const toast = useToast();
@@ -48,7 +48,7 @@ export function DossierPicker({ onClose }: { onClose: () => void }) {
     return run(() => call('dossier.open', info.file), `Ouverture de ${info.store_name ?? info.name}…`);
   };
   const create = async () => {
-    const name = await askText('Nom du fichier de la nouvelle boutique (ex. Boutique Mvog-Mbi) : FEDONIX 360 redémarre sur une boutique vide à paramétrer.');
+    const name = await askText('Nom du fichier de la nouvelle boutique (ex. Boutique Mvog-Mbi) : ONIX 360 redémarre sur une boutique vide à paramétrer.');
     if (name) return run(() => call('dossier.create', name), 'Ouverture de la nouvelle boutique…');
   };
   const forget = async (d: Dossier) => {
@@ -103,7 +103,7 @@ export function DossierPicker({ onClose }: { onClose: () => void }) {
         </table>
       )}
       <div className="actions spread">
-        <span className="muted">FEDONIX 360 redémarre sur la boutique choisie.</span>
+        <span className="muted">ONIX 360 redémarre sur la boutique choisie.</span>
         <span>
           <button disabled={busy} onClick={() => void openFile()}>
             Ouvrir une fiche…

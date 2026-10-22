@@ -33,7 +33,7 @@ export function createDigestMailer(s: Services) {
     });
     try {
       await transport.sendMail({
-        from: `FEDONIX 360 <${c.smtpUser}>`,
+        from: `ONIX 360 <${c.smtpUser}>`,
         to: c.emails,
         subject: `Résumé du ${frDate(date)} · ${digest.storeName}`,
         // Le texte est mis en forme pour WhatsApp : les étoiles du gras n'ont pas de sens dans un e-mail.

@@ -75,7 +75,7 @@ export function App() {
     setReceiveMode(on);
     remember('reception', on ? '1' : null);
   };
-  if (!s.ready) return <div className="splash">FEDONIX 360 Inventaire</div>;
+  if (!s.ready) return <div className="splash">ONIX 360 Inventaire</div>;
   const connected = Boolean(s.config && s.session);
   const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
   const archive = s.archives.find((a) => a.inventory.id === recapId);
@@ -234,9 +234,9 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
   return (
     <div className="page center">
       <img className="logo" src="./icon.png" alt="" />
-      <h1>FEDONIX 360 Inventaire</h1>
+      <h1>ONIX 360 Inventaire</h1>
       <p className="muted">
-        Reliez ce téléphone au magasin : le gérant ouvre FEDONIX 360 Gérant › Inventaire et affiche le QR code. Vous venez aider sans compte ? Scannez le QR code d’aide que le
+        Reliez ce téléphone au magasin : le gérant ouvre ONIX 360 Gérant › Inventaire et affiche le QR code. Vous venez aider sans compte ? Scannez le QR code d’aide que le
         gérant vous montre.
       </p>
       <label className="field">
@@ -298,7 +298,7 @@ function Login({ onFiles }: { onFiles: () => void }) {
       <h1>{s.config!.storeName}</h1>
       {guest ? <GuestLogin onBack={() => setGuest(false)} /> : null}
       <p className="muted" hidden={guest}>
-        Connectez-vous avec votre identifiant et votre code de FEDONIX 360.
+        Connectez-vous avec votre identifiant et votre code d’ONIX 360.
       </p>
       <form
         hidden={guest}
@@ -2120,7 +2120,7 @@ function Settings({ onClose }: { onClose: () => void }) {
         >
           Délier ce téléphone
         </button>
-        <p className="muted small">FEDONIX 360 Inventaire {VERSION}</p>
+        <p className="muted small">ONIX 360 Inventaire {VERSION}</p>
         <button className="link" onClick={onClose}>
           Fermer
         </button>

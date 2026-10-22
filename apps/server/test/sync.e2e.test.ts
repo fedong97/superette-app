@@ -22,7 +22,7 @@ function licenseKey(machine: string, stations: number): string {
 
 /**
  * Deux PC du même magasin, puis un deuxième magasin, reliés par un vrai serveur :
- * sur PostgreSQL si TEST_DATABASE_URL est donnée, sinon sur la base intégrée (FEDONIX 360 Serveur pour Windows).
+ * sur PostgreSQL si TEST_DATABASE_URL est donnée, sinon sur la base intégrée (ONIX 360 Serveur pour Windows).
  */
 describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchronisation par le serveur central (base %s)', (base) => {
   let app: INestApplication;
@@ -485,7 +485,7 @@ describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchroni
       expect(res.status).toBe(302);
       cookie = res.headers.get('set-cookie')!.split(';')[0]!;
       expect((await (await get('/admin/api/session')).json()).authenticated).toBe(true);
-      expect(await (await get('/')).text()).toContain('FEDONIX 360 Serveur');
+      expect(await (await get('/')).text()).toContain('ONIX 360 Serveur');
     });
 
     it('montre les postes, les ventes du jour et le journal des opérations', async () => {

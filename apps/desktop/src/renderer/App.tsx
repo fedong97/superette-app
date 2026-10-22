@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
+import { DEFAULT_STORE_SETTINGS, type EagleMood, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
@@ -32,7 +32,7 @@ import { AgentPoint, type AgentTab } from './screens/AgentPoint';
 import { CashierControl } from './screens/CashierControl';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { AskHost, DRAFT_SCREENS, KeyHints, THEMES, type Theme, applyTheme, askConfirm, Field, Modal, OPEN_EVENT, RefreshCtx, dateTime, pageShortcuts, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, DRAFT_SCREENS, KeyHints, THEMES, type Theme, applyTheme, askConfirm, Field, Mascot, Modal, OPEN_EVENT, RefreshCtx, dateTime, pageShortcuts, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
 import { type ListPrefs, ListTools } from './listTools';
@@ -526,6 +526,12 @@ export function App() {
 }
 
 /** Texte court de la barre d'état ; le message complet est dans l'infobulle et Administration › Licence. */
+/** L'aigle de l'accueil dit bonjour le jour et dort tard le soir. */
+function homeMood(): EagleMood {
+  const h = new Date().getHours();
+  return h >= 22 || h < 5 ? 'dort' : 'bonjour';
+}
+
 function licenseLabel(l: AppState['license']): string {
   const days = l.daysLeft === null ? '' : ` (${l.daysLeft} j)`;
   switch (l.state) {
@@ -652,7 +658,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     };
   }, [idleMinutes]);
   useEffect(() => {
-    document.title = `FEDONIX 360 v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
+    document.title = `ONIX 360 v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
     if (!menu && !ctxMenu) return;
@@ -781,7 +787,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const startTraining = async () => {
     if (state.dossier.fiche?.kind === 'formation') return toast.ok('Vous êtes déjà en mode formation');
     const ok = await askConfirm(
-      "Ouvrir le mode formation ? FEDONIX 360 redémarre sur une copie de la boutique : on y vend pour s'entraîner, avec les vrais articles et les vrais comptes, mais rien ne compte dans la boutique (ni stock, ni caisse, ni comptabilité, ni serveur). « Quitter la formation » ramène à la boutique.",
+      "Ouvrir le mode formation ? ONIX 360 redémarre sur une copie de la boutique : on y vend pour s'entraîner, avec les vrais articles et les vrais comptes, mais rien ne compte dans la boutique (ni stock, ni caisse, ni comptabilité, ni serveur). « Quitter la formation » ramène à la boutique.",
     );
     if (!ok) return;
     try {
@@ -1012,7 +1018,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
         <section className={`home ${showHome ? 'front' : ''}`}>
           <div className="home-card">
-            <div className="home-mark">{(state.station?.store.name ?? 'S').replace(/^(superette|supérette)\s+/i, '').slice(0, 1).toUpperCase()}</div>
+            <Mascot mood={homeMood()} size={96} className="home-aigle" />
             <h1>{state.station?.store.name}</h1>
             {(state.station?.store.address || state.station?.store.phone) && (
               <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
@@ -1120,7 +1126,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ))}
       </main>
       <footer className="statusbar">
-        <span title="Version du logiciel">FEDONIX 360 v{state.version}</span>
+        <span title="Version du logiciel">ONIX 360 v{state.version}</span>
         <span title="Magasin">{state.station?.store.name}</span>
         {state.canChooseRegister ? (
           <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
@@ -1163,7 +1169,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             className="warn soft"
             title="La nouvelle version s'installe à la fermeture du logiciel"
             onClick={async () => {
-              if (!(await askConfirm(`Fermer FEDONIX 360 et installer la version ${update.data!.available} ? Le logiciel se rouvre tout seul après l'installation.`))) return;
+              if (!(await askConfirm(`Fermer ONIX 360 et installer la version ${update.data!.available} ? Le logiciel se rouvre tout seul après l'installation.`))) return;
               call('update.install').catch(() => update.reload());
             }}
           >
@@ -1416,8 +1422,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       {help === 'about' && (
         <Modal title="À propos" onClose={() => setHelp(null)}>
           <p>
-            <img src={logo} alt="" width={48} height={48} style={{ float: 'left', marginRight: 12 }} />
-            <strong>FEDONIX 360</strong> v{state.version}
+            <span style={{ float: 'left', marginRight: 12 }}>
+              <Mascot mood="bonjour" size={64} branch={false} />
+            </span>
+            <strong>ONIX 360</strong> v{state.version}
             <br />
             Gestion commerciale pour superettes et boutiques au Cameroun : caisse, stock, multi-magasins.
             <br />© FEDONG

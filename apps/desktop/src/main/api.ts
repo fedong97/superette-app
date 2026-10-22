@@ -784,7 +784,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.templates.apply(u.id, ctx().storeId, findTemplate(idOrFile));
     },
     'template.choose': async () => {
-      const file = await chooseOpenFile('Choisir le modèle de boutique', 'Modèle FEDONIX 360', [TEMPLATE_EXTENSION]);
+      const file = await chooseOpenFile('Choisir le modèle de boutique', 'Modèle ONIX 360', [TEMPLATE_EXTENSION]);
       return file ? templateSummary({ ...parseTemplate(readFileSync(file, 'utf8')), file }) : null;
     },
     /** Fait un modèle de la boutique ouverte, rangé avec les modèles de ce PC (et copiable sur une clé). */
@@ -878,7 +878,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'relay.choose': async () => {
       requireUser(['cash', 'admin']);
-      const file = await chooseOpenFile('Choisir le fichier de journée à intégrer', 'Journée FEDONIX 360', [RELAY_EXTENSION]);
+      const file = await chooseOpenFile('Choisir le fichier de journée à intégrer', 'Journée ONIX 360', [RELAY_EXTENSION]);
       return file ? { file, ...s.relay.read(file) } : null;
     },
     'relay.integrate': (file: string) => {

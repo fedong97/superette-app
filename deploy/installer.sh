@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installe FEDONIX 360 Serveur sur un serveur loué (Ubuntu ou Debian), à lancer en root
+# Installe ONIX 360 Serveur sur un serveur loué (Ubuntu ou Debian), à lancer en root
 # dans le dossier décompressé : sudo bash installer.sh
 # Relancé plus tard avec une nouvelle image, il met le serveur à jour sans toucher aux données.
 set -euo pipefail
@@ -17,11 +17,11 @@ if [ -z "$image" ]; then
 fi
 version=${image#fedonix360-serveur-}
 version=${version%.tar.gz}
-echo "Chargement de FEDONIX 360 Serveur $version…"
+echo "Chargement d’ONIX 360 Serveur $version…"
 gunzip -c "$image" | docker load
 
 if [ ! -f .env ]; then
-  read -rp "Nom de domaine du serveur (ex. fedonix.mamaboutique.cm) : " domaine
+  read -rp "Nom de domaine du serveur (ex. onix.mamaboutique.cm) : " domaine
   read -rsp "Mot de passe de l'interface du serveur : " mdp
   echo
   cle=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
@@ -42,6 +42,6 @@ chown -R 1000:1000 donnees
 docker compose up -d
 . ./.env
 echo
-echo "FEDONIX 360 Serveur $version démarré : https://$DOMAINE/"
+echo "ONIX 360 Serveur $version démarré : https://$DOMAINE/"
 echo "Sur chaque PC : Administration › Serveur central, adresse https://$DOMAINE"
 echo "Page du gérant sur téléphone : https://$DOMAINE/gerant"

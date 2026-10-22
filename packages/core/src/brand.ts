@@ -10,7 +10,7 @@ export const DEFAULT_BRAND_COLOR2 = '#57b083';
 
 /** Palettes toutes prêtes proposées dans Administration. */
 export const BRAND_PRESETS: { name: string; color: string; color2: string }[] = [
-  { name: 'Vert (FEDONIX)', color: DEFAULT_BRAND_COLOR, color2: DEFAULT_BRAND_COLOR2 },
+  { name: 'Vert (ONIX)', color: DEFAULT_BRAND_COLOR, color2: DEFAULT_BRAND_COLOR2 },
   { name: 'Bleu', color: '#1d4ed8', color2: '#38bdf8' },
   { name: 'Rouge', color: '#c62828', color2: '#f2994a' },
   { name: 'Orange', color: '#d9480f', color2: '#f59f00' },

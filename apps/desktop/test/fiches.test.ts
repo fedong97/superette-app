@@ -33,7 +33,7 @@ function pc(root: string, name: string) {
       install: (f) => void installed.push(f),
     },
   });
-  /** Démarre FEDONIX 360 sur la boutique retenue par ce PC. */
+  /** Démarre ONIX 360 sur la boutique retenue par ce PC. */
   const start = (clock: () => Date): { s: Services; api: Api; file: string } => {
     const file = dossiers.startupFile();
     const s = openServices(file, clock);

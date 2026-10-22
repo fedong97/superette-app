@@ -1,4 +1,4 @@
-# Serveur central FEDONIX 360 pour un serveur loué (VPS) : base intégrée, sauvegardes
+# Serveur central ONIX 360 pour un serveur loué (VPS) : base intégrée, sauvegardes
 # quotidiennes dans /data. Construit depuis la racine du dépôt :
 #   docker build -f deploy/Dockerfile -t fedonix360-serveur .
 FROM node:22-bookworm-slim AS build

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f7a4d">
-<title>Inventaire sur téléphone · FEDONIX 360</title>
+<title>Inventaire sur téléphone · ONIX 360</title>
 <link rel="icon" href="/gerant/icon.png">
 <style>
   :root {
@@ -96,7 +96,7 @@
       <h1>Inventaire sur téléphone</h1>
       ${message ? `<div class="message erreur">${esc(message)}</div>` : ''}
       <form id="f">
-        <input type="password" id="mdp" placeholder="Mot de passe de FEDONIX 360 Serveur" autocomplete="current-password" autofocus>
+        <input type="password" id="mdp" placeholder="Mot de passe d’ONIX 360 Serveur" autocomplete="current-password" autofocus>
         <button class="principal" style="width:100%" type="submit">Se connecter</button>
       </form>
     </div>`;
@@ -126,7 +126,7 @@
     if (!stores.some((s) => s.id === pairStore)) pairStore = stores[0]?.id ?? '';
     const left = pairing ? Math.max(0, Math.round((Date.parse(pairing.expiresAt) - Date.now()) / 1000)) : 0;
     return `<section><h2>Relier un téléphone</h2>
-      <p class="muted" style="margin:0 0 8px">Installez l’application FEDONIX 360 Inventaire sur le téléphone du compteur, ouvrez-la puis scannez ce QR code. Le téléphone et ce serveur doivent être sur le même réseau Wi-Fi.</p>
+      <p class="muted" style="margin:0 0 8px">Installez l’application ONIX 360 Inventaire sur le téléphone du compteur, ouvrez-la puis scannez ce QR code. Le téléphone et ce serveur doivent être sur le même réseau Wi-Fi.</p>
       <div class="ligne">
         ${stores.length > 1 ? `<select id="pair-store">${stores.map((s) => `<option value="${esc(s.id)}" ${s.id === pairStore ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
         <button class="principal" id="pair" ${stores.length ? '' : 'disabled'}>${pairing ? 'Nouveau QR code' : 'Afficher le QR code'}</button>
@@ -184,7 +184,7 @@
     return `<h3>Aides sans compte <span class="muted" style="font-weight:400">(famille, intérimaires…)</span></h3>
       ${active.length ? `<div class="liste">${active.map((g) => `<div><div class="g">${esc(g.name)} <span class="pastille ok">Actif</span><small>Code <b>${esc(g.code)}</b> · jusqu’à ${date(g.expiresAt)} · signé sur le PC au nom de ${esc(g.onBehalfOf)}</small></div><button class="petit" data-guest-off="${esc(g.id)}">Couper</button></div>`).join('')}</div>` : '<div class="vide">Aucun aide pour cet inventaire.</div>'}
       ${shown ? `<div class="qr"><div class="img">${shown.qr}</div><div>
-        <div><b>${esc(shown.name)}</b> scanne ce QR code avec l’application FEDONIX 360 Inventaire</div>
+        <div><b>${esc(shown.name)}</b> scanne ce QR code avec l’application ONIX 360 Inventaire</div>
         <div class="muted" style="margin-top:8px">ou tape le code sur l’écran de connexion (« Je suis un aide »)</div>
         <div class="code">${esc(shown.code.replace(/(\d{3})/, '$1 '))}</div>
         <div class="muted" style="margin-top:8px">Valable jusqu’à ${date(shown.expiresAt)}, et seulement pour cet inventaire : l’accès s’arrête à la clôture.</div>

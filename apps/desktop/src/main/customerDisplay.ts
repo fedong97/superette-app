@@ -28,7 +28,7 @@ export interface CustomerDisplay {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const money = (v: number) => formatFcfa(v);
 
-/** Page du deuxième écran : grands chiffres lisibles de loin, aux couleurs de FEDONIX 360. */
+/** Page du deuxième écran : grands chiffres lisibles de loin, aux couleurs d’ONIX 360. */
 const PAGE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Afficheur client</title><style>
   html, body { margin: 0; height: 100%; font-family: 'Segoe UI', Arial, sans-serif; background: #0f3d3a; color: #fff; overflow: hidden; }
   body { display: flex; flex-direction: column; }

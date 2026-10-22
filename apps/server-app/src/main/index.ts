@@ -6,7 +6,7 @@ import { BrowserWindow, Menu, Tray, app, dialog, nativeImage, shell } from 'elec
 import { createApp } from '../../../server/src/app';
 
 /**
- * FEDONIX 360 Serveur : le serveur central dans une application Windows.
+ * ONIX 360 Serveur : le serveur central dans une application Windows.
  * La base est intégrée (dossier %APPDATA%\FEDO Serveur\donnees), l'interface s'ouvre
  * dans une fenêtre, et le serveur continue de tourner, icône près de l'horloge,
  * quand la fenêtre est fermée.
@@ -66,7 +66,7 @@ function showWindow(port: number) {
     height: 820,
     minWidth: 760,
     minHeight: 560,
-    title: 'FEDONIX 360 Serveur',
+    title: 'ONIX 360 Serveur',
     icon: icon(),
     autoHideMenuBar: true,
     backgroundColor: '#f4f5f7',
@@ -86,7 +86,7 @@ function showWindow(port: number) {
     if (!hintShown && tray && process.platform === 'win32') {
       hintShown = true;
       tray.displayBalloon({
-        title: 'FEDONIX 360 Serveur continue de tourner',
+        title: 'ONIX 360 Serveur continue de tourner',
         content: "Les PC du magasin restent synchronisés. Cliquez sur l'icône près de l'horloge pour rouvrir la fenêtre.",
         iconType: 'info',
       });
@@ -102,9 +102,9 @@ async function quit() {
     buttons: ['Arrêter le serveur', 'Annuler'],
     defaultId: 1,
     cancelId: 1,
-    title: 'FEDONIX 360 Serveur',
+    title: 'ONIX 360 Serveur',
     message: 'Arrêter le serveur ?',
-    detail: "Les PC continueront de vendre, mais ne se synchroniseront plus jusqu'au prochain démarrage de FEDONIX 360 Serveur.",
+    detail: "Les PC continueront de vendre, mais ne se synchroniseront plus jusqu'au prochain démarrage d’ONIX 360 Serveur.",
   });
   if (answer.response !== 0) return;
   quitting = true;
@@ -113,10 +113,10 @@ async function quit() {
 
 function buildTray(port: number) {
   tray = new Tray(icon());
-  tray.setToolTip(`FEDONIX 360 Serveur : en marche (port ${port})`);
+  tray.setToolTip(`ONIX 360 Serveur : en marche (port ${port})`);
   const menu = () =>
     Menu.buildFromTemplate([
-      { label: 'Ouvrir FEDONIX 360 Serveur', click: () => showWindow(port) },
+      { label: 'Ouvrir ONIX 360 Serveur', click: () => showWindow(port) },
       { label: 'Ouvrir dans le navigateur', click: () => void shell.openExternal(`http://localhost:${port}/`) },
       { label: 'Dossier des sauvegardes', click: () => void shell.openPath(backupDir()) },
       { type: 'separator' },
@@ -154,7 +154,7 @@ async function start() {
   } catch (e) {
     const busy = (e as { code?: string }).code === 'EADDRINUSE';
     dialog.showErrorBox(
-      'FEDONIX 360 Serveur ne peut pas démarrer',
+      'ONIX 360 Serveur ne peut pas démarrer',
       busy
         ? `Le port ${reglages.port} est déjà utilisé : un autre serveur FEDO tourne peut-être déjà sur ce PC.\n\nPour changer de port, modifiez ${reglagesFile()}.`
         : `${e instanceof Error ? e.message : String(e)}\n\nDossier de la base : ${dataDir}`,
@@ -170,7 +170,7 @@ async function start() {
   } else if (!existsSync(reglagesFile())) {
     writeReglages(reglages);
   } else if (!reglages.sansDemarrageAuto && !app.getLoginItemSettings({ args: [HIDDEN_ARG] }).openAtLogin) {
-    // L'exécutable a changé de nom (« FEDO Serveur.exe » devenu « FEDONIX 360 Serveur.exe ») :
+    // L'exécutable a changé de nom (« FEDO Serveur.exe », puis « FEDONIX 360 Serveur.exe », devenu « ONIX 360 Serveur.exe ») :
     // l'ancienne entrée de démarrage pointe vers un fichier supprimé, on la refait.
     app.setLoginItemSettings({ openAtLogin: true, args: [HIDDEN_ARG] });
   }

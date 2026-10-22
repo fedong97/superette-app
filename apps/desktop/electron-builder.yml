@@ -1,5 +1,5 @@
 appId: cm.superette.gestion
-productName: FEDONIX 360
+productName: ONIX 360
 copyright: © FEDONG
 directories:
   output: release
@@ -13,13 +13,13 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  artifactName: Fedonix360-Setup-${version}.exe
+  artifactName: Onix360-Setup-${version}.exe
 nsis:
   oneClick: false
   perMachine: true
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: FEDONIX 360
+  shortcutName: ONIX 360
   language: '1036'
   # Contrat de licence à accepter pendant l'installation (aussi affiché dans Administration › Licence).
   license: build/contrat-licence.txt

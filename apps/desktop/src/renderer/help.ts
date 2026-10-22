@@ -262,7 +262,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Le gérant crée l’inventaire (global ou par rayons) ; la liste des produits s’affiche.',
           'Tapez les quantités comptées, Entrée passe à la ligne suivante. Les ventes faites pendant le comptage sont déduites.',
-          'Sur téléphone : les compteurs installent FEDONIX 360 Inventaire (Android). Le gérant ouvre FEDONIX 360 Gérant › Inventaire, affiche le QR code et le téléphone le scanne. Les quantités comptées arrivent ici toutes seules.',
+          'Sur téléphone : les compteurs installent ONIX 360 Inventaire (Android). Le gérant ouvre ONIX 360 Gérant › Inventaire, affiche le QR code et le téléphone le scanne. Les quantités comptées arrivent ici toutes seules.',
           'Le gérant clôture : le stock est corrigé et la fiche d’écarts s’imprime.',
         ],
       },
@@ -666,7 +666,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         perm: 'fixed_assets',
         steps: [
           '« Nouvelle immobilisation » : choisissez la catégorie (elle propose le compte et la durée), le nom du bien, sa valeur HT et sa date de mise en service.',
-          'Un bien que le magasin avait déjà avant FEDONIX 360 se saisit en « Bien repris » : ses amortissements d’avant la reprise sont comptés, sans dotation en double.',
+          'Un bien que le magasin avait déjà avant ONIX 360 se saisit en « Bien repris » : ses amortissements d’avant la reprise sont comptés, sans dotation en double.',
           'La dotation de chaque exercice se passe toute seule à sa date de fin. Cliquez un bien pour son plan d’amortissement ; « Vendre ou mettre au rebut » le sort du registre.',
         ],
       },
@@ -872,7 +872,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Reprise des données',
         perm: 'data_takeover',
         steps: [
-          'Pour un magasin qui passe à FEDONIX 360 : choisissez le fichier à reprendre (clients, fournisseurs ou stock de départ) et téléchargez le modèle Excel.',
+          'Pour un magasin qui passe à ONIX 360 : choisissez le fichier à reprendre (clients, fournisseurs ou stock de départ) et téléchargez le modèle Excel.',
           'Remplissez-le (ou exportez la liste de l’ancien logiciel avec les mêmes en-têtes), puis « Choisir le fichier rempli » : l’aperçu montre ce qui sera fait et les lignes à corriger.',
           '« Importer » enregistre tout d’un bloc et passe les à-nouveaux contre le compte 4711. S’il reste une erreur, rien n’est importé : corrigez le fichier et recommencez.',
         ],
@@ -892,7 +892,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Serveur central',
         steps: [
           'Adresse du serveur qui relie les PC et les magasins ; l’état s’affiche dans la barre du bas.',
-          'Sur votre téléphone : ouvrez l’adresse du serveur suivie de /gerant, connectez-vous avec le mot de passe de FEDONIX 360 Serveur, puis « Ajouter à l’écran d’accueil ». Ventes du jour, caisses, écarts, ruptures et alertes de chaque magasin.',
+          'Sur votre téléphone : ouvrez l’adresse du serveur suivie de /gerant, connectez-vous avec le mot de passe d’ONIX 360 Serveur, puis « Ajouter à l’écran d’accueil ». Ventes du jour, caisses, écarts, ruptures et alertes de chaque magasin.',
         ],
       },
       {
@@ -901,7 +901,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Le PC cherche une nouvelle version au démarrage puis toutes les 4 heures, sur le serveur central ou à l’adresse saisie ici.',
           'La version téléchargée s’installe à la fermeture du logiciel, ou tout de suite avec « Installer maintenant ».',
-          'Pour proposer une version aux PC : FEDONIX 360 Serveur › Mises à jour › déposer le fichier Fedonix360-Setup-x.y.z.exe.',
+          'Pour proposer une version aux PC : ONIX 360 Serveur › Mises à jour › déposer le fichier Onix360-Setup-x.y.z.exe.',
         ],
       },
       {
@@ -929,7 +929,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Choisissez la journée : le résumé montre les ventes, les encaissements, les caisses et leurs écarts, les meilleures ventes et ce qui demande votre attention.',
           '« Envoyer par WhatsApp » ouvre WhatsApp avec le résumé, adressé au numéro du gérant réglé à droite.',
-          'Pour l’envoi automatique, l’administrateur coche « Envoyer le résumé chaque soir », choisit l’heure, les destinataires et le compte e-mail qui envoie. Ce PC doit être allumé avec FEDONIX 360 ouvert ; sinon le résumé de la veille part au démarrage suivant.',
+          'Pour l’envoi automatique, l’administrateur coche « Envoyer le résumé chaque soir », choisit l’heure, les destinataires et le compte e-mail qui envoie. Ce PC doit être allumé avec ONIX 360 ouvert ; sinon le résumé de la veille part au démarrage suivant.',
         ],
       },
     ],

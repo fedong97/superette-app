@@ -11,7 +11,7 @@ async function frenchLeft(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out = new Set<string>();
     const fr = /[éèêàçùôîûœ]|\b(le|la|les|des|du|un|une|et|pour|sur|avec|aucun|aucune|est|dans|par|de|au|aux|en|ou|ce|cette|ses|son|sa|nouveau|nouvelle|rechercher|enregistrer|imprimer|choisir|fermer|ouvrir|tous|toutes|jour|mois|annuler|valider|retour|remise|solde|reste|payer|caisse|vente|ventes|client|clients|facture|montant|ticket)\b/i;
-    const data = /Superette Test|Gérant Test|Riz parfumé|Awa Ndiaye|FEDONIX|DLA1/;
+    const data = /Superette Test|Gérant Test|Riz parfumé|Awa Ndiaye|ONIX|DLA1/;
     const keep = (t: string | null | undefined) => {
       const s = (t ?? '').trim();
       if (s && fr.test(s) && !data.test(s)) out.add(s.slice(0, 160));

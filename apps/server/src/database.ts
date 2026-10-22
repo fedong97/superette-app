@@ -170,14 +170,14 @@ CREATE INDEX events_received ON events (received_at);
   {
     version: 4,
     sql: `
--- Version de FEDONIX 360 de chaque PC, pour voir qui n'a pas encore pris la mise à jour.
+-- Version d’ONIX 360 de chaque PC, pour voir qui n'a pas encore pris la mise à jour.
 ALTER TABLE devices ADD COLUMN app_version TEXT;
 `,
   },
   {
     version: 5,
     sql: `
--- Téléphones d'inventaire (FEDONIX 360 Inventaire) : des postes à part, hors licence des PC,
+-- Téléphones d'inventaire (ONIX 360 Inventaire) : des postes à part, hors licence des PC,
 -- qui ne lisent que le catalogue et les inventaires ouverts de leur magasin.
 ALTER TABLE devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'pc';
 -- Code du QR affiché au gérant : une seule utilisation, valable 15 minutes.

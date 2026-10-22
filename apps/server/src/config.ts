@@ -2,7 +2,7 @@
 export interface ServerConfig {
   /** Serveur PostgreSQL. Sans elle, la base intégrée de `dataDir` est utilisée. */
   databaseUrl?: string;
-  /** Dossier de la base intégrée (FEDONIX 360 Serveur pour Windows) : rien à installer. */
+  /** Dossier de la base intégrée (ONIX 360 Serveur pour Windows) : rien à installer. */
   dataDir?: string;
   /** Dossier des sauvegardes automatiques de la base intégrée. */
   backupDir?: string;
@@ -16,7 +16,7 @@ export interface ServerConfig {
   enrollmentKey?: string;
   /** Clé publique qui vérifie les licences ; celle de l'éditeur par défaut (autre clé : tests seulement). */
   licensePublicKey?: string;
-  /** Jeton qui ouvre l'interface sans mot de passe : seulement pour la fenêtre de FEDONIX 360 Serveur sur ce PC. */
+  /** Jeton qui ouvre l'interface sans mot de passe : seulement pour la fenêtre d’ONIX 360 Serveur sur ce PC. */
   localAdminToken?: string;
   /** Mot de passe de l'interface, s'il n'en a pas encore (serveur sur Internet, derrière un proxy). */
   adminPassword?: string;

@@ -1,5 +1,5 @@
-import { DEFAULT_STORE_SETTINGS, type Permission, type StoreSettings } from '@superette/core';
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { DEFAULT_STORE_SETTINGS, type EagleMood, type Permission, type StoreSettings, eagleMascotSvg } from '@superette/core';
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { formatFcfa, formatQty } from '@superette/core';
 import { ApiError, type ErrorFix, call } from './api';
 
@@ -58,6 +58,28 @@ export const openScreen = (kind: string, tab?: string) => window.dispatchEvent(n
 
 /** Délai pendant lequel une action simple peut être annulée. */
 export const UNDO_SECONDS = 10;
+
+/**
+ * La mascotte ONIX, l'aigle, dans l'humeur du moment : veille (attente),
+ * bonjour (accueil), compte (calcul, impression), alerte (erreur, écart),
+ * bravo (réussite), dort (caisse fermée).
+ */
+export function Mascot({ mood, size = 96, branch = true, className = '' }: { mood: EagleMood; size?: number; branch?: boolean; className?: string }) {
+  const svg = useMemo(() => eagleMascotSvg(mood, { branch }), [mood, branch]);
+  return (
+    <svg
+      className={`aigle aigle-${mood} ${className}`}
+      viewBox="0 0 200 230"
+      width={size}
+      height={(size * 230) / 200}
+      role="img"
+      aria-label={`Aigle ONIX : ${mood}`}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
+const TOAST_MOOD: Record<Toast['kind'], EagleMood> = { ok: 'bravo', error: 'alerte', undo: 'compte' };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -137,6 +159,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind} ${t.fixes?.length ? 'with-fixes' : ''}`}>
+            <Mascot mood={TOAST_MOOD[t.kind]} size={34} branch={false} className="toast-aigle" />
             <span>{t.text}</span>
             {t.kind === 'undo' && (
               <button type="button" className="toast-btn" onClick={() => undo(t.id)} title="Ctrl+Z">
@@ -438,9 +461,10 @@ export function SupervisorPrompt({ action, onCancel, onConfirm }: { action: stri
  * Liste ou page vide : le message dit quoi faire ensuite, et le bouton
  * facultatif le fait tout de suite (« Ouvrir la caisse », « Nouveau client »…).
  */
-export function Empty({ children, action }: { children: ReactNode; action?: { label: string; onClick: () => void } }) {
+export function Empty({ children, action, mood = 'veille' }: { children: ReactNode; action?: { label: string; onClick: () => void }; mood?: EagleMood }) {
   return (
     <div className="empty">
+      <Mascot mood={mood} size={64} branch={false} />
       <div>{children}</div>
       {action && (
         <button className="primary empty-action" onClick={action.onClick}>

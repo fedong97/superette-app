@@ -78,7 +78,7 @@ export class AdminService {
     if (token) this.sessions.delete(token);
   }
 
-  /** La fenêtre de FEDONIX 360 Serveur s'ouvre avec son jeton : pas de mot de passe à taper sur le PC du serveur. */
+  /** La fenêtre d’ONIX 360 Serveur s'ouvre avec son jeton : pas de mot de passe à taper sur le PC du serveur. */
   localLogin(token: string): string | null {
     const expected = this.config.localAdminToken;
     if (!expected || token.length !== expected.length || !timingSafeEqual(Buffer.from(token), Buffer.from(expected))) return null;
@@ -87,7 +87,7 @@ export class AdminService {
 
   async login(password: string, remember = false): Promise<string> {
     const stored = await this.passwordHash();
-    if (!stored) throw new UnauthorizedException("Aucun mot de passe n'est encore choisi : ouvrez FEDONIX 360 Serveur sur le PC du serveur.");
+    if (!stored) throw new UnauthorizedException("Aucun mot de passe n'est encore choisi : ouvrez ONIX 360 Serveur sur le PC du serveur.");
     const [salt] = stored.split(':');
     const given = Buffer.from(hashPassword(String(password ?? ''), salt));
     if (given.length !== stored.length || !timingSafeEqual(given, Buffer.from(stored))) throw new UnauthorizedException('Mot de passe incorrect');

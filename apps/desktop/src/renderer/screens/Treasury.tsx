@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BANK_METHODS, DENOMINATIONS_FCFA, ELECTRONIC_METHODS, PAYMENT_METHODS, type PaymentMethod, type RegisterKind, countedTotal } from '@superette/core';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast, PhoneApproval } from '../ui';
+import { askConfirm, Empty, Field, Mascot, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, today, useCan, useLoad, useToast, PhoneApproval } from '../ui';
 import { CashInDialog, CashOutDialog, DeskActions, type DeskProps, type DeskRow, NatureTotals } from './CashDesk';
 import { EmoneyCentral } from './EmoneyCentral';
 import { ZView } from './PosDialogs';
@@ -905,6 +905,10 @@ function CloseDialog({
     const deposits = done.session.deposit ?? 0;
     return (
       <Modal title={`Caisse fermée · Z n° ${done.session.z_number}`} onClose={() => onDone(done.session.id)} wide>
+        <div className="aigle-bulle">
+          <Mascot mood="dort" size={70} branch={false} />
+          <div>Caisse fermée. Bon repos, à demain !</div>
+        </div>
         <ZView z={done} />
         <p>
           Versé à la caisse centrale : <b>{fcfa(deposits)}</b> · fond laissé dans le tiroir : <b>{fcfa(done.session.float_left ?? 0)}</b>
@@ -924,7 +928,10 @@ function CloseDialog({
       {!preview ? (
         <>
           <BeforeClose registerId={session.register_id ?? undefined} />
-          <p>Comptez les espèces du tiroir par coupure. L'attendu s'affiche après le comptage.</p>
+          <div className="aigle-bulle">
+            <Mascot mood="compte" size={70} branch={false} />
+            <div>Comptez les espèces du tiroir par coupure. L'attendu s'affiche après le comptage.</div>
+          </div>
           <Denominations count={count} onChange={setCount} />
           <div className="actions">
             <span className="big-total">{fcfa(counted)}</span>
@@ -960,6 +967,14 @@ function CloseDialog({
             }
           }}
         >
+          <div className="aigle-bulle">
+            <Mascot mood={preview.difference === 0 ? 'bravo' : 'alerte'} size={70} branch={false} />
+            <div>
+              {preview.difference === 0
+                ? 'Caisse juste : le comptage tombe pile sur l’attendu.'
+                : `${preview.difference < 0 ? 'Il manque' : 'Il y a en trop'} ${fcfa(Math.abs(preview.difference))} : recomptez avant de clôturer.`}
+            </div>
+          </div>
           <div className="kpis">
             <div>
               <small>Attendu</small>

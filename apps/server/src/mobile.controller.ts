@@ -14,7 +14,7 @@ const cookieOf = (req: Request): string | undefined =>
     .find(([k]) => k === 'fedo_admin')?.[1];
 
 /**
- * Application Android « FEDONIX 360 Inventaire » (`/api/v1/mobile/…`) et
+ * Application Android « ONIX 360 Inventaire » (`/api/v1/mobile/…`) et
  * page du gérant qui relie les téléphones et suit les comptages (`/gerant/inventaire`).
  */
 @Controller()

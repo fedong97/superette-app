@@ -55,7 +55,7 @@ const lower = (s: string) => s.trim().toLocaleLowerCase('fr').replace(/\s+/g, ' 
 const digits = (s: string | null) => (s ?? '').replace(/\D/g, '').replace(/^237(?=\d{9}$)/, '');
 
 /**
- * Reprise d'un magasin qui passe à FEDONIX 360 : fiches clients et fournisseurs
+ * Reprise d'un magasin qui passe à ONIX 360 : fiches clients et fournisseurs
  * avec ce qu'ils doivent, stock de départ par dépôt. Chaque fichier se vérifie
  * d'abord en aperçu (rien n'est enregistré), puis s'importe d'un bloc.
  *
@@ -219,7 +219,7 @@ export class OpeningService extends Base {
             dueDate: row.dueDate ?? dueDate(docDate, supplier.payment_terms_days),
             totalHt: amount,
             totalTva: 0,
-            notes: 'Solde repris à la mise en service de FEDONIX 360',
+            notes: 'Solde repris à la mise en service d’ONIX 360',
           });
           this.db.prepare('UPDATE supplier_invoices SET opening = 1 WHERE id = ?').run(invoice.id);
           action += row.balance > 0 ? `, on lui doit ${formatFcfa(amount)}` : `, avoir de ${formatFcfa(amount)}`;

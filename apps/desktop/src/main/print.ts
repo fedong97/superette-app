@@ -413,7 +413,7 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         <h2 style="font-size:15px;margin-top:22px">Rayons qui font la marge</h2>
         <table><tr><th>Rayon</th><th class="r">Ventes HT</th><th class="r">Marge</th></tr>
         ${r.departments.map((d) => `<tr><td>${esc(d.name)}</td><td class="r">${money(d.sales_ht)}</td><td class="r">${money(d.margin)}</td></tr>`).join('')}</table>
-        <p class="muted" style="margin-top:24px">Chiffres tirés des ventes, de la comptabilité et du stock enregistrés dans FEDONIX 360.</p>`;
+        <p class="muted" style="margin-top:24px">Chiffres tirés des ventes, de la comptabilité et du stock enregistrés dans ONIX 360.</p>`;
       return saveA4Pdf(body, `rapport-${month}-${store.code}.pdf`);
     },
 

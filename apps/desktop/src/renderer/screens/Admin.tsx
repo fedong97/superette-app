@@ -1034,11 +1034,11 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   if (!st) return null;
   const lic = st.license;
   const digits = lic?.contact?.replace(/\D/g, '') ?? '';
-  const whatsapp = `https://wa.me/${digits.length >= 8 ? digits : ''}?text=${encodeURIComponent(`Bonjour, voici le code machine de mon PC pour la licence FEDONIX 360 : ${st.machineCode}`)}`;
+  const whatsapp = `https://wa.me/${digits.length >= 8 ? digits : ''}?text=${encodeURIComponent(`Bonjour, voici le code machine de mon PC pour la licence ONIX 360 : ${st.machineCode}`)}`;
   return (
     <div className="narrow">
       <p>
-        FEDONIX 360 s'utilise avec une licence liée à ce PC. Envoyez le code machine à votre fournisseur ; il vous renvoie une clé de licence à
+        ONIX 360 s'utilise avec une licence liée à ce PC. Envoyez le code machine à votre fournisseur ; il vous renvoie une clé de licence à
         coller ci-dessous. Les autres PC reliés au serveur central reçoivent la licence tout seuls.{' '}
         <button type="button" className="link" onClick={() => setShowContract(true)}>
           Lire le contrat de licence
@@ -1247,10 +1247,10 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
           }}
         >
           <div className="grid2">
-            <Field label="Adresse du serveur" hint="ex. http://192.168.1.20:3000 (affichée dans FEDONIX 360 Serveur)">
+            <Field label="Adresse du serveur" hint="ex. http://192.168.1.20:3000 (affichée dans ONIX 360 Serveur)">
               <input value={url} onChange={(e) => setUrl(e.target.value)} required />
             </Field>
-            <Field label="Clé d'enrôlement" hint="affichée dans FEDONIX 360 Serveur, onglet Réglages">
+            <Field label="Clé d'enrôlement" hint="affichée dans ONIX 360 Serveur, onglet Réglages">
               <input type="password" value={key} onChange={(e) => setKey(e.target.value)} required />
             </Field>
           </div>
@@ -1329,8 +1329,8 @@ function SoftwareUpdates({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="narrow">
       <p>
-        FEDONIX 360 se met à jour tout seul : il cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge sans gêner la caisse et
-        l'installe à la prochaine fermeture du logiciel. Les nouvelles versions se déposent dans FEDONIX 360 Serveur, onglet « Mises à jour ».
+        ONIX 360 se met à jour tout seul : il cherche une nouvelle version au démarrage puis toutes les 4 heures, la télécharge sans gêner la caisse et
+        l'installe à la prochaine fermeture du logiciel. Les nouvelles versions se déposent dans ONIX 360 Serveur, onglet « Mises à jour ».
       </p>
       <table className="list">
         <tbody>
@@ -1368,7 +1368,7 @@ function SoftwareUpdates({ isAdmin }: { isAdmin: boolean }) {
             className="primary"
             disabled={busy}
             onClick={async () => {
-              if (!(await askConfirm(`Fermer FEDONIX 360 et installer la version ${st.available} ? Le logiciel se rouvre tout seul après l'installation.`))) return;
+              if (!(await askConfirm(`Fermer ONIX 360 et installer la version ${st.available} ? Le logiciel se rouvre tout seul après l'installation.`))) return;
               void run(() => call('update.install'));
             }}
           >
@@ -1389,7 +1389,7 @@ function SoftwareUpdates({ isAdmin }: { isAdmin: boolean }) {
               void run(() => call('update.setUrl', url ?? st.customUrl), 'Adresse enregistrée');
             }}
           >
-            <Field label="Adresse (facultative)" hint="ex. https://mises-a-jour.fedonix360.cm/">
+            <Field label="Adresse (facultative)" hint="ex. https://mises-a-jour.onix360.cm/">
               <input value={url ?? st.customUrl} onChange={(e) => setUrl(e.target.value)} placeholder="Serveur central de ce PC" />
             </Field>
             <div className="actions">

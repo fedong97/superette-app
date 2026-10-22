@@ -1,19 +1,19 @@
-# Mettre FEDONIX 360 Serveur sur internet
+# Mettre ONIX 360 Serveur sur internet
 
 Avec le serveur central sur internet, les PC de chaque magasin se synchronisent de partout, la page du gérant marche sur son téléphone hors du magasin, et la base est sauvegardée chaque jour hors de la boutique.
 
 ## Ce qu'il faut
 
 1. **Un serveur loué (VPS)** sous Ubuntu 24.04 ou Debian 12 : 1 processeur, 2 Go de mémoire et 25 Go de disque suffisent pour plusieurs magasins. Comptez quelques milliers de FCFA par mois chez un hébergeur (Hetzner, OVHcloud, Contabo, DigitalOcean…). L'hébergeur vous donne l'adresse IP du serveur et un accès `root`.
-2. **Un nom de domaine** (ex. `fedonix.mamaboutique.cm`) dont l'enregistrement **A** pointe vers l'adresse IP du serveur. Il se règle chez le vendeur du nom de domaine, en quelques minutes.
-3. **Le paquet `FEDONIX-360-serveur-internet-<version>`**, fourni avec les installateurs. Il contient l'image du serveur, `installer.sh`, `docker-compose.yml`, `Caddyfile` et ce guide.
+2. **Un nom de domaine** (ex. `onix.mamaboutique.cm`) dont l'enregistrement **A** pointe vers l'adresse IP du serveur. Il se règle chez le vendeur du nom de domaine, en quelques minutes.
+3. **Le paquet `ONIX-360-serveur-internet-<version>`**, fourni avec les installateurs. Il contient l'image du serveur, `installer.sh`, `docker-compose.yml`, `Caddyfile` et ce guide.
 
 ## Installation (10 minutes)
 
 1. Copiez le dossier du paquet sur le serveur, par exemple avec WinSCP ou :
 
    ```bash
-   scp -r FEDONIX-360-serveur-internet-0.74.0 root@ADRESSE_IP:/opt/fedonix
+   scp -r ONIX-360-serveur-internet-0.74.0 root@ADRESSE_IP:/opt/fedonix
    ```
 
 2. Connectez-vous au serveur (`ssh root@ADRESSE_IP`, ou PuTTY sous Windows) et lancez :

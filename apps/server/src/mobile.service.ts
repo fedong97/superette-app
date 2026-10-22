@@ -102,7 +102,7 @@ interface OpenInventory {
 }
 
 /**
- * Inventaire sur téléphone (FEDONIX 360 Inventaire, application Android).
+ * Inventaire sur téléphone (ONIX 360 Inventaire, application Android).
  * Le téléphone est relié au magasin par un QR code que le gérant affiche,
  * le compteur s'y connecte avec son identifiant et son code, télécharge le
  * catalogue et les inventaires ouverts, compte (hors ligne au besoin) puis

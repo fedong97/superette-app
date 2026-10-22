@@ -210,7 +210,7 @@ function AssetForm({ asset, onClose, onSaved }: { asset: Asset | null; onClose: 
             <input type="date" value={inService} onChange={(e) => setInService(e.target.value)} required />
           </Field>
           {funding === 'opening' && (
-            <Field label="Repris dans FEDONIX 360 le" hint="Les amortissements d’avant cette date sont repris tels quels">
+            <Field label="Repris dans ONIX 360 le" hint="Les amortissements d’avant cette date sont repris tels quels">
               <input type="date" value={recorded || today()} onChange={(e) => setRecorded(e.target.value)} />
             </Field>
           )}

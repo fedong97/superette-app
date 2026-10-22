@@ -57,7 +57,7 @@ const POS: PageHelp = {
         '« Encaisser » (Ctrl+E) ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
         'Paiement mobile réglé sur ce PC : avec MTN MoMo ou Orange Money, tapez le téléphone du client et « Demander le paiement » ; il confirme sur son téléphone et le paiement s’ajoute avec sa référence.',
         'Un paiement peut être mixte : une partie en espèces, le reste en MTN par exemple.',
-        'Chaque paiement va dans la caisse de son type : MTN, Orange et carte à votre caisse électronique, virement et chèque à votre caisse banque.',
+        'Chaque paiement va dans la caisse de son type : MTN, Orange et carte à celle de vos caisses électroniques qui reçoit ce moyen, virement et chèque à votre caisse banque.',
       ],
     },
     {

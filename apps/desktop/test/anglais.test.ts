@@ -1,33 +1,21 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { toEnglish } from '../src/renderer/i18n';
 
-/** Écrans du caissier et du vendeur : entièrement traduits. */
-const CASHIER_FILES = [
-  'App.tsx',
-  'ui.tsx',
-  'mdi.tsx',
-  'screens/Login.tsx',
-  'screens/Pos.tsx',
-  'screens/PosDialogs.tsx',
-  'screens/Treasury.tsx',
-  'screens/CashDesk.tsx',
-  'screens/Customers.tsx',
-  'screens/customerDialogs.tsx',
-  'screens/SummaryInvoices.tsx',
-  'screens/Sales.tsx',
-  'screens/SaleSearch.tsx',
-  'screens/Orders.tsx',
-  'screens/Deliveries.tsx',
-  'screens/Containers.tsx',
-  'screens/AgentPoint.tsx',
-  'screens/docPreview.tsx',
-  'screens/pickers.tsx',
+/** Tous les écrans du bureau, hors dictionnaires. */
+const RENDERER = join(__dirname, '../src/renderer');
+const FILES = [
+  ...readdirSync(RENDERER).filter((f) => /\.tsx?$/.test(f) && !/^i18n/.test(f)),
+  ...readdirSync(join(RENDERER, 'screens')).filter((f) => /\.tsx?$/.test(f)).map((f) => `screens/${f}`),
 ];
 /** Textes identiques en anglais, ou laissés en français exprès (le choix « Français »). */
-const SAME = new Set(['Administration', 'Session', 'Situation', 'Commission', 'Correction', 'Action ▾', 'Français', 'Afficher les écrans en français']);
+const SAME = new Set([
+  'Administration', 'Session', 'Situation', 'Commission', 'Correction', 'Action', 'Action ▾', 'Transaction', 'Synchronisation', 'Version',
+  'Document', 'Orientation', 'Section', 'Promotion', 'Description', 'Destination', 'Consumer key', 'Consumer secret', 'SARL, SA, Ets…',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Français', 'Afficher les écrans en français',
+]);
 const FRENCH = /[éèêàçùôîûœÉÀ]|\b(le|la|les|des|du|un|une|et|pour|sur|avec|aucun|aucune|est|dans|par|de|au|aux|en|ou|ce|cette|ses|son|sa|d|l|qu)\b|^[A-Z][a-z]+(er|ez|é|ée|és|ées|ion|eur|ure|ment|ité|té)\b/i;
 const CODE = /^[a-z][a-zA-Z0-9_.:-]*$|^[A-Z_0-9.]+$|[{}<>;=]|^\.|^#|^\w+\(|px\b|^--|^https?:|^[a-z-]+(\s[a-z-]+)+$/;
 /** Appels dont les textes ne s'affichent pas (noms d'API, réglages, classes). */
@@ -77,8 +65,9 @@ describe('écrans en anglais', () => {
     expect(toEnglish('Aucun devis encore préparé')).toBe('Aucun devis encore préparé');
   });
 
-  it('chaque texte des écrans du caissier et du vendeur a sa traduction', () => {
-    const missing = CASHIER_FILES.flatMap((f) => displayedTexts(f).filter((t) => !SAME.has(t) && toEnglish(t) === t).map((t) => `${f} : ${t}`));
+  it('chaque texte de chaque écran a sa traduction', () => {
+    expect(FILES.length).toBeGreaterThan(80);
+    const missing = FILES.flatMap((f) => displayedTexts(f).filter((t) => !SAME.has(t) && toEnglish(t) === t).map((t) => `${f} : ${t}`));
     expect([...new Set(missing)]).toEqual([]);
   });
 });

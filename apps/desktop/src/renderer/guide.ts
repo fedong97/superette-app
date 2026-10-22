@@ -109,8 +109,11 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
-    version: '0.82.1',
+    version: '0.83.0',
     items: [
+      'Plusieurs caisses électroniques par utilisateur : dans sa fiche (Administration › Utilisateurs), cochez ses caisses électroniques. Chaque paiement MTN, Orange Money ou carte va à celle qui reçoit ce moyen, réglé dans Administration › Caisses (« Moyens reçus »).',
+      'Fenêtres : elles tiennent maintenant en entier sur les petits écrans et les PC portables réglés à 125 % ; les grandes fenêtres ne passent plus sous la barre verte de gauche et défilent quand elles sont plus hautes que l’écran.',
+      'Anglais : tous les écrans sont traduits, y compris l’administration, la comptabilité, les achats, le stock et le personnel.',
       'Afficheur client « deuxième écran » : sans deuxième écran branché, il ne recouvre plus l’écran de la caisse (écran « Bienvenue » impossible à fermer).',
     ],
   },

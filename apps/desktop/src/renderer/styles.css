@@ -125,9 +125,11 @@ th.r { text-align: right !important; }
 
 /* Fenêtres */
 .modal-back { position: fixed; inset: 0; background: rgba(16, 24, 40, 0.45); display: grid; place-items: center; z-index: 10; }
-.modal { background: var(--panel); border-radius: 12px; padding: 18px 22px; width: min(520px, 94vw); max-height: 92vh; overflow: auto; }
+/* Les fenêtres s'ouvrent à droite de la barre verte et tiennent toujours dans l'écran (portable 1366 × 768 à 125 %). */
+.desk .modal-back { left: 78px; }
+.modal { background: var(--panel); border-radius: 12px; padding: 18px 22px; width: min(520px, calc(100% - 24px)); max-height: calc(100vh - 24px); overflow: auto; }
 .modal .grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.modal.wide { width: min(980px, 96vw); }
+.modal.wide { width: min(980px, calc(100% - 24px)); }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .pick-list { display: flex; flex-direction: column; gap: 4px; }
 .pick-list button { display: flex; justify-content: space-between; text-align: left; }
@@ -310,7 +312,7 @@ tr.group-start td { border-top: 2px solid var(--line); }
 .actions.spread { justify-content: space-between; flex-wrap: wrap; }
 .warn-text { color: var(--warn); }
 .qty-prompt-head { font-size: 16px; }
-.modal.wide:has(table.levels) { width: min(1200px, 97vw); }
+.modal.wide:has(table.levels) { width: min(1200px, calc(100% - 16px)); }
 table.list.compact.levels td { padding: 3px 5px; }
 table.list.compact.levels th { padding: 6px 5px; }
 
@@ -846,7 +848,7 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: col
 
 /* Questions « OK / Annuler » dans la page (remplacent confirm()). */
 .ask-back { z-index: 80; }
-.modal.ask { width: min(460px, 94vw); padding-top: 22px; }
+.modal.ask { width: min(460px, calc(100% - 24px)); padding-top: 22px; }
 .modal.ask p { margin: 0 0 14px; font-size: 15px; line-height: 1.45; white-space: pre-line; }
 .modal.ask input { width: 100%; margin-bottom: 12px; }
 .modal.ask .actions { display: flex; justify-content: flex-end; gap: 8px; }

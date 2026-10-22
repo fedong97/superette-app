@@ -5,7 +5,7 @@ import { fold } from '../nav';
 import classicShot from '../assets/caisse/classique.png';
 import conventionalShot from '../assets/caisse/conventionnel.png';
 import modernShot from '../assets/caisse/moderne.png';
-import { askConfirm, Empty, useLoad, useToast } from '../ui';
+import { askConfirm, dateFr, Empty, useLoad, useToast } from '../ui';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type StoreIdentity = { name: string; address: string; phone: string; taxpayer_number: string };
@@ -85,6 +85,8 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
   const syncState = useLoad(() => call('sync.state'));
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [storeDraft, setStoreDraft] = useState<Partial<StoreSettings>>({});
+  const holidayDraft = { cameroon: Boolean(storeDraft.holidaysCameroon ?? store.data?.holidaysCameroon ?? true), extra: String(storeDraft.holidaysExtra ?? store.data?.holidaysExtra ?? '') };
+  const holidays = useLoad(() => call('personnel.holidays', new Date().getFullYear(), holidayDraft).catch(() => []), [holidayDraft.cameroon, holidayDraft.extra]);
   const [identity, setIdentity] = useState<Partial<StoreIdentity>>({});
   const [threshold, setThreshold] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -640,9 +642,66 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
     ],
     [
       'Pointage du personnel',
-      'L’arrivée est notée à la première connexion du jour, le départ à la clôture de caisse ou par « Je pars ». État du mois : Charge › Pointage du personnel.',
+      'Chaque entreprise choisit sa façon de pointer ; elles se combinent. Tout le personnel a sa fiche, même ceux qui n’utilisent pas le logiciel. État du mois : Personnel › Pointage du personnel.',
       [
-        { label: 'Heure d’arrivée attendue', render: () => <input type="time" disabled={!canEdit} value={String(sv('workStart'))} onChange={(e) => e.target.value && sset('workStart', e.target.value)} /> },
+        {
+          label: 'Pointer à la connexion au logiciel',
+          hint: 'L’arrivée est notée à la première connexion du jour, le départ à la clôture de caisse ou par « Je pars ».',
+          render: () => yes('punchLogin'),
+        },
+        {
+          label: 'Borne de pointage à l’entrée',
+          hint: 'Un PC ou une tablette près de la porte : chacun y pointe en arrivant et en partant, même sans compte. Ce PC devient borne dans Personnel › Équipes et entrées.',
+          render: () => yes('punchKiosk'),
+        },
+        ...(sv('punchKiosk')
+          ? [
+              { label: '… avec un badge', hint: 'Lecteur de code-barres USB (douchette) branché à la borne ; le badge s’imprime depuis la fiche.', render: () => yes('punchBadge') },
+              { label: '… avec un numéro et un code personnel', hint: 'Pavé de chiffres à l’écran : pour un badge oublié, ou sans lecteur.', render: () => yes('punchPin') },
+              { label: '… avec une photo prise par la caméra', hint: 'Une photo à chaque passage, visible dans le détail du jour : personne ne pointe à la place d’un autre.', render: () => yes('punchPhoto') },
+              { label: 'Deux passages rapprochés comptent pour un', hint: 'Évite un départ noté par un double passage du badge.', render: () => num('punchGapMinutes', 'minutes') },
+              { label: 'Plusieurs entrées, chacune avec sa borne', hint: 'Sinon, une seule entrée.', render: () => yes('multiEntrances') },
+            ]
+          : []),
+        {
+          label: 'Personnel de sociétés prestataires',
+          hint: 'Vigiles ou agents d’entretien d’une société de gardiennage ou de nettoyage : ils pointent, leur société les paie. Sinon, tout le personnel est salarié du magasin.',
+          render: () => yes('contractorStaff'),
+        },
+        {
+          label: 'Équipes et rotations',
+          hint: 'Matin, soir, nuit (une garde de nuit finit le lendemain), avec rotation d’une semaine à l’autre. Sinon, la semaine type de chacun (Planning).',
+          render: () => yes('staffTeams'),
+        },
+        {
+          label: 'Jours fériés légaux du Cameroun',
+          hint: 'Jour de l’an, Fête de la jeunesse, Vendredi saint, Fête du travail, Fête nationale, Ascension, Assomption, Noël : ni absence ni retard.',
+          render: () => yes('holidaysCameroon'),
+        },
+        {
+          label: 'Autres jours fériés',
+          hint: 'Un par ligne : « AAAA-MM-JJ Libellé » (Aïd el-Fitr, Tabaski, qui suivent la lune), ou « MM-JJ Libellé » pour un jour fixe chaque année.',
+          wide: true,
+          render: () => (
+            <span>
+              <textarea
+                rows={3}
+                style={{ width: '100%' }}
+                disabled={!canEdit}
+                placeholder={'2026-03-20 Aïd el-Fitr\n2026-05-27 Tabaski'}
+                value={String(sv('holidaysExtra'))}
+                onChange={(e) => sset('holidaysExtra', e.target.value)}
+              />
+              {Boolean(holidays.data?.length) && (
+                <small className="muted block">
+                  {new Date().getFullYear()} : {holidays.data!.map((h) => `${dateFr(h.day)} ${h.label}`).join(' · ')}
+                </small>
+              )}
+            </span>
+          ),
+        },
+        { label: 'Signaler les fins de contrat et de pièces', hint: 'CDD, essai, stage, CNI, contrat de prestation : signalés dans la liste du personnel. 0 : jamais.', render: () => num('contractAlertDays', 'jours avant') },
+        { label: 'Heure d’arrivée attendue', hint: 'Pour ceux qui n’ont ni semaine type ni équipe.', render: () => <input type="time" disabled={!canEdit} value={String(sv('workStart'))} onChange={(e) => e.target.value && sset('workStart', e.target.value)} /> },
         { label: 'Tolérance avant un retard', render: () => num('lateToleranceMinutes', 'minutes') },
         {
           label: 'Congés payés acquis par mois (jours)',

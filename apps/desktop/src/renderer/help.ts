@@ -1036,7 +1036,7 @@ export const HELP: Record<WinKind, PageHelp> = {
   },
   staff: {
     title: 'Collaborateurs et salaires',
-    intro: 'Vos employés, leurs sous-comptes en comptabilité, leurs salaires et leurs avances.',
+    intro: 'Tout votre personnel, même ceux qui n’utilisent pas le logiciel (nettoyage, vigiles) : fiches, badges, pointage à la borne, équipes, salaires et avances.',
     sections: [
       {
         tab: 'list',
@@ -1047,6 +1047,37 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Deux sous-comptes sont créés à son nom : sous le compte de rattachement pour ses salaires dus (4211001…), et 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
           'Le rattachement ne change plus une fois qu’il a des écritures.',
           '« Avance… » paie une avance au bureau ; à la caisse, utilisez Décaisser › Remboursement / Prêt.',
+          'Catégorie : employé, journalier, stagiaire ou agent d’une société prestataire. Un agent prestataire (vigile, nettoyage) est payé par sa société : ni salaire ni sous-compte.',
+          '« Badge et pointage » : photo, badge à imprimer, numéro et code tapés à la borne, équipe ou rotation. « Imprimer les badges » les imprime tous.',
+          '« Dossier » garde la CNI, le contrat signé ou le certificat médical (photo ou PDF). Les fins de contrat et de pièces sont signalées en haut de la liste.',
+        ],
+      },
+      {
+        tab: 'presence',
+        title: 'Qui est là',
+        perm: 'staff_attendance',
+        steps: [
+          'Les présents, les retards à appeler, les attendus, les absents et ceux en congé, d’après l’horaire prévu de chacun. L’écran se met à jour tout seul.',
+          'Cliquez une personne pour ses passages du jour, avec la photo prise à la borne.',
+        ],
+      },
+      {
+        tab: 'teams',
+        title: 'Équipes et entrées',
+        perm: 'staff_attendance',
+        steps: [
+          'Une équipe a son horaire, ses jours et sa tolérance. Une fin avant le début est une garde de nuit : elle compte pour le jour où elle commence.',
+          'Chaque collaborateur reçoit une équipe fixe ou une rotation (par exemple Jour puis Nuit, une semaine chacune) dans « Badge et pointage ».',
+          'Entrées : une ou plusieurs, chacune avec sa borne. « Ce PC est la borne de » fait de ce PC une borne : elle remplace l’écran de connexion.',
+        ],
+      },
+      {
+        tab: 'agencies',
+        title: 'Sociétés prestataires',
+        perm: 'staff_edit',
+        steps: [
+          'Votre société de gardiennage ou de nettoyage : contact, téléphone et fin du contrat de prestation.',
+          '« Pointage de ses agents » ouvre le pointage du mois filtré sur cette société, pour vérifier sa facture.',
         ],
       },
       {
@@ -1066,9 +1097,11 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Pointage',
         perm: 'staff_attendance',
         steps: [
-          'L’arrivée se note à la première connexion du jour ; le départ à la fermeture de la caisse ou avec « Je pars » (Fichier, ou en bas de l’écran).',
+          'L’arrivée et le départ se notent à la borne de l’entrée (badge, ou numéro et code), et, si le magasin l’a choisi, à la connexion au logiciel et à la fermeture de la caisse ou avec « Je pars ».',
+          'Borne de pointage : Personnel › Borne de pointage l’ouvre en plein écran ; le code du gérant la referme.',
           'Le tableau du mois donne pour chacun les jours de présence, les heures, les retards et les absences. Cliquez une personne pour ses journées.',
-          'Un oubli se corrige avec « Corriger » : heures d’arrivée et de départ, et un motif obligatoire.',
+          'Un oubli se corrige avec « Corriger » : heures d’arrivée et de départ, et un motif obligatoire. « Passages » montre chaque passage, sa photo, et permet d’annuler un double badge.',
+          'Les jours fériés (légaux du Cameroun et ceux ajoutés dans les paramètres) ne sont ni des absences ni des retards ; un férié travaillé est compté à part.',
           'L’heure d’embauche, la tolérance de retard et les jours travaillés se règlent dans Administration › Paramètres › Pointage du personnel.',
           'Les départs avant la fin prévue au planning et les jours de congé accordés apparaissent dans le tableau ; un jour de congé n’est pas une absence.',
         ],

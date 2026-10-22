@@ -2307,4 +2307,104 @@ ALTER TABLE users ADD COLUMN emoney_register_ids TEXT;
 UPDATE users SET emoney_register_ids = json_array(emoney_register_id) WHERE emoney_register_id IS NOT NULL;
 `,
   },
+  {
+    version: 59,
+    name: 'personnel sans accès au logiciel, borne de pointage, entrées, équipes et prestataires',
+    sql: `
+-- Tout le personnel a une fiche, qu'il se connecte au logiciel ou non (agents de nettoyage, vigiles…).
+ALTER TABLE staff ADD COLUMN category TEXT NOT NULL DEFAULT 'employee';
+ALTER TABLE staff ADD COLUMN contract_type TEXT;
+ALTER TABLE staff ADD COLUMN contract_end TEXT;
+-- Agent d'une société prestataire (gardiennage, nettoyage) : suivi au pointage, payé par sa société.
+ALTER TABLE staff ADD COLUMN agency_id TEXT;
+ALTER TABLE staff ADD COLUMN photo TEXT;
+ALTER TABLE staff ADD COLUMN emergency_contact TEXT;
+-- Badge de pointage (FP + 8 chiffres) ; celui d'un utilisateur (FX…) pointe aussi.
+ALTER TABLE staff ADD COLUMN badge TEXT;
+CREATE UNIQUE INDEX staff_badge ON staff(badge) WHERE badge IS NOT NULL;
+-- Numéro court tapé à la borne, suivi du code personnel de pointage.
+ALTER TABLE staff ADD COLUMN punch_number INTEGER;
+ALTER TABLE staff ADD COLUMN punch_pin_hash TEXT;
+UPDATE staff SET punch_number = (SELECT COUNT(*) FROM staff s2 WHERE s2.store_id = staff.store_id AND (s2.created_at < staff.created_at OR (s2.created_at = staff.created_at AND s2.id <= staff.id)));
+-- Équipe fixe, ou rotation entre équipes (JSON : { teams, start, weeks }).
+ALTER TABLE staff ADD COLUMN team_id TEXT;
+ALTER TABLE staff ADD COLUMN rotation TEXT;
+
+CREATE TABLE staff_agencies (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  name TEXT NOT NULL,
+  kind TEXT,
+  contact TEXT,
+  phone TEXT,
+  address TEXT,
+  contract_end TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Entrées du magasin : chacune peut avoir sa borne de pointage.
+CREATE TABLE entrances (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Équipes : horaire commun (une fin avant le début passe minuit), jours travaillés et tolérance propre.
+CREATE TABLE staff_teams (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  name TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  days TEXT NOT NULL,
+  tolerance INTEGER,
+  color TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Passages pointés : à la borne (badge, numéro et code, photo), à la connexion, ou saisis par le gérant.
+CREATE TABLE time_punches (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  staff_id TEXT NOT NULL,
+  entrance_id TEXT,
+  at TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('in', 'out')),
+  method TEXT NOT NULL,
+  photo TEXT,
+  station TEXT,
+  user_id TEXT,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX time_punches_staff ON time_punches(staff_id, at);
+CREATE INDEX time_punches_store ON time_punches(store_id, at);
+
+-- Pièces du dossier : CNI, contrat signé, certificat médical (image ou PDF), avec leur date de fin.
+CREATE TABLE staff_documents (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  staff_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  file_name TEXT,
+  data TEXT NOT NULL,
+  expires_on TEXT,
+  user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX staff_documents_staff ON staff_documents(staff_id);
+`,
+  },
 ];

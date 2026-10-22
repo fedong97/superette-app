@@ -109,6 +109,17 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.84.0',
+    items: [
+      'Nouveau menu Personnel : tout le personnel a sa fiche, même ceux qui n’utilisent pas le logiciel (nettoyage, vigiles), avec sa catégorie, son contrat, sa photo et son dossier (CNI, contrat signé…).',
+      'Borne de pointage à l’entrée : chacun passe son badge, ou tape son numéro et son code, en arrivant et en partant ; une photo peut être prise à chaque passage. Un PC peut devenir la borne d’une entrée.',
+      'Qui est là : les présents, les retards à appeler et les absents du jour, d’après l’horaire de chacun.',
+      'Équipes et rotations (jour, nuit…), gardes de nuit qui finissent le lendemain, une ou plusieurs entrées, et jours fériés du Cameroun.',
+      'Vigiles d’une société de gardiennage : leur société a sa fiche, ils pointent sans salaire ni sous-compte, et le pointage du mois filtré par société vérifie sa facture.',
+      'Chaque option se règle dans Administration › Paramètres › Pointage du personnel : chaque magasin garde seulement ce dont il a besoin.',
+    ],
+  },
+  {
     version: '0.83.0',
     items: [
       'Plusieurs caisses électroniques par utilisateur : dans sa fiche (Administration › Utilisateurs), cochez ses caisses électroniques. Chaque paiement MTN, Orange Money ou carte va à celle qui reçoit ce moyen, réglé dans Administration › Caisses (« Moyens reçus »).',

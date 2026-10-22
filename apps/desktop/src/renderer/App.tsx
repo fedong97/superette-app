@@ -24,6 +24,7 @@ import { EDIT_SALE_EVENT, SaleDetail, Sales, type SalesTab } from './screens/Sal
 import { Setup } from './screens/Setup';
 import { DossierPicker, FicheBanner, saveFicheCopy } from './screens/Dossiers';
 import { Staff, type StaffTab } from './screens/Staff';
+import { Kiosk } from './screens/Kiosk';
 import { Stock, type StockTab } from './screens/Stock';
 import { Suppliers, type SuppliersTab } from './screens/Suppliers';
 import { Treasury, type TreasuryTab } from './screens/Treasury';
@@ -92,7 +93,9 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme';
+  action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
+  /** Option du magasin (Administration › Paramètres) dont dépend l'écran : il suffit d'une seule. */
+  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff')[];
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -119,6 +122,7 @@ const MENU_ICONS: Record<string, string> = {
   Fournisseur: '🚚',
   Client: '👥',
   Charge: '💸',
+  Personnel: '🪪',
   Transfert: '🔁',
   Magasinier: '🗄️',
   Comptabilité: '📒',
@@ -141,6 +145,7 @@ const MENU_COLORS: Record<string, string> = {
   Fournisseur: '#0d9488',
   Client: '#db2777',
   Charge: '#dc2626',
+  Personnel: '#ea580c',
   Transfert: '#0284c7',
   Magasinier: '#65a30d',
   Comptabilité: '#4f46e5',
@@ -157,6 +162,7 @@ const RAIL_LABELS: Record<string, string> = {
   Client: 'Clients',
   Fournisseur: 'Fournisseurs',
   Charge: 'Charges',
+  Personnel: 'Personnel',
   Transfert: 'Transferts',
   Comptabilité: 'Compta',
   Administration: 'Réglages',
@@ -363,13 +369,23 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Dépenses par catégorie', open: ['expenses', 'summary'], perm: 'expenses' },
       SEP,
       { label: 'Constats de charges', open: ['expenses', 'schedule'], perm: 'charge_plans' },
-      SEP,
+    ],
+  ],
+  [
+    'Personnel',
+    [
       { label: 'Collaborateurs (fiches, comptes tiers)', open: ['staff', 'list'] },
+      { label: 'Qui est là (présences du jour)', open: ['staff', 'presence'], perm: ['staff_presence', 'staff_attendance'] },
+      { label: 'Pointage du personnel', open: ['staff', 'attendance'], perm: 'staff_attendance' },
+      { label: 'Borne de pointage', action: 'kiosk', perm: 'staff_kiosk', setting: ['punchKiosk'] },
+      SEP,
+      { label: 'Planning de la semaine', open: ['staff', 'planning'], perm: 'staff_leaves' },
+      { label: 'Congés du personnel', open: ['staff', 'leaves'], perm: 'staff_leaves' },
+      { label: 'Équipes, rotations et entrées', open: ['staff', 'teams'], perm: 'staff_teams', setting: ['staffTeams', 'multiEntrances'] },
+      { label: 'Sociétés prestataires (gardiennage, nettoyage)', open: ['staff', 'agencies'], perm: 'staff_agencies', setting: ['contractorStaff'] },
+      SEP,
       { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
       { label: 'Objectifs et commissions des vendeurs', open: ['staff', 'targets'], perm: 'staff_targets' },
-      { label: 'Pointage du personnel', open: ['staff', 'attendance'], perm: 'staff_attendance' },
-      { label: 'Congés du personnel', open: ['staff', 'leaves'], perm: 'staff_leaves' },
-      { label: 'Planning de la semaine', open: ['staff', 'planning'], perm: 'staff_leaves' },
       { label: 'Extrait de compte d’un collaborateur', open: ['staff', 'statement'] },
     ],
   ],
@@ -516,13 +532,39 @@ export function App() {
       {!state.initialized ? (
         <Setup onDone={refresh} />
       ) : !state.user ? (
-        <Login station={state.station} fiche={state.dossier.fiche} onDone={refresh} />
+        <LoginOrKiosk state={state} refresh={refresh} />
       ) : (
         <Workspace key={state.user.id} state={state} user={state.user} refresh={refresh} />
       )}
       <AskHost />
     </ToastProvider>
   );
+}
+
+/**
+ * PC réglé en borne de pointage : la borne s'affiche à la place de l'écran de
+ * connexion ; « Connexion » ouvre l'écran habituel, qui revient à la borne
+ * après une minute sans saisie.
+ */
+function LoginOrKiosk({ state, refresh }: { state: AppState; refresh: () => void }) {
+  const kiosk = useLoad(() => (state.station ? call('kiosk.state') : Promise.resolve(null)), []);
+  const [login, setLogin] = useState(false);
+  useEffect(() => {
+    if (!login) return;
+    let last = Date.now();
+    const bump = () => (last = Date.now());
+    window.addEventListener('keydown', bump, true);
+    window.addEventListener('mousedown', bump, true);
+    const t = setInterval(() => Date.now() - last > 60_000 && setLogin(false), 5000);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('keydown', bump, true);
+      window.removeEventListener('mousedown', bump, true);
+    };
+  }, [login]);
+  if (kiosk.data === undefined && state.station) return <div className="splash">Chargement…</div>;
+  if (kiosk.data?.here && !login) return <Kiosk onLogin={() => setLogin(true)} />;
+  return <Login station={state.station} fiche={state.dossier.fiche} onDone={refresh} />;
 }
 
 /** Texte court de la barre d'état ; le message complet est dans l'infobulle et Administration › Licence. */
@@ -571,6 +613,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   /** Place du menu ouvert depuis la barre verte (elle défile : le menu s'affiche par-dessus). */
   const [menuAt, setMenuAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const [finding, setFinding] = useState(false);
+  /** Borne de pointage ouverte en plein écran par le gérant sur ce PC. */
+  const [kiosk, setKiosk] = useState(false);
   const [dossiers, setDossiers] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
   // Menu du clic droit : sur un onglet rapide (le déplacer, le retirer) ou sur un écran d'un menu (l'épingler).
@@ -780,6 +824,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       .filter((i) => (!i.open || canWin(i.open[0])) && (!i.soon || supervisor))
       // Magasin sans TVA : pas de déclaration de TVA.
       .filter((i) => hasVat() || i.open?.[1] !== 'vat')
+      // Options du personnel que le magasin n'a pas choisies : leurs écrans ne s'affichent pas.
+      .filter((i) => !i.setting || i.setting.some((k) => Boolean(state.storeSettings?.[k])))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || Boolean(i.perm) || i.open[1] === 'tickets')
       .filter((i, n, all) => !i.sep || (n > 0 && n < all.length - 1 && !all[n - 1]!.sep));
   const visibleMenus = MENUS.filter(([, items]) => visibleItems(items).some((i) => !i.sep));
@@ -813,6 +859,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'leave') return leave();
+    if (item.action === 'kiosk') return setKiosk(true);
     if (item.action === 'training') return startTraining();
     if (item.action === 'dossiers') return setDossiers(true);
     if (item.action === 'quit') return window.close();
@@ -1409,6 +1456,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       <KeyHints />
       <ListTools prefs={(prefs.lists as ListPrefs | undefined) ?? {}} onSave={(p) => savePref('lists', p)} />
       {dossiers && <DossierPicker onClose={() => setDossiers(false)} />}
+      {kiosk && <Kiosk overlay onExit={() => setKiosk(false)} />}
       {finding && (
         <OpenInvoice
           onClose={() => setFinding(false)}

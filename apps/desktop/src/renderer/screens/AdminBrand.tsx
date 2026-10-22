@@ -30,7 +30,7 @@ function portrait(source: CanvasImageSource, w: number, h: number): string {
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
-function readPortrait(file: File): Promise<string> {
+export function readPortrait(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Image illisible'));
@@ -45,7 +45,7 @@ function readPortrait(file: File): Promise<string> {
 }
 
 /** Prise de la photo avec la caméra du PC (webcam). */
-function CameraDialog({ onClose, onTaken }: { onClose: () => void; onTaken: (photo: string) => void }) {
+export function CameraDialog({ onClose, onTaken }: { onClose: () => void; onTaken: (photo: string) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {

@@ -3,6 +3,7 @@ import { DEFAULT_BRAND_COLOR, DEFAULT_BRAND_COLOR2, isHexColor } from './brand';
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
 import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
 import { DEFAULT_PAYROLL, normalizePayroll, type PayrollRules } from './payroll';
+import { parseHolidays } from './personnel';
 
 /**
  * Paramètres du magasin (Administration › Paramètres) : règles de vente, de
@@ -116,6 +117,31 @@ export interface StoreSettings {
   /** Jours travaillés (0 = dimanche … 6 = samedi) : « 123456 » du lundi au samedi. */
   workDays: string;
 
+  /**
+   * Façons de pointer, au choix de chaque entreprise (elles se combinent) :
+   * à la première connexion au logiciel, et à la borne de l'entrée par badge,
+   * par numéro et code, avec ou sans photo prise par la caméra.
+   */
+  punchLogin: boolean;
+  punchKiosk: boolean;
+  punchBadge: boolean;
+  punchPin: boolean;
+  punchPhoto: boolean;
+  /** Deux passages à la borne à moins de ce nombre de minutes comptent pour un seul. */
+  punchGapMinutes: number;
+  /** Plusieurs entrées, chacune avec sa borne ; sinon une seule entrée. */
+  multiEntrances: boolean;
+  /** Personnel d'une société prestataire (gardiennage, nettoyage) : suivi au pointage, sans paie. */
+  contractorStaff: boolean;
+  /** Équipes (matin, soir, nuit) et rotations ; sinon la semaine type de chacun. */
+  staffTeams: boolean;
+  /** Jours fériés légaux du Cameroun : ni absence ni retard ces jours-là. */
+  holidaysCameroon: boolean;
+  /** Autres jours fériés, un par ligne : « AAAA-MM-JJ Libellé » ou « MM-JJ Libellé » chaque année. */
+  holidaysExtra: string;
+  /** Les contrats qui finissent dans ce nombre de jours sont signalés ; 0 : jamais. */
+  contractAlertDays: number;
+
   /** Congés payés acquis par mois de service, en dixièmes de jour (15 = 1,5 jour, Code du travail). */
   leaveDaysPerMonth: number;
   /** Avances sur salaire : encours maximal en % du salaire de base ; 0 : sans plafond. */
@@ -204,6 +230,18 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   workStart: '08:00',
   lateToleranceMinutes: 10,
   workDays: '123456',
+  punchLogin: true,
+  punchKiosk: false,
+  punchBadge: true,
+  punchPin: false,
+  punchPhoto: false,
+  punchGapMinutes: 2,
+  multiEntrances: false,
+  contractorStaff: false,
+  staffTeams: false,
+  holidaysCameroon: true,
+  holidaysExtra: '',
+  contractAlertDays: 30,
   leaveDaysPerMonth: 15,
   advanceMaxPct: 0,
   clearanceRules: '14:10,7:20,3:30',
@@ -241,13 +279,15 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   loyaltyPointValue: [1, 1e6],
   loyaltyMinRedeem: [0, 1e7],
   lateToleranceMinutes: [0, 240],
+  punchGapMinutes: [0, 120],
+  contractAlertDays: [0, 365],
   leaveDaysPerMonth: [0, 50],
   advanceMaxPct: [0, 100],
   cycleCountPerWeek: [5, 500],
   onlineShopDeliveryFee: [0, 1e7],
   onlineShopMinOrder: [0, 1e8],
 };
-const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500, onlineShopMessage: 300 };
+const TEXT_MAX: Partial<Record<keyof StoreSettings, number>> = { rccm: 40, ticketHeader: 120, logo: 400_000, reminderTemplate: 1500, onlineShopMessage: 300, holidaysExtra: 3000 };
 const PREFIXES: (keyof StoreSettings)[] = ['prefixSale', 'prefixReturn', 'prefixQuote', 'prefixProforma', 'prefixOrder', 'prefixCustomerOrder'];
 
 /**
@@ -297,6 +337,14 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
         const rules = parseClearanceRules(s);
         if (s && !rules.length) throw new Error('Déstockage : « jours:remise » séparés par des virgules, par exemple 14:10,7:20,3:30');
         s = rules.map((r) => `${r.days}:${r.pct}`).join(',');
+      }
+      if (k === 'holidaysExtra') {
+        s = String(raw ?? '')
+          .split(/\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .join('\n');
+        parseHolidays(s);
       }
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
       const max = TEXT_MAX[k];

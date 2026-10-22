@@ -8,6 +8,10 @@ import {
   loyaltyCardHtml,
   badgesHtml,
   badgeExpiry,
+  holidaysBetween,
+  type Rotation,
+  type StaffKind,
+  STAFF_KINDS,
   type BadgeCard,
   type BadgeLayout,
   reminderMessage,
@@ -91,6 +95,8 @@ import {
   SECURITY_KINDS,
   inspectBackup,
   STAFF_CATEGORIES,
+  type AgencyInput,
+  type TeamInput,
   type ArticleInput,
   type WarehouseInput,
   type WarehousePurpose,
@@ -407,6 +413,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       hiredOn: staff?.hired_on ?? null,
       code: target.badge ?? '',
       photo: s.admin.userPhoto(target.id),
+      expires: badgeExpiry(new Date(), set.badge.validityMonths),
+      color: set.brandColor,
+      color2: set.brandColor2,
+    };
+  };
+  /** Badge d'un collaborateur, avec ou sans compte dans le logiciel : la société prestataire tient lieu de rôle pour ses agents. */
+  const staffBadgeCard = (st: ReturnType<typeof s.staff.get>, code: string): BadgeCard => {
+    const set = s.admin.storeSettings(st.store_id);
+    const user = st.user_id ? s.admin.getUser(st.user_id) : null;
+    return {
+      store: s.admin.getStore(st.store_id).name,
+      logo: set.logo || null,
+      name: st.name,
+      role: st.category === 'contractor' ? (st.agency_name ?? STAFF_KINDS.contractor) : user ? ROLE_LABELS[user.role] : STAFF_KINDS[st.category],
+      position: st.position,
+      number: st.punch_number ? `${st.code} · n° ${st.punch_number}` : st.code,
+      phone: st.phone,
+      hiredOn: st.hired_on,
+      code,
+      photo: s.personnel.photo(st.id),
       expires: badgeExpiry(new Date(), set.badge.validityMonths),
       color: set.brandColor,
       color2: set.brandColor2,
@@ -939,7 +965,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const u = requireUser();
       return s.attendance.get(u.id);
     },
-    'attendance.month': (period: string) => s.attendance.month(ctx(['staff_attendance']).storeId, period),
+    'attendance.month': (period: string, opts?: { category?: StaffKind | null; agencyId?: string | null }) => s.attendance.month(ctx(['staff_attendance']).storeId, period, opts ?? {}),
     'attendance.correct': (userId: string, day: string, input: { arrived: string | null; left: string | null; reason: string }) =>
       s.attendance.correct(requireUser(['staff_attendance']).id, userId, day, input),
     'auth.logout': () => {
@@ -2075,6 +2101,100 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.cashdesk.record(c, { ...input, direction: input.kind === 'staff_repayment' ? 'IN' : 'OUT', sessionId: null, authorizedBy: c.userId });
     },
     'staff.printEntry': (id: string) => (requireUser(STAFF), printer.officeVoucher(id)),
+
+    // --- Personnel : prestataires, entrées, équipes, badges et pointage ------------------------
+    'personnel.agencies': (includeInactive?: boolean) => s.personnel.agencies(ctx(['staff', 'staff_edit', 'staff_agencies', 'staff_attendance']).storeId, includeInactive),
+    'personnel.saveAgency': (input: AgencyInput, id?: string | null) => s.personnel.saveAgency(ctx(['staff_agencies']), input, id),
+    'personnel.entrances': (includeInactive?: boolean) => s.personnel.entrances(ctx().storeId, includeInactive),
+    'personnel.saveEntrance': (input: { name: string; active?: boolean }, id?: string | null) => s.personnel.saveEntrance(ctx(['staff_teams']), input, id),
+    'personnel.teams': (includeInactive?: boolean) => s.personnel.teams(ctx(['staff_teams', 'staff_leaves', 'staff_edit', 'staff_attendance']).storeId, includeInactive),
+    'personnel.saveTeam': (input: TeamInput, id?: string | null) => s.personnel.saveTeam(ctx(['staff_teams']), input, id),
+    'personnel.setTeam': (staffId: string, input: { teamId?: string | null; rotation?: Rotation | null }) => s.personnel.setTeam(ctx(['staff_teams']), staffId, input),
+    'personnel.newBadge': (staffId: string) => s.personnel.newBadge(ctx(['staff_badges']), staffId),
+    'personnel.setPunchPin': (staffId: string, pin: string | null) => s.personnel.setPunchPin(ctx(['staff_badges']), staffId, pin),
+    'personnel.newPunchNumber': (staffId: string) => s.personnel.newPunchNumber(ctx(['staff_badges']), staffId),
+    /** Badges de collaborateurs (avec ou sans compte) sur une planche A4. */
+    'personnel.printBadges': (ids: string[]) => {
+      requireUser(['staff_badges']);
+      const cards = ids.map((id) => {
+        const st = s.staff.get(id);
+        const code = st.badge ?? st.user_badge;
+        if (!code) throw new AppError(`${st.name} n'a pas encore de badge`, 'INVALID');
+        return staffBadgeCard(st, code);
+      });
+      return printer.a4(badgesHtml(cards, settings().badge));
+    },
+    'personnel.badgePreview': (id: string) => {
+      requireUser(['staff', 'staff_edit', 'staff_badges']);
+      const st = s.staff.get(id);
+      return badgesHtml([staffBadgeCard(st, st.badge ?? st.user_badge ?? 'FP00000000')], settings().badge);
+    },
+    'personnel.photo': (staffId: string) => (requireUser(['staff', 'staff_edit', 'staff_attendance', 'staff_kiosk']), s.personnel.photo(staffId)),
+    'personnel.setPhoto': (staffId: string, photo: string | null) => s.personnel.setPhoto(ctx(['staff_edit']), staffId, photo),
+    'personnel.documents': (staffId: string) => (requireUser(['staff_documents']), s.personnel.documents(staffId)),
+    'personnel.document': (id: string) => (requireUser(['staff_documents']), s.personnel.document(id)),
+    'personnel.addDocument': (staffId: string, input: { label: string; fileName?: string | null; data: string; expiresOn?: string | null }) =>
+      s.personnel.addDocument(ctx(['staff_documents']), staffId, input),
+    'personnel.removeDocument': (id: string) => s.personnel.removeDocument(ctx(['staff_documents']), id),
+    'personnel.alerts': () => s.personnel.alerts(ctx(['staff', 'staff_edit', 'staff_attendance']).storeId),
+    /** Jours fériés d'une année, d'après les paramètres (ou ceux en cours de modification). */
+    'personnel.holidays': (year: number, draft?: { cameroon: boolean; extra: string }) => {
+      const c = ctx();
+      const set = s.admin.storeSettings(c.storeId);
+      const map = holidaysBetween(`${year}-01-01`, `${year}-12-31`, draft ?? { cameroon: set.holidaysCameroon, extra: set.holidaysExtra });
+      return [...map.entries()].map(([day, label]) => ({ day, label }));
+    },
+    'punches.presence': () => s.punches.presence(ctx(['staff_presence', 'staff_attendance']).storeId),
+    'punches.day': (staffId: string, day: string) => (requireUser(['staff_attendance']), s.punches.dayPunches(staffId, day)),
+    'punches.correctDay': (staffId: string, day: string, input: { arrived: string | null; left: string | null; reason: string }) => s.punches.correctDay(ctx(['staff_attendance']), staffId, day, input),
+    'punches.cancel': (id: string, reason: string) => s.punches.cancel(ctx(['staff_attendance']), id, reason),
+
+    // --- Borne de pointage -----------------------------------------------------------------------
+    /** Ce PC est-il une borne, et pour quelle entrée ? La borne s'affiche à la place de l'écran de connexion. */
+    'kiosk.state': () => {
+      const station = s.admin.station();
+      if (!station) return null;
+      const set = s.admin.storeSettings(station.store.id);
+      const configured = s.admin.getSetting('kiosk.entrance') || null;
+      const entrances = s.personnel.entrances(station.store.id);
+      const entrance = (configured && entrances.find((e) => e.id === configured)) || (configured ? (entrances[0] ?? null) : null);
+      return {
+        /** Borne de ce PC (null : PC ordinaire). */
+        here: Boolean(configured && set.punchKiosk),
+        entranceId: entrance?.id ?? null,
+        entranceName: set.multiEntrances ? (entrance?.name ?? null) : null,
+        store: station.store.name,
+        enabled: set.punchKiosk,
+        badge: set.punchBadge,
+        pin: set.punchPin,
+        photo: set.punchPhoto,
+        multiEntrances: set.multiEntrances,
+      };
+    },
+    /** Fait de ce PC la borne d'une entrée (ou le remet en PC ordinaire avec null). */
+    'kiosk.configure': (entranceId: string | null) => {
+      const c = ctx(['staff_kiosk']);
+      if (entranceId === null) return void s.admin.setSetting('kiosk.entrance', '');
+      const id = entranceId === 'main' ? s.personnel.mainEntrance(c).id : entranceId;
+      const e = s.personnel.getEntrance(id);
+      if (e.store_id !== c.storeId) throw new AppError("Cette entrée est d'un autre magasin", 'FORBIDDEN');
+      s.admin.setSetting('kiosk.entrance', id);
+    },
+    /**
+     * Passage à la borne. Sans utilisateur connecté, seulement sur un PC réglé en
+     * borne ; sinon il faut le droit d'ouvrir la borne.
+     */
+    'kiosk.punch': (input: { badge?: string | null; number?: number | string | null; pin?: string | null; photo?: string | null; entranceId?: string | null }) => {
+      const station = s.admin.station();
+      if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
+      const here = s.admin.getSetting('kiosk.entrance') || null;
+      if (!here) requireUser(['staff_kiosk']);
+      return s.punches.punch(station.store.id, {
+        ...input,
+        entranceId: here ?? input.entranceId ?? null,
+        station: station.register ? `${station.store.code}-${station.register.number}` : station.store.code,
+      });
+    },
     'treasury.printReport': (sessionId: string) => {
       const u = requireUser(TREASURY);
       if (can(u, AMOUNTS)) return printer.sessionReport(sessionId);

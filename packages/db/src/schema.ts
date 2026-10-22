@@ -2296,4 +2296,15 @@ CREATE TABLE day_task_checks (
 );
 `,
   },
+  {
+    version: 58,
+    name: 'plusieurs caisses électroniques par utilisateur, moyens reçus par chaque caisse électronique',
+    sql: `
+-- Moyens reçus par une caisse électronique (MTN_MOMO,ORANGE_MONEY,CARD) ; vide : tous.
+ALTER TABLE registers ADD COLUMN methods TEXT;
+-- Caisses électroniques de l'utilisateur (JSON d'ids) ; emoney_register_id garde la première pour les anciennes versions.
+ALTER TABLE users ADD COLUMN emoney_register_ids TEXT;
+UPDATE users SET emoney_register_ids = json_array(emoney_register_id) WHERE emoney_register_id IS NOT NULL;
+`,
+  },
 ];

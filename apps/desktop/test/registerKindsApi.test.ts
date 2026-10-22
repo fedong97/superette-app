@@ -29,7 +29,9 @@ beforeEach(() => {
 describe('caisse électronique du caissier', () => {
   it('s’ouvre avec sa caisse espèces, reçoit le MTN et se clôture à l’aveugle avec son bon', async () => {
     login('awa', '5555');
-    expect((api['app.state']!() as { linkedRegisters: { electronic: { name: string } | null } }).linkedRegisters.electronic?.name).toBe('Mobile 1');
+    const linked = (api['app.state']!() as { linkedRegisters: { electronic: { name: string }[]; byMethod: Record<string, { name: string } | null> } }).linkedRegisters;
+    expect(linked.electronic.map((r) => r.name)).toEqual(['Mobile 1']);
+    expect(linked.byMethod['MTN_MOMO']?.name).toBe('Mobile 1');
     api['treasury.open']!(10_000);
     const state = api['treasury.state']!() as { linked: { id: string; session: unknown }[] };
     expect(state.linked).toHaveLength(1);

@@ -1,4 +1,4 @@
-import { BACKUP_FREQUENCIES, type Permission, type RegisterKind } from '@superette/core';
+import { BACKUP_FREQUENCIES, ELECTRONIC_METHODS, PAYMENT_METHODS, type Permission, type RegisterKind, registerMethods } from '@superette/core';
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
@@ -201,6 +201,23 @@ function Stores({ onChanged }: { onChanged: () => void }) {
 const KIND_LABEL: Record<RegisterKind, string> = { cash: 'Espèces', electronic: 'Électronique (MTN, Orange, carte)', bank: 'Banque (virement, chèque)' };
 const KIND_SHORT: Record<RegisterKind, string> = { cash: 'Espèces', electronic: 'Électronique', bank: 'Banque' };
 
+/** Caisses électroniques d'un utilisateur, dans l'ordre choisi. */
+function emoneyIds(u: { emoney_register_id: string | null; emoney_register_ids?: string | null }): string[] {
+  try {
+    const ids = u.emoney_register_ids ? (JSON.parse(u.emoney_register_ids) as unknown) : null;
+    if (Array.isArray(ids)) return ids.filter((x): x is string => typeof x === 'string');
+  } catch {
+    // Valeur illisible : la caisse unique.
+  }
+  return u.emoney_register_id ? [u.emoney_register_id] : [];
+}
+
+/** Moyens reçus par une caisse électronique, en clair (vide : tous). */
+const methodsLabel = (methods: string | null | undefined) =>
+  registerMethods(methods)
+    .map((m) => PAYMENT_METHODS[m])
+    .join(', ');
+
 function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
   const toast = useToast();
   const state = useLoad(() => call('app.state'));
@@ -212,9 +229,9 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
   const [code, setCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newKind, setNewKind] = useState<RegisterKind>('cash');
-  const [editing, setEditing] = useState<{ id: string; name: string; active: boolean } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; name: string; active: boolean; kind: RegisterKind; methods: string[] } | null>(null);
   const assigned = (id: string) =>
-    (users.data ?? []).filter((u) => (u.register_id === id || u.emoney_register_id === id || u.bank_register_id === id) && u.active === 1).map((u) => u.name);
+    (users.data ?? []).filter((u) => (u.register_id === id || emoneyIds(u).includes(id) || u.bank_register_id === id) && u.active === 1).map((u) => u.name);
   return (
     <>
       <div className="filters">
@@ -229,8 +246,10 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
       </div>
       <p className="muted">
         Chaque utilisateur vend sur la caisse qui lui est attribuée (Administration › Utilisateurs), depuis n'importe quel PC du magasin. Un
-        caissier peut avoir une caisse de chaque type : espèces (le tiroir), électronique (MTN, Orange, carte) et banque (virement, chèque) ; chaque
-        paiement va dans la caisse de son type. Le code d'activation d'une caisse espèces sert à rattacher un nouveau PC au magasin.
+        caissier a une caisse espèces (le tiroir), une caisse banque (virement, chèque) et une ou plusieurs caisses électroniques ; chaque
+        paiement va dans la caisse de son type. Une caisse électronique reçoit les moyens cochés (MTN, Orange, carte) : avec deux caisses
+        électroniques, par exemple une pour MTN et une pour Orange, chaque paiement va dans la sienne. Le code d'activation d'une caisse espèces
+        sert à rattacher un nouveau PC au magasin.
       </p>
       <table className="list">
         <thead>
@@ -251,13 +270,14 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
               <td>{r.name}</td>
               <td>
                 <span className={`tag kind-${r.kind}`}>{KIND_SHORT[r.kind]}</span>
+                {r.kind === 'electronic' && <div className="muted small">{methodsLabel(r.methods)}</div>}
               </td>
               <td>{assigned(r.id).join(', ') || <span className="muted">personne</span>}</td>
               <td>{r.kind === 'cash' ? <code>{r.activation_code}</code> : <span className="muted">—</span>}</td>
               <td>{r.active ? 'Active' : 'Désactivée'}</td>
               {isAdmin && (
                 <td>
-                  <button className="link" onClick={() => setEditing({ id: r.id, name: r.name, active: r.active === 1 })}>
+                  <button className="link" onClick={() => setEditing({ id: r.id, name: r.name, active: r.active === 1, kind: r.kind, methods: registerMethods(r.methods) })}>
                     Modifier
                   </button>
                 </td>
@@ -301,7 +321,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             onSubmit={async (e) => {
               e.preventDefault();
               try {
-                await call('admin.updateRegister', editing.id, { name: editing.name, active: editing.active });
+                await call('admin.updateRegister', editing.id, { name: editing.name, active: editing.active, ...(editing.kind === 'electronic' ? { methods: editing.methods } : {}) });
                 toast.ok('Caisse enregistrée');
                 setEditing(null);
                 registers.reload();
@@ -314,6 +334,22 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             <Field label="Nom">
               <input autoFocus value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
+            {editing.kind === 'electronic' && (
+              <Field label="Moyens reçus" hint="Un paiement va dans la caisse électronique du caissier qui reçoit ce moyen.">
+                <div className="checks columns3">
+                  {ELECTRONIC_METHODS.map((m) => (
+                    <label key={m} className="check">
+                      <input
+                        type="checkbox"
+                        checked={editing.methods.includes(m)}
+                        onChange={(e) => setEditing({ ...editing, methods: e.target.checked ? [...editing.methods, m] : editing.methods.filter((x) => x !== m) })}
+                      />{' '}
+                      {PAYMENT_METHODS[m]}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
             <label className="check">
               <input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Caisse active
             </label>
@@ -599,7 +635,8 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     role: Role;
     storeId: string;
     registerId: string;
-    emoneyRegisterId: string;
+    /** Caisses électroniques cochées : chacune reçoit ses moyens (MTN, Orange, carte). */
+    emoneyRegisterIds: string[];
     bankRegisterId: string;
     /** Dépôts de vente cochés ; null = selon le droit « vendre depuis un autre dépôt ». */
     saleWarehouses: string[] | null;
@@ -665,7 +702,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   role: u.role,
                   storeId: u.store_id ?? '',
                   registerId: u.register_id ?? '',
-                  emoneyRegisterId: u.emoney_register_id ?? '',
+                  emoneyRegisterIds: emoneyIds(u),
                   bankRegisterId: u.bank_register_id ?? '',
                   saleWarehouses: u.sale_warehouses ? (JSON.parse(u.sale_warehouses) as string[]) : null,
                   active: u.active === 1,
@@ -682,7 +719,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
               <td>
                 {registerLabel(u.register_id) ||
                   (sells(u.role) ? <span className="tag alerte">aucune : ne peut pas vendre</span> : <span className="muted">—</span>)}
-                {[u.emoney_register_id, u.bank_register_id].filter(Boolean).map((id) => (
+                {[...emoneyIds(u), u.bank_register_id].filter(Boolean).map((id) => (
                   <small key={id} className="muted">
                     {' '}
                     + {registerLabel(id)}
@@ -777,7 +814,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                 role: 'cashier',
                 storeId: '',
                 registerId: '',
-                emoneyRegisterId: '',
+                emoneyRegisterIds: [],
                 bankRegisterId: '',
                 saleWarehouses: null,
                 active: true,
@@ -804,7 +841,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     role: form.role,
                     storeId: form.storeId || null,
                     registerId: form.registerId || null,
-                    emoneyRegisterId: form.emoneyRegisterId || null,
+                    emoneyRegisterIds: form.emoneyRegisterIds,
                     bankRegisterId: form.bankRegisterId || null,
                     saleWarehouses: form.saleWarehouses,
                     active: form.active,
@@ -821,7 +858,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                       role: form.role,
                       storeId: form.storeId || null,
                       registerId: form.registerId || null,
-                      emoneyRegisterId: form.emoneyRegisterId || null,
+                      emoneyRegisterIds: form.emoneyRegisterIds,
                       bankRegisterId: form.bankRegisterId || null,
                       saleWarehouses: form.saleWarehouses,
                     },
@@ -888,25 +925,41 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     ))}
                 </select>
               </Field>
-              {(
-                [
-                  ['emoneyRegisterId', 'electronic', 'Caisse électronique', 'Reçoit ses paiements MTN, Orange Money et carte.'],
-                  ['bankRegisterId', 'bank', 'Caisse banque', 'Reçoit ses virements et chèques.'],
-                ] as const
-              ).map(([key, kind, label, hint]) => (
-                <Field key={key} label={label} hint={hint}>
-                  <select value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })}>
-                    <option value="">Aucune (dans la caisse espèces)</option>
-                    {(registers.data ?? [])
-                      .filter((r) => r.kind === kind && (r.active || r.id === form[key]) && (!form.storeId || r.store_id === form.storeId))
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {registerLabel(r.id)}
-                        </option>
-                      ))}
-                  </select>
-                </Field>
-              ))}
+              <Field label="Caisse banque" hint="Reçoit ses virements et chèques.">
+                <select value={form.bankRegisterId} onChange={(e) => setForm({ ...form, bankRegisterId: e.target.value })}>
+                  <option value="">Aucune (dans la caisse espèces)</option>
+                  {(registers.data ?? [])
+                    .filter((r) => r.kind === 'bank' && (r.active || r.id === form.bankRegisterId) && (!form.storeId || r.store_id === form.storeId))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {registerLabel(r.id)}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field
+                label="Caisses électroniques"
+                hint="Cochez-en une ou plusieurs : chaque paiement MTN, Orange Money ou carte va dans celle qui reçoit ce moyen. Aucune : dans la caisse espèces."
+              >
+                {(() => {
+                  const choices = (registers.data ?? []).filter(
+                    (r) => r.kind === 'electronic' && (r.active || form.emoneyRegisterIds.includes(r.id)) && (!form.storeId || r.store_id === form.storeId),
+                  );
+                  if (!choices.length) return <small className="muted">Aucune caisse électronique : créez-en dans Administration › Caisses.</small>;
+                  return choices.map((r) => (
+                    <label key={r.id} className="check">
+                      <input
+                        type="checkbox"
+                        checked={form.emoneyRegisterIds.includes(r.id)}
+                        onChange={(e) =>
+                          setForm({ ...form, emoneyRegisterIds: e.target.checked ? [...form.emoneyRegisterIds, r.id] : form.emoneyRegisterIds.filter((x) => x !== r.id) })
+                        }
+                      />{' '}
+                      {registerLabel(r.id)} <small className="muted">({methodsLabel(r.methods)})</small>
+                    </label>
+                  ));
+                })()}
+              </Field>
               {(warehouses.data?.length ?? 0) > 1 && (
                 <Field
                   label="Dépôts de vente"

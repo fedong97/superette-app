@@ -142,8 +142,9 @@ export class ExpenseService extends Base {
     } else if (input.atRegister) {
       if (isPayout(input.method)) {
         // Payée avec le compte MoMo/OM du caissier : elle sort de sa caisse électronique.
-        const own = emoney.userRegister(ctx.userId);
-        if (!own.registerId) throw new AppError("Vous n'avez pas de caisse électronique : payez en espèces", 'INVALID');
+        const own = emoney.userRegister(ctx.userId, input.method);
+        if (!own.registerId && !own.any) throw new AppError("Vous n'avez pas de caisse électronique : payez en espèces", 'INVALID');
+        if (!own.registerId) throw new AppError(`Aucune de vos caisses électroniques ne reçoit ${EXPENSE_PAYMENT_METHODS[input.method as keyof typeof EXPENSE_PAYMENT_METHODS] ?? input.method} : payez en espèces`, 'INVALID');
         if (!own.sessionId) throw new AppError("Ouvrez la caisse avant d'y prendre de l'argent", 'NO_SESSION');
         registerId = own.registerId;
         sessionId = own.sessionId;

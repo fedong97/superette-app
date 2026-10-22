@@ -16,7 +16,8 @@ function useMethods(): { methods: PaymentMethod[]; target: (m: PaymentMethod) =>
   const methods = linked?.bank ? [...METHODS, 'BANK_TRANSFER', 'CHEQUE' as PaymentMethod] : METHODS;
   const target = (m: PaymentMethod) => {
     const kind = paymentRegisterKind(m);
-    return kind === 'cash' ? null : (linked?.[kind]?.name ?? null);
+    if (kind === 'cash') return null;
+    return (kind === 'bank' ? linked?.bank : linked?.byMethod[m])?.name ?? null;
   };
   return { methods: methods as PaymentMethod[], target };
 }

@@ -88,7 +88,9 @@ async function dismiss(page: Page) {
   for (let i = 0; i < 3; i++) await page.keyboard.press('Escape');
 }
 
+/** Parcours complet (une vingtaine de minutes) : lancé à la main avec AUDIT_FENETRES=1, pas dans la vérification automatique. */
 test('à la taille d’un portable, chaque écran et chaque fenêtre s’affiche en entier', async () => {
+  test.skip(!process.env.AUDIT_FENETRES, 'AUDIT_FENETRES=1 pour lancer le parcours de toutes les fenêtres');
   test.setTimeout(45 * 60_000);
   const { app, page } = await launch();
   const report: Record<string, string[]> = {};

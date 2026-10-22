@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.82.1',
+    items: [
+      'Afficheur client « deuxième écran » : sans deuxième écran branché, il ne recouvre plus l’écran de la caisse (écran « Bienvenue » impossible à fermer).',
+    ],
+  },
+  {
     version: '0.82.0',
     items: [
       'Le logiciel s’appelle maintenant ONIX 360. Vos boutiques, votre licence et vos réglages sont gardés tels quels.',

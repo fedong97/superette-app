@@ -1343,3 +1343,17 @@ ul.plain li { padding: 3px 0; }
 .staff-photo { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; background: var(--bg); }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
 .warn-box { color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 8px 12px; margin: 0 0 10px; }
+
+/* Alertes du personnel : une ligne par retard ou absence, avec les messages WhatsApp prêts. */
+.alert-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line, #e5e7eb);
+}
+.alert-row .link {
+  margin-right: 10px;
+}

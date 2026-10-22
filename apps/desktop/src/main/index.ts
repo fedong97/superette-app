@@ -8,6 +8,7 @@ import { createCloudBackup } from './cloudBackup';
 import { createCustomerDisplay } from './customerDisplay';
 import { createDigestMailer } from './digest';
 import { createDossiers } from './dossiers';
+import { createFingerprintReceiver } from './fingerprint';
 import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 import { createUpdater } from './updater';
@@ -162,11 +163,14 @@ void app.whenReady().then(() => {
   const backupTimer = setInterval(autoBackup, 60_000);
   const digest = createDigestMailer(services);
   const customerDisplay = createCustomerDisplay();
+  // Pointeuses à empreinte par le réseau, et alertes de retard et d'absence du personnel.
+  const fingerprint = createFingerprintReceiver(services);
   /** Ferme proprement la boutique ouverte (changement de boutique, restauration, installation). */
   const shutdown = () => {
     customerDisplay.close();
     sync.stop();
     digest.stop();
+    fingerprint.stop();
     updater.stop();
     clearTimeout(backupStart);
     clearInterval(backupTimer);
@@ -203,6 +207,7 @@ void app.whenReady().then(() => {
       return r.canceled ? null : (r.filePaths[0] ?? null);
     },
     digest: { seal: digest.seal, sendNow: digest.sendNow },
+    fingerprint,
     updater,
     customerDisplay,
     restore: (file, userId) => {

@@ -176,3 +176,132 @@ export function parseRotation(json: string | null | undefined): Rotation | null 
     return null;
   }
 }
+
+/**
+ * Règles de la paie d'après le pointage (Administration › Paramètres), chacune
+ * au choix du magasin : retenues pour absence et retard, heures
+ * supplémentaires majorées, majoration des jours fériés travaillés et prime
+ * d'assiduité.
+ */
+export interface AttendancePayRules {
+  payAbsence: boolean;
+  payLate: boolean;
+  payOvertime: boolean;
+  /** Majoration des heures supplémentaires, en % du taux horaire. */
+  overtimeRatePct: number;
+  /** Dépassement de l'horaire du jour compté en heures supplémentaires à partir de ce nombre de minutes. */
+  overtimeMinMinutes: number;
+  /** Majoration des heures travaillées un jour férié, en % ; 0 : aucune. */
+  holidayRatePct: number;
+  /** Prime d'assiduité du mois sans absence ni retard, en FCFA ; 0 : aucune. */
+  attendanceBonus: number;
+  /** Heures de travail d'un mois complet (40 h par semaine : 173). */
+  monthlyHours: number;
+}
+
+/** Ce que le pointage du mois dit d'un collaborateur, pour sa paie. */
+export interface AttendancePayFacts {
+  base: number;
+  /** Tarif journalier (journaliers) : payé par jour de présence. */
+  dailyRate: number;
+  /** Primes fixes du mois (transport, logement…). */
+  allowance: number;
+  /** Jours de travail prévus sur tout le mois (fériés et congés payés exclus). */
+  plannedDays: number;
+  presentDays: number;
+  absences: number;
+  /** Jours de congé sans solde. */
+  unpaidLeave: number;
+  lateMinutes: number;
+  lateCount: number;
+  overtimeMinutes: number;
+  holidayMinutes: number;
+}
+
+export type PayLineCode = 'base' | 'days' | 'absence' | 'late' | 'overtime' | 'holiday' | 'bonus' | 'allowance';
+
+export interface PayLine {
+  code: PayLineCode;
+  label: string;
+  /** Montant en FCFA : négatif pour une retenue. */
+  amount: number;
+}
+
+const hours = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+};
+const thousands = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
+
+/**
+ * Salaire brut proposé d'après le pointage : salaire de base (ou jours de
+ * présence d'un journalier), retenues et majorations selon les règles
+ * choisies. Le gérant le vérifie et le corrige avant de le constater.
+ */
+export function attendancePay(f: AttendancePayFacts, r: AttendancePayRules): { lines: PayLine[]; gross: number } {
+  const lines: PayLine[] = [];
+  const daily = f.dailyRate > 0 && f.base <= 0;
+  if (daily) {
+    lines.push({ code: 'days', label: `${plural(f.presentDays, 'jour', 'jours')} de présence à ${thousands(f.dailyRate)} FCFA`, amount: f.presentDays * f.dailyRate });
+  } else if (f.base > 0) {
+    lines.push({ code: 'base', label: 'Salaire de base', amount: f.base });
+  }
+  // Taux horaire : salaire du mois sur les heures d'un mois complet ; journalier : sa journée de 8 heures.
+  const hourly = daily ? f.dailyRate / 8 : f.base / Math.max(1, r.monthlyHours);
+  if (!daily && f.base > 0 && r.payAbsence && f.absences + f.unpaidLeave > 0) {
+    const days = f.absences + f.unpaidLeave;
+    const perDay = f.base / Math.max(1, f.plannedDays || 26);
+    const label = [f.absences ? plural(f.absences, 'absence', 'absences') : '', f.unpaidLeave ? plural(f.unpaidLeave, 'jour sans solde', 'jours sans solde') : ''].filter(Boolean).join(' et ');
+    lines.push({ code: 'absence', label: `Retenue : ${label}`, amount: -Math.min(f.base, Math.round(perDay * days)) });
+  }
+  if (r.payLate && f.lateMinutes > 0 && hourly > 0) {
+    lines.push({ code: 'late', label: `Retenue : ${plural(f.lateCount, 'retard', 'retards')}, ${hours(f.lateMinutes)}`, amount: -Math.round((hourly * f.lateMinutes) / 60) });
+  }
+  if (r.payOvertime && f.overtimeMinutes > 0 && hourly > 0) {
+    lines.push({
+      code: 'overtime',
+      label: `Heures supplémentaires : ${hours(f.overtimeMinutes)} majorées de ${r.overtimeRatePct} %`,
+      amount: Math.round(((hourly * (100 + r.overtimeRatePct)) / 100) * (f.overtimeMinutes / 60)),
+    });
+  }
+  if (r.holidayRatePct > 0 && f.holidayMinutes > 0 && hourly > 0) {
+    lines.push({ code: 'holiday', label: `Jours fériés travaillés : ${hours(f.holidayMinutes)} majorées de ${r.holidayRatePct} %`, amount: Math.round(((hourly * r.holidayRatePct) / 100) * (f.holidayMinutes / 60)) });
+  }
+  if (r.attendanceBonus > 0 && f.presentDays > 0 && f.absences === 0 && f.lateCount === 0) {
+    lines.push({ code: 'bonus', label: 'Prime d’assiduité (ni absence ni retard)', amount: r.attendanceBonus });
+  }
+  if (f.allowance > 0) lines.push({ code: 'allowance', label: 'Primes fixes du mois', amount: f.allowance });
+  const gross = Math.max(0, lines.reduce((t, l) => t + l.amount, 0));
+  return { lines, gross };
+}
+
+/** Avertissements donnés à un collaborateur. */
+export const WARNING_KINDS = {
+  oral: 'Avertissement oral',
+  written: 'Avertissement écrit',
+  blame: 'Blâme',
+  suspension: 'Mise à pied',
+} as const;
+export type WarningKind = keyof typeof WARNING_KINDS;
+
+/**
+ * Pointages lus d'une pointeuse à empreinte ZKTeco : fichier « attlog » de la
+ * clé USB, ou envoi « ATTLOG » par le réseau (ADMS). Une ligne : numéro de la
+ * personne dans la pointeuse, date et heure, puis l'état (0 arrivée, 1 départ).
+ */
+export function parseAttlog(text: string): { number: number; at: string; state: number | null }[] {
+  const out: { number: number; at: string; state: number | null }[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^(\d{1,9})\s+(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+(\d+))?/.exec(line);
+    if (!m) continue;
+    const [, n, y, mo, d, h, mi, s, st] = m;
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s ?? 0));
+    if (Number.isNaN(date.getTime())) continue;
+    out.push({ number: Number(n), at: date.toISOString(), state: st === undefined ? null : Number(st) });
+  }
+  return out;
+}

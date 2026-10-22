@@ -142,7 +142,7 @@ export class PunchService extends Base {
     return Boolean(l && l.kind === 'in' && this.clock().getTime() - Date.parse(l.at) < MAX_SESSION_MS);
   }
 
-  private insert(row: Omit<TimePunch, 'id' | 'created_at' | 'updated_at' | 'status'> & { status?: TimePunch['status'] }): TimePunch {
+  private insert(row: Omit<TimePunch, 'id' | 'created_at' | 'updated_at' | 'status'> & { status?: TimePunch['status']; id?: string }): TimePunch {
     const now = this.now();
     const punch: TimePunch = { id: newId(), status: 'active', created_at: now, updated_at: now, ...row } as TimePunch;
     this.db
@@ -240,6 +240,28 @@ export class PunchService extends Base {
     );
     const { late, expected } = this.lateness(staffId, punch);
     return { staff: info, punch, duplicate: false, late_minutes: late, expected };
+  }
+
+  /**
+   * Passage reçu d'une pointeuse (empreinte), à l'heure où il a eu lieu : la
+   * pointeuse garde ses passages quand le PC est éteint et les renvoie. Le
+   * même passage reçu deux fois (réseau puis clé USB, ou deux PC) n'est noté
+   * qu'une fois : son identifiant vient de la personne et de l'heure.
+   */
+  external(storeId: string, staffId: string, at: string, opts: { entranceId?: string | null; station?: string | null; method?: PunchMethod } = {}): { punch: TimePunch | null; duplicate: boolean } {
+    const set = this.admin.storeSettings(storeId);
+    const id = `fp:${staffId}:${at}`;
+    if (this.db.prepare('SELECT 1 FROM time_punches WHERE id = ?').get(id)) return { punch: null, duplicate: true };
+    const t = Date.parse(at);
+    const gap = set.punchGapMinutes * 60_000;
+    const near = this.db
+      .prepare("SELECT 1 FROM time_punches WHERE staff_id = ? AND status = 'active' AND at > ? AND at < ? LIMIT 1")
+      .get(staffId, new Date(t - gap).toISOString(), new Date(t + gap).toISOString());
+    if (gap > 0 && near) return { punch: null, duplicate: true };
+    const prev = this.db.prepare("SELECT * FROM time_punches WHERE staff_id = ? AND status = 'active' AND at < ? ORDER BY at DESC LIMIT 1").get(staffId, at) as TimePunch | undefined;
+    const kind: 'in' | 'out' = prev && prev.kind === 'in' && t - Date.parse(prev.at) < MAX_SESSION_MS ? 'out' : 'in';
+    const punch = this.insert({ id, store_id: storeId, staff_id: staffId, entrance_id: opts.entranceId ?? null, at, kind, method: opts.method ?? 'fingerprint', photo: null, station: opts.station ?? null, user_id: null, reason: null });
+    return { punch, duplicate: false };
   }
 
   /** Retard d'une arrivée (ou avance d'un départ) d'après l'horaire prévu du jour. */

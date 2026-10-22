@@ -1,4 +1,4 @@
-import { computePayroll, CONTRACT_TYPES, type ContractType, type Fcfa, type Payroll, STAFF_KINDS, type StaffKind } from '@superette/core';
+import { type AttendancePayFacts, computePayroll, CONTRACT_TYPES, type PayLine, type ContractType, type Fcfa, type Payroll, STAFF_KINDS, type StaffKind } from '@superette/core';
 import type { AdminService, Role, User, UserRegisters } from './admin';
 import type { Db } from './database';
 import { AppError, Base, type Clock, type Context, newId } from './util';
@@ -58,6 +58,10 @@ export interface Staff {
   team_id: string | null;
   team_name: string | null;
   rotation: string | null;
+  /** Tarif d'une journée (journaliers payés à la journée) ; 0 : salaire du mois. */
+  daily_rate: Fcfa;
+  /** Primes fixes ajoutées chaque mois (transport, logement…). */
+  allowance: Fcfa;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +90,8 @@ export interface StaffInput {
   /** Société prestataire de l'agent (catégorie « contractor »). */
   agencyId?: string | null;
   emergencyContact?: string | null;
+  dailyRate?: Fcfa;
+  allowance?: Fcfa;
 }
 
 /** Ce que le magasin doit au collaborateur (salaires constatés non payés) et ce qu'il doit (avances non remboursées). */
@@ -113,6 +119,8 @@ export interface StaffSalary {
   employer_tax: Fcfa;
   /** Détail des retenues et charges (JSON), absent sans retenues légales. */
   payroll: string | null;
+  /** Détail du salaire proposé d'après le pointage (JSON : lignes et faits du mois). */
+  attendance: string | null;
   /** Net à payer : brut moins les retenues légales et les avances retenues. */
   net: Fcfa;
   paid: Fcfa;
@@ -135,6 +143,21 @@ export interface StaffStatementLine {
   advance: Fcfa;
   dueBalance: Fcfa;
   advanceBalance: Fcfa;
+}
+
+/** Détail d'un salaire proposé d'après le pointage, gardé pour le bulletin. */
+export interface SalaryAttendance {
+  lines: PayLine[];
+  facts: AttendancePayFacts;
+  /** Brut proposé par le calcul (le gérant a pu le corriger). */
+  proposed: Fcfa;
+}
+
+/** Détail du pointage gardé avec le salaire : lignes bornées et vérifiées. */
+function salaryAttendance(a: SalaryAttendance | null | undefined): string | null {
+  if (!a || !Array.isArray(a.lines)) return null;
+  const lines = a.lines.slice(0, 20).map((l) => ({ code: String(l.code).slice(0, 20) as PayLine['code'], label: String(l.label).slice(0, 200), amount: Math.round(Number(l.amount) || 0) }));
+  return JSON.stringify({ lines, facts: a.facts, proposed: Math.round(Number(a.proposed) || 0) });
 }
 
 const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -160,7 +183,7 @@ export class StaffService extends Base {
     return this.db.prepare(
       `SELECT s.id, s.store_id, s.code, s.name, s.position, s.phone, s.id_card, s.base_salary, s.hired_on, s.user_id, s.salary_account, s.parent_account,
               s.advance_account, s.active, s.declared, s.cnps_number, s.notes, s.category, s.contract_type, s.contract_end, s.agency_id, s.emergency_contact,
-              s.badge, s.punch_number, s.punch_pin_hash IS NOT NULL AS has_punch_pin, s.photo IS NOT NULL AS has_photo, s.team_id, s.rotation, s.created_at, s.updated_at,
+              s.badge, s.punch_number, s.punch_pin_hash IS NOT NULL AS has_punch_pin, s.photo IS NOT NULL AS has_photo, s.team_id, s.rotation, s.daily_rate, s.allowance, s.created_at, s.updated_at,
               u.name AS user_name, u.badge AS user_badge, pa.label AS parent_label, ag.name AS agency_name, t.name AS team_name
        FROM staff s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN accounts pa ON pa.id = s.parent_account
        LEFT JOIN staff_agencies ag ON ag.id = s.agency_id LEFT JOIN staff_teams t ON t.id = s.team_id WHERE ${where} ORDER BY s.active DESC, s.name`,
@@ -291,6 +314,9 @@ export class StaffService extends Base {
     if (!name) throw new AppError('Le nom du collaborateur est obligatoire', 'INVALID');
     const baseSalary = input.baseSalary ?? 0;
     if (!Number.isSafeInteger(baseSalary) || baseSalary < 0) throw new AppError('Salaire de base invalide', 'INVALID');
+    for (const [v, label] of [[input.dailyRate, 'Tarif journalier'], [input.allowance, 'Primes fixes']] as const) {
+      if (v !== undefined && (!Number.isSafeInteger(v) || v < 0)) throw new AppError(`${label} invalide`, 'INVALID');
+    }
     if (input.hiredOn && !/^\d{4}-\d{2}-\d{2}$/.test(input.hiredOn)) throw new AppError("Date d'entrée invalide", 'INVALID');
     if (input.userId) {
       const linked = this.db.prepare('SELECT id FROM staff WHERE user_id = ? AND id <> ?').pluck().get(input.userId, id ?? '') as string | undefined;
@@ -341,6 +367,9 @@ export class StaffService extends Base {
         contract_end: contractEnd,
         agency_id: agencyId,
         emergency_contact: input.emergencyContact === undefined ? (current?.emergency_contact ?? null) : input.emergencyContact?.trim() || null,
+        // L'agent prestataire est payé par sa société.
+        daily_rate: category === 'contractor' ? 0 : (input.dailyRate ?? current?.daily_rate ?? 0),
+        allowance: category === 'contractor' ? 0 : (input.allowance ?? current?.allowance ?? 0),
         now,
       };
       let staffId = id;
@@ -349,7 +378,7 @@ export class StaffService extends Base {
           .prepare(
             `UPDATE staff SET name = @name, position = @position, phone = @phone, id_card = @id_card, base_salary = @base_salary,
                hired_on = @hired_on, user_id = @user_id, active = @active, notes = @notes, category = @category, contract_type = @contract_type,
-               contract_end = @contract_end, agency_id = @agency_id, emergency_contact = @emergency_contact, updated_at = @now WHERE id = @id`,
+               contract_end = @contract_end, agency_id = @agency_id, emergency_contact = @emergency_contact, daily_rate = @daily_rate, allowance = @allowance, updated_at = @now WHERE id = @id`,
           )
           .run({ ...values, id: current.id });
         // Un agent prestataire devenu employé reçoit ses sous-comptes.
@@ -371,9 +400,9 @@ export class StaffService extends Base {
         this.db
           .prepare(
             `INSERT INTO staff (id, store_id, code, name, position, phone, id_card, base_salary, hired_on, user_id, salary_account, advance_account, active, notes,
-               category, contract_type, contract_end, agency_id, emergency_contact, punch_number, created_at, updated_at)
+               category, contract_type, contract_end, agency_id, emergency_contact, daily_rate, allowance, punch_number, created_at, updated_at)
              VALUES (@id, @store, @code, @name, @position, @phone, @id_card, @base_salary, @hired_on, @user_id, @salary, @advance, @active, @notes,
-               @category, @contract_type, @contract_end, @agency_id, @emergency_contact, @punch_number, @now, @now)`,
+               @category, @contract_type, @contract_end, @agency_id, @emergency_contact, @daily_rate, @allowance, @punch_number, @now, @now)`,
           )
           .run({
             ...values,
@@ -514,7 +543,7 @@ export class StaffService extends Base {
   }
 
   /** Constate les salaires du mois : brut, retenues légales et avances retenues, un salaire par collaborateur et par mois. */
-  recordSalaries(ctx: Context, period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa; commission?: Fcfa }[]): StaffSalary[] {
+  recordSalaries(ctx: Context, period: string, lines: { staffId: string; gross: Fcfa; deducted?: Fcfa; commission?: Fcfa; attendance?: SalaryAttendance | null }[]): StaffSalary[] {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new AppError('Mois invalide (AAAA-MM)', 'INVALID');
     if (period > this.today().slice(0, 7)) throw new AppError("On ne constate pas le salaire d'un mois à venir", 'INVALID');
     const todo = lines.filter((l) => l.gross > 0);
@@ -538,8 +567,8 @@ export class StaffService extends Base {
         const now = this.now();
         this.db
           .prepare(
-            `INSERT INTO staff_salaries (id, number, store_id, staff_id, period, gross, deducted, commission, cnps, tax, employer_social, employer_tax, payroll, label, status, user_id, at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+            `INSERT INTO staff_salaries (id, number, store_id, staff_id, period, gross, deducted, commission, cnps, tax, employer_social, employer_tax, payroll, attendance, label, status, user_id, at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
           )
           .run(
             id,
@@ -555,6 +584,7 @@ export class StaffService extends Base {
             p?.employerSocial ?? 0,
             p?.employerTax ?? 0,
             p ? JSON.stringify(p) : null,
+            salaryAttendance(l.attendance),
             commission > 0 ? `Salaire de ${periodLabel(period)}, commission comprise` : `Salaire de ${periodLabel(period)}`,
             ctx.userId,
             now,
@@ -619,6 +649,7 @@ export class StaffService extends Base {
       )
       .all(salaryId) as { number: string; at: string; amount: number; method: string; reference: string | null; register_name: string | null }[];
     const payroll = salary.payroll ? (JSON.parse(salary.payroll) as Payroll) : null;
-    return { salary, staff, payments, payroll, periodLabel: periodLabel(salary.period) };
+    const attendance = salary.attendance ? (JSON.parse(salary.attendance) as SalaryAttendance) : null;
+    return { salary, staff, payments, payroll, attendance, periodLabel: periodLabel(salary.period) };
   }
 }

@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.85.0',
+    items: [
+      'Paie d’après le pointage : le salaire du mois est proposé avec les absences, les retards, les heures supplémentaires majorées, les fériés travaillés, la prime d’assiduité et les primes fixes. Chaque règle se choisit dans Administration › Paramètres ; le gérant vérifie avant de constater et le calcul figure sur le bulletin.',
+      'Journaliers payés à la journée : le tarif d’une journée sur la fiche, multiplié par les jours de présence pointés.',
+      'Pointeuse à empreinte ZKTeco : les passages arrivent par le réseau sur un PC du magasin, ou par le fichier de la clé USB. Les empreintes restent dans l’appareil.',
+      'Alertes du personnel : un retard ou une absence s’affiche sur le PC et sur le téléphone du gérant, avec le message WhatsApp prêt pour le responsable ou la société de gardiennage.',
+      'Avertissements : oral, écrit, blâme ou mise à pied, gardés au dossier avec la lettre à faire signer ; proposés après trop de retards dans le mois.',
+    ],
+  },
+  {
     version: '0.84.0',
     items: [
       'Nouveau menu Personnel : tout le personnel a sa fiche, même ceux qui n’utilisent pas le logiciel (nettoyage, vigiles), avec sa catégorie, son contrat, sa photo et son dossier (CNI, contrat signé…).',

@@ -95,7 +95,7 @@ interface MenuItem {
   open?: [WinKind, string?];
   action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
   /** Option du magasin (Administration › Paramètres) dont dépend l'écran : il suffit d'une seule. */
-  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff')[];
+  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint')[];
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -382,7 +382,9 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Planning de la semaine', open: ['staff', 'planning'], perm: 'staff_leaves' },
       { label: 'Congés du personnel', open: ['staff', 'leaves'], perm: 'staff_leaves' },
       { label: 'Équipes, rotations et entrées', open: ['staff', 'teams'], perm: 'staff_teams', setting: ['staffTeams', 'multiEntrances'] },
+      { label: 'Pointeuses à empreinte', open: ['staff', 'teams'], perm: ['staff_teams', 'staff_kiosk', 'staff_attendance'], setting: ['fingerprint'] },
       { label: 'Sociétés prestataires (gardiennage, nettoyage)', open: ['staff', 'agencies'], perm: 'staff_agencies', setting: ['contractorStaff'] },
+      { label: 'Avertissements', open: ['staff', 'warnings'], perm: ['staff_edit', 'staff_attendance'] },
       SEP,
       { label: 'Salaires du mois', open: ['staff', 'salaries'], perm: 'staff_salaries' },
       { label: 'Objectifs et commissions des vendeurs', open: ['staff', 'targets'], perm: 'staff_targets' },

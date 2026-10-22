@@ -247,7 +247,7 @@
   }
 
   // ——— Demandes d'accord des caisses et alertes ———
-  const KINDS = { approval: 'Demandes d’accord des caisses', gap: 'Écarts de caisse à la clôture', discount: 'Grosses remises', cancel: 'Tickets annulés', stockout: 'Ruptures de stock', silent: 'PC qui ne donnent plus de nouvelles' };
+  const KINDS = { approval: 'Demandes d’accord des caisses', gap: 'Écarts de caisse à la clôture', discount: 'Grosses remises', cancel: 'Tickets annulés', stockout: 'Ruptures de stock', silent: 'PC qui ne donnent plus de nouvelles', staff: 'Retards et absences du personnel' };
   const prefs = (() => {
     try { return { kinds: Object.keys(KINDS), discountPct: 20, ...JSON.parse(localStorage.getItem('fedo.gerant.alertes') || '{}') }; } catch { return { kinds: Object.keys(KINDS), discountPct: 20 }; }
   })();

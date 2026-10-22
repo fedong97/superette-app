@@ -48,6 +48,8 @@ import { AssetService } from './assets';
 import { AttendanceService } from './attendance';
 import { PersonnelService } from './personnel';
 import { PunchService } from './punches';
+import { FingerprintService } from './fingerprint';
+import { StaffWatchService } from './staffWatch';
 import { SupplierReturnService } from './supplierReturns';
 import { SummaryInvoiceService } from './summaryInvoices';
 import { ChequeService } from './cheques';
@@ -119,6 +121,8 @@ export * from './assets';
 export * from './attendance';
 export * from './personnel';
 export * from './punches';
+export * from './fingerprint';
+export * from './staffWatch';
 export * from './supplierReturns';
 export * from './summaryInvoices';
 export * from './cheques';
@@ -190,6 +194,8 @@ export interface Services {
   attendance: AttendanceService;
   personnel: PersonnelService;
   punches: PunchService;
+  fingerprint: FingerprintService;
+  staffWatch: StaffWatchService;
   supplierReturns: SupplierReturnService;
   summaryInvoices: SummaryInvoiceService;
   cheques: ChequeService;
@@ -261,6 +267,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const personnel = new PersonnelService(db, clock, admin, staffTime);
   const punches = new PunchService(db, clock, admin, personnel, staffTime);
   const attendance = new AttendanceService(db, clock, admin, staffTime, personnel, punches);
+  const fingerprint = new FingerprintService(db, clock, admin, personnel, punches);
+  const staffWatch = new StaffWatchService(db, clock, admin, punches);
   const containers = new ContainerService(db, clock, pos, cashdesk);
   const agent = new AgentService(db, clock, pos, cashdesk);
   const cashierControl = new CashierControlService(db, clock);
@@ -278,7 +286,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const missedSales = new MissedSaleService(db, clock);
   const floor = new FloorService(db, clock, stock);
   const insights = new InsightService(db, clock, catalogue, cashierControl, companies);
-  return { db, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  return { db, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

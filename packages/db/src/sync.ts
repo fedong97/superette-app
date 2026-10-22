@@ -91,6 +91,9 @@ const TABLES: Record<string, string> = {
   staff_team: 'staff_teams',
   time_punch: 'time_punches',
   staff_document: 'staff_documents',
+  fingerprint_device: 'fingerprint_devices',
+  staff_warning: 'staff_warnings',
+  staff_alert: 'staff_alerts',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -116,6 +119,7 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   // Un passage annulé (correction du gérant) ne redevient pas actif.
   time_punches: { active: 0, cancelled: 1 },
   staff_documents: { active: 0, cancelled: 1 },
+  staff_warnings: { active: 0, cancelled: 1 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */

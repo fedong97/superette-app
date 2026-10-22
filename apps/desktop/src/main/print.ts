@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import {
   PAYMENT_METHODS,
   PAYROLL_LABELS,
+  WARNING_KINDS,
   type Codepage,
   type DocLang,
   type Receipt,
@@ -980,7 +981,16 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
     },
 
     async salarySlip(salaryId) {
-      const { salary: x, staff: st, payments, payroll: p, periodLabel } = s.staff.slip(salaryId);
+      const { salary: x, staff: st, payments, payroll: p, attendance: att, periodLabel } = s.staff.slip(salaryId);
+      // Détail du brut d'après le pointage : jours, retenues, heures supplémentaires, primes.
+      const fromAttendance = att
+        ? `<h3>Calcul du brut d'après le pointage</h3><table class="totals" style="width:100%">${att.lines
+            .map((l) => `<tr><td>${esc(l.label)}</td><td class="r">${l.amount < 0 ? '-' : ''}${money(Math.abs(l.amount))}</td></tr>`)
+            .join('')}${x.commission ? `<tr><td>Commission sur les ventes</td><td class="r">${money(x.commission)}</td></tr>` : ''}${
+            x.gross !== att.proposed + x.commission ? `<tr><td>Ajustement du gérant</td><td class="r">${x.gross - att.proposed - x.commission < 0 ? '-' : ''}${money(Math.abs(x.gross - att.proposed - x.commission))}</td></tr>` : ''
+          }</table>
+          <p class="muted">Mois : ${att.facts.presentDays} jour(s) de présence sur ${att.facts.plannedDays} prévu(s), ${att.facts.absences} absence(s), ${att.facts.lateCount} retard(s).</p>`
+        : '';
       const legal = p
         ? (['cnps', 'irpp', 'cac', 'cfc', 'rav', 'tdl'] as const)
             .filter((k) => p[k])
@@ -1001,6 +1011,7 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         <h1>Bulletin de paie, ${esc(periodLabel)}</h1>
         <div class="box" style="margin-bottom:6mm"><b>${esc(st.name)}</b>${st.position ? ` · ${esc(st.position)}` : ''}<br>
           Matricule ${esc(st.code)}${st.cnps_number ? ` · CNPS ${esc(st.cnps_number)}` : ''}${st.id_card ? ` · CNI ${esc(st.id_card)}` : ''}${st.phone ? ` · ${esc(st.phone)}` : ''}${st.hired_on ? `<br>Entré(e) le ${dayFr(st.hired_on)}` : ''}</div>
+        ${fromAttendance}
         <table class="totals" style="width:100%">
           <tr><td>Salaire brut du mois</td><td class="r">${money(x.gross)}</td></tr>
           ${legal}
@@ -1013,6 +1024,22 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         ${employer}
         <p class="muted">Avances restant à rembourser : ${money(Math.max(0, st.advances))} FCFA.${p ? '' : ' Sans retenues légales (paie non activée ou collaborateur non déclaré).'}</p>
         <div style="display:flex;justify-content:space-between;margin-top:16mm"><div>Le collaborateur</div><div>L'employeur</div></div>`);
+    },
+
+    async staffWarning(warningId) {
+      const w = s.staffWatch.warning(warningId);
+      const st = s.staff.get(w.staff_id);
+      const store = s.admin.getStore(w.store_id);
+      await printA4(`${a4Head(store)}
+        <h1>${esc(WARNING_KINDS[w.kind] ?? w.kind)}</h1>
+        <div class="box" style="margin-bottom:8mm"><b>${esc(st.name)}</b>${st.position ? ` · ${esc(st.position)}` : ''}<br>Matricule ${esc(st.code)}</div>
+        <p style="font-size:12pt">Le ${dayFr(w.day)}, la direction vous adresse le présent ${esc((WARNING_KINDS[w.kind] ?? w.kind).toLowerCase())} pour le motif suivant :</p>
+        <p class="box" style="font-size:12pt">${esc(w.reason)}</p>
+        <p style="font-size:12pt">Nous vous demandons de veiller à ce que cela ne se reproduise pas. Ce document est versé à votre dossier.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:18mm;font-size:11pt">
+          <div style="text-align:center">Le collaborateur<br><span class="muted">(reçu le ..................)</span></div>
+          <div style="text-align:center">La direction<br><span class="muted">${esc(w.user_name ?? '')}</span></div>
+        </div>`);
     },
 
     async payrollDeclarations(storeId, period) {

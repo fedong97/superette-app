@@ -10,6 +10,7 @@ export const ALERT_KINDS = {
   cancel: 'Tickets annulés',
   stockout: 'Ruptures de stock',
   silent: 'PC qui ne donnent plus de nouvelles',
+  staff: 'Retards et absences du personnel',
 } as const;
 export type AlertKind = keyof typeof ALERT_KINDS;
 
@@ -86,7 +87,7 @@ export class AlertsService {
       `SELECT e.seq, e.entity, e.entity_id, e.store_id, e.payload, e.created_at,
          NOT EXISTS (SELECT 1 FROM events p WHERE p.entity = e.entity AND p.entity_id = e.entity_id AND p.seq < e.seq) AS first,
          (SELECT p.payload FROM events p WHERE p.entity = e.entity AND p.entity_id = e.entity_id AND p.seq < e.seq ORDER BY p.seq DESC LIMIT 1) AS was
-       FROM events e WHERE e.seq > $1 AND e.seq <= $2 AND e.op = 'upsert' AND e.entity IN ('cash_session', 'sale', 'stock_level') ORDER BY e.seq LIMIT 2000`,
+       FROM events e WHERE e.seq > $1 AND e.seq <= $2 AND e.op = 'upsert' AND e.entity IN ('cash_session', 'sale', 'stock_level', 'staff_alert') ORDER BY e.seq LIMIT 2000`,
       [since, upTo],
     );
     if (!rows.length) return [];
@@ -118,6 +119,9 @@ export class AlertsService {
           const pct = Math.round((discount / Math.max(1, num(p['total_ttc']) + discount)) * 100);
           out.push({ key: `discount:${r.entity_id}`, kind: 'discount', store: storeName, title: `Remise de ${pct} %`, text: `${String(p['number'] ?? '')} : ${fcfa(discount)} de remise sur ${fcfa(num(p['total_ttc']) + discount)}${who ? ` (${who})` : ''}`, at, pct });
         }
+      } else if (r.entity === 'staff_alert') {
+        // Levée par le PC du magasin d'après l'horaire prévu ; une seule fois par personne, jour et sorte.
+        if (r.first) out.push({ key: `staff:${r.entity_id}`, kind: 'staff', store: storeName, title: p['kind'] === 'absent' ? 'Absence du personnel' : 'Retard du personnel', text: String(p['text'] ?? ''), at });
       } else if (num(p['qty']) <= 0 && (r.first || num(r.was?.['qty']) > 0)) {
         const article = name(articles, p['article_id']);
         if (!article) continue;

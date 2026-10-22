@@ -1059,6 +1059,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           'Les présents, les retards à appeler, les attendus, les absents et ceux en congé, d’après l’horaire prévu de chacun. L’écran se met à jour tout seul.',
           'Cliquez une personne pour ses passages du jour, avec la photo prise à la borne.',
+          'Alertes du personnel (si activées) : un retard au-delà du délai réglé ou une absence s’affiche ici et sur le PC. Le message WhatsApp est prêt pour le responsable, la société de gardiennage (envoyer un remplaçant) ou la personne. « Traité » la range.',
         ],
       },
       {
@@ -1069,6 +1070,16 @@ export const HELP: Record<WinKind, PageHelp> = {
           'Une équipe a son horaire, ses jours et sa tolérance. Une fin avant le début est une garde de nuit : elle compte pour le jour où elle commence.',
           'Chaque collaborateur reçoit une équipe fixe ou une rotation (par exemple Jour puis Nuit, une semaine chacune) dans « Badge et pointage ».',
           'Entrées : une ou plusieurs, chacune avec sa borne. « Ce PC est la borne de » fait de ce PC une borne : elle remplace l’écran de connexion.',
+          'Pointeuse à empreinte (ZKTeco) : enregistrez chaque personne dans la pointeuse sous son numéro de pointage. Un PC toujours allumé reçoit les passages par le réseau (dans la pointeuse : Communication › Serveur cloud, adresse et port affichés ici), ou importez le fichier « attlog » de la clé USB. Un passage reçu deux fois n’est compté qu’une fois.',
+        ],
+      },
+      {
+        tab: 'warnings',
+        title: 'Avertissements',
+        perm: 'staff_edit',
+        steps: [
+          '« Nouvel avertissement… » : collaborateur, sorte (oral, écrit, blâme, mise à pied), date et motif. Il est gardé au dossier ; « Imprimer la lettre » donne la lettre à faire signer.',
+          'Après le nombre de retards du mois réglé dans les paramètres, la personne est proposée en haut de la liste.',
         ],
       },
       {
@@ -1085,6 +1096,8 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Salaires du mois',
         steps: [
           'Choisissez le mois : le salaire de base et les avances à retenir sont proposés. Corrigez si besoin, puis « Constater les salaires ».',
+          'Paie d’après le pointage (Administration › Paramètres) : le brut est proposé avec les absences, les retards, les heures supplémentaires, les fériés travaillés, la prime d’assiduité et les primes fixes. Cliquez le montant de la colonne « D’après le pointage » pour voir le calcul ; il figure aussi sur le bulletin.',
+          'Journalier : avec un salaire de base à 0 et un tarif d’une journée sur sa fiche, il est payé par jour de présence pointé.',
           '« Payer… » règle le net au bureau (caisse centrale, MoMo/OM ou banque). À la caisse : Décaisser › Remboursement / Prêt › Salaire.',
           'Paie activée (Administration › Paramètres › Paie) : la colonne « Retenues légales » montre la CNPS et les impôts retenus (IRPP, CAC, CFC, RAV, TDL) pour chaque collaborateur déclaré ; le net en tient compte.',
           '« Bulletin » imprime le bulletin de paie : brut, retenues ligne par ligne, avances, net, et charges patronales pour information.',

@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.86.0',
+    items: [
+      'Nouveau logo : l’œil des chiffres. Des lames vertes en relief tournent autour d’un œil dont l’iris est un graphique en anneau. Le logiciel et le serveur gardent chacun leur icône sur le bureau (menthe pour la caisse, noire et or avec un serveur pour ONIX 360 Serveur).',
+      'Awa et Paul remplacent l’aigle : Awa, la caissière, accompagne les vendeurs et la caisse ; Paul, le gérant, accompagne ceux qui ont l’administration. Ils veillent à la connexion, disent bonjour, comptent à la clôture, applaudissent quand la caisse est juste, sursautent en cas d’erreur et dorment quand la caisse est fermée.',
+    ],
+  },
+  {
     version: '0.85.0',
     items: [
       'Paie d’après le pointage : le salaire du mois est proposé avec les absences, les retards, les heures supplémentaires majorées, les fériés travaillés, la prime d’assiduité et les primes fixes. Chaque règle se choisit dans Administration › Paramètres ; le gérant vérifie avant de constater et le calcul figure sur le bulletin.',

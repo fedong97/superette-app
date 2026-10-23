@@ -11,7 +11,7 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
   const toast = useToast();
   const [login, setLogin] = useState('');
   const [pin, setPin] = useState('');
-  // L'aigle veille, baisse les yeux pendant la saisie du code et sursaute en cas d'erreur.
+  // La mascotte veille, baisse les yeux pendant la saisie du code et sursaute en cas d'erreur.
   const [oops, setOops] = useState(false);
   const pinRef = useRef<HTMLInputElement>(null);
   const failed = () => {
@@ -35,7 +35,7 @@ export function Login({ station, fiche, onDone }: { station: Result<'app.state'>
   return (
     <div className="center-page">
       <form className="card login" onSubmit={submit}>
-        <Mascot mood={oops ? 'alerte' : pin ? 'compte' : 'veille'} size={92} className="login-aigle" />
+        <Mascot mood={oops ? 'alerte' : pin ? 'compte' : 'veille'} size={92} className="login-mascotte" />
         <div className="brand">
           <img src={logo} alt="" width={40} height={40} />
           <span>ONIX 360</span>

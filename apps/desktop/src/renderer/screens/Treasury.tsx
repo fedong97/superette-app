@@ -905,8 +905,8 @@ function CloseDialog({
     const deposits = done.session.deposit ?? 0;
     return (
       <Modal title={`Caisse fermée · Z n° ${done.session.z_number}`} onClose={() => onDone(done.session.id)} wide>
-        <div className="aigle-bulle">
-          <Mascot mood="dort" size={70} branch={false} />
+        <div className="mascotte-bulle">
+          <Mascot mood="dort" size={70} />
           <div>Caisse fermée. Bon repos, à demain !</div>
         </div>
         <ZView z={done} />
@@ -928,8 +928,8 @@ function CloseDialog({
       {!preview ? (
         <>
           <BeforeClose registerId={session.register_id ?? undefined} />
-          <div className="aigle-bulle">
-            <Mascot mood="compte" size={70} branch={false} />
+          <div className="mascotte-bulle">
+            <Mascot mood="compte" size={70} />
             <div>Comptez les espèces du tiroir par coupure. L'attendu s'affiche après le comptage.</div>
           </div>
           <Denominations count={count} onChange={setCount} />
@@ -967,8 +967,8 @@ function CloseDialog({
             }
           }}
         >
-          <div className="aigle-bulle">
-            <Mascot mood={preview.difference === 0 ? 'bravo' : 'alerte'} size={70} branch={false} />
+          <div className="mascotte-bulle">
+            <Mascot mood={preview.difference === 0 ? 'bravo' : 'alerte'} size={70} />
             <div>
               {preview.difference === 0
                 ? 'Caisse juste : le comptage tombe pile sur l’attendu.'

@@ -321,6 +321,10 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Alertes (`staff_alerts`, une par personne, jour et sorte) : levées chaque minute d'après « Qui est là », notification sur le PC, alerte « Retards et absences du personnel » sur le téléphone du gérant, messages WhatsApp prêts (responsable, société prestataire, personne).
 - Avertissements (`staff_warnings`) avec lettre A4 ; proposés à partir de `warnLateCount` retards dans le mois.
 
+**Nouveau logo et mascottes (0.86.0)**
+- Logo : lames vertes en relief autour de l'œil des chiffres (iris en graphique en anneau), dessiné en SVG dans `packages/core/src/mascot.ts` (`logoSvg`, `logoDoc`) ; icônes du logiciel et du serveur générées depuis `iconDoc('app' | 'server')`.
+- Mascottes : Awa (caisse, vente) et Paul (gérant) jouent les six humeurs (`mascotSvg(mood, { who })`) ; l'écran choisit Paul quand l'utilisateur a le droit `admin`, sinon Awa.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

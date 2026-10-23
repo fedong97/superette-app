@@ -1284,26 +1284,26 @@ ul.plain li { padding: 3px 0; }
 .pos-rayons button { min-height: 40px; padding: 6px 16px; border-radius: 20px; font-size: 15px; }
 .pos-rayons button.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
 
-/* Aigle ONIX : la mascotte et ses humeurs */
-.aigle { display: block; flex: none; overflow: visible; }
-.aigle-veille, .aigle-bonjour { animation: aigle-plane 4s ease-in-out infinite; }
-.aigle-bravo { animation: aigle-saut 0.9s ease-out 2; }
-.aigle-alerte { animation: aigle-sursaut 0.5s ease-in-out 2; }
-.aigle-dort { animation: aigle-souffle 3.5s ease-in-out infinite; transform-origin: 50% 100%; }
-.aigle-compte { animation: aigle-plane 2.4s ease-in-out infinite; }
-@keyframes aigle-plane { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@keyframes aigle-saut { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-8px) rotate(-3deg); } 70% { transform: translateY(0) rotate(2deg); } }
-@keyframes aigle-sursaut { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
-@keyframes aigle-souffle { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.97); } }
-@media (prefers-reduced-motion: reduce) { .aigle { animation: none !important; } }
-.empty .aigle { margin: 0 auto 8px; opacity: 0.95; }
-.toast-aigle { background: rgba(255, 255, 255, 0.92); border-radius: 50%; padding: 3px 2px 0; width: 38px; height: 38px; }
-.home-aigle { margin: -6px auto 6px; }
-.login-aigle { margin: 0 auto 4px; }
-.aigle-bulle { display: flex; align-items: center; gap: 14px; text-align: left; }
-.aigle-bulle .aigle { flex: none; }
-.aigle-bulle > :not(.aigle) { margin: 0; background: var(--brand-soft, #e2f5ec); border-radius: 14px; padding: 10px 14px; position: relative; }
-.aigle-bulle > :not(.aigle)::before { content: ''; position: absolute; left: -8px; top: 50%; margin-top: -8px; border: 8px solid transparent; border-left: 0; border-right-color: var(--brand-soft, #e2f5ec); }
+/* Awa et Paul : la mascotte et ses humeurs */
+.mascotte { display: block; flex: none; overflow: visible; }
+.mascotte-veille, .mascotte-bonjour { animation: mascotte-plane 4s ease-in-out infinite; }
+.mascotte-bravo { animation: mascotte-saut 0.9s ease-out 2; }
+.mascotte-alerte { animation: mascotte-sursaut 0.5s ease-in-out 2; }
+.mascotte-dort { animation: mascotte-souffle 3.5s ease-in-out infinite; transform-origin: 50% 100%; }
+.mascotte-compte { animation: mascotte-plane 2.4s ease-in-out infinite; }
+@keyframes mascotte-plane { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes mascotte-saut { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-8px) rotate(-3deg); } 70% { transform: translateY(0) rotate(2deg); } }
+@keyframes mascotte-sursaut { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
+@keyframes mascotte-souffle { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.97); } }
+@media (prefers-reduced-motion: reduce) { .mascotte { animation: none !important; } }
+.empty .mascotte { margin: 0 auto 8px; opacity: 0.95; }
+.toast-mascotte { background: rgba(255, 255, 255, 0.92); border-radius: 50%; padding: 3px 2px 0; width: 38px; height: 38px; }
+.home-mascotte { margin: -6px auto 6px; }
+.login-mascotte { margin: 0 auto 4px; }
+.mascotte-bulle { display: flex; align-items: center; gap: 14px; text-align: left; }
+.mascotte-bulle .mascotte { flex: none; }
+.mascotte-bulle > :not(.mascotte) { margin: 0; background: var(--brand-soft, #e2f5ec); border-radius: 14px; padding: 10px 14px; position: relative; }
+.mascotte-bulle > :not(.mascotte)::before { content: ''; position: absolute; left: -8px; top: 50%; margin-top: -8px; border: 8px solid transparent; border-left: 0; border-right-color: var(--brand-soft, #e2f5ec); }
 
 /* Borne de pointage : plein écran, grands caractères, lisible de loin. */
 .kiosk { position: relative; min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 32px; background: var(--bg); color: var(--ink); }

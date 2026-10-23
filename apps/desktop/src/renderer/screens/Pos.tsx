@@ -2359,7 +2359,7 @@ function ClosedRegister({ canOpen, onTreasury, onReload }: { canOpen: boolean; o
   return (
     <div className="center-page">
       <div className="card closed-register">
-        <Mascot mood="dort" size={110} className="login-aigle" />
+        <Mascot mood="dort" size={110} className="login-mascotte" />
         <h2>La caisse est fermée</h2>
         <p>Aucune vente n'est possible tant que la caisse n'est pas ouverte. L'ouverture se fait dans Trésorerie › Opérations de trésorerie, avec le comptage du fond de caisse.</p>
         <div className="row">

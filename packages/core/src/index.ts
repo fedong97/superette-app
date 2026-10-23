@@ -33,5 +33,5 @@ export * from './articleFile';
 export * from './brand';
 export * from './badge';
 export * from './tiers';
-export * from './eagle';
+export * from './mascot';
 export * from './personnel';

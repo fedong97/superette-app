@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { DEFAULT_STORE_SETTINGS, type EagleMood, type Permission } from '@superette/core';
+import { DEFAULT_STORE_SETTINGS, type MascotMood, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
@@ -570,8 +570,8 @@ function LoginOrKiosk({ state, refresh }: { state: AppState; refresh: () => void
 }
 
 /** Texte court de la barre d'état ; le message complet est dans l'infobulle et Administration › Licence. */
-/** L'aigle de l'accueil dit bonjour le jour et dort tard le soir. */
-function homeMood(): EagleMood {
+/** La mascotte de l'accueil dit bonjour le jour et dort tard le soir. */
+function homeMood(): MascotMood {
   const h = new Date().getHours();
   return h >= 22 || h < 5 ? 'dort' : 'bonjour';
 }
@@ -1067,7 +1067,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
         <section className={`home ${showHome ? 'front' : ''}`}>
           <div className="home-card">
-            <Mascot mood={homeMood()} size={96} className="home-aigle" />
+            <Mascot mood={homeMood()} size={96} className="home-mascotte" />
             <h1>{state.station?.store.name}</h1>
             {(state.station?.store.address || state.station?.store.phone) && (
               <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
@@ -1473,7 +1473,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <Modal title="À propos" onClose={() => setHelp(null)}>
           <p>
             <span style={{ float: 'left', marginRight: 12 }}>
-              <Mascot mood="bonjour" size={64} branch={false} />
+              <Mascot mood="bonjour" size={64} />
             </span>
             <strong>ONIX 360</strong> v{state.version}
             <br />

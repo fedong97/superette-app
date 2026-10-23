@@ -14,8 +14,8 @@ export function HelpDialog({ kind, tab, rights, onClose, onGuide }: { kind: WinK
     return (
       <Modal title="Aide : page d'accueil" onClose={onClose}>
         <div className="help">
-          <div className="aigle-bulle">
-            <Mascot mood="bonjour" size={64} branch={false} />
+          <div className="mascotte-bulle">
+            <Mascot mood="bonjour" size={64} />
             <p className="help-intro">Les grosses tuiles ouvrent les écrans que vous utilisez le plus. La barre verte à gauche ouvre les menus ; « Tous les menus » les montre tous d'un coup.</p>
           </div>
           <ul>
@@ -39,8 +39,8 @@ export function HelpDialog({ kind, tab, rights, onClose, onGuide }: { kind: WinK
   return (
     <Modal title={`Aide : ${page.title}`} onClose={onClose} wide>
       <div className="help">
-        <div className="aigle-bulle">
-          <Mascot mood="veille" size={64} branch={false} />
+        <div className="mascotte-bulle">
+          <Mascot mood="veille" size={64} />
           <p className="help-intro">{page.intro}</p>
         </div>
         {sections.map((s, i) => (
@@ -281,8 +281,8 @@ export function GettingStarted({ role, canOpen, onOpen, onClose }: { role: keyof
   const steps: GuideStep[] = GETTING_STARTED[role];
   return (
     <Modal title="Guide de démarrage" onClose={onClose} wide>
-      <div className="aigle-bulle">
-        <Mascot mood="bonjour" size={64} branch={false} />
+      <div className="mascotte-bulle">
+        <Mascot mood="bonjour" size={64} />
         <p>Bienvenue ! Voici les premières choses à faire. Chaque bouton ouvre le bon écran.</p>
       </div>
       <ol className="guide-steps">
@@ -317,8 +317,8 @@ export function WhatsNew({ version, onClose }: { version: string; onClose: () =>
   return (
     <Modal title={`Quoi de neuf dans la version ${version}`} onClose={onClose} wide>
       <div className="help">
-        <div className="aigle-bulle">
-          <Mascot mood="bravo" size={64} branch={false} />
+        <div className="mascotte-bulle">
+          <Mascot mood="bravo" size={64} />
           <p>Le logiciel vient d'être mis à jour. Voici ce qui change.</p>
         </div>
         {WHATS_NEW.map((v) => (

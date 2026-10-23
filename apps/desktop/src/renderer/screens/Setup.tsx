@@ -113,7 +113,7 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
     <div className="center-page">
       <form className="card setup" onSubmit={submit}>
         <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Mascot mood="bonjour" size={64} branch={false} />
+          <Mascot mood="bonjour" who="paul" size={64} />
           Bienvenue dans ONIX 360
         </h1>
         <p>Première installation : renseignez votre magasin et le compte administrateur. Vous pourrez ajouter d'autres magasins et caisses ensuite.</p>

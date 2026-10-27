@@ -4,7 +4,7 @@ import { type Page, expect, test } from '@playwright/test';
 import { createStore, invoke, launch } from './app';
 
 /** Captures de la nouvelle organisation des menus : dans CAPTURES s'il est donné, sinon avec les résultats des tests. */
-const SHOTS = process.env.CAPTURES ?? join(__dirname, '../../../test-results/captures-menus');
+const SHOTS = process.env.CAPTURES ?? join(__dirname, '../../../test-results/captures-nouveaux-menus');
 
 async function shot(page: Page, name: string) {
   mkdirSync(SHOTS, { recursive: true });

@@ -445,14 +445,14 @@ const MENUS: [string, MenuItem[]][] = [
 /** Onglets rapides en haut de l'écran : quelques écrans du jour selon le rôle, que chacun peut personnaliser. */
 const QUICK_BY_ROLE: Record<Role, QuickTab[]> = {
   cashier: [
-    { label: 'Caisse 1', open: ['cash1'] },
-    { label: 'Caisse 2', open: ['cash2'] },
-    { label: 'Crédit', open: ['credit'], credit: true },
+    { label: 'V. cash 1', open: ['cash1'] },
+    { label: 'V. cash 2', open: ['cash2'] },
+    { label: 'V. crédit', open: ['credit'], credit: true },
     { label: 'Mes factures', open: ['sales', 'tickets'] },
     { label: 'Ma caisse', open: ['treasury', 'day'] },
   ],
   seller: [
-    { label: 'Caisse 1', open: ['cash1'] },
+    { label: 'V. cash 1', open: ['cash1'] },
     { label: 'Devis', open: ['quotes'] },
     { label: 'Commandes clients', open: ['orders'] },
     { label: 'Mes factures', open: ['sales', 'tickets'] },
@@ -477,7 +477,7 @@ const QUICK_BY_ROLE: Record<Role, QuickTab[]> = {
     { label: 'Rapprochement', open: ['accounting', 'bank'] },
   ],
   manager: [
-    { label: 'Caisse 1', open: ['cash1'] },
+    { label: 'V. cash 1', open: ['cash1'] },
     { label: 'Tableau de bord', open: ['dashboard', 'day'] },
     { label: "Points d'attention", open: ['dashboard', 'attention'] },
     { label: 'Journées de caisse', open: ['treasury', 'history'] },

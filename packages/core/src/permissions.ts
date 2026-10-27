@@ -178,6 +178,7 @@ export const PERMISSIONS = {
   stock_moves: { label: "Consulter l'historique des mouvements de stock", group: 'Gestion des stocks', type: 'Menu', parent: 'stock' },
   stock_monitoring: { label: "Monitoring de l'évolution des stocks", group: 'Gestion des stocks', type: 'Menu', parent: 'stock' },
   stock_receive: { label: 'Saisir une réception sans commande', group: 'Gestion des stocks', type: 'Bouton', parent: 'stock' },
+  reception_edit: { label: 'Corriger un bon de réception pas encore facturé (articles, quantités, prix)', group: 'Gestion des stocks', type: 'Bouton', roles: MANAGE },
   stock_loss: { label: 'Déstocker des marchandises (pertes, casse, périmés)', group: 'Gestion des stocks', type: 'Bouton', parent: 'stock' },
   containers: { label: 'Emballages consignés : types, vides, fournisseurs', group: 'Gestion des stocks', type: 'Menu', roles: STOCK },
   clearance: { label: 'Déstockage avant péremption et rapport de démarque', group: 'Gestion des stocks', type: 'Menu', roles: MANAGE },
@@ -222,7 +223,7 @@ export const PERMISSIONS = {
   // --- Suivi des charges -------------------------------------------------------
   expenses: { label: 'Consulter toutes les dépenses', group: 'Suivi des charges', type: 'Menu', roles: ACCOUNTING },
   expense_record: { label: 'Saisir une dépense au bureau', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
-  expense_cancel: { label: 'Annuler une dépense (avec le code du gérant)', group: 'Suivi des charges', type: 'Bouton', roles: COUNTER },
+  expense_cancel: { label: 'Modifier ou annuler une dépense (avec le code du gérant)', group: 'Suivi des charges', type: 'Bouton', roles: COUNTER },
   expense_categories: { label: 'Fixer les types de charge', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
   charge_plans: { label: 'Définir les charges fixes et constater les charges', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
 

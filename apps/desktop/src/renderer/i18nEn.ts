@@ -5144,6 +5144,14 @@ export const EN: Record<string, string> = {
   "Date de la pièce": "Document date",
   "Corrigez les articles, les quantités ou les prix : ce qui était entré en stock ressort et les articles corrigés entrent à leur place. Le fournisseur et le dépôt ne changent pas.": "Correct the items, quantities or prices: what had entered stock goes out and the corrected items come in instead. The supplier and the warehouse do not change.",
   "corrigée, stock mis à jour": "corrected, stock updated",
+  "Enregistrer les modifications": "Save the changes",
+  "Modification de la dépense": "Change of the expense",
+  "Déjà facturé : corrigez la facture fournisseur": "Already invoiced: correct the supplier invoice",
+  "Stock de départ : corrigez-le par un inventaire": "Opening stock: correct it with an inventory",
+  "Corriger les articles": "Correct the items",
+  "Corriger le bon de réception": "Correct the receipt note",
+  "BL du fournisseur": "Supplier delivery note",
+  "corrigé, stock mis à jour": "corrected, stock updated",
 };
 
 /** Textes avec un nombre, un numéro ou un nom : le premier motif qui correspond s'applique. */

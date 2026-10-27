@@ -331,10 +331,10 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         <div className="actions">
           <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
           <button onClick={() => onDone(order?.id ?? null)}>Retour</button>
-          <button disabled={!lines.length} onClick={() => void save(false)}>
-            Enregistrer le brouillon
+          <button className={order?.status === 'sent' ? 'primary' : undefined} disabled={!lines.length} onClick={() => void save(false)}>
+            {order?.status === 'sent' ? 'Enregistrer les modifications' : 'Enregistrer le brouillon'}
           </button>
-          {can('order_close') && (
+          {can('order_close') && order?.status !== 'sent' && (
             <button className="primary" disabled={!lines.length} onClick={() => void save(true)}>
               Enregistrer et envoyer
             </button>
@@ -437,7 +437,7 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
           WhatsApp au fournisseur
         </button>
         {whatsapp && <WhatsappOrderDialog orderId={o.id} number={o.number} supplier={o.supplier_name} onClose={() => setWhatsapp(false)} />}
-        {canEdit && o.state === 'draft' && <button onClick={() => onEdit(o)}>Modifier</button>}
+        {canEdit && (o.state === 'draft' || o.state === 'sent') && <button onClick={() => onEdit(o)}>Modifier</button>}
         {canClose && o.state === 'draft' && (
           <>
             <button className="danger" onClick={() => void setStatus('cancelled', 'Annuler ce bon de commande ?')}>
@@ -655,9 +655,22 @@ function ReceiveOrder({ id, onDone, phone }: { id: string; onDone: () => void; p
 // --- Réceptions ----------------------------------------------------------------
 
 function Receptions() {
+  const can = useCan();
   const list = useLoad(() => call('purchases.receptions', {}));
   const [open, setOpen] = useState<string | null>(null);
-  const detail = useLoad(() => (open ? call('purchases.reception', open) : Promise.resolve(null)), [open]);
+  const [correcting, setCorrecting] = useState(false);
+  const detail = useLoad(() => (open ? call('purchases.reception', open) : Promise.resolve(null)), [open, correcting]);
+  const d = detail.data;
+  if (open && correcting && d)
+    return (
+      <ReceptionEditor
+        reception={d}
+        onDone={() => {
+          setCorrecting(false);
+          list.reload();
+        }}
+      />
+    );
   return (
     <>
       {list.data?.length === 0 ? (
@@ -703,9 +716,66 @@ function Receptions() {
             {hasVat() ? `Total HT ${fcfa(detail.data.total_ht)} · TVA ${fcfa(detail.data.total_tva)} · TTC ${fcfa(detail.data.total_ttc)}` : `Total ${fcfa(detail.data.total_ttc)}`}
             {detail.data.discount ? ` · dont remise globale ${fcfa(detail.data.discount)}` : ''}
           </p>
+          {can('reception_edit') && (
+            <div className="actions">
+              <button
+                disabled={Boolean(detail.data.invoice_id || detail.data.opening || detail.data.discount)}
+                title={detail.data.invoice_id ? 'Déjà facturé : corrigez la facture fournisseur' : detail.data.opening ? 'Stock de départ : corrigez-le par un inventaire' : undefined}
+                onClick={() => setCorrecting(true)}
+              >
+                Corriger les articles
+              </button>
+            </div>
+          )}
         </Modal>
       )}
     </>
+  );
+}
+
+/** Corriger un bon de réception pas encore facturé : ce qui était entré ressort, les articles corrigés entrent. */
+function ReceptionEditor({ reception: r, onDone }: { reception: Result<'purchases.reception'>; onDone: () => void }) {
+  const toast = useToast();
+  const [lines, setLines] = useState<RecLine[]>([]);
+  const [note, setNote] = useState(r.delivery_note ?? '');
+  useEffect(() => {
+    invoiceRecLines(r.lines).then(setLines, (err) => toast.error(err));
+  }, [r.id]);
+  const total = lines.reduce((t, l) => t + lineNet(l), 0);
+  return (
+    <div>
+      <h2>Corriger le bon de réception {r.number}</h2>
+      <p className="warn-text">
+        {r.supplier_name ?? 'Sans fournisseur'} · dépôt {r.warehouse_name}
+        {r.order_number ? ` · commande ${r.order_number}` : ''}. Ce qui était entré en stock ressort et les articles corrigés entrent à leur place.
+      </p>
+      <div className="grid3">
+        <Field label="BL du fournisseur">
+          <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </div>
+      <PurchaseEntry lines={lines} setLines={setLines}>
+        <div className="actions">
+          <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
+          <button onClick={onDone}>Retour</button>
+          <button
+            className="primary"
+            disabled={!lines.length}
+            onClick={async () => {
+              try {
+                await call('purchases.correctReception', r.id, { lines: lines.map(recLineInput), deliveryNote: note || null });
+                toast.ok(`Bon ${r.number} corrigé, stock mis à jour`);
+                onDone();
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          >
+            Enregistrer la correction
+          </button>
+        </div>
+      </PurchaseEntry>
+    </div>
   );
 }
 

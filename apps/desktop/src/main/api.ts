@@ -1522,6 +1522,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (input.payment && !can(user!, ['supplier_pay'])) throw new AppError("Vous n'avez pas le droit de régler les fournisseurs", 'FORBIDDEN');
       return s.purchases.directInvoice(c, input);
     },
+    'purchases.correctReception': (id: string, input: Parameters<Services['purchases']['correctReception']>[2]) => s.purchases.correctReception(ctx(['reception_edit']), id, input),
     'purchases.updateInvoice': (id: string, input: Parameters<Services['purchases']['updateInvoice']>[2]) => s.purchases.updateInvoice(ctx(['purchase_invoice_edit']), id, input),
     /** Corriger les articles d'une facture directe refait aussi la réception : il faut le droit de réceptionner. */
     'purchases.correctDirectInvoice': (id: string, input: Parameters<Services['purchases']['correctDirectInvoice']>[2]) => {
@@ -2578,6 +2579,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx(['expense_cancel']);
       const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
       return s.expenses.cancel(c, id, sup, reason);
+    },
+    /** Modifier une dépense : mêmes droits que l'annuler (le gérant, ou son code). */
+    'expenses.update': (id: string, patch: { amount?: Fcfa; label?: string; beneficiary?: string | null; reference?: string | null }, supervisorPin?: string) => {
+      const c = ctx(['expense_cancel']);
+      const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
+      return s.expenses.update(c, id, sup, patch);
     },
     'expenses.get': (id: string) => (requireUser(), s.expenses.get(id)),
     'expenses.list': (opts: { from?: string; to?: string; categoryId?: string; sessionId?: string; includeCancelled?: boolean }) =>

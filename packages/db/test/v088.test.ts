@@ -141,6 +141,31 @@ describe('modifier une facture d’achat', () => {
   });
 });
 
+describe('bons de commande et de réception', () => {
+  it('une commande envoyée se modifie tant que rien n’est reçu', () => {
+    const o = s.purchases.createOrder(ctx, { supplierId: sup, warehouseId: wh, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });
+    s.purchases.setOrderStatus(ctx, o.id, 'sent');
+    const up = s.purchases.updateOrder(ctx, o.id, { supplierId: sup, warehouseId: wh, lines: [{ articleId: riz, qty: 12_000, unitCost: 3_000 }] });
+    expect(up).toMatchObject({ status: 'sent', total_ht: 36_000 });
+    s.purchases.receiveOrder(ctx, o.id, { lines: [{ orderLineId: up.lines[0]!.id, articleId: riz, qty: 5_000, unitCost: 3_000 }] });
+    expect(() => s.purchases.updateOrder(ctx, o.id, { supplierId: sup, warehouseId: wh, lines: [{ articleId: riz, qty: 1_000, unitCost: 3_000 }] })).toThrow(/déjà reçue/);
+  });
+
+  it('un bon de réception pas encore facturé se corrige, la commande suit', () => {
+    const o = s.purchases.createOrder(ctx, { supplierId: sup, warehouseId: wh, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });
+    s.purchases.setOrderStatus(ctx, o.id, 'sent');
+    const r = s.purchases.receiveOrder(ctx, o.id, { lines: [{ orderLineId: o.lines[0]!.id, articleId: riz, qty: 10_000, unitCost: 3_000 }] });
+    const recId = s.purchases.listReceptions(storeId)[0]!.id;
+    expect(r).toBeTruthy();
+    const fixed = s.purchases.correctReception(ctx, recId, { lines: [{ articleId: riz, qty: 8_000, unitCost: 3_000 }] });
+    expect(fixed.lines.map((l) => l.qty)).toEqual([8_000]);
+    expect(stockOf(riz)).toBe(8_000);
+    expect(s.purchases.getOrder(o.id).lines[0]!.received).toBe(8_000);
+    s.purchases.createInvoice(ctx, { supplierId: sup, supplierNumber: 'F-2', invoiceDate: '2026-10-27', totalHt: 24_000, totalTva: 0, receptionIds: [recId] });
+    expect(() => s.purchases.correctReception(ctx, recId, { lines: [{ articleId: riz, qty: 1_000, unitCost: 3_000 }] })).toThrow(/déjà facturé/);
+  });
+});
+
 describe('remise à zéro des données d’essai', () => {
   const play = () => {
     const cust = s.customers.saveCustomer(adminId, { name: 'Mballa', creditLimit: 100_000 });

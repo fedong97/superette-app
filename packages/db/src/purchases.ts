@@ -155,6 +155,8 @@ export interface Reception {
   received_at: string;
   /** Remise globale (facture directe), déjà répartie sur les lignes. */
   discount: Fcfa;
+  /** Stock de départ repris d'un ancien logiciel. */
+  opening?: number;
   total_ht: Fcfa;
   total_tva: Fcfa;
   total_ttc: Fcfa;
@@ -546,7 +548,10 @@ export class PurchaseService extends Base {
   ): PurchaseOrder {
     this.validateLines(input.lines);
     const order = this.getOrder(id);
-    if (order.status !== 'draft') throw new AppError('Seule une commande en brouillon peut être modifiée', 'INVALID_STATE');
+    // Une commande envoyée se modifie encore tant que rien n'en est reçu (le fournisseur a appelé, une erreur de quantité…).
+    if (order.status !== 'draft' && (order.status !== 'sent' || order.lines.some((l) => l.received > 0))) {
+      throw new AppError('Une commande déjà reçue, même en partie, ne se modifie plus : soldez-la et faites-en une autre', 'INVALID_STATE');
+    }
     this.getSupplier(input.supplierId);
     return this.tx(() => {
       this.db
@@ -554,6 +559,7 @@ export class PurchaseService extends Base {
         .run(input.supplierId, input.warehouseId, input.expectedDate ?? order.expected_date, input.notes?.trim() || null, this.now(), id);
       this.writeLines(id, input.lines);
       this.enqueue(ctx, 'purchase_order', id, 'upsert', {});
+      if (order.status === 'sent') this.audit(ctx.userId, 'order.update', 'purchase_order', id, { number: order.number, lines: input.lines.length });
       return this.getOrder(id);
     });
   }
@@ -1032,6 +1038,34 @@ export class PurchaseService extends Base {
       this.enqueue(ctx, 'supplier_invoice', invoice.id, 'upsert', {});
       if (input.payment) this.paySupplier(ctx, { ...input.payment, amount: input.payment.amount || this.getInvoice(invoice.id).balance, invoiceId: invoice.id });
       return this.getInvoice(invoice.id);
+    });
+  }
+
+  /**
+   * Corrige les articles d'un bon de réception pas encore facturé (quantité,
+   * prix, article oublié ou en trop) : le stock reçu est refait. Pour une
+   * réception de commande, chaque article reste rattaché à sa ligne de commande.
+   */
+  correctReception(ctx: Context, id: string, input: { lines: ReceptionLine[]; deliveryNote?: string | null }): ReceptionDetail {
+    const rec = this.db.prepare('SELECT id, number, store_id, order_id, invoice_id, opening, discount FROM receptions WHERE id = ?').get(id) as
+      | { id: string; number: string; store_id: string; order_id: string | null; invoice_id: string | null; opening: number; discount: number }
+      | undefined;
+    if (!rec || rec.store_id !== ctx.storeId) throw new AppError('Bon de réception introuvable', 'NOT_FOUND');
+    if (rec.opening) throw new AppError('Le stock de départ se corrige par un inventaire', 'INVALID');
+    if (rec.invoice_id) throw new AppError('Ce bon est déjà facturé : corrigez la facture fournisseur (bouton Modifier de la facture)', 'INVALID');
+    if (rec.discount) throw new AppError('Ce bon porte une remise globale : corrigez sa facture', 'INVALID');
+    // Réception de commande : un article garde sa ligne de commande (ce qui reste à recevoir suit).
+    const orderLines = rec.order_id
+      ? new Map((this.db.prepare('SELECT article_id, id FROM purchase_order_lines WHERE order_id = ? ORDER BY line_no').all(rec.order_id) as { article_id: string; id: string }[]).map((l) => [l.article_id, l.id]))
+      : new Map<string, string>();
+    return this.tx(() => {
+      this.stock.rewriteReception(ctx, id, {
+        lines: input.lines.map((l) => ({ ...l, orderLineId: orderLines.get(l.articleId) ?? null })),
+        reference: input.deliveryNote,
+        reason: `Correction du bon ${rec.number}`,
+      });
+      if (rec.order_id) this.enqueue(ctx, 'purchase_order', rec.order_id, 'upsert', {});
+      return this.getReception(id);
     });
   }
 

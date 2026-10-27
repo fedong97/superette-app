@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Page, test } from '@playwright/test';
+import { type Page, expect, test } from '@playwright/test';
 import { createStore, invoke, launch } from './app';
 
 /** Captures de la nouvelle interface : dans CAPTURES s'il est donné, sinon avec les résultats des tests. */
@@ -104,6 +104,47 @@ test('captures de l’interface (accueil, menus, tableau de bord, liste, caisse,
     await shot(page, '10-telephone');
     await page.locator('.side-burger').click();
     await shot(page, '11-telephone-menu');
+  } finally {
+    await app.close();
+  }
+});
+
+/** Les écrans de chaque menu, pour vérifier qu'ils suivent tous le même style. */
+const SCREENS: [string, string, string?][] = [
+  ['10-ventes-registre', 'sales', 'register'],
+  ['11-achats', 'purchases'],
+  ['12-stock', 'stock'],
+  ['13-articles', 'articles', 'list'],
+  ['14-clients', 'customers', 'list'],
+  ['15-fournisseurs', 'suppliers'],
+  ['16-depenses', 'expenses', 'list'],
+  ['17-tresorerie', 'treasury', 'day'],
+  ['18-compta', 'accounting'],
+  ['19-personnel', 'staff'],
+  ['20-rapports', 'reports', 'department'],
+  ['21-administration', 'admin', 'users'],
+  ['22-parametres', 'admin', 'settings'],
+  ['23-points-attention', 'dashboard', 'attention'],
+];
+
+test('captures de chaque écran dans le nouveau style', async () => {
+  const { app, page, errors } = await launch();
+  await page.setViewportSize({ width: 1440, height: 860 });
+  const dir = join(SHOTS, 'ecrans');
+  try {
+    await createStore(page);
+    await seed(page);
+    for (const [name, kind, tab] of SCREENS) {
+      await page.keyboard.press('Escape');
+      await page.evaluate(([k, t]) => window.dispatchEvent(new CustomEvent('fedonix:open', { detail: [k, t] })), [kind, tab] as const);
+      await page.waitForTimeout(700);
+      const bar = page.locator('main.windows > section.mdi.active:not(.max) .mdi-bar');
+      if (await bar.count()) await bar.first().dblclick().catch(() => undefined);
+      mkdirSync(dir, { recursive: true });
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: join(dir, `${name}.png`) });
+    }
+    expect(errors).toEqual([]);
   } finally {
     await app.close();
   }

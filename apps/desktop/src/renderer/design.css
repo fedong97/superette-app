@@ -358,6 +358,33 @@ table.list tr.total td { background: var(--surface-2); font-weight: 650; }
 .kpis > div:nth-child(3), .dash-grid > .card:nth-child(3) { animation-delay: 80ms; }
 .kpis > div:nth-child(4), .dash-grid > .card:nth-child(4) { animation-delay: 120ms; }
 
+/* --- Écrans : points d'attention, segments, barres d'outils, listes --- */
+.attention .tile { border: 1px solid var(--line); border-left: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
+.attention .tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--line); }
+.attention .tile:hover { border-color: var(--accent-line); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.attention .tile-count { font-size: 24px; font-weight: 650; }
+.attention .tile-label { font-weight: 600; }
+.attention .tile.danger, .attention .tile.warning { background: var(--panel); border-left-color: var(--line); }
+.attention .tile.danger::before { background: var(--danger); }
+.attention .tile.warning::before { background: var(--warn); }
+.attention .tile.info::before { background: var(--info); }
+.attention .tile.calm { opacity: 1; border-left-color: var(--line); }
+.attention .tile.calm .tile-count { color: var(--faint); }
+.seg { border-color: var(--line-strong); border-radius: var(--radius); background: var(--surface-2); padding: 2px; gap: 2px; }
+.seg button { border-radius: 6px; color: var(--muted); }
+.seg button.active { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm); }
+.search, .inv-search, .picker input, .toolbar input, input.key { background: #fff; }
+.filters, .toolbar { gap: var(--s2); }
+.tre-bar, .tre-pane, .tre-linked, .mon-head, .mon-section, .transfer-main, .settings-section, fieldset.box { border-color: var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.transfer-actions { background: var(--surface-2); border-color: var(--line); }
+.transfer-actions button.main { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.mon-chosen { background: var(--accent-soft) !important; border-color: var(--accent-line); }
+.settings-row { border-top-color: var(--line); }
+.rights-group-list { border-color: var(--line); }
+.rights-group-head { background: var(--surface-2); color: var(--muted); font-weight: 600; }
+fieldset.box legend { font-weight: 600; color: var(--muted); }
+.all-menus { background: var(--bg); }
+
 /* --- Recherche Ctrl+K --- */
 .palette > input { font-size: 15px; padding: 10px 12px; }
 .palette-list button { font-size: 13.5px; font-weight: 550; border-radius: 8px; display: flex; align-items: center; gap: 8px; }

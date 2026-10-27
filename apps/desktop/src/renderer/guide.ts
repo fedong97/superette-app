@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.92.0',
+    items: [
+      'Nouvelle interface : fond clair, cartes blanches, police Inter et icônes au trait. La couleur du magasin ne sert plus qu’aux accents (bouton principal, élément choisi, graphiques) ; boutons, champs, tableaux, fenêtres et messages ont le même style sur tous les écrans.',
+      'Barre latérale avec le nom des menus : le bouton ☰ (ou « Réduire » en bas) la réduit aux icônes, le nom s’affichant au survol. Le choix est gardé sur ce poste ; sur un petit écran elle s’ouvre en tiroir.',
+      'En haut : « Rechercher… » (Ctrl+K) trouve un écran, un produit ou un client, et ouvre la liste sur le résultat ; la cloche compte les points d’attention.',
+      'Accueil et tableau de bord : bouton « Nouvelle vente » (F2 hors de la caisse), chiffres du jour comparés à la veille, actions rapides et ventes par heure en colonnes.',
+    ],
+  },
+  {
     version: '0.91.0',
     items: [
       'Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met V. cash 1, V. cash 2 et V. crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.',

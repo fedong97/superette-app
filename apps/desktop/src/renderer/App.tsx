@@ -1150,7 +1150,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const showHome = !activeWin || activeWin.min;
   // Retour à l'accueil : les saisies en cours sont relues (l'une vient peut-être d'être enregistrée).
   useEffect(() => {
-    if (showHome) drafts.reload();
+    if (showHome) (drafts.reload(), attention.reload());
   }, [showHome]);
   const tiles = ROLE_TILES[user.role].filter((t) => canWin(t.open[0]));
   const attentionCount = (attention.data ?? []).reduce((n, i) => n + (i.count ? 1 : 0), 0);

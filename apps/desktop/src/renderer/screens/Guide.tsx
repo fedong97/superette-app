@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { call } from '../api';
 import type { Permission } from '@superette/core';
 import { GETTING_STARTED, type GuideStep, WHATS_NEW } from '../guide';
 import { HELP } from '../help';
 import { type QuickTab, type WinKind, fold } from '../nav';
-import { Mascot, Modal } from '../ui';
+import { Mascot, Modal, fcfa, findIn, openScreen } from '../ui';
 
 /**
  * Aide de la page affichée : à quoi elle sert, comment faire, raccourcis.
@@ -90,9 +91,19 @@ export interface PaletteEntry {
 }
 
 /** Recherche de menu (Ctrl+K) : on tape quelques lettres, Entrée ouvre l'écran. */
+/** Une ligne de la recherche Ctrl+K : un écran, un produit ou un client. */
+interface Hit {
+  group: string;
+  key: string;
+  label: string;
+  meta?: string;
+  run: () => void;
+}
+
 export function CommandPalette({ entries, onClose }: { entries: PaletteEntry[]; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
+  const [records, setRecords] = useState<Hit[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const found = useMemo(() => {
     const words = fold(q).split(/\s+/).filter(Boolean);
@@ -114,40 +125,82 @@ export function CommandPalette({ entries, onClose }: { entries: PaletteEntry[]; 
       })
       .sort((a, b) => b.score - a.score || a.n - b.n)
       .map((x) => x.e)
-      .slice(0, 12);
+      .slice(0, q.trim() ? 6 : 12);
   }, [q, entries]);
+  // Produits et clients : cherchés dès 2 lettres, un court instant après la frappe.
+  useEffect(() => {
+    const text = q.trim();
+    if (text.length < 2) return setRecords([]);
+    let live = true;
+    const t = setTimeout(() => {
+      void Promise.all([
+        call('catalogue.search', text).catch(() => []),
+        call('customers.list', { search: text }).catch(() => []),
+      ]).then(([articles, customers]) => {
+        if (!live) return;
+        setRecords([
+          ...articles.slice(0, 5).map((a) => ({
+            group: 'Produits',
+            key: `a-${a.id}`,
+            label: a.name,
+            meta: `${a.code} · ${fcfa(a.store_price || a.sale_price)}`,
+            run: () => (findIn('articles', a.name), openScreen('articles', 'list')),
+          })),
+          ...customers.slice(0, 4).map((c) => ({
+            group: 'Clients',
+            key: `c-${c.id}`,
+            label: c.name,
+            meta: c.phone ?? undefined,
+            run: () => (findIn('customers', c.name), openScreen('customers', 'list')),
+          })),
+        ]);
+      });
+    }, 120);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+  const hits: Hit[] = [...found.map((e) => ({ group: 'Écrans et actions', key: `e-${e.menu}-${e.label}`, label: e.label, meta: e.menu, run: e.run })), ...records];
   useEffect(() => setSel(0), [q]);
   useEffect(() => {
-    listRef.current?.children[sel]?.scrollIntoView({ block: 'nearest' });
+    listRef.current?.querySelectorAll('button')[sel]?.scrollIntoView({ block: 'nearest' });
   }, [sel]);
-  const go = (e: PaletteEntry | undefined) => {
-    if (!e) return;
+  const go = (h: Hit | undefined) => {
+    if (!h) return;
     onClose();
-    e.run();
+    h.run();
   };
   return (
-    <Modal title="Rechercher une fonction" onClose={onClose}>
+    <Modal title="Rechercher" onClose={onClose}>
       <div className="palette">
         <input
           autoFocus
-          placeholder="Tapez : vente, inventaire, réception fournisseur, clôture, TVA…"
+          aria-label="Rechercher un écran, un produit ou un client"
+          placeholder="Un écran, un produit, un client : vente, clôture, coca, Mballa…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'ArrowDown') (e.preventDefault(), setSel((s) => Math.min(s + 1, found.length - 1)));
+            if (e.key === 'ArrowDown') (e.preventDefault(), setSel((s) => Math.min(s + 1, hits.length - 1)));
             if (e.key === 'ArrowUp') (e.preventDefault(), setSel((s) => Math.max(s - 1, 0)));
-            if (e.key === 'Enter') (e.preventDefault(), go(found[sel]));
+            if (e.key === 'Enter') (e.preventDefault(), go(hits[sel]));
           }}
         />
-        <div className="palette-list" ref={listRef}>
-          {found.map((e, i) => (
-            <button key={`${e.menu}-${e.label}`} className={i === sel ? 'active' : ''} onMouseEnter={() => setSel(i)} onClick={() => go(e)}>
-              <small>{e.menu} ›</small> {e.label}
-            </button>
+        <div className="palette-list" ref={listRef} role="listbox">
+          {hits.map((h, i) => (
+            <Fragment key={h.key}>
+              {(i === 0 || hits[i - 1]!.group !== h.group) && <div className="palette-group">{h.group}</div>}
+              <button role="option" aria-selected={i === sel} className={i === sel ? 'active' : ''} onMouseEnter={() => setSel(i)} onClick={() => go(h)}>
+                {h.label}
+                {h.meta && <span className="p-meta">{h.meta}</span>}
+              </button>
+            </Fragment>
           ))}
-          {!found.length && <p className="muted">Aucun écran ne correspond. Essayez un autre mot.</p>}
+          {!hits.length && <p className="muted">Rien ne correspond. Essayez un autre mot.</p>}
         </div>
-        <p className="muted palette-hint">↑ ↓ pour choisir, Entrée pour ouvrir, Échap pour fermer.</p>
+        <p className="muted palette-hint">
+          <kbd>↑</kbd> <kbd>↓</kbd> pour choisir · <kbd>Entrée</kbd> pour ouvrir · <kbd>Échap</kbd> pour fermer
+        </p>
       </div>
     </Modal>
   );

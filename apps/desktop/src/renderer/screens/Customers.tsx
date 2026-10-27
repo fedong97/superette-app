@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, useLoad, useStoreSettings, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, useLoad, useStoreSettings, useToast, useFind } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
 import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canLinkSupplier, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
@@ -56,6 +56,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
 
 function CustomerList({ user }: { user: User }) {
   const [search, setSearch] = useState('');
+  useFind('customers', setSearch);
   const [inactive, setInactive] = useState(false);
   const [debtors, setDebtors] = useState(false);
   const [zone, setZone] = useState('');

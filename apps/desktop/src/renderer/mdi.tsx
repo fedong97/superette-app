@@ -81,7 +81,7 @@ export function MdiWindow({
   children,
 }: {
   title: string;
-  icon: string;
+  icon: ReactNode;
   geo: Geo;
   area: Area;
   z: number;

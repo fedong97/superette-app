@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { parseNetContent, parseQtyTiers, splitTtc, unitPriceText } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings, useDraft } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings, useDraft, useFind } from '../ui';
 import { ExportDialog, ImportDialog, type ListFilter, PriceUpdateDialog } from './articleFiles';
 import { useArticleSuggestions, SuggestionList } from './pickers';
 import { Shelving } from './Controls';
@@ -50,6 +50,7 @@ export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesV
 
 function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: boolean; focusSearch: boolean }) {
   const [search, setSearch] = useState('');
+  useFind('articles', setSearch);
   const [departmentId, setDepartmentId] = useState('');
   const [status, setStatus] = useState<ListFilter['status']>('all');
   const [editing, setEditing] = useState<Article | 'new' | null>(startNew ? 'new' : null);

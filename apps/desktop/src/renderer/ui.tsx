@@ -1,5 +1,5 @@
 import { DEFAULT_STORE_SETTINGS, type MascotMood, type MascotWho, type Permission, type StoreSettings, mascotSvg } from '@superette/core';
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { formatFcfa, formatQty } from '@superette/core';
 import { ApiError, type ErrorFix, call } from './api';
 
@@ -55,6 +55,27 @@ const ToastCtx = createContext<Push>(() => {});
 /** Ouvre un écran depuis n'importe où (solutions des messages d'erreur, tâches du jour…). */
 export const OPEN_EVENT = 'fedonix:open';
 export const openScreen = (kind: string, tab?: string) => window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: [kind, tab] }));
+
+/** Texte à chercher dans la liste d'un écran (recherche Ctrl+K) : pris par la liste à son ouverture, ou tout de suite si elle est ouverte. */
+const FIND_EVENT = 'fedonix:find';
+let pendingFind: { kind: string; text: string } | null = null;
+export const findIn = (kind: string, text: string) => {
+  pendingFind = { kind, text };
+  window.dispatchEvent(new CustomEvent(FIND_EVENT));
+};
+export function useFind(kind: string, set: (text: string) => void) {
+  useEffect(() => {
+    const take = () => {
+      if (pendingFind?.kind !== kind) return;
+      set(pendingFind.text);
+      pendingFind = null;
+    };
+    take();
+    window.addEventListener(FIND_EVENT, take);
+    return () => window.removeEventListener(FIND_EVENT, take);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
 
 /** Délai pendant lequel une action simple peut être annulée. */
 export const UNDO_SECONDS = 10;
@@ -241,11 +262,18 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // Le clavier entre dans la fenêtre : sur le champ marqué autoFocus, sinon sur le premier champ.
+  const titleId = useId();
+  useEffect(() => {
+    const box = back.current?.querySelector<HTMLElement>('.modal');
+    if (!box || box.contains(document.activeElement)) return;
+    box.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])')?.focus();
+  }, []);
   return (
     <div ref={back} className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'wide' : ''}`}>
+      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="modal-head">
-          <h2>{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <button type="button" className="ghost" onClick={onClose} aria-label="Fermer">
             ✕
           </button>
@@ -622,7 +650,7 @@ export function KeyHints() {
       pending = false;
       observer.disconnect();
       for (const b of document.querySelectorAll<HTMLButtonElement>('button[title]:not([data-kbd]), button.primary:not([data-kbd])')) {
-        if (b.closest('.pos-screen, .rail, .quick-tabs, .lv-tools, .statusbar, .toasts')) {
+        if (b.closest('.pos-screen, .rail, .topbar, .lv-tools, .statusbar, .toasts')) {
           b.dataset.kbd = '';
           continue;
         }

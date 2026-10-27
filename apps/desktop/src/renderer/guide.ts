@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.91.0',
+    items: [
+      'Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met V. cash 1, V. cash 2 et V. crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.',
+      'En plein écran, les boutons V. cash 1, V. cash 2 et V. crédit de la barre verte passent d’une fiche à l’autre. « Quitter le plein écran » (ou F11) ramène l’affichage habituel ; il revient aussi tout seul en allant à la trésorerie ou à la clôture.',
+      'Le logiciel se souvient du choix de chacun. Dans Paramètres › Écran de caisse, le gérant coche les rôles (caissier, vendeur, gérant, administrateur) qui arrivent directement en mode Caisse seule après la connexion.',
+    ],
+  },
+  {
     version: '0.90.0',
     items: [
       'Fenêtres façon Sage : chaque écran s’ouvre dans sa propre fenêtre. Paramètres s’ouvre seul, sans les autres onglets de l’administration ; Utilisateurs, État du stock ou Bons de commande ont chacun la leur.',

@@ -1,4 +1,4 @@
-import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, CUSTOMER_DISPLAY_MODES, type CustomerDisplayMode, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, CUSTOMER_DISPLAY_MODES, type CustomerDisplayMode, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_FULL_ROLES, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -33,6 +33,9 @@ const PRINT_SLOTS: { doc: DocKind; format: DocFormat; variant: DocVariant; label
   { doc: 'quote', format: 'a4', variant: 'quote', label: 'Devis' },
   { doc: 'quote', format: 'a4', variant: 'proforma', label: 'Facture proforma' },
 ];
+
+/** Rôles proposés pour le mode « Caisse seule » à la connexion. */
+const POS_FULL_ROLE_LABELS: Record<(typeof POS_FULL_ROLES)[number], string> = { cashier: 'Caissier', seller: 'Vendeur', manager: 'Gérant', admin: 'Administrateur' };
 
 /** Les trois présentations de l'écran de caisse, avec leur vignette. */
 const LAYOUT_CARDS: { id: PosLayout; shot: string; text: string }[] = [
@@ -370,6 +373,28 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
                 </option>
               ))}
             </select>
+          ),
+        },
+        {
+          label: 'Mode Caisse seule (plein écran) dès la connexion',
+          hint: 'La fiche de vente couvre tout l’écran, sans menus ni onglets. Chacun peut en sortir ou y revenir avec ⛶ dans la barre verte ou F11.',
+          render: () => (
+            <span>
+              {POS_FULL_ROLES.map((r) => {
+                const roles = String(sv('posFullRoles')).split(',').filter(Boolean);
+                return (
+                  <label key={r} className="inline">
+                    <input
+                      type="checkbox"
+                      disabled={!canEdit}
+                      checked={roles.includes(r)}
+                      onChange={(e) => sset('posFullRoles', (e.target.checked ? [...roles, r] : roles.filter((x) => x !== r)).join(','))}
+                    />{' '}
+                    {POS_FULL_ROLE_LABELS[r]}
+                  </label>
+                );
+              })}
+            </span>
           ),
         },
       ],

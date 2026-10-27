@@ -3,6 +3,15 @@
  * Les textes qui portent un nombre ou un nom passent par EN_PATTERNS.
  */
 export const EN: Record<string, string> = {
+  "Passer à cette fiche de vente sans quitter le plein écran": "Go to this sales sheet without leaving full screen",
+  "Revenir à l’affichage habituel (F11)": "Back to the usual display (F11)",
+  "Caisse seule : plein écran, sans menus ni onglets (F11)": "Till only: full screen, without menus or tabs (F11)",
+  "⛶ Quitter le plein écran": "⛶ Leave full screen",
+  "Mode Caisse seule (plein écran) dès la connexion": "Till only mode (full screen) right after login",
+  "La fiche de vente couvre tout l’écran, sans menus ni onglets. Chacun peut en sortir ou y revenir avec ⛶ dans la barre verte ou F11.": "The sales sheet covers the whole screen, without menus or tabs. Anyone can leave it or come back with ⛶ in the green bar or F11.",
+  "Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met V. cash 1, V. cash 2 et V. crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.": "“Till only” mode: the ⛶ button in the green bar (or F11) shows Cash sale 1, Cash sale 2 and Credit sale full screen, without menus, tabs or the Windows taskbar. The cashier only sees the sales sheet, the key strip and the bottom line.",
+  "En plein écran, les boutons V. cash 1, V. cash 2 et V. crédit de la barre verte passent d’une fiche à l’autre. « Quitter le plein écran » (ou F11) ramène l’affichage habituel ; il revient aussi tout seul en allant à la trésorerie ou à la clôture.": "In full screen, the Cash sale 1, Cash sale 2 and Credit sale buttons in the green bar switch from one sheet to another. “Leave full screen” (or F11) brings back the usual display; it also comes back on its own when going to the treasury or the closing.",
+  "Le logiciel se souvient du choix de chacun. Dans Paramètres › Écran de caisse, le gérant coche les rôles (caissier, vendeur, gérant, administrateur) qui arrivent directement en mode Caisse seule après la connexion.": "The software remembers each person’s choice. In Settings › Till screen, the manager ticks the roles (cashier, seller, manager, administrator) that go straight to Till only mode after logging in.",
   "Historique du Point Mobile Money": "Mobile Money point history",
   "Mouvements des emballages": "Container movements",
   "Paiement mobile (MTN, Orange)": "Mobile payment (MTN, Orange)",

@@ -408,52 +408,7 @@ tr.inv-ok, .inv-legend .inv-ok { background: var(--ok-soft); }
 .inv-history { width: auto !important; min-width: 320px; }
 .inv-foot > strong { margin-left: auto; font-size: 16px; align-self: center; }
 
-/* --- 0.28.0 : plus de nuances, dans les verts de l'application --- */
-.window { background: linear-gradient(180deg, var(--brand-soft) 0, var(--brand-pale) 260px); }
-.page-head { background: linear-gradient(90deg, var(--brand-deep), var(--brand) 55%, var(--brand2)); color: #fff; border-radius: 10px; padding: 10px 16px; box-shadow: 0 2px 6px color-mix(in srgb, var(--brand-deep) 25%, transparent); }
-.page-head h1 { color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.15); }
-.page-head .muted, .page-head small { color: color-mix(in srgb, var(--brand-ink) 85%, transparent); }
-.page-head button:not(.primary) { background: rgba(255, 255, 255, 0.92); border-color: transparent; color: var(--ink); }
-.page-head button.primary { background: #fff; color: var(--brand); border-color: #fff; }
-.tabs { border-bottom: 2px solid var(--brand-line); }
-.tabs button { border-radius: 6px 6px 0 0; color: var(--brand-deep); }
-.tabs button:hover:not(:disabled) { background: var(--brand-soft); }
-.tabs button.active { background: #fff; border-bottom: 3px solid var(--brand); box-shadow: 0 -1px 0 var(--brand-line) inset; }
-button { background: linear-gradient(#ffffff, var(--brand-pale)); }
-button:hover:not(:disabled) { background: var(--brand-soft); }
-button.primary:hover:not(:disabled) { background: var(--brand-dark); }
-button.ghost, button.link, .tabs button, .menu-drop button, .seg button, .suggest button { background: transparent; }
-table.list { overflow: hidden; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06); }
-table.list thead th { background: linear-gradient(var(--brand-pale), var(--brand-soft)); color: var(--brand-deep); border-bottom: 1px solid var(--brand-line); }
-table.list tfoot th, table.list tfoot td { background: var(--brand-pale); }
-table.list > tbody > tr:nth-child(even):not(.inv-short):not(.inv-surplus):not(.inv-ok):not(.selected):not(.total):not(.mon-in):not(.mon-out) { background: var(--brand-pale); }
-table.list tr.clickable:hover { background: color-mix(in srgb, var(--brand) 18%, white) !important; }
-.search, .inv-search, .picker input, .toolbar input, input.key { background: #fff7cc; border-color: #e3c84b; }
-.search:focus, .inv-search:focus, .picker input:focus, .toolbar input:focus, input.key:focus { background: #fff1a6; }
-.statusbar { background: linear-gradient(var(--brand-soft), color-mix(in srgb, var(--brand) 16%, white)); border-top-color: var(--brand-line); }
-.modal { box-shadow: 0 18px 48px rgba(16, 24, 40, 0.3); }
-.modal-head { margin: -18px -22px 14px; padding: 12px 22px; background: linear-gradient(90deg, var(--brand-deep), var(--brand) 60%, var(--brand2)); border-radius: 12px 12px 0 0; }
-.modal-head h2, .modal-head h3 { color: #fff; }
-.modal-head button { background: rgba(255, 255, 255, 0.9); border-color: transparent; }
-.kpis > div, .tre-foot > div { border-left: 4px solid var(--brand); background: linear-gradient(135deg, #ffffff, var(--brand-pale)); }
-.kpis > div:nth-child(4n + 2), .tre-foot > div:nth-child(4n + 2) { border-left-color: #2563eb; background: linear-gradient(135deg, #ffffff, #eef3ff); }
-.kpis > div:nth-child(4n + 3), .tre-foot > div:nth-child(4n + 3) { border-left-color: #d97706; background: linear-gradient(135deg, #ffffff, #fff6e8); }
-.kpis > div:nth-child(4n + 4), .tre-foot > div:nth-child(4n + 4) { border-left-color: #7c3aed; background: linear-gradient(135deg, #ffffff, #f4efff); }
-.tre-bar, .tre-pane { box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06); }
-.tre-pane h3 { background: var(--brand-soft); margin: -10px -10px 8px; padding: 7px 10px; border-radius: 10px 10px 0 0; }
-/* Page d'accueil quand aucune fenêtre n'est ouverte */
-.home { height: 100%; overflow: auto; display: grid; place-items: center; padding: 20px; background: radial-gradient(circle at 20% 15%, #fff6cc 0, transparent 40%), linear-gradient(135deg, var(--brand), var(--brand2) 55%, color-mix(in srgb, var(--brand2) 70%, white)); }
-.home-card { background: rgba(255, 255, 255, 0.93); border-radius: 18px; padding: 34px 44px; text-align: center; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); min-width: 480px; }
-.home-mark { width: 84px; height: 84px; margin: 0 auto 12px; border-radius: 22px; display: grid; place-items: center; font-size: 46px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand2)); box-shadow: 0 6px 16px color-mix(in srgb, var(--brand-deep) 40%, transparent); }
-.home-card h1 { font-size: 30px; color: var(--brand-deep); }
-.home-card p { margin: 6px 0 0; color: var(--muted); }
-.home-sub { font-weight: 700; color: var(--brand) !important; }
-.home-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 22px; }
-.home-tiles button { padding: 14px 10px; font-weight: 700; background: linear-gradient(#ffffff, var(--brand-soft)); border-color: var(--brand-line); }
-.home-tiles button.credit { color: #b42318; }
-.modal-head button.ghost { background: transparent; color: #fff; font-size: 18px; }
-.modal-head button.ghost:hover { background: rgba(255, 255, 255, 0.2); }
-.card h3 { color: var(--brand-deep); }
+/* 0.92.0 : habillage (couleurs, boutons, tableaux, fenêtres, accueil) dans design.css. */
 /* Fiche de facturation : solde du client, homonymes, tickets en attente */
 .solde-chip { padding: 4px 12px; border-radius: 4px; font-weight: 800; font-variant-numeric: tabular-nums; border: 1px solid; }
 .solde-chip.pos { background: #dcf5e6; color: #046c3c; border-color: #6cc596; }

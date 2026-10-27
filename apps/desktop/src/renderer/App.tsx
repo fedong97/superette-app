@@ -4,6 +4,7 @@ import { type Result, call } from './api';
 import logo from './assets/logo.png';
 import { type QuickTab, type WinKind } from './nav';
 import { applyBrand } from './theme';
+import { Ico, MenuIcon } from './icons';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';
 import { Orders } from './screens/Orders';
@@ -710,6 +711,31 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   }, []);
   const chargesLate = useLoad(() => call('charges.late'), []);
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
+  const attention = useLoad(() => (user.rights.includes('dashboard') ? call('attention.list').catch(() => []) : Promise.resolve([])), []);
+  useEffect(() => {
+    const t = setInterval(() => attention.reload(), 5 * 60_000);
+    return () => clearInterval(t);
+  }, []);
+  /** Barre latérale large (icônes et noms) ou étroite (icônes seules), gardée sur ce poste ; tiroir sur téléphone. */
+  const [side, setSide] = useState<'wide' | 'narrow'>(() => {
+    try {
+      return localStorage.getItem('onix.side') === 'narrow' || (!localStorage.getItem('onix.side') && window.innerWidth < 1100) ? 'narrow' : 'wide';
+    } catch {
+      return 'wide';
+    }
+  });
+  const [sideOpen, setSideOpen] = useState(false);
+  useEffect(() => setSideOpen(false), [active, help]);
+  const toggleSide = () => {
+    const next = side === 'wide' ? 'narrow' : 'wide';
+    setSide(next);
+    setMenu(null);
+    try {
+      localStorage.setItem('onix.side', next);
+    } catch {
+      /* poste sans stockage : le choix vaut pour la session */
+    }
+  };
   const update = useLoad(() => call('update.state'), []);
   useEffect(() => {
     const t = setInterval(update.reload, 5 * 60_000);
@@ -830,6 +856,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       } else if (e.key === 'F1' && !onPos) {
         e.preventDefault();
         setHelp('page');
+      } else if (e.key === 'F2' && !onPos && !help && canWin('cash1')) {
+        // F2 hors de la caisse : nouvelle vente (à la caisse, F2 valide et imprime le ticket).
+        e.preventDefault();
+        open('cash1', undefined, 'Vente › Vente au comptant 1');
       } else if (e.ctrlKey && e.key.toLowerCase() === 'j' && !onPos) {
         // Ctrl+J : nouveau ; dans un formulaire, enregistre et en rouvre un vide.
         e.preventDefault();
@@ -1120,17 +1150,31 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const showHome = !activeWin || activeWin.min;
   // Retour à l'accueil : les saisies en cours sont relues (l'une vient peut-être d'être enregistrée).
   useEffect(() => {
-    if (showHome) drafts.reload();
+    if (showHome) (drafts.reload(), attention.reload());
   }, [showHome]);
   const tiles = ROLE_TILES[user.role].filter((t) => canWin(t.open[0]));
+  const attentionCount = (attention.data ?? []).reduce((n, i) => n + (i.count ? 1 : 0), 0);
 
   return (
     <RightsProvider value={user.rights}>
     <StoreSettingsProvider value={state.storeSettings ?? DEFAULT_STORE_SETTINGS}>
-    <div className={`desk ${onPos ? 'on-pos' : ''} ${full ? 'pos-full' : ''}`}>
-      <nav className="rail">
-        <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
-          <img src={logo} alt="" />
+    <div className={`desk side-${side} ${onPos ? 'on-pos' : ''} ${full ? 'pos-full' : ''}`}>
+      {sideOpen && <div className="side-back" onClick={() => setSideOpen(false)} aria-hidden />}
+      <nav className={`rail ${sideOpen ? 'open' : ''}`} aria-label="Menus">
+        <div className="side-head">
+          <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null), setSideOpen(false))}>
+            <img src={logo} alt="" />
+          </button>
+          <span className="side-brand">
+            <b>ONIX 360</b>
+            <small>{state.station?.store.name}</small>
+          </span>
+        </div>
+        <button className={`rail-link side-home ${showHome && !allMenus ? 'on' : ''}`} data-tip="Accueil" onClick={() => (setAllMenus(false), setActive(null), setSideOpen(false))}>
+          <i aria-hidden>
+            <Ico.House size={18} strokeWidth={1.9} />
+          </i>
+          <span className="rail-label">Accueil</span>
         </button>
         {/* Faire défiler la barre ferme le menu ouvert ; la roulette dans le menu lui-même le fait défiler. */}
         <div className="rail-scroll" onWheel={(e) => menu && !(e.target as HTMLElement).closest('.menu-drop') && setMenu(null)}>
@@ -1139,6 +1183,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               <button
                 className={`rail-item ${menu === name ? 'open' : ''}`}
                 title={name}
+                data-tip={RAIL_LABELS[name] ?? name}
+                aria-haspopup="menu"
+                aria-expanded={menu === name}
                 onClick={(e) => {
                   e.stopPropagation();
                   // « Tous les menus » couvre l'écran : on le ferme pour voir le menu choisi.
@@ -1147,16 +1194,26 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   gaps.reload();
                 }}
               >
-                <i aria-hidden>{MENU_ICONS[name]}</i>
-                {RAIL_LABELS[name] ?? name}
+                <i aria-hidden>
+                  <MenuIcon name={name} fallback={MENU_ICONS[name]} />
+                </i>
+                <span className="rail-label">{RAIL_LABELS[name] ?? name}</span>
+                <Ico.ChevronRight className="rail-chev" size={15} aria-hidden />
               </button>
               {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
             </div>
           ))}
         </div>
+        <button className="rail-link side-search" data-tip="Rechercher (Ctrl+K)" onClick={() => (setSideOpen(false), setHelp('palette'))}>
+          <i aria-hidden>
+            <Ico.Search size={18} strokeWidth={1.9} />
+          </i>
+          <span className="rail-label">Rechercher</span>
+          <kbd className="rail-kbd">Ctrl K</kbd>
+        </button>
         <button
           className={`rail-item ${allMenus ? 'open' : ''}`}
-          title="Tous les menus"
+          data-tip="Tous les menus"
           onClick={(e) => {
             e.stopPropagation();
             setMenu(null);
@@ -1165,26 +1222,58 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             gaps.reload();
           }}
         >
-          <i aria-hidden>▦</i>
-          Tous les menus
+          <i aria-hidden>
+            <Ico.LayoutGrid size={18} strokeWidth={1.9} />
+          </i>
+          <span className="rail-label">Tous les menus</span>
         </button>
         {railBottom.map(([name, items]) => (
           <div key={name} className="menu">
             <button
               className={`rail-item ${menu === name ? 'open' : ''}`}
+              data-tip={RAIL_LABELS[name] ?? name}
+              aria-haspopup="menu"
+              aria-expanded={menu === name}
               onClick={(e) => {
                 e.stopPropagation();
                 toggleRailMenu(name, e.currentTarget);
               }}
             >
-              <i aria-hidden>{MENU_ICONS[name]}</i>
-              {RAIL_LABELS[name] ?? name}
+              <i aria-hidden>
+                <MenuIcon name={name} fallback={MENU_ICONS[name]} />
+              </i>
+              <span className="rail-label">{RAIL_LABELS[name] ?? name}</span>
+              <Ico.ChevronRight className="rail-chev" size={15} aria-hidden />
             </button>
             {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
           </div>
         ))}
+        <div className="menu side-user-wrap">
+          <button
+            className={`side-user ${menu === '__side_user' ? 'open' : ''}`}
+            data-tip={`${user.name} (${ROLE_LABELS[user.role]})`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleRailMenu('__side_user', e.currentTarget);
+            }}
+          >
+            <b aria-hidden>{user.name.slice(0, 1).toUpperCase()}</b>
+            <span className="rail-label">
+              {user.name}
+              <small>{ROLE_LABELS[user.role]}</small>
+            </span>
+          </button>
+          {menu === '__side_user' && <MenuDrop name="Mon compte" items={visibleItems(FILE_MENU)} at={menuAt} />}
+        </div>
+        <button className="side-toggle" title={side === 'narrow' ? 'Agrandir la barre latérale' : 'Réduire la barre latérale'} onClick={toggleSide}>
+          {side === 'narrow' ? <Ico.PanelLeftOpen size={17} /> : <Ico.PanelLeftClose size={17} />}
+          <span className="rail-label">Réduire</span>
+        </button>
       </nav>
       <header className="topbar">
+        <button className="top-icon side-burger" aria-label="Ouvrir les menus" title="Menus" onClick={() => (window.innerWidth < 760 ? setSideOpen((v) => !v) : toggleSide())}>
+          <Ico.Menu size={18} />
+        </button>
         <div className="quick-tabs">
           {quickTabs.map((q, idx) => {
             // Chaque onglet rapide a sa fenêtre : en relief quand elle est devant, marqué quand elle est ouverte.
@@ -1242,9 +1331,17 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className="top-icon tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
           ＋
         </button>
-        <button className="top-icon" title="Aller à un écran (Ctrl+K)" onClick={() => setHelp('palette')}>
-          🔍
+        <button className="top-search" title="Rechercher un écran, un produit, un client (Ctrl+K)" onClick={() => setHelp('palette')}>
+          <Ico.Search size={16} aria-hidden />
+          <span>Rechercher…</span>
+          <kbd>Ctrl K</kbd>
         </button>
+        {can('dashboard') && (
+          <button className="top-icon top-bell" title="Points d'attention" aria-label={`Points d'attention : ${attentionCount}`} onClick={() => open('dashboard', 'attention', "Suivi › Points d'attention")}>
+            <Ico.Bell size={17} aria-hidden />
+            {attentionCount > 0 && <span className="dot">{attentionCount > 99 ? '99+' : attentionCount}</span>}
+          </button>
+        )}
         <div className="menu">
           <button
             className={`user-chip ${menu === '__user' ? 'open' : ''}`}
@@ -1272,15 +1369,25 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       <main className="windows" ref={areaRef}>
         {/* La page d'accueil est le fond de la zone de travail ; le logo la met devant les fenêtres. */}
         <section className={`home ${showHome ? 'front' : ''}`}>
-          <div className="home-card">
-            <Mascot mood={homeMood()} size={96} className="home-mascotte" />
-            <h1>{state.station?.store.name}</h1>
-            {(state.station?.store.address || state.station?.store.phone) && (
-              <p>{[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</p>
-            )}
-            <p className="home-sub">
-              Bonjour {user.name.split(' ')[0]} · {ROLE_LABELS[user.role]}
-            </p>
+          <div className="home-wrap">
+            <header className="home-hello">
+              <Mascot mood={homeMood()} size={64} className="home-mascotte" />
+              <div>
+                <p className="home-date">{new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                <h1>Bonjour {user.name.split(' ')[0]}</h1>
+                <p className="home-sub">
+                  {state.station?.store.name} · {ROLE_LABELS[user.role]}
+                  {(state.station?.store.address || state.station?.store.phone) && (
+                    <span className="muted"> · {[state.station?.store.address, state.station?.store.phone].filter(Boolean).join(' · ')}</span>
+                  )}
+                </p>
+              </div>
+              {canWin('cash1') && (
+                <button className="primary home-cta" onClick={() => open('cash1', undefined, 'Vente › Vente au comptant 1')}>
+                  <Ico.Plus size={17} aria-hidden /> Nouvelle vente <kbd>F2</kbd>
+                </button>
+              )}
+            </header>
             {(can('cash') || can('credit')) && showHome && <MyDay />}
             {Boolean(drafts.data?.length) && showHome && (
               <div className="home-drafts">
@@ -1296,20 +1403,23 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               </div>
             )}
             {can('day_tasks') && showHome && <DayTasks compact />}
+            <h2 className="home-section">Accès rapides</h2>
             <div className="role-tiles">
               {tiles.map((t) => (
                 <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
                   <span className="tile-icon" aria-hidden>
                     {t.icon}
                   </span>
-                  <strong>{t.label}</strong>
-                  <small>{t.desc}</small>
+                  <span className="tile-text">
+                    <strong>{t.label}</strong>
+                    <small>{t.desc}</small>
+                  </span>
                 </button>
               ))}
             </div>
             <p className="home-links">
               <button className="link" onClick={() => setHelp('palette')}>
-                Chercher un autre écran (Ctrl+K)
+                Chercher un autre écran <kbd>Ctrl K</kbd>
               </button>
               <button className="link" onClick={() => setHelp('guide')}>
                 Guide de démarrage
@@ -1324,7 +1434,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           <MdiWindow
             key={`${w.id}-${w.nonce}`}
             title={w.crumb ?? WINDOWS[w.kind].label}
-            icon={MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)}
+            icon={<MenuIcon name={(w.crumb ?? '').split(' › ')[0]!} fallback={MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)} size={15} />}
             geo={geoOf(w)}
             area={area}
             z={stack.indexOf(w.id) + 1}
@@ -1679,7 +1789,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['Échap', 'Fermer la fenêtre ouverte'],
                 ['Ctrl+Z', 'Annuler la dernière action (pendant 10 secondes)'],
                 ['F1', 'Aide sur la page (à la caisse : rechercher un produit)'],
-                ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
+                ['F2', 'Nouvelle vente ; à la caisse : valider et imprimer le ticket (fiche vide : réimprimer le dernier)'],
                 ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière en listing)'],
                 ['F5', 'Actualiser la page (à la caisse : ouvrir le tiroir)'],
                 ['Ctrl+Tab', 'Passer à la fenêtre suivante (Ctrl+Maj+Tab : la précédente)'],

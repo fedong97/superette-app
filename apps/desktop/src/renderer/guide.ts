@@ -109,6 +109,21 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.87.0',
+    items: [
+      'Bons d’achat : vendus à la caisse ou offerts, imprimés avec un code-barres et payés par ce code au moment de l’achat ; un remboursement peut aussi se faire en bon. Ventes › Bons d’achat suit ce qui reste sur chacun.',
+      'Plafond du tiroir : au-dessus du montant réglé dans les paramètres, la caisse demande un retrait vers le coffre et le gérant est prévenu sur son téléphone.',
+      'Contrôle des tickets à la sortie : le vigile scanne le ticket sur un PC ou sur son téléphone et voit s’il est bon, déjà présenté, annulé ou rapporté. Le rapport du jour montre la part des tickets contrôlés et les problèmes.',
+      'Ventes au carnet pendant une coupure : les tickets écrits à la main sont saisis à la reprise avec leur numéro de carnet, et comptés à part dans la clôture.',
+      'Pas de monnaie : la monnaie due peut aller sur le compte du client ou sur un bon de monnaie imprimé.',
+      'Rappel de lot : un lot retiré par le fournisseur ou les autorités est bloqué à la vente ; le logiciel montre où il reste du stock, qui l’a acheté (avec le message à envoyer) et prépare le retour au fournisseur.',
+      'Prix programmés : une hausse ou une baisse se prépare pour une date, les étiquettes aux nouveaux prix s’impriment la veille et les prix changent seuls le jour venu. Les étiquettes montrent aussi le prix au kilo ou au litre, et les promotions ont leurs affiches A4 ou A5.',
+      'Prévenir le client à l’arrivage : quand « Le client voulait… » note son téléphone, le logiciel prépare son message WhatsApp dès que le produit revient en stock.',
+      'Commandes récurrentes des clients professionnels : la même commande chaque semaine (jours choisis), créée et préparée seule à l’avance.',
+      'Transferts entre magasins : avant d’acheter, le logiciel propose de demander le produit à un autre magasin qui en a trop ; la demande s’expédie, se reçoit et garde les lots.',
+    ],
+  },
+  {
     version: '0.86.0',
     items: [
       'Nouveau logo : l’œil des chiffres. Des lames vertes en relief tournent autour d’un œil dont l’iris est un graphique en anneau. Le logiciel et le serveur gardent chacun leur icône sur le bureau (menthe pour la caisse, noire et or avec un serveur pour ONIX 360 Serveur).',

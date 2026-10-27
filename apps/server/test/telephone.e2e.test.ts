@@ -130,7 +130,7 @@ describe('panier préparé au rayon', () => {
       return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
     };
     const login = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
-    expect(login.can).toEqual({ count: false, cart: true, missed: true, receive: false });
+    expect(login.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false });
     const catalog = await (await phone('/catalog', undefined, login.session)).json();
     expect(catalog.articles.find((a: { id: string }) => a.id === riz)).toMatchObject({ price: 1_000 });
 

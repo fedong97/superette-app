@@ -27,6 +27,9 @@ export type WinKind =
   | 'control'
   | 'exit';
 
+/** Onglets rapides au plus : deux lignes dans la barre du haut. */
+export const MAX_QUICK_TABS = 12;
+
 /** Onglet rapide : une fenêtre, éventuellement ouverte sur un de ses onglets. */
 export interface QuickTab {
   label: string;

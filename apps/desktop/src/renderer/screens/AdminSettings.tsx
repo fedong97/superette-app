@@ -864,7 +864,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       ],
     ],
     [
-      'Imprimante ticket et tiroir-caisse (ce PC)',
+      'Imprimantes et tiroir-caisse (ce PC)',
       '',
       [
         {
@@ -886,6 +886,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
           : [
               {
                 label: 'Imprimante ticket',
+                hint: 'Tickets de caisse, rapports Z et bons de caisse.',
                 render: () => (
                   <select disabled={!canEdit} value={v('printer.name')} onChange={set('printer.name')}>
                     <option value="">Imprimante par défaut de Windows</option>
@@ -959,6 +960,20 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
           hint: 'Imprimante à papier continu : la facture listing y part directement, sans fenêtre Windows.',
           render: () => (
             <select disabled={!canEdit} value={v('printer.listing')} onChange={set('printer.listing')}>
+              <option value="">Demander à chaque fois (fenêtre d’impression)</option>
+              {(printers.data ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ),
+        },
+        {
+          label: 'Imprimante A4',
+          hint: 'Factures A4, bons de commande, affiches et cartes : directement sur cette imprimante, sans fenêtre Windows.',
+          render: () => (
+            <select disabled={!canEdit} value={v('printer.a4')} onChange={set('printer.a4')}>
               <option value="">Demander à chaque fois (fenêtre d’impression)</option>
               {(printers.data ?? []).map((p) => (
                 <option key={p.name} value={p.name}>

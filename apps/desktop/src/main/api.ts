@@ -334,6 +334,7 @@ const LOCAL_SETTINGS = [
   'display.customerMessage',
   'pos.layout',
   'printer.listing',
+  'printer.a4',
   'printer.labels',
   'backup.autoTime',
   'backup.every',

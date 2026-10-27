@@ -17,10 +17,13 @@ import {
   Search,
   Settings,
   ShoppingCart,
+  SlidersHorizontal,
   TrendingUp,
   UserRound,
   Users,
   Wallet,
+  Landmark,
+  Truck,
   IdCard,
   FolderOpen,
 } from 'lucide-react';
@@ -33,11 +36,13 @@ const MENU: Record<string, LucideIcon> = {
   Stock: Boxes,
   Articles: Package,
   Achats: ShoppingCart,
+  Fournisseurs: Truck,
   Clients: Users,
   Dépenses: HandCoins,
   Personnel: IdCard,
   Suivi: TrendingUp,
-  Compta: BookOpenText,
+  Comptabilité: BookOpenText,
+  Fiscalité: Landmark,
   Administration: Settings,
   Aide: CircleHelp,
 };
@@ -48,4 +53,4 @@ export function MenuIcon({ name, fallback, size = 18 }: { name: string; fallback
   return <I size={size} strokeWidth={1.9} aria-hidden />;
 }
 
-export const Ico = { Bell, ChevronRight, CircleHelp, House, LayoutGrid, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, UserRound };
+export const Ico = { Bell, ChevronRight, CircleHelp, House, LayoutGrid, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, SlidersHorizontal, UserRound };

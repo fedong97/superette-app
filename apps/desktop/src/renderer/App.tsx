@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_STORE_SETTINGS, type MascotMood, type Permission } from '@superette/core';
 import { type Result, call } from './api';
 import logo from './assets/logo.png';
-import { type QuickTab, type WinKind } from './nav';
+import { MAX_QUICK_TABS, type QuickTab, type WinKind } from './nav';
 import { applyBrand } from './theme';
 import { Ico, MenuIcon } from './icons';
 import { Accounting, type AccountingTab } from './screens/Accounting';
@@ -178,11 +178,13 @@ const MENU_ICONS: Record<string, string> = {
   Stock: '🗄️',
   Articles: '📦',
   Achats: '🛒',
+  Fournisseurs: '🚚',
   Clients: '👥',
   Dépenses: '💸',
   Personnel: '🪪',
   Suivi: '📈',
-  Compta: '📒',
+  Comptabilité: '📒',
+  Fiscalité: '🧾',
   Administration: '⚙️',
   Aide: '❔',
 };
@@ -196,11 +198,13 @@ const MENU_COLORS: Record<string, string> = {
   Stock: '#65a30d',
   Articles: '#0891b2',
   Achats: '#2563eb',
+  Fournisseurs: '#0f766e',
   Clients: '#db2777',
   Dépenses: '#dc2626',
   Personnel: '#ea580c',
   Suivi: 'var(--brand2)',
-  Compta: '#4f46e5',
+  Comptabilité: '#4f46e5',
+  Fiscalité: '#7c3aed',
   Administration: '#64748b',
   Aide: '#94a3b8',
 };
@@ -217,12 +221,17 @@ const OLD_MENUS: Record<string, string[]> = {
   Magasinier: ['Stock'],
   Transfert: ['Stock'],
   Fabrication: ['Articles'],
-  Fournisseur: ['Achats'],
+  Fournisseur: ['Fournisseurs'],
+  /** 0.93.0 : les fournisseurs quittent le menu Achats pour leur propre menu. */
+  Achats: ['Achats', 'Fournisseurs'],
   Client: ['Clients'],
   Charge: ['Dépenses'],
-  Comptabilité: ['Compta'],
-  Fiscal: ['Compta'],
+  Fiscal: ['Fiscalité'],
+  /** 0.93.0 : Compta se sépare en Comptabilité et Fiscalité. */
+  Compta: ['Comptabilité', 'Fiscalité'],
 };
+/** Version des noms de menus d'une barre latérale enregistrée : à jour, les anciens noms ne sont plus convertis. */
+const RAIL_VERSION = 93;
 
 /** Menu du nom de l'utilisateur (en haut à droite) : son compte et ses réglages à lui. */
 const FILE_MENU: MenuItem[] = [
@@ -362,6 +371,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Échéancier fournisseurs', words: 'dettes fournisseurs payer échéances', open: ['purchases', 'due'], perm: 'purchase_due' },
       { label: 'Retours fournisseur et avoirs attendus', open: ['purchases', 'returns'], perm: 'supplier_returns' },
       { label: 'Achats par produit', open: ['purchases', 'byproduct'] },
+    ],
+  ],
+  [
+    'Fournisseurs',
+    [
       H('Fournisseurs'),
       { label: 'Liste des fournisseurs', words: 'fournisseur nouveau fournisseur', open: ['suppliers', 'list'], perm: 'suppliers' },
       { label: 'Extrait de compte fournisseur', open: ['suppliers', 'statement'], perm: 'supplier_statement' },
@@ -437,9 +451,9 @@ const MENUS: [string, MenuItem[]][] = [
     ],
   ],
   [
-    'Compta',
+    'Comptabilité',
     [
-      H('Comptabilité'),
+      H('Comptes'),
       { label: 'Journaux', open: ['accounting', 'journals'], perm: 'accounting' },
       { label: 'Grand livre', open: ['accounting', 'ledger'], perm: 'accounting' },
       { label: 'Balance générale', open: ['accounting', 'balance'], perm: 'accounting' },
@@ -452,7 +466,12 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Budgets', open: ['accounting', 'budgets'], perm: 'budgets' },
       { label: 'Analytique par rayon et par magasin', open: ['accounting', 'analytics'], perm: 'analytics' },
       { label: 'Export des ventes (CSV)', open: ['sales', 'export'], perm: 'accounting_export' },
-      H('Fiscal'),
+    ],
+  ],
+  [
+    'Fiscalité',
+    [
+      H('Déclarations'),
       { label: 'Déclaration de TVA', words: 'tva impôt', open: ['accounting', 'vat'], perm: 'vat_return' },
       { label: 'Bilan, compte de résultat et DSF', words: 'états financiers bilan', open: ['accounting', 'statements'], perm: 'statements' },
       { label: 'Notes déclaratives de la DSF', open: ['accounting', 'dsf'], perm: ['tax', 'tax_settings'] },
@@ -760,6 +779,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const pin = (t: QuickTab) => {
     const key = (q: QuickTab) => `${q.open[0]}:${q.open[1] ?? ''}`;
     if (quickTabs.some((q) => key(q) === key(t))) return toast.ok(`« ${t.label} » est déjà dans les onglets`);
+    if (quickTabs.length >= MAX_QUICK_TABS) return toast.error(`${MAX_QUICK_TABS} onglets au plus : retirez-en un d'abord`);
     saveTabs([...quickTabs, t]);
     toast.ok(`« ${t.label} » ajouté aux onglets rapides`);
   };
@@ -1134,7 +1154,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // Barre verte : les menus choisis par l'utilisateur, dans son ordre ; par défaut tous.
   const railChoice = prefs.railMenus as string[] | undefined;
   const railMenus = railChoice
-    ? [...new Set(railChoice.flatMap((n) => OLD_MENUS[n] ?? [n]))].flatMap((n) => visibleMenus.filter(([name]) => name === n && !RAIL_FIXED.includes(name)))
+    ? [...new Set(railChoice.flatMap((n) => (prefs.railVersion === RAIL_VERSION ? undefined : OLD_MENUS[n]) ?? [n]))].flatMap((n) => visibleMenus.filter(([name]) => name === n && !RAIL_FIXED.includes(name)))
     : visibleMenus.filter(([name]) => !RAIL_FIXED.includes(name));
   const railBottom = visibleMenus.filter(([name]) => RAIL_FIXED.includes(name));
   /** Ouvre un menu de la barre verte à hauteur de son bouton (vers le haut dans la moitié basse de l'écran). */
@@ -1227,6 +1247,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           </i>
           <span className="rail-label">Tous les menus</span>
         </button>
+        <button className="rail-link side-custom" data-tip="Personnaliser la barre latérale" onClick={() => (setSideOpen(false), setMenu(null), setHelp('rail'))}>
+          <i aria-hidden>
+            <Ico.SlidersHorizontal size={18} strokeWidth={1.9} />
+          </i>
+          <span className="rail-label">Personnaliser</span>
+        </button>
         {railBottom.map(([name, items]) => (
           <div key={name} className="menu">
             <button
@@ -1275,7 +1301,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           <Ico.Menu size={18} />
         </button>
         <div className="quick-tabs">
-          {quickTabs.map((q, idx) => {
+          {quickTabs.slice(0, MAX_QUICK_TABS).map((q, idx) => {
             // Chaque onglet rapide a sa fenêtre : en relief quand elle est devant, marqué quand elle est ouverte.
             const id = winId(q.open[0], q.open[1]);
             const isOpen = wins.some((w) => w.id === id);
@@ -1331,10 +1357,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <button className="top-icon tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
           ＋
         </button>
-        <button className="top-search" title="Rechercher un écran, un produit, un client (Ctrl+K)" onClick={() => setHelp('palette')}>
-          <Ico.Search size={16} aria-hidden />
-          <span>Rechercher…</span>
-          <kbd>Ctrl K</kbd>
+        <button className="top-icon top-search" title="Rechercher un écran, un produit, un client (Ctrl+K)" aria-label="Rechercher (Ctrl+K)" onClick={() => setHelp('palette')}>
+          <Ico.Search size={17} aria-hidden />
         </button>
         {can('dashboard') && (
           <button className="top-icon top-bell" title="Points d'attention" aria-label={`Points d'attention : ${attentionCount}`} onClick={() => open('dashboard', 'attention', "Suivi › Points d'attention")}>
@@ -1342,19 +1366,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {attentionCount > 0 && <span className="dot">{attentionCount > 99 ? '99+' : attentionCount}</span>}
           </button>
         )}
-        <div className="menu">
-          <button
-            className={`user-chip ${menu === '__user' ? 'open' : ''}`}
-            title={`${user.name} (${ROLE_LABELS[user.role]})`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenu(menu === '__user' ? null : '__user');
-            }}
-          >
-            <b>{user.name.slice(0, 1).toUpperCase()}</b>
-          </button>
-          {menu === '__user' && <MenuDrop name="Mon compte" items={visibleItems(FILE_MENU)} right />}
-        </div>
         <button className="help-btn" title="Aide sur cette page (F1)" onClick={() => setHelp('page')}>
           ?
         </button>
@@ -1727,6 +1738,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           label={(n) => `${MENU_ICONS[n] ?? ''} ${RAIL_LABELS[n] ?? n}`}
           onSave={(list) => {
             savePref('railMenus', list);
+            savePref('railVersion', RAIL_VERSION);
             setHelp(null);
           }}
           onClose={() => setHelp(null)}

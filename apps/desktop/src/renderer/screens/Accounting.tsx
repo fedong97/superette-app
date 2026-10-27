@@ -1103,7 +1103,7 @@ function VatReturn() {
               </p>
               <p className="muted">
                 L'acompte d'impôt sur le résultat (minimum de perception) est calculé sur le chiffre d'affaires HT du mois, au taux du régime choisi dans
-                Compta › Impôt sur le résultat. Les précomptes et le droit d'accises restent à ajouter par votre comptable.
+                Fiscalité › Impôt sur le résultat. Les précomptes et le droit d'accises restent à ajouter par votre comptable.
               </p>
             </div>
           </div>

@@ -169,13 +169,13 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         await writeFile(target.filePath, await win.webContents.printToPDF(height ? { preferCSSPageSize: true, printBackground: true } : { pageSize: { width: width / 25.4, height: pageHeight / 25.4 }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, printBackground: true }));
         return true;
       }
-      // Facture listing : directement sur l'imprimante listing de ce PC quand elle est choisie (Paramètres).
-      const listing = t.format === 'listing' ? s.admin.getSetting('printer.listing') || undefined : undefined;
+      // Listing ou A4 : directement sur l'imprimante de ce format choisie pour ce PC (Paramètres).
+      const device = t.format === 'listing' ? s.admin.getSetting('printer.listing') || undefined : a4Device();
       return await new Promise<boolean>((resolve, reject) =>
         win.webContents.print(
           {
-            silent: Boolean(listing),
-            deviceName: listing,
+            silent: Boolean(device),
+            deviceName: device,
             printBackground: true,
             copies: t.page.copies,
             pageSize: size,
@@ -276,14 +276,20 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
     return print;
   }
 
-  /** Document A4 (bon de commande) : la fenêtre d'impression Windows s'ouvre pour choisir l'imprimante ou « Enregistrer en PDF ». */
+  /** Imprimante A4 de ce PC (Paramètres) ; sans elle, la fenêtre d'impression Windows s'ouvre. */
+  function a4Device(): string | undefined {
+    return s.admin.getSetting('printer.a4') || undefined;
+  }
+
+  /** Document A4 (bon de commande) : sur l'imprimante A4 choisie, sinon la fenêtre d'impression Windows pour choisir l'imprimante ou « Enregistrer en PDF ». */
   async function printA4(body: string): Promise<void> {
     const win = renderWindow();
     try {
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>${A4_STYLE}</style></head><body>${tr(body)}</body></html>`;
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const device = a4Device();
       await new Promise<void>((resolve, reject) =>
-        win.webContents.print({ silent: false, printBackground: true, pageSize: 'A4' }, (ok, reason) =>
+        win.webContents.print({ silent: Boolean(device), deviceName: device, printBackground: true, pageSize: 'A4' }, (ok, reason) =>
           ok || reason === 'cancelled' ? resolve() : reject(new Error(`Impression impossible : ${reason}`)),
         ),
       );
@@ -720,7 +726,7 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
       try {
         await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
         return await new Promise<boolean>((resolve, reject) =>
-          win.webContents.print({ silent: false, printBackground: true, pageSize: 'A4', landscape: size === 'a5', margins: { marginType: 'none' } }, (ok, reason) =>
+          win.webContents.print({ silent: Boolean(a4Device()), deviceName: a4Device(), printBackground: true, pageSize: 'A4', landscape: size === 'a5', margins: { marginType: 'none' } }, (ok, reason) =>
             ok ? resolve(true) : reason === 'cancelled' ? resolve(false) : reject(new Error(`Impression impossible : ${reason}`)),
           ),
         );

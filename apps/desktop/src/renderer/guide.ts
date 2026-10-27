@@ -109,6 +109,17 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.93.0',
+    items: [
+      "Barre latérale plus étroite : plus de place pour les fenêtres.",
+      "Nouveau menu Fournisseurs dans la barre latérale : liste des fournisseurs, extraits de compte, situation, bonus et soldes qui ont bougé. Le menu Achats garde les commandes, les réceptions et les factures.",
+      "Le menu Compta devient deux menus : Comptabilité (journaux, grand livre, balance, plan comptable, pilotage) et Fiscalité (TVA, bilan et DSF, impôt sur le résultat).",
+      "Bouton « Personnaliser » en bas de la barre latérale : choisissez les menus affichés et leur ordre.",
+      "Paramètres › Imprimantes et tiroir-caisse : une imprimante pour les tickets, une pour le listing et une pour l'A4. Les documents y partent directement, sans fenêtre Windows.",
+      "Barre du haut : les onglets rapides tiennent sur deux lignes au plus (12 onglets), chacun encadré d'un trait fin ; la recherche devient une loupe (Ctrl+K) et le bouton du compte reste dans la barre latérale.",
+    ],
+  },
+  {
     version: '0.92.0',
     items: [
       'Nouvelle interface : fond clair, cartes blanches, police Inter et icônes au trait. La couleur du magasin ne sert plus qu’aux accents (bouton principal, élément choisi, graphiques) ; boutons, champs, tableaux, fenêtres et messages ont le même style sur tous les écrans.',

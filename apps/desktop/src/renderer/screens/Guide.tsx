@@ -3,7 +3,7 @@ import { call } from '../api';
 import type { Permission } from '@superette/core';
 import { GETTING_STARTED, type GuideStep, WHATS_NEW } from '../guide';
 import { HELP } from '../help';
-import { type QuickTab, type WinKind, fold } from '../nav';
+import { MAX_QUICK_TABS, type QuickTab, type WinKind, fold } from '../nav';
 import { Mascot, Modal, fcfa, findIn, openScreen } from '../ui';
 
 /**
@@ -222,7 +222,9 @@ export function QuickTabsEditor({ current, available, onSave, onClose }: { curre
     <Modal title="Personnaliser les onglets rapides" onClose={onClose} wide>
       <div className="grid2 quick-editor">
         <div>
-          <h3>Mes onglets ({tabs.length})</h3>
+          <h3>
+            Mes onglets ({tabs.length} sur {MAX_QUICK_TABS})
+          </h3>
           <table className="list compact">
             <tbody>
               {tabs.map((t, i) => (
@@ -252,13 +254,17 @@ export function QuickTabsEditor({ current, available, onSave, onClose }: { curre
                 <tr key={key(t)}>
                   <td>{t.label}</td>
                   <td className="r">
-                    <button onClick={() => setTabs([...tabs, t])}>Ajouter</button>
+                    <button disabled={tabs.length >= MAX_QUICK_TABS} onClick={() => setTabs([...tabs, t])}>
+                      Ajouter
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="muted">Depuis un menu, un clic droit sur un écran l'épingle aussi dans les onglets.</p>
+          <p className="muted">
+            {MAX_QUICK_TABS} onglets au plus, pour tenir sur deux lignes. Depuis un menu, un clic droit sur un écran l'épingle aussi dans les onglets.
+          </p>
         </div>
       </div>
       <div className="actions">
@@ -288,7 +294,7 @@ export function RailEditor({ menus, current, label, onSave, onClose }: { menus: 
   };
   return (
     <Modal title="Personnaliser la barre latérale" onClose={onClose}>
-      <p className="muted">Cochez les menus à afficher dans la barre verte et rangez-les avec ↑ ↓. Réglages et Aide restent en bas ; « Tous les menus » montre toujours tout.</p>
+      <p className="muted">Cochez les menus à afficher dans la barre latérale et rangez-les avec ↑ ↓. Réglages et Aide restent en bas ; « Tous les menus » montre toujours tout.</p>
       <table className="list compact">
         <tbody>
           {order.map((m, i) => (

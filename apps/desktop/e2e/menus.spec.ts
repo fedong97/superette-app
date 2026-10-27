@@ -39,7 +39,7 @@ test('menus rangés par métier, onglets du haut selon le rôle', async () => {
     await invoke(page, 'admin.createUser', { name: 'Paul', login: 'paul', pin: '6666', role: 'stock', storeId: store!.id });
 
     await shot(page, '01-accueil-gerant');
-    for (const [n, menu] of [['02', 'Vente'], ['03', 'Trésorerie'], ['04', 'Stock'], ['05', 'Articles'], ['06', 'Achats'], ['07', 'Clients'], ['08', 'Suivi'], ['09', 'Compta'], ['10', 'Réglages']] as const) {
+    for (const [n, menu] of [['02', 'Vente'], ['03', 'Trésorerie'], ['04', 'Stock'], ['05', 'Articles'], ['06', 'Achats'], ['06b', 'Fournisseurs'], ['07', 'Clients'], ['08', 'Suivi'], ['09', 'Comptabilité'], ['09b', 'Fiscalité'], ['10', 'Réglages']] as const) {
       await railMenu(page, menu);
       await shot(page, `${n}-menu-${menu.toLowerCase()}`);
     }
@@ -49,7 +49,7 @@ test('menus rangés par métier, onglets du haut selon le rôle', async () => {
     await page.mouse.wheel(0, 900);
     await shot(page, '12-tous-les-menus-suite');
     await page.keyboard.press('Escape');
-    await page.locator('.user-chip').click();
+    await page.locator('.side-user').click();
     await shot(page, '13-pastille-utilisateur');
 
     await loginAs(page, 'awa', '5555');

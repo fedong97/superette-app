@@ -1138,7 +1138,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         steps: [
           '« Nouveau collaborateur… » : nom, poste, téléphone, CNI, salaire de base et date d’entrée, n° CNPS, et s’il est déclaré (retenues légales sur ses salaires).',
           'Choisissez son compte de rattachement : Personnel (4211, par défaut), CNPS (4311), État (4471), Associés (4621) ou un autre compte de la classe 4.',
-          'Deux sous-comptes sont créés à son nom : sous le compte de rattachement pour ses salaires dus (4211001…), et 4251… pour ses avances. Ils sont dans Compta › Plan comptable.',
+          'Deux sous-comptes sont créés à son nom : sous le compte de rattachement pour ses salaires dus (4211001…), et 4251… pour ses avances. Ils sont dans Comptabilité › Plan comptable.',
           'Le rattachement ne change plus une fois qu’il a des écritures.',
           '« Avance… » paie une avance au bureau ; à la caisse, utilisez Décaisser › Remboursement / Prêt.',
           'Catégorie : employé, journalier, stagiaire ou agent d’une société prestataire. Un agent prestataire (vigile, nettoyage) est payé par sa société : ni salaire ni sous-compte.',

@@ -144,6 +144,13 @@ test('captures de chaque écran dans le nouveau style', async () => {
       await page.waitForTimeout(400);
       await page.screenshot({ path: join(dir, `${name}.png`) });
     }
+    // Comme sur le poste de Steve : la caisse agrandie, Paramètres ouvert devant.
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('fedonix:open', { detail: ['cash1'] })));
+    await page.waitForTimeout(600);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('fedonix:open', { detail: ['admin', 'settings'] })));
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: join(dir, '24-caisse-et-parametres.png') });
     expect(errors).toEqual([]);
   } finally {
     await app.close();

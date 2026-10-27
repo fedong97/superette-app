@@ -20,6 +20,9 @@ import {
   purchaseOrderMessage,
   PAYMENT_METHODS,
   formatQty,
+  arrivalMessage,
+  promoPostersHtml,
+  type PosterSize,
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
@@ -73,6 +76,8 @@ import {
   stationStatuses,
   type StationStatus,
   type MissedSaleInput,
+  type PriceScheduleInput,
+  type RecurringOrderInput,
   type OwnerReport,
   takeShelfCart,
   takeWebOrder,
@@ -223,6 +228,10 @@ export interface Printer {
   centralVoucher(movementId: string): Promise<void>;
   /** Bon d'un mouvement de caisse électronique : versement vers la centrale, transfert, banque… */
   emoneyVoucher(movementId: string): Promise<void>;
+  /** Bon d'achat, d'avoir ou de monnaie, avec son code-barres. */
+  giftVoucher(voucherId: string): Promise<void>;
+  /** Affiches promo A4 ou A5 (deux par page A4 à l'italienne) : la fenêtre d'impression s'ouvre. Renvoie false si annulé. */
+  posters(html: string, size: 'a4' | 'a5'): Promise<boolean>;
   /** Rapport de clôture A4 : Z, mouvements d'espèces et liste des ventes de la journée. */
   /** Rapport A4 d'une journée ; blind : bon de clôture d'une caisse électronique ou banque sans l'attendu ni l'écart. */
   sessionReport(sessionId: string, blind?: boolean): Promise<void>;
@@ -1559,8 +1568,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       replacesId?: string | null;
       /** Vendeur du panier préparé au rayon. */
       sellerId?: string | null;
+      /** Monnaie gardée sur le compte du client ou en bon de monnaie. */
+      keepChange?: Fcfa | null;
+      /** Vente du carnet à souches (panne) : numéro de la souche et heure écrite. */
+      book?: { number: string; at: string } | null;
     }) => {
       const c = ctx(POS);
+      if (input.book) requireUser(['sale_book']);
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
       const otherLevel = Boolean(input.priceLevel) && input.priceLevel !== usual;
@@ -1588,6 +1602,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         warehouseId: input.warehouseId ?? null,
         delivery: input.delivery ?? null,
         sellerId: input.sellerId ?? null,
+        keepChange: input.keepChange ?? null,
+        book: input.book ?? null,
       };
       if (input.replacesId) {
         const grant = editGrant(input.replacesId);
@@ -1645,8 +1661,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       editGrant(saleId);
       return { ...s.pos.editableSale(saleId), number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
     },
-    'pos.return': (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) =>
-      s.pos.returnSale(ctx(['sale_return']), { ...input, supervisorId: supervisor(input.supervisorPin).id }),
+    'pos.return': async (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) => {
+      const ret = s.pos.returnSale(ctx(['sale_return']), { ...input, supervisorId: supervisor(input.supervisorPin).id });
+      // Remboursé en bon d'avoir : le bon s'imprime avec son code-barres.
+      const code = input.refundMethod === 'VOUCHER' ? ret.payments.find((p) => p.method === 'VOUCHER')?.reference : null;
+      const voucher = code ? s.vouchers.byCode(code) : null;
+      if (voucher) await printer.giftVoucher(voucher.id).catch(() => undefined);
+      return ret;
+    },
     'pos.findSale': (number: string) => (requireUser(), s.pos.findSaleByNumber(number)),
     'pos.sale': (id: string) => (requireSaleAccess(id), s.pos.getSale(id)),
     'pos.sales': (opts: { sessionId?: string; date?: string }) => {
@@ -2822,6 +2844,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ['supplier_invoices', can(u, ['purchase_invoices'])],
         ['late_customers', can(u, ['receivables'])],
         ['production', can(u, ['production'])],
+        ['cash_alerts', can(u, ['treasury', 'cash_z'])],
+        ['to_notify', can(u, ['missed_report', 'missed_sale'])],
+        ['store_requests', can(u, ['store_transfers'])],
       ];
       return s.attention.list(c.storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
     },
@@ -2839,6 +2864,98 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx(['missed_sale']);
       return s.missedSales.list(c.storeId, { from: new Date(Date.now() - 86_400_000).toISOString() }).filter((m) => m.user_name === requireUser().name).slice(0, 20);
     },
+    /** Clients qui ont laissé leur numéro : le produit qu'ils voulaient est arrivé (message WhatsApp prêt). */
+    'missed.toNotify': () => {
+      const c = ctx(['missed_sale', 'missed_report']);
+      const store = s.admin.getStore(c.storeId).name;
+      return s.missedSales.toNotify(c.storeId).map((m) => ({
+        ...m,
+        whatsapp: whatsappLink(m.phone, arrivalMessage({ store, customer: m.customer_name, product: m.label, price: m.price })),
+      }));
+    },
+    'missed.markNotified': (id: string) => s.missedSales.markNotified(ctx(['missed_sale', 'missed_report']), id),
+
+    // --- 0.87.0 -----------------------------------------------------------------------
+    /** Bon d'achat vendu en caisse (Encaisser) : l'argent entre dans la journée, le bon s'imprime. */
+    'vouchers.sell': async (sessionId: string, input: { amount: Fcfa; method: string; reference?: string | null; holder?: string | null; customerId?: string | null }) => {
+      requireUser(['voucher_sell']);
+      const v = s.cashdesk.sellVoucher(deskCtx(sessionId), sessionId, { ...input, validityDays: settings().voucherValidityDays });
+      await printer.giftVoucher(v.id).catch(() => undefined);
+      return v;
+    },
+    'vouchers.print': (id: string) => (requireUser(['voucher_sell', 'vouchers', ...POS]), printer.giftVoucher(id)),
+    /** Code tapé ou scanné en caisse : le bon, son solde et ce qui l'empêche de servir. */
+    'vouchers.lookup': (code: string) => s.vouchers.lookup(ctx().storeId, code),
+    'vouchers.list': (opts?: { state?: 'valid' | 'spent' | 'expired' | 'void' | null; search?: string | null }) => {
+      const c = ctx(['vouchers']);
+      return { vouchers: s.vouchers.list(c.storeId, opts), outstanding: s.vouchers.outstanding(c.storeId) };
+    },
+    'vouchers.uses': (code: string) => (requireUser(['vouchers']), s.vouchers.uses(code)),
+    'vouchers.cancel': (id: string, reason: string) => s.cashdesk.cancelVoucher(ctx(['vouchers']), id, requireUser().id, reason),
+    /** Espèces du tiroir et plafond : l'alerte part au gérant quand le plafond est franchi. */
+    'pos.drawerStatus': () => {
+      const c = ctx();
+      return c.registerId ? s.pos.drawerStatus(c) : null;
+    },
+    'pos.cashAlerts': (days?: number) => s.pos.cashAlerts(ctx(['treasury', 'cash_z']).storeId, days),
+    'pos.bookSales': (opts?: { from?: string | null; to?: string | null }) => s.pos.bookSales(ctx(['sales', 'sale_book']).storeId, opts),
+    /** Contrôle à la sortie : le vigile scanne le ticket. */
+    'exit.lookup': (code: string) => s.exitChecks.lookup(ctx(['exit_check']).storeId, code),
+    'exit.record': (saleId: string, input: { status: 'ok' | 'problem'; note?: string | null }) => s.exitChecks.record(ctx(['exit_check']), saleId, { ...input, source: 'pc' }),
+    'exit.list': (opts?: { from?: string | null; to?: string | null; problems?: boolean }) => s.exitChecks.list(ctx(['exit_report']).storeId, opts),
+    'exit.coverage': (day: string) => s.exitChecks.coverage(ctx(['exit_report']).storeId, day),
+    /** Rappels de lots : bloqués à la caisse, clients qui ont acheté, retour au fournisseur. */
+    'recalls.list': (opts?: { open?: boolean }) => s.recalls.list(ctx(['lot_recall']).storeId, opts),
+    'recalls.detail': (id: string) => (requireUser(['lot_recall']), s.recalls.detail(id)),
+    'recalls.create': (input: { articleId: string; lotNumber?: string | null; expiry?: string | null; reason: string; note?: string | null }) => s.recalls.create(ctx(['lot_recall']), input),
+    'recalls.returnToSupplier': (id: string, input: { supplierId: string; warehouseId: string }) => s.recalls.returnToSupplier(ctx(['lot_recall']), id, input),
+    'recalls.close': (id: string, note?: string | null) => s.recalls.close(ctx(['lot_recall']), id, note),
+    'recalls.buyersMessage': (id: string) => {
+      const c = ctx(['lot_recall']);
+      const d = s.recalls.detail(id);
+      const store = s.admin.getStore(c.storeId);
+      const text = (name: string) =>
+        `Bonjour ${name}, ici ${store.name}. Le produit ${d.recall.article_name}${d.recall.lot_number ? ` (lot ${d.recall.lot_number})` : ''} que vous avez acheté chez nous fait l'objet d'un rappel : merci de ne pas le consommer et de nous le rapporter, il vous sera remboursé ou échangé.${store.phone ? ` Renseignements : ${store.phone}.` : ''}`;
+      return d.buyers.map((b) => ({ ...b, whatsapp: whatsappLink(b.phone, text(b.name)) }));
+    },
+    /** Prix programmés : préparés à l'avance, appliqués seuls à leur date. */
+    'priceSchedules.list': () => (requireUser(['price_schedule', 'price_update']), s.priceSchedules.list()),
+    'priceSchedules.get': (id: string) => (requireUser(['price_schedule', 'price_update']), s.priceSchedules.get(id)),
+    'priceSchedules.create': (input: PriceScheduleInput) => s.priceSchedules.create(ctx(['price_schedule']), input),
+    'priceSchedules.cancel': (id: string) => s.priceSchedules.cancel(ctx(['price_schedule']), id),
+    'priceSchedules.tomorrow': () => {
+      const c = ctx(STOCK);
+      const r = s.priceSchedules.pricesOn(c.storeId);
+      return { day: r.day, count: r.prices.size, schedules: r.schedules };
+    },
+    'priceSchedules.labelsPreview': (format: LabelFormatId, day?: string) => labelsHtml(s.priceSchedules.labelsFor(ctx(STOCK).storeId, day), format),
+    'priceSchedules.labelsPrint': (format: LabelFormatId, day?: string) => printer.labels(labelsHtml(s.priceSchedules.labelsFor(ctx(STOCK).storeId, day), format), format),
+    'articles.setNetContent': (id: string, text: string | null) => s.catalogue.setNetContent(requireUser(['article_edit']).id, id, text),
+    /** Affichettes promo A4 ou A5 des promotions choisies. */
+    'promotions.postersPreview': (ids: string[], size: PosterSize) => {
+      const c = ctx(['promotions', 'promotion_save', 'labels']);
+      return promoPostersHtml(s.promotions.posters(c.storeId, ids, s.admin.getStore(c.storeId).name), size);
+    },
+    'promotions.postersPrint': (ids: string[], size: PosterSize) => {
+      const c = ctx(['promotions', 'promotion_save', 'labels']);
+      const posters = s.promotions.posters(c.storeId, ids, s.admin.getStore(c.storeId).name);
+      if (!posters.length) throw new AppError('Choisissez une promotion en cours ou à venir', 'INVALID');
+      return printer.posters(promoPostersHtml(posters, size), size);
+    },
+    /** Commandes répétées des clients pros. */
+    'recurring.list': () => s.recurringOrders.list(ctx(['recurring_orders']).storeId),
+    'recurring.save': (input: RecurringOrderInput, id?: string | null) => s.recurringOrders.save(ctx(['recurring_orders']), input, id ?? undefined),
+    'recurring.setActive': (id: string, active: boolean) => s.recurringOrders.setActive(ctx(['recurring_orders']), id, active),
+    'recurring.generate': () => s.recurringOrders.generate(ctx(['recurring_orders'])).length,
+    /** Marchandise demandée à un autre magasin avant d'acheter au fournisseur. */
+    'storeTransfers.list': (opts?: { open?: boolean }) => s.storeTransfers.list(ctx(['store_transfers']).storeId, opts),
+    'storeTransfers.suggestions': () => s.storeTransfers.suggestions(ctx(['store_transfers', 'reorder']).storeId),
+    'storeTransfers.pending': () => s.storeTransfers.pending(ctx(['store_transfers']).storeId),
+    'storeTransfers.request': (input: { fromStoreId: string; articleId: string; qty: Milli; note?: string | null }) => s.storeTransfers.request(ctx(['store_transfers']), input),
+    'storeTransfers.ship': (id: string, input?: { qty?: Milli; warehouseId?: string | null }) => s.storeTransfers.ship(ctx(['store_transfers']), id, input),
+    'storeTransfers.refuse': (id: string, answer: string) => s.storeTransfers.refuse(ctx(['store_transfers']), id, answer),
+    'storeTransfers.cancel': (id: string) => s.storeTransfers.cancel(ctx(['store_transfers']), id),
+    'storeTransfers.receive': (id: string, input?: { qty?: Milli; warehouseId?: string | null }) => s.storeTransfers.receive(ctx(['store_transfers']), id, input),
     'restock.list': () => s.floor.restockList(ctx(['restock']).storeId),
     'restock.apply': (lines: { articleId: string; fromWarehouseId: string; qty: Milli }[]) => s.floor.restock(ctx(['restock']), lines),
     'restock.setShelfQty': (articleId: string, qty: Milli | null) => s.floor.setShelfQty(ctx(['restock', 'article_edit']), articleId, qty),

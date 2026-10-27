@@ -39,6 +39,17 @@ export interface StoreSettings {
   /** Autoriser un prix négocié sous le coût de revient (avec le code du gérant). */
   allowBelowCost: boolean;
 
+  /** Durée de validité d'un bon d'achat, en jours ; 0 : sans limite. */
+  voucherValidityDays: number;
+  /** Plafond d'espèces dans le tiroir : au-delà, alerte et prélèvement proposé vers la caisse centrale ; 0 : pas de plafond. */
+  cashCeiling: number;
+  /** Monnaie que le caissier n'a pas : mise sur le compte du client, ou en bon de monnaie. */
+  changeToAccount: boolean;
+  /** Contrôle des tickets à la sortie du magasin (vigile, téléphone ou PC à la porte). */
+  exitCheck: boolean;
+  /** Un ticket plus vieux que ce nombre d'heures est signalé au contrôle de sortie. */
+  exitCheckHours: number;
+
   /** Plafond de crédit proposé pour un nouveau client ; 0 : pas de crédit. */
   creditDefaultLimit: number;
   /** Délai de paiement proposé pour un nouveau client, en jours. */
@@ -219,6 +230,11 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   cancelMinutes: 0,
   maxHeld: 0,
   allowBelowCost: false,
+  voucherValidityDays: 365,
+  cashCeiling: 0,
+  changeToAccount: true,
+  exitCheck: false,
+  exitCheckHours: 3,
   creditDefaultLimit: 0,
   creditDefaultDays: 30,
   creditBlockLate: false,
@@ -305,6 +321,9 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   customerRequiredAbove: [0, 1e10],
   cancelMinutes: [0, 100000],
   maxHeld: [0, 100],
+  voucherValidityDays: [0, 3650],
+  cashCeiling: [0, 1e10],
+  exitCheckHours: [1, 72],
   creditDefaultLimit: [0, 1e10],
   creditDefaultDays: [0, 365],
   expiryAlertDays: [1, 365],

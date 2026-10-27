@@ -89,7 +89,8 @@ export class OrderService extends Base {
     super(db, clock);
   }
 
-  save(ctx: Context, input: OrderInput, id?: string): CustomerOrder {
+  /** `createId` : identifiant imposé pour une nouvelle commande (commande répétée, la même sur tous les PC). */
+  save(ctx: Context, input: OrderInput, id?: string, opts: { createId?: string } = {}): CustomerOrder {
     if (input.lines.length === 0) throw new AppError('Ajoutez au moins un article', 'EMPTY');
     let customerName = input.customerName?.trim() || null;
     let phone = input.phone?.trim() || null;
@@ -123,7 +124,7 @@ export class OrderService extends Base {
     }
     const total = lines.reduce((t, l) => t + l.total, 0) + fee;
     return this.tx(() => {
-      const orderId = id ?? newId();
+      const orderId = id ?? opts.createId ?? newId();
       const backOrdered = new Map<string, string>();
       const now = this.now();
       const row = {

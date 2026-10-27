@@ -188,12 +188,14 @@ export function MissedSaleDialog({ onClose }: { onClose: () => void }) {
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState<Reason>('rupture');
   const [note, setNote] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [phone, setPhone] = useState('');
   const mine = useLoad(() => call('missed.mine'), []);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const save = async () => {
     try {
-      await call('missed.record', { articleId: article?.id ?? null, label: article ? null : label, qty: parseQty(quantity) ?? 1000, reason: article ? reason : reason === 'rupture' ? 'absent' : reason, note: note || null });
-      toast.ok(`Noté : le client voulait ${article?.name ?? label}`);
+      await call('missed.record', { articleId: article?.id ?? null, label: article ? null : label, qty: parseQty(quantity) ?? 1000, reason: article ? reason : reason === 'rupture' ? 'absent' : reason, note: note || null, customerName: customerName || null, phone: phone || null });
+      toast.ok(phone.trim() ? `Noté : le client sera prévenu quand ${article?.name ?? label} arrivera` : `Noté : le client voulait ${article?.name ?? label}`);
       onClose();
     } catch (e) {
       toast.error(e);
@@ -232,6 +234,14 @@ export function MissedSaleDialog({ onClose }: { onClose: () => void }) {
         </Field>
         <Field label="Remarque (facultatif)">
           <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </div>
+      <div className="grid2">
+        <Field label="Nom du client (facultatif)">
+          <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+        </Field>
+        <Field label="Téléphone pour le prévenir (facultatif)" hint="Un message WhatsApp lui est proposé quand le produit arrive">
+          <input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="677 12 34 56" />
         </Field>
       </div>
       {Boolean(mine.data?.length) && (
@@ -289,6 +299,7 @@ export function MissedReport() {
           </button>
         )}
       </div>
+      <ToNotify />
       <h3>Les plus demandés</h3>
       {top.data?.length === 0 ? (
         <Empty>Aucune vente manquée notée sur la période. Le bouton « Le client voulait… » de la caisse les note en 5 secondes.</Empty>
@@ -332,6 +343,7 @@ export function MissedReport() {
             <th className="r">Quantité</th>
             <th>Raison</th>
             <th>Noté par</th>
+            <th>Client</th>
             <th>Remarque</th>
           </tr>
         </thead>
@@ -346,6 +358,10 @@ export function MissedReport() {
                 {m.user_name}
                 {m.source === 'phone' && <small className="muted"> (téléphone)</small>}
               </td>
+              <td>
+                {[m.customer_name, m.phone].filter(Boolean).join(' · ')}
+                {m.notified_at && <small className="tag normal"> prévenu</small>}
+              </td>
               <td>{m.note}</td>
             </tr>
           ))}
@@ -353,6 +369,52 @@ export function MissedReport() {
       </table>
       {noting && <MissedSaleDialog onClose={() => (setNoting(false), top.reload(), recent.reload())} />}
     </>
+  );
+}
+
+/** Clients qui ont laissé leur numéro : le produit qu'ils voulaient est arrivé. Un clic ouvre WhatsApp avec le message prêt. */
+export function ToNotify() {
+  const toast = useToast();
+  const list = useLoad(() => call('missed.toNotify'), []);
+  if (!list.data?.length) return null;
+  const done = (id: string) => call('missed.markNotified', id).then(list.reload, toast.error);
+  return (
+    <section className="card">
+      <h3>Clients à prévenir : le produit qu'ils voulaient est arrivé</h3>
+      <table className="list compact">
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Téléphone</th>
+            <th>Produit</th>
+            <th className="r">Stock</th>
+            <th>Demandé le</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {list.data.map((m) => (
+            <tr key={m.id}>
+              <td>{m.customer_name ?? '-'}</td>
+              <td>{m.phone}</td>
+              <td>{m.label}</td>
+              <td className="r">{num(m.stock)}</td>
+              <td>{dateTime(m.created_at)}</td>
+              <td className="r nowrap">
+                {m.whatsapp && (
+                  <a className="button primary" href={m.whatsapp} target="_blank" rel="noreferrer" onClick={() => void done(m.id)}>
+                    Prévenir par WhatsApp
+                  </a>
+                )}{' '}
+                <button type="button" onClick={() => void done(m.id)}>
+                  Déjà prévenu
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 

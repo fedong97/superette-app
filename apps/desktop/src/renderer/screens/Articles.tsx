@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { parseQtyTiers, splitTtc } from '@superette/core';
+import { parseNetContent, parseQtyTiers, splitTtc, unitPriceText } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings, useDraft } from '../ui';
 import { ExportDialog, ImportDialog, type ListFilter, PriceUpdateDialog } from './articleFiles';
 import { useArticleSuggestions, SuggestionList } from './pickers';
 import { Shelving } from './Controls';
+import { PriceSchedules } from './PriceSchedules';
 import { LevelGrid, MAX_LEVELS, emptyLevel, levelsFromArticle, levelsToInput } from './packs';
 import { type ArticlePhoto, PhotoField } from './photo';
 import { BarcodeChip, BarcodePrintDialog, barcodeRowsOf } from './barcodePrint';
@@ -13,10 +14,17 @@ import { tx } from '../tax';
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 
-export type ArticlesView = 'list' | 'new' | 'search' | 'shelving';
+/** Prix au kilo ou au litre imprimé sur l'étiquette, d'après le contenu net (ou la désignation). */
+const unitPriceHint = (text: string, price: number) => {
+  const t = unitPriceText(price, parseNetContent(text));
+  return t ? `Étiquette : ${t}` : 'Pour le prix au kilo ou au litre sur l’étiquette';
+};
+
+export type ArticlesView = 'list' | 'new' | 'search' | 'shelving' | 'schedules';
 
 export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesView }) {
-  const [tab, setTab] = useState<'list' | 'shelving'>(view === 'shelving' ? 'shelving' : 'list');
+  const schedules = has(user, 'price_schedule') || has(user, 'price_update');
+  const [tab, setTab] = useState<'list' | 'shelving' | 'schedules'>(view === 'shelving' ? 'shelving' : view === 'schedules' && schedules ? 'schedules' : 'list');
   const canEdit = has(user, 'article_families');
   return (
     <div className="page">
@@ -29,10 +37,12 @@ export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesV
         tabs={[
           ['list', 'Liste des produits'],
           ['shelving', 'Rayonnage'],
+          ...(schedules ? ([['schedules', 'Prix programmés']] as ['schedules', string][]) : []),
         ]}
       />
       {tab === 'list' && <ArticleList user={user} startNew={view === 'new'} focusSearch={view === 'search'} />}
       {tab === 'shelving' && <Shelving canEdit={canEdit} />}
+      {tab === 'schedules' && <PriceSchedules />}
     </div>
   );
 }
@@ -199,6 +209,7 @@ export function ArticleForm({
   const departments = useLoad(() => call('catalogue.departments'));
   const history = useLoad(() => (article ? call('catalogue.priceHistory', article.id) : Promise.resolve([])));
   const milli = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v / 1000));
+  const [netContent, setNetContent] = useState(article?.net_content ?? '');
   const [f, setF] = useState({
     code: article?.code ?? '',
     name: article?.name ?? initialName?.toUpperCase() ?? '',
@@ -368,6 +379,7 @@ export function ArticleForm({
         if (sp !== current) await call('catalogue.setStorePrice', saved.id, sp);
       }
       if (photo !== undefined) await call('catalogue.setPhoto', saved.id, photo);
+      if (netContent.trim() !== (article?.net_content ?? '')) await call('articles.setNetContent', saved.id, netContent.trim() || null);
       if (shelfQty !== milli(article?.shelf_qty) && can('restock', 'article_edit')) await call('restock.setShelfQty', saved.id, shelfQty.trim() ? parseQty(shelfQty) : null);
       draft.clear();
       toast.ok('Article enregistré');
@@ -391,6 +403,9 @@ export function ArticleForm({
           </Field>
           <Field label="Autre réf." hint="Référence fournisseur, ancien code : cherchée en caisse">
             <input value={f.otherRef} onChange={set('otherRef')} />
+          </Field>
+          <Field label="Contenu net" hint={unitPriceHint(netContent || f.name, parseAmount(levels.filter((l) => l.enabled).at(-1)?.sale ?? '') ?? article?.sale_price ?? 0)}>
+            <input value={netContent} placeholder={tx('ex. 900 g, 1,5 L')} onChange={(e) => setNetContent(e.target.value)} />
           </Field>
           <Field label="Rayon / famille">
             <select value={f.familyId} onChange={set('familyId')}>

@@ -88,6 +88,12 @@ export const PERMISSIONS = {
   courier_returns: { label: 'Retour des livreurs : encaisser ce qu’ils rapportent, feuille de route', group: 'Facturation', type: 'Bouton', parent: 'deliveries' },
   containers_counter: { label: 'Encaisser ou rendre la consigne des emballages à la caisse', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sales_alerts: { label: 'Alertes sur les ventes (remises, annulations, retours)', group: 'Facturation', type: 'Menu', parent: 'sales' },
+  voucher_sell: { label: "Vendre un bon d'achat ou une carte cadeau en caisse", group: 'Facturation', type: 'Bouton', roles: POS },
+  vouchers: { label: "Bons d'achat : liste, soldes et annulation", group: 'Facturation', type: 'Menu', roles: MANAGE },
+  sale_book: { label: 'Saisir les ventes notées sur le carnet pendant une panne', group: 'Facturation', type: 'Bouton', roles: POS },
+  exit_check: { label: 'Contrôle des tickets à la sortie du magasin (vigile)', group: 'Facturation', type: 'Menu', roles: ['manager', 'cashier', 'seller', 'stock'] },
+  exit_report: { label: 'Contrôles de sortie : historique et anomalies', group: 'Facturation', type: 'Menu', roles: MANAGE },
+  recurring_orders: { label: 'Commandes répétées des clients pros (chaque semaine)', group: 'Facturation', type: 'Menu', parent: 'customer_orders' },
   missed_sale: { label: 'Noter une vente manquée : « le client voulait… » (produit absent, en rupture, trop cher)', group: 'Facturation', type: 'Bouton', roles: [...COUNTER, 'stock'] },
 
   // --- Trésorerie --------------------------------------------------------------
@@ -161,6 +167,8 @@ export const PERMISSIONS = {
   price_update: { label: 'Mettre à jour les prix en masse (hausse en %, coefficient)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
   price_review: { label: 'Prix à revoir : articles dont le prix d’achat a monté sans que le prix de vente bouge', group: 'Configuration des produits', type: 'Menu', parent: 'price_update' },
   stock_location: { label: 'Noter l’emplacement des produits dans les dépôts', group: 'Configuration des produits', type: 'Fonction', parent: 'article_edit' },
+  lot_recall: { label: "Rappel d'un lot : bloquer à la caisse, retrouver les clients, rendre au fournisseur", group: 'Gestion des stocks', type: 'Menu', roles: STOCK },
+  price_schedule: { label: 'Prix programmés à une date', group: 'Configuration des produits', type: 'Menu', parent: 'price_update' },
   labels: { label: 'Étiquettes de rayon', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
 
   // --- Gestion des stocks ------------------------------------------------------
@@ -178,6 +186,7 @@ export const PERMISSIONS = {
 
   // --- Transferts de marchandises ----------------------------------------------
   transfer_view: { label: 'Consulter la situation des transferts', group: 'Transferts de marchandises', type: 'Menu', parent: 'stock' },
+  store_transfers: { label: 'Équilibrer le stock entre magasins : demander, expédier, réceptionner', group: 'Transferts de marchandises', type: 'Menu', roles: STOCK },
   transfer_create: { label: 'Enregistrer ou modifier un bon de transfert', group: 'Transferts de marchandises', type: 'Bouton', parent: 'stock' },
   transfer_ship: { label: "Valider l'expédition d'un transfert", group: 'Transferts de marchandises', type: 'Bouton', parent: 'stock' },
   transfer_receive: { label: 'Réceptionner un transfert', group: 'Transferts de marchandises', type: 'Bouton', parent: 'stock' },

@@ -68,6 +68,12 @@ import { CompanyService } from './companies';
 import { MissedSaleService } from './missedSales';
 import { FloorService } from './floor';
 import { InsightService } from './insights';
+import { VoucherService } from './vouchers';
+import { RecallService } from './recalls';
+import { ExitCheckService } from './exitChecks';
+import { PriceScheduleService } from './priceSchedules';
+import { RecurringOrderService } from './recurringOrders';
+import { StoreTransferService } from './storeTransfers';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -141,6 +147,12 @@ export * from './companies';
 export * from './missedSales';
 export * from './floor';
 export * from './insights';
+export * from './vouchers';
+export * from './recalls';
+export * from './exitChecks';
+export * from './priceSchedules';
+export * from './recurringOrders';
+export * from './storeTransfers';
 export { AppError, type Clock, type Context, type ErrorFix } from './util';
 
 export interface Services {
@@ -214,6 +226,12 @@ export interface Services {
   missedSales: MissedSaleService;
   floor: FloorService;
   insights: InsightService;
+  vouchers: VoucherService;
+  recalls: RecallService;
+  exitChecks: ExitCheckService;
+  priceSchedules: PriceScheduleService;
+  recurringOrders: RecurringOrderService;
+  storeTransfers: StoreTransferService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -240,11 +258,12 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const deliveries = new DeliveryService(db, clock);
   const loyalty = new LoyaltyService(db, clock, admin);
   const mobilePay = new MobilePayService(db, clock);
-  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty, orders);
+  const vouchers = new VoucherService(db, clock, admin);
+  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty, orders, vouchers);
   const purchases = new PurchaseService(db, clock, stock);
   const receipts = new ReceiptService(db, clock, admin, pos, customers, expenses, treasury, inventories, rebates, quotes, purchases);
   const staff = new StaffService(db, clock, admin);
-  const cashdesk = new CashDeskService(db, clock, pos, customers, purchases, expenses, staff, treasury);
+  const cashdesk = new CashDeskService(db, clock, pos, customers, purchases, expenses, staff, treasury, vouchers);
   const reports = new ReportService(db, clock);
   const accounting = new AccountingService(db, clock);
   const statements = new FinancialStatementsService(db, clock, accounting, stock);
@@ -286,7 +305,12 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const missedSales = new MissedSaleService(db, clock);
   const floor = new FloorService(db, clock, stock);
   const insights = new InsightService(db, clock, catalogue, cashierControl, companies);
-  return { db, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const recalls = new RecallService(db, clock, supplierReturns);
+  const exitChecks = new ExitCheckService(db, clock, admin, pos);
+  const priceSchedules = new PriceScheduleService(db, clock, catalogue, labels);
+  const recurringOrders = new RecurringOrderService(db, clock, catalogue, orders);
+  const storeTransfers = new StoreTransferService(db, clock, stock);
+  return { db, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

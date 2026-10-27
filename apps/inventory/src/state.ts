@@ -22,7 +22,7 @@ export interface Session {
   token: string;
   user: User;
   /** Ce que la personne peut faire : compter un inventaire, préparer un panier au rayon, noter une vente manquée, réceptionner. */
-  can?: { count: boolean; cart: boolean; missed?: boolean; receive?: boolean };
+  can?: { count: boolean; cart: boolean; missed?: boolean; receive?: boolean; exit?: boolean };
 }
 
 /** Ligne du panier préparé au rayon : quantité en millièmes d'unité. */
@@ -795,10 +795,36 @@ export async function loadSentCarts() {
 export type MissedReason = 'absent' | 'rupture' | 'prix' | 'autre';
 
 /** Note un produit demandé qu'on n'a pas pu vendre ; le gérant le voit sur le PC. */
-export async function recordMissed(input: { articleId: string | null; label: string | null; qty: number; reason: MissedReason; note?: string | null }) {
+export async function recordMissed(input: { articleId: string | null; label: string | null; qty: number; reason: MissedReason; note?: string | null; customerName?: string | null; phone?: string | null }) {
   const config = state.config;
   if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
   await request<{ id: string }>(config.url, '/api/v1/mobile/missed', { body: { id: newId(), ...input }, auth: auth() });
+}
+
+// ——— Contrôle des tickets à la sortie ———
+
+export interface ExitTicket {
+  saleId: string;
+  number: string;
+  at: string;
+  total: number;
+  lines: { label: string; qty: number; text: string }[];
+  checks: { status: string; at: string; user: string | null }[];
+  warnings: string[];
+  verdict: 'ok' | 'warn' | 'stop';
+}
+
+/** Ticket scanné à la porte : ce qu'il reste à emporter et ce qui cloche. */
+export async function exitLookup(code: string): Promise<ExitTicket> {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  return request<ExitTicket>(config.url, `/api/v1/mobile/exit?code=${encodeURIComponent(code)}`, { auth: auth() });
+}
+
+export async function exitRecord(t: ExitTicket, status: 'ok' | 'problem', note?: string | null) {
+  const config = state.config;
+  if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
+  await request<{ id: string }>(config.url, '/api/v1/mobile/exit', { body: { id: newId(), saleId: t.saleId, number: t.number, status, note: note ?? null }, auth: auth() });
 }
 
 // ——— Fiche produit : ailleurs, bientôt, à la place ———

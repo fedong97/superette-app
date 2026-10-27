@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DENOMINATIONS_FCFA, type LoyaltyRules, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, maxRedeemable, paymentRegisterKind, pointsForAmount, requiresReference, roundCash, settle } from '@superette/core';
+import { DENOMINATIONS_FCFA, type LoyaltyRules, PAYMENT_METHODS, type Payment, type PaymentMethod, countedTotal, formatRate, maxRedeemable, normalizeVoucherCode, paymentRegisterKind, pointsForAmount, requiresReference, roundCash, settle } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, SupervisorPrompt, dateTime, fcfa, parseAmount, qty, useLoad, useStoreSettings, useToast } from '../ui';
 import { hasVat, tx } from '../tax';
@@ -30,6 +30,7 @@ export function PaymentDialog({
   allowCredit = false,
   loyalty = null,
   payerPhone = null,
+  customerName = null,
   onClose,
   onPaid,
 }: {
@@ -43,10 +44,15 @@ export function PaymentDialog({
   loyalty?: { balance: number; rules: LoyaltyRules } | null;
   /** Téléphone du client choisi, proposé pour la demande de paiement mobile. */
   payerPhone?: string | null;
+  /** Client choisi : la monnaie gardée va sur son compte (sinon, bon de monnaie). */
+  customerName?: string | null;
   onClose: () => void;
-  onPaid: (payments: Payment[], supervisorPin?: string) => Promise<void>;
+  onPaid: (payments: Payment[], supervisorPin?: string, keepChange?: number | null) => Promise<void>;
 }) {
   const toast = useToast();
+  const settings = useStoreSettings();
+  const [keep, setKeep] = useState<string | null>(null);
+  const [voucher, setVoucher] = useState<Result<'vouchers.lookup'> | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [method, setMethod] = useState<PaymentMethod>('CASH');
   const [amount, setAmount] = useState('');
@@ -89,7 +95,7 @@ export function PaymentDialog({
       }
       if (loyalty.balance < loyalty.rules.minRedeem) return toast.error(`Il faut au moins ${loyalty.rules.minRedeem} points pour payer avec`);
     }
-    if (requiresReference(method) && !reference.trim()) return toast.error(`Saisissez la référence de la transaction ${PAYMENT_METHODS[method]}`);
+    if (requiresReference(method) && !reference.trim()) return toast.error(method === 'VOUCHER' ? 'Scannez ou tapez le code du bon' : `Saisissez la référence de la transaction ${PAYMENT_METHODS[method]}`);
     const next = [...payments, { method, amount: v, reference: reference.trim() || undefined }];
     try {
       settle(next.every((p) => p.method === 'CASH') ? roundCash(total, cashRounding) : total, next);
@@ -99,13 +105,31 @@ export function PaymentDialog({
     setPayments(next);
     setAmount('');
     setReference('');
+    setVoucher(null);
     setMethod('CASH');
   };
 
+  /** Code d'un bon du logiciel : solde vérifié, le montant payable est proposé. Un ancien bon papier passe tel quel. */
+  const checkVoucher = async () => {
+    if (!normalizeVoucherCode(reference)) return add();
+    try {
+      const r = await call('vouchers.lookup', reference);
+      setVoucher(r);
+      if (r.problem) return toast.error(r.problem);
+      const already = payments.filter((p) => p.method === 'VOUCHER' && normalizeVoucherCode(p.reference) === r.voucher.code).reduce((t, p) => t + p.amount, 0);
+      const usable = Math.min(r.voucher.balance - already, state.remaining);
+      if (usable <= 0) return toast.error('Ce bon est déjà utilisé en entier sur ce ticket');
+      add(Math.min(parseAmount(amount) ?? usable, usable));
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
+  const kept = keep === null ? 0 : Math.min(state.change, Math.max(0, parseAmount(keep) ?? 0));
   const finish = async (pin?: string) => {
     setBusy(true);
     try {
-      await onPaid(payments, pin);
+      await onPaid(payments, pin, kept > 0 ? kept : null);
     } catch (e) {
       toast.error(e);
       setBusy(false);
@@ -145,7 +169,8 @@ export function PaymentDialog({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                add();
+                if (method === 'VOUCHER') void checkVoucher();
+                else add();
               }}
             >
               <Field label={`Montant ${PAYMENT_METHODS[method]}`}>
@@ -172,11 +197,25 @@ export function PaymentDialog({
               )}
               {requiresReference(method) && (
                 <Field
-                  label={method === 'CHEQUE' ? 'Numéro du chèque' : 'Référence de la transaction'}
-                  hint={method === 'CHEQUE' ? 'Banque et numéro inscrits sur le chèque' : method === 'BANK_TRANSFER' ? 'Référence du virement sur le relevé' : 'Numéro reçu par SMS de confirmation'}
+                  label={method === 'CHEQUE' ? 'Numéro du chèque' : method === 'VOUCHER' ? 'Code du bon (scanner le code-barres)' : 'Référence de la transaction'}
+                  hint={
+                    method === 'CHEQUE'
+                      ? 'Banque et numéro inscrits sur le chèque'
+                      : method === 'BANK_TRANSFER'
+                        ? 'Référence du virement sur le relevé'
+                        : method === 'VOUCHER'
+                          ? 'Le solde du bon est vérifié ; un ancien bon papier ne sert qu’une fois'
+                          : 'Numéro reçu par SMS de confirmation'
+                  }
                 >
-                  <input value={reference} onChange={(e) => setReference(e.target.value)} />
+                  <input autoFocus={method === 'VOUCHER'} value={reference} onChange={(e) => (setReference(e.target.value), setVoucher(null))} />
                 </Field>
+              )}
+              {method === 'VOUCHER' && voucher && !voucher.problem && (
+                <p className="muted method-target">
+                  Bon {voucher.voucher.code} : reste {fcfa(voucher.voucher.balance)}
+                  {voucher.voucher.expires_on ? `, valable jusqu'au ${voucher.voucher.expires_on.split('-').reverse().join('/')}` : ''}
+                </p>
               )}
               {method === 'CASH' && (
                 <div className="quick-cash">
@@ -218,7 +257,18 @@ export function PaymentDialog({
             </div>
             {state.change > 0 && (
               <div className="change">
-                Rendu monnaie <strong>{fcfa(state.change)}</strong>
+                Rendu monnaie <strong>{fcfa(state.change - kept)}</strong>
+              </div>
+            )}
+            {state.change > 0 && settings.changeToAccount && (
+              <div className="keep-change">
+                <label>
+                  <input type="checkbox" checked={keep !== null} onChange={(e) => setKeep(e.target.checked ? String(state.change % 1000 || state.change) : null)} /> Pas de monnaie :{' '}
+                  {customerName ? `garder sur le compte de ${customerName}` : 'donner un bon de monnaie'}
+                </label>
+                {keep !== null && (
+                  <input inputMode="numeric" className="qty" value={keep} onChange={(e) => setKeep(e.target.value)} title="Montant gardé (au plus le rendu)" />
+                )}
               </div>
             )}
           </div>
@@ -588,10 +638,10 @@ export function ScannedTicketDialog({ sale, canReturn, canReprint, onReturn, onC
   );
 }
 
-export function CashOpDialog({ type, needsSupervisor, onClose }: { type: 'IN' | 'OUT'; needsSupervisor: boolean; onClose: () => void }) {
+export function CashOpDialog({ type, needsSupervisor, onClose, initialAmount }: { type: 'IN' | 'OUT'; needsSupervisor: boolean; onClose: () => void; initialAmount?: number }) {
   const toast = useToast();
-  const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState(type === 'OUT' ? 'Versement à la caisse centrale' : 'Complément de fond');
+  const [amount, setAmount] = useState(initialAmount ? String(initialAmount) : '');
+  const [reason, setReason] = useState(type === 'OUT' ? (initialAmount ? 'Tiroir au-dessus du plafond : versement à la caisse centrale' : 'Versement à la caisse centrale') : 'Complément de fond');
   const [askPin, setAskPin] = useState(false);
   const submit = async (pin?: string) => {
     try {
@@ -679,6 +729,18 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
                 <td className="r">{fcfa(m.amount)}</td>
               </tr>
             ))}
+            {z.keptChange > 0 && (
+              <tr className="muted">
+                <td>Monnaie gardée (compte client ou bon de monnaie)</td>
+                <td className="r">{fcfa(z.keptChange)}</td>
+              </tr>
+            )}
+            {z.bookSales.count > 0 && (
+              <tr className="muted">
+                <td>Dont ventes du carnet à souches ({z.bookSales.count})</td>
+                <td className="r">{fcfa(z.bookSales.total)}</td>
+              </tr>
+            )}
           </tbody>
         </table>
         <table className="list">
@@ -1042,6 +1104,112 @@ export function ContainerCounterDialog({
           Enregistrer la consigne
         </button>
       </div>
+    </Modal>
+  );
+}
+
+/**
+ * Vente écrite sur le carnet à souches pendant une panne (courant, PC) : la
+ * vente saisie ensuite porte le numéro de la souche et l'heure notée. Elle
+ * compte dans la journée de caisse et le Z la montre à part.
+ */
+export function BookSaleDialog({ current, onClose, onSet }: { current: { number: string; at: string } | null; onClose: () => void; onSet: (b: { number: string; at: string } | null) => void }) {
+  const toast = useToast();
+  const local = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const [number, setNumber] = useState(current?.number ?? '');
+  const [at, setAt] = useState(current ? local(current.at) : local(new Date().toISOString()));
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const when = new Date(at);
+    if (!number.trim()) return toast.error('Indiquez le numéro de la souche');
+    if (Number.isNaN(when.getTime())) return toast.error('Heure invalide');
+    onSet({ number: number.trim(), at: when.toISOString() });
+  };
+  return (
+    <Modal title="Vente du carnet à souches" onClose={onClose}>
+      <p className="muted">Pendant la panne, la vente a été écrite sur le carnet. Saisissez la souche puis les articles et le paiement comme une vente normale : le ticket garde le numéro et l'heure notés.</p>
+      <form onSubmit={submit}>
+        <div className="grid2">
+          <Field label="Numéro de la souche">
+            <input autoFocus value={number} onChange={(e) => setNumber(e.target.value)} />
+          </Field>
+          <Field label="Heure écrite sur la souche">
+            <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
+          </Field>
+        </div>
+        <div className="actions">
+          {current && (
+            <button type="button" onClick={() => onSet(null)}>
+              Vente normale (sans carnet)
+            </button>
+          )}
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button className="primary">Saisir cette souche</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Bon d'achat vendu en caisse : payé en espèces ou Mobile Money, imprimé avec son code-barres. */
+export function SellVoucherDialog({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+  const toast = useToast();
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<'CASH' | 'MTN_MOMO' | 'ORANGE_MONEY'>('CASH');
+  const [reference, setReference] = useState('');
+  const [holder, setHolder] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const v = await call('vouchers.sell', sessionId, { amount: parseAmount(amount) ?? 0, method, reference: reference || null, holder: holder || null });
+      toast.ok(`Bon ${v.code} de ${fcfa(v.amount)} vendu et imprimé`);
+      onClose();
+    } catch (err) {
+      toast.error(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Vendre un bon d'achat" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="grid2">
+          <Field label="Montant du bon (FCFA)">
+            <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          <Field label="Payé en">
+            <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
+              <option value="CASH">{PAYMENT_METHODS.CASH}</option>
+              <option value="MTN_MOMO">{PAYMENT_METHODS.MTN_MOMO}</option>
+              <option value="ORANGE_MONEY">{PAYMENT_METHODS.ORANGE_MONEY}</option>
+            </select>
+          </Field>
+          {method !== 'CASH' && (
+            <Field label="Référence de la transaction">
+              <input value={reference} onChange={(e) => setReference(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Pour (facultatif)" hint="Nom écrit sur le bon">
+            <input value={holder} onChange={(e) => setHolder(e.target.value)} />
+          </Field>
+        </div>
+        <p className="muted">Le bon sert en caisse avec le moyen de paiement « Bon d'achat », en une ou plusieurs fois, jusqu'à sa date de fin.</p>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button className="primary" disabled={busy || !parseAmount(amount)}>
+            Encaisser et imprimer le bon
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

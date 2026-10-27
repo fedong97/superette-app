@@ -81,22 +81,29 @@ export const ENTITY_LABELS: Record<string, string> = {
   sale_edit_request: 'Demande de modification de facture',
   consignment_count: 'Fiche de contrôle dépôt-vente',
   missed_sale: 'Vente manquée (le client voulait…)',
+  gift_voucher: "Bon d'achat",
+  cash_alert: 'Alerte : trop d’espèces dans le tiroir',
+  exit_check: 'Contrôle du ticket à la sortie',
+  lot_recall: 'Rappel de lot',
+  price_schedule: 'Prix programmés',
+  recurring_order: 'Commande répétée',
+  store_transfer_request: 'Demande de marchandise à un autre magasin',
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
-  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale'] },
-  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover', 'agent_operation', 'agent_account'] },
+  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale', 'gift_voucher', 'exit_check', 'recurring_order'] },
+  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover', 'agent_operation', 'agent_account', 'cash_alert'] },
   {
     key: 'stock',
     label: 'Stock',
-    entities: ['stock_movement', 'lot', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'stock_level', 'reception', 'production_order'],
+    entities: ['stock_movement', 'lot', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'stock_level', 'reception', 'production_order', 'lot_recall', 'store_transfer_request'],
   },
   { key: 'achats', label: 'Achats', entities: ['purchase_order', 'supplier_invoice', 'supplier_payment', 'supplier', 'supplier_article', 'supplier_return'] },
   {
     key: 'catalogue',
     label: 'Articles et prix',
-    entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules', 'container'],
+    entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules', 'container', 'price_schedule'],
   },
   { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['company', 'store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'attendance', 'time_punch', 'staff_agency', 'entrance', 'staff_team', 'staff_document', 'fingerprint_device', 'staff_warning', 'staff_alert', 'staff_leave', 'staff_schedule', 'expense_category'] },
   {

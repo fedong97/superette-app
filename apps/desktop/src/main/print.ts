@@ -711,6 +711,24 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
       await printReceipt(s.receipts.emoneyVoucher(movementId), false, true);
     },
 
+    async giftVoucher(voucherId) {
+      await printReceipt(s.receipts.giftVoucher(s.vouchers.get(voucherId)), false, true);
+    },
+
+    async posters(html, size) {
+      const win = renderWindow();
+      try {
+        await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        return await new Promise<boolean>((resolve, reject) =>
+          win.webContents.print({ silent: false, printBackground: true, pageSize: 'A4', landscape: size === 'a5', margins: { marginType: 'none' } }, (ok, reason) =>
+            ok ? resolve(true) : reason === 'cancelled' ? resolve(false) : reject(new Error(`Impression impossible : ${reason}`)),
+          ),
+        );
+      } finally {
+        win.destroy();
+      }
+    },
+
     async sessionReport(sessionId, blind = false) {
       const z = s.pos.zReport(sessionId);
       const se = z.session;

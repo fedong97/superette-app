@@ -19,6 +19,9 @@ export interface MissedSaleInput {
   reason?: MissedReason;
   note?: string | null;
   source?: 'pc' | 'phone';
+  /** Nom et téléphone du client, pour le prévenir quand le produit arrive. */
+  customerName?: string | null;
+  phone?: string | null;
 }
 
 export interface MissedSale {
@@ -32,6 +35,15 @@ export interface MissedSale {
   user_name: string | null;
   source: string;
   created_at: string;
+  customer_name: string | null;
+  phone: string | null;
+  notified_at: string | null;
+}
+
+/** Client à prévenir : il voulait un produit qui est maintenant en stock. */
+export interface MissedToNotify extends MissedSale {
+  stock: Milli;
+  price: number;
 }
 
 /** Produits les plus demandés sans être vendus, sur une période. */
@@ -64,15 +76,18 @@ export class MissedSaleService extends Base {
     const qty = input.qty ?? 1000;
     if (!Number.isSafeInteger(qty) || qty <= 0 || qty > 10_000_000) throw new AppError('Quantité invalide', 'INVALID');
     const reason: MissedReason = input.reason && input.reason in MISSED_REASONS ? input.reason : article ? 'rupture' : 'absent';
+    const phone = normalizePhone(input.phone);
+    if (input.phone?.trim() && !phone) throw new AppError('Numéro de téléphone invalide (ex. 677 12 34 56)', 'INVALID');
     const id = newId();
     const now = this.now();
     return this.tx(() => {
       this.db
         .prepare(
-          `INSERT INTO missed_sales (id, store_id, article_id, label, qty, reason, note, user_id, source, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO missed_sales (id, store_id, article_id, label, qty, reason, note, user_id, source, customer_name, phone, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, ctx.storeId, article?.id ?? null, label, qty, reason, input.note?.trim() || null, ctx.userId, input.source === 'phone' ? 'phone' : 'pc', now, now);
+        .run(id, ctx.storeId, article?.id ?? null, label, qty, reason, input.note?.trim() || null, ctx.userId, input.source === 'phone' ? 'phone' : 'pc',
+          input.customerName?.trim().slice(0, 80) || null, phone, now, now);
       this.enqueue(ctx, 'missed_sale', id, 'upsert', {});
       return this.get(id);
     });
@@ -120,6 +135,38 @@ export class MissedSaleService extends Base {
     return rows;
   }
 
+  /**
+   * Clients qui ont laissé leur numéro pour un produit du catalogue qui est
+   * maintenant en stock, et qui n'ont pas encore été prévenus (60 derniers jours).
+   */
+  toNotify(storeId: string): MissedToNotify[] {
+    const since = new Date(this.clock().getTime() - 60 * 86_400_000).toISOString();
+    return this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT x.*, COALESCE((SELECT SUM(s.qty) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id
+                    WHERE s.article_id = x.article_id AND w.store_id = @storeId AND w.purpose = 'stock'), 0) AS stock,
+                  COALESCE((SELECT sp.sale_price FROM store_prices sp WHERE sp.article_id = x.article_id AND sp.store_id = @storeId), a.sale_price) AS price
+           FROM (${SELECT} WHERE m.store_id = @storeId AND m.phone IS NOT NULL AND m.notified_at IS NULL AND m.article_id IS NOT NULL AND m.created_at >= @since) x
+           JOIN articles a ON a.id = x.article_id
+         ) WHERE stock > 0 ORDER BY created_at`,
+      )
+      .all({ storeId, since }) as MissedToNotify[];
+  }
+
+  /** Le client a été prévenu (message WhatsApp envoyé ou appel). */
+  markNotified(ctx: Context, id: string): MissedSale {
+    const row = this.get(id);
+    if (row.notified_at) return row;
+    const now = this.now();
+    this.tx(() => {
+      this.db.prepare('UPDATE missed_sales SET notified_at = ?, notified_by = ?, updated_at = ? WHERE id = ? AND store_id = ?').run(now, ctx.userId, now, id, ctx.storeId);
+      this.enqueue(ctx, 'missed_sale', id, 'upsert', {});
+      this.audit(ctx.userId, 'missed.notified', 'missed_sale', id);
+    });
+    return this.get(id);
+  }
+
   /** Quantités demandées sans être vendues, par article, depuis une date (pour la proposition de commande). */
   demandSince(storeId: string, since: string): Map<string, Milli> {
     const rows = this.db
@@ -130,7 +177,13 @@ export class MissedSaleService extends Base {
 }
 
 const SELECT = `SELECT m.id, m.article_id, a.code AS article_code, COALESCE(a.name, m.label) AS label, m.qty, m.reason, m.note,
-                       u.name AS user_name, m.source, m.created_at
+                       u.name AS user_name, m.source, m.created_at, m.customer_name, m.phone, m.notified_at
                 FROM missed_sales m LEFT JOIN articles a ON a.id = m.article_id LEFT JOIN users u ON u.id = m.user_id`;
 
 const nextDay = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+/** Numéro gardé en chiffres (8 à 15) ; null s'il est vide ou trop court. */
+export function normalizePhone(raw: string | null | undefined): string | null {
+  const d = (raw ?? '').replace(/\D/g, '');
+  return d.length >= 8 && d.length <= 15 ? d : null;
+}

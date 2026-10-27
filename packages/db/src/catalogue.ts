@@ -13,6 +13,7 @@ import {
   internalEan8,
   isValidEan,
   normalizeBarcode,
+  parseNetContent,
   packUnits,
   parseScaleBarcode,
 } from '@superette/core';
@@ -72,6 +73,8 @@ export interface Article {
   locations: string | null;
   /** Prix par quantité de l'unité de détail (JSON : [{"minQty": 12000, "price": 480}]). */
   qty_tiers: string | null;
+  /** Contenu net (« 900 g ») pour le prix au kilo ou au litre ; vide : lu dans la désignation. */
+  net_content: string | null;
   barcodes: { code: string; pack_qty: Milli }[];
   /** Conditionnements, du plus grand au plus petit (carton, paquet). */
   packs: ArticlePack[];
@@ -1029,8 +1032,30 @@ export class CatalogueService extends Base {
   applyPriceUpdate(userId: string, storeId: string, input: PriceUpdateInput): { articles: number; lines: number } {
     const plan = this.planPriceUpdate(storeId, input);
     return this.tx(() => {
+      this.applyPlan(userId, storeId, plan);
+      this.audit(userId, 'price.bulk_update', 'article', undefined, { ...input, articleIds: input.articleIds?.length, articles: plan.articles.length });
+      return { articles: plan.articles.length, lines: plan.lines };
+    });
+  }
+
+  /**
+   * Prix d'un plan déjà calculé, mis tels quels sur les articles (prix
+   * programmés). Un article déjà à ces prix n'est pas réécrit : deux PC qui
+   * appliquent le même plan ne créent pas de nouvelle modification.
+   */
+  applyPlan(userId: string, storeId: string, plan: PriceUpdatePlan): number {
+    let changed = 0;
+    this.tx(() => {
       for (const p of plan.articles) {
+        if (!this.db.prepare('SELECT 1 FROM articles WHERE id = ?').get(p.articleId)) continue;
         const a = this.getArticle(p.articleId, storeId);
+        const store = a.store_price !== a.sale_price ? a.store_price : null;
+        const packsSame = !a.packs.length || a.packs.every((x, i) => {
+          const n = p.packs[i];
+          return n && n.sale_price === x.sale_price && n.wholesale_price === x.wholesale_price && n.super_wholesale_price === x.super_wholesale_price;
+        });
+        if (a.purchase_price === p.purchase && a.sale_price === p.unit && a.wholesale_price === p.wholesale && a.super_wholesale_price === p.superWholesale && packsSame && (p.store === null || p.store === store)) continue;
+        changed += 1;
         this.saveArticle(
           userId,
           {
@@ -1045,10 +1070,24 @@ export class CatalogueService extends Base {
           },
           a.id,
         );
-        if (p.store !== null && p.store !== (a.store_price !== a.sale_price ? a.store_price : null)) this.setStorePrice(userId, a.id, storeId, p.store);
+        if (p.store !== null && p.store !== store) this.setStorePrice(userId, a.id, storeId, p.store);
       }
-      this.audit(userId, 'price.bulk_update', 'article', undefined, { ...input, articleIds: input.articleIds?.length, articles: plan.articles.length });
-      return { articles: plan.articles.length, lines: plan.lines };
+    });
+    return changed;
+  }
+
+  /** Contenu net (« 900 g », « 1,5 L ») pour le prix au kilo ou au litre ; vide le retire. */
+  setNetContent(userId: string, articleId: string, text: string | null): Article {
+    const a = this.getArticle(articleId);
+    const value = (text ?? '').trim().slice(0, 30) || null;
+    if (value && !parseNetContent(value)) throw new AppError('Contenu net illisible : écrivez par exemple « 900 g », « 1,5 L » ou « 6 x 33 cl »', 'INVALID');
+    if (value === (a.net_content ?? null)) return a;
+    return this.tx(() => {
+      this.db.prepare('UPDATE articles SET net_content = ?, updated_at = ? WHERE id = ?').run(value, this.now(), articleId);
+      const next = this.getArticle(articleId);
+      this.enqueue(null, 'article', articleId, 'upsert', next);
+      this.audit(userId, 'article.net_content', 'article', articleId, { value });
+      return next;
     });
   }
 }

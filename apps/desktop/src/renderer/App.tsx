@@ -7,6 +7,7 @@ import { applyBrand } from './theme';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';
 import { Orders } from './screens/Orders';
+import { ExitChecks, type ExitTab } from './screens/ExitCheck';
 import { Admin, type AdminTab } from './screens/Admin';
 import { Articles, type ArticlesView } from './screens/Articles';
 import { Customers, type CustomersTab } from './screens/Customers';
@@ -63,11 +64,11 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   cash1: { label: 'Fiche de facturation 1', perm: ['cash'] },
   cash2: { label: 'Fiche de facturation 2', perm: ['cash'] },
   credit: { label: 'Vente à crédit', perm: ['credit'] },
-  sales: { label: 'Mes factures', perm: ['sales', 'cash_z', 'cash_operations', 'sales_alerts', 'sale_edit_approve'] },
+  sales: { label: 'Mes factures', perm: ['sales', 'cash_z', 'cash_operations', 'sales_alerts', 'sale_edit_approve', 'vouchers'] },
   articles: { label: 'Produits', perm: ['articles', 'article_create'] },
   stock: {
     label: 'Stock',
-    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count', 'restock', 'day_tasks'],
+    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count', 'restock', 'day_tasks', 'store_transfers', 'lot_recall'],
   },
   purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns', 'group_orders', 'supplier_calendar', 'missed_report', 'mobile_reception'] },
   suppliers: { label: 'Fournisseurs', perm: ['suppliers', 'supplier_statement', 'free_goods'] },
@@ -75,7 +76,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
   quotes: { label: 'Devis et proformas', perm: ['quotes', 'quote_save'] },
   deliveries: { label: 'Livraisons du jour', perm: ['deliveries'] },
-  orders: { label: 'Commandes clients', perm: ['customer_orders'] },
+  orders: { label: 'Commandes clients', perm: ['customer_orders', 'recurring_orders'] },
   promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
@@ -88,6 +89,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   containers: { label: 'Emballages consignés', perm: ['containers', 'containers_counter'] },
   agent: { label: 'Point Mobile Money', perm: ['agent_point', 'agent_accounts'] },
   control: { label: 'Contrôle des caissiers', perm: ['cashier_control'] },
+  exit: { label: 'Contrôle à la sortie', perm: ['exit_check', 'exit_report'] },
 };
 
 interface MenuItem {
@@ -95,7 +97,7 @@ interface MenuItem {
   open?: [WinKind, string?];
   action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
   /** Option du magasin (Administration › Paramètres) dont dépend l'écran : il suffit d'une seule. */
-  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint')[];
+  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint' | 'exitCheck')[];
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Module pas encore développé : affiché grisé. */
@@ -196,6 +198,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Emballages consignés', open: ['containers', 'situation'], perm: ['containers', 'containers_counter'] },
       { label: 'Mes factures', open: ['sales', 'tickets'] },
       { label: 'Registre (clôtures Z)', open: ['sales', 'z'] },
+      { label: "Bons d'achat et bons d'avoir", open: ['sales', 'vouchers'], perm: 'vouchers' },
+      { label: 'Contrôle des tickets à la sortie', open: ['exit', 'door'], perm: 'exit_check', setting: ['exitCheck'] },
     ],
   ],
   [
@@ -212,8 +216,10 @@ const MENUS: [string, MenuItem[]][] = [
       SEP,
       { label: 'Devis et factures proforma', open: ['quotes'] },
       { label: 'Commandes clients (téléphone, WhatsApp)', open: ['orders'], perm: 'customer_orders' },
+      { label: 'Commandes répétées des clients pros', open: ['orders', 'recurring'], perm: 'recurring_orders' },
       { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       { label: 'Factures cumulées par client', open: ['reports', 'customer'], perm: 'reports' },
+      { label: 'Rapport des contrôles à la sortie', open: ['exit', 'report'], perm: 'exit_report', setting: ['exitCheck'] },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
       { label: 'Contrôle des caissiers', open: ['control'], perm: 'cashier_control' },
       { label: 'Demandes de modification de facture', open: ['sales', 'requests'], perm: ['sale_edit_approve', 'sale_edit_request'] },
@@ -299,6 +305,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Péremptions', open: ['stock', 'expiry'], perm: 'stock' },
       { label: 'Étiquettes et codes-barres', open: ['labels'] },
       { label: 'Promotions', open: ['promotions'], perm: 'promotions' },
+      { label: 'Prix programmés (à une date)', open: ['articles', 'schedules'], perm: ['price_schedule', 'price_update'] },
+      { label: 'Rappels de lots', open: ['stock', 'recalls'], perm: 'lot_recall' },
       SEP,
       { label: 'Stock multi-magasin', open: ['stock', 'multi'], perm: 'stock' },
       { label: 'Articles par dépôt', open: ['stock', 'warehouses'], perm: 'stock' },
@@ -317,6 +325,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Emballages consignés', open: ['containers', 'situation'], perm: 'containers' },
       SEP,
       { label: 'Stocks critiques', open: ['stock', 'critical'], perm: 'stock' },
+      { label: "Demander la marchandise à un autre magasin", open: ['stock', 'stores'], perm: 'store_transfers' },
       { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
     ],
   ],
@@ -396,6 +405,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       { label: 'Nouveau transfert', open: ['stock', 'transferNew'], perm: 'transfer_create' },
       { label: 'Liste des transferts', open: ['stock', 'transfer'], perm: ['transfer_view', 'transfer_create', 'transfer_ship', 'transfer_receive', 'transfer_cancel', 'transfer_direct'] },
+      { label: 'Demandes entre magasins', open: ['stock', 'stores'], perm: 'store_transfers' },
     ],
   ],
   [
@@ -1157,7 +1167,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} startNew={w.tab === 'new'} />}
             {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
-            {w.kind === 'orders' && <Orders user={user} />}
+            {w.kind === 'orders' && <Orders user={user} initialView={w.tab === 'recurring' ? 'recurring' : 'orders'} />}
+            {w.kind === 'exit' && <ExitChecks initialTab={w.tab as ExitTab | undefined} />}
             {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
             {w.kind === 'labels' && <Labels active={w.kind === active} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}

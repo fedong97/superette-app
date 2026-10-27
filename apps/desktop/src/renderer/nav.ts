@@ -24,7 +24,8 @@ export type WinKind =
   | 'staff'
   | 'containers'
   | 'agent'
-  | 'control';
+  | 'control'
+  | 'exit';
 
 /** Onglet rapide : une fenêtre, éventuellement ouverte sur un de ses onglets. */
 export interface QuickTab {

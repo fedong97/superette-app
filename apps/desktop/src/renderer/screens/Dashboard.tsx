@@ -21,6 +21,9 @@ const TARGET: Record<Item['key'], AttentionTarget> = {
   supplier_invoices: ['purchases', 'due'],
   late_customers: ['customers', 'receivables'],
   production: ['production', 'orders'],
+  cash_alerts: ['treasury', 'day'],
+  to_notify: ['purchases', 'missed'],
+  store_requests: ['stock', 'stores'],
   sale_edit_requests: ['sales', 'requests'],
 };
 

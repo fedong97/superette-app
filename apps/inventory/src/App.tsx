@@ -75,6 +75,12 @@ export function App() {
     setReceiveMode(on);
     remember('reception', on ? '1' : null);
   };
+  // Contrôle des tickets à la sortie (vigile) : à la place des inventaires.
+  const [exitMode, setExitMode] = useState(() => recall('sortie') === '1');
+  const exitOn = (on: boolean) => {
+    setExitMode(on);
+    remember('sortie', on ? '1' : null);
+  };
   if (!s.ready) return <div className="splash">ONIX 360 Inventaire</div>;
   const connected = Boolean(s.config && s.session);
   const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
@@ -83,8 +89,9 @@ export function App() {
   const can = s.session?.can;
   const cartOnly = Boolean(connected && can && can.cart && !can.count);
   let page: ReactNode;
-  if (connected && can?.receive && receiveMode) page = <Receive onBack={() => receiveOn(false)} />;
-  else if (connected && can?.cart && (cartOnly || cartMode)) page = <ShelfCart onBack={cartOnly ? null : () => cartOn(false)} onReceive={can.receive ? () => receiveOn(true) : undefined} />;
+  if (connected && can?.exit && exitMode) page = <ExitControl onBack={() => exitOn(false)} />;
+  else if (connected && can?.receive && receiveMode) page = <Receive onBack={() => receiveOn(false)} />;
+  else if (connected && can?.cart && (cartOnly || cartMode)) page = <ShelfCart onBack={cartOnly ? null : () => cartOn(false)} onReceive={can.receive ? () => receiveOn(true) : undefined} onExit={can.exit ? () => exitOn(true) : undefined} />;
   else if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
   else if (recapFile) page = <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
   else if (inventory && recapId === inventory.id) page = <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
@@ -97,6 +104,7 @@ export function App() {
         onLeaveFiles={connected ? undefined : () => files(false)}
         onCart={connected && can?.cart ? () => cartOn(true) : undefined}
         onReceive={connected && can?.receive ? () => receiveOn(true) : undefined}
+        onExit={connected && can?.exit ? () => exitOn(true) : undefined}
       />
     );
   else if (!s.config) page = <Pairing onFiles={() => files(true)} />;
@@ -436,12 +444,14 @@ function Inventories({
   onLeaveFiles,
   onCart,
   onReceive,
+  onExit,
 }: {
   onChoose: (id: string) => void;
   onRecap: (id: string) => void;
   onLeaveFiles?: () => void;
   onCart?: () => void;
   onReceive?: () => void;
+  onExit?: () => void;
 }) {
   const s = useStore();
   const [menu, setMenu] = useState(false);
@@ -492,6 +502,11 @@ function Inventories({
         </button>
       </header>
       <main>
+        {onExit ? (
+          <button className="big" onClick={onExit}>
+            Contrôle des tickets à la sortie
+          </button>
+        ) : null}
         {onReceive ? (
           <button className="big" onClick={onReceive}>
             Réceptionner une livraison
@@ -579,7 +594,7 @@ const fcfa = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
  * le panier à la caisse : le caissier le retrouve dans « Tickets en attente »
  * et l'encaisse ; la vente compte pour le vendeur.
  */
-function ShelfCart({ onBack, onReceive }: { onBack: (() => void) | null; onReceive?: () => void }) {
+function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null; onReceive?: () => void; onExit?: () => void }) {
   const s = useStore();
   const [info, setInfo] = useState<Article | null>(null);
   const [missed, setMissed] = useState<{ article: Article | null; label: string } | null>(null);
@@ -692,6 +707,11 @@ function ShelfCart({ onBack, onReceive }: { onBack: (() => void) | null; onRecei
         {onReceive ? (
           <button className="link" onClick={onReceive}>
             Réceptionner une livraison
+          </button>
+        ) : null}
+        {onExit ? (
+          <button className="link" onClick={onExit}>
+            Contrôle des tickets à la sortie
           </button>
         ) : null}
         {query.trim().length >= 2 ? (
@@ -889,6 +909,8 @@ function MissedSheet({ article, label, onClose }: { article: Article | null; lab
   const [text, setText] = useState(label);
   const [qty, setQty] = useState('1');
   const [reason, setReason] = useState<S.MissedReason>(article ? 'rupture' : 'absent');
+  const [customer, setCustomer] = useState('');
+  const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const results = useMemo(() => (!picked && text.trim().length >= 2 ? search(s.catalog?.articles ?? [], text, 6) : []), [picked, text, s.catalog]);
@@ -897,7 +919,7 @@ function MissedSheet({ article, label, onClose }: { article: Article | null; lab
     setError('');
     try {
       const q = parseNumber(qty);
-      await S.recordMissed({ articleId: picked?.id ?? null, label: picked ? null : text.trim(), qty: Math.round((q && q > 0 ? q : 1) * 1000), reason: !picked && reason === 'rupture' ? 'absent' : reason });
+      await S.recordMissed({ articleId: picked?.id ?? null, label: picked ? null : text.trim(), qty: Math.round((q && q > 0 ? q : 1) * 1000), reason: !picked && reason === 'rupture' ? 'absent' : reason, customerName: customer.trim() || null, phone: phone.trim() || null });
       beepOk();
       onClose(`Noté : le client voulait ${picked?.name ?? text.trim()}`);
     } catch (e) {
@@ -945,6 +967,14 @@ function MissedSheet({ article, label, onClose }: { article: Article | null; lab
               </button>
             ))}
         </div>
+        <label className="field">
+          Nom du client (facultatif)
+          <input value={customer} onChange={(e) => setCustomer(e.target.value)} autoComplete="off" />
+        </label>
+        <label className="field">
+          Son téléphone : on le prévient par WhatsApp à l’arrivage
+          <input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="6XX XX XX XX" autoComplete="off" />
+        </label>
         {error ? <div className="notice erreur">{error}</div> : null}
         <button className="big primary" disabled={busy || (!picked && text.trim().length < 2)} onClick={() => void save()}>
           {busy ? 'Envoi…' : 'Noter pour le gérant'}
@@ -953,6 +983,148 @@ function MissedSheet({ article, label, onClose }: { article: Article | null; lab
           Annuler
         </button>
       </div>
+    </div>
+  );
+}
+
+// ——— Contrôle des tickets à la sortie ———
+
+/**
+ * Le vigile scanne le code-barres du ticket à la porte : le téléphone dit si
+ * le ticket est bon, déjà présenté, annulé ou rapporté, et liste ce que le
+ * client emporte. Un problème noté alerte le gérant.
+ */
+function ExitControl({ onBack }: { onBack: () => void }) {
+  const [camera, setCamera] = useState(false);
+  const [code, setCode] = useState('');
+  const [ticket, setTicket] = useState<S.ExitTicket | null>(null);
+  const [note, setNote] = useState('');
+  const [problem, setProblem] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const lookupCode = async (raw: string) => {
+    const c = raw.trim();
+    if (!c || busy) return;
+    setCamera(false);
+    setBusy(true);
+    setFlash(null);
+    try {
+      const t = await S.exitLookup(c);
+      setTicket(t);
+      setProblem(false);
+      setNote('');
+      setCode('');
+      if (t.verdict === 'ok') beepOk();
+      else beepError();
+    } catch (e) {
+      beepError();
+      setFlash({ text: e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur : réessayez.' : message(e), ok: false });
+    } finally {
+      setBusy(false);
+    }
+  };
+  useCamera(
+    camera,
+    (c) => void lookupCode(c),
+    (e) => {
+      setCamera(false);
+      setFlash({ text: message(e), ok: false });
+    },
+  );
+  const wedge = useRef(lookupCode);
+  wedge.current = lookupCode;
+  useEffect(() => listenWedge((c) => void wedge.current(c)), []);
+  const save = async (status: 'ok' | 'problem') => {
+    if (!ticket) return;
+    setBusy(true);
+    try {
+      await S.exitRecord(ticket, status, status === 'problem' ? note.trim() : null);
+      setFlash({ text: status === 'ok' ? `Ticket ${ticket.number} : sortie notée` : `Problème noté sur le ticket ${ticket.number} : le gérant est prévenu`, ok: status === 'ok' });
+      setTicket(null);
+    } catch (e) {
+      setFlash({ text: message(e), ok: false });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (camera) return <CameraOverlay title="Contrôle sortie" hint="Visez le code-barres du ticket" onStop={() => setCamera(false)} />;
+
+  return (
+    <div className="page">
+      <header className="bar">
+        <button className="ghost" onClick={onBack} aria-label="Retour">
+          ‹
+        </button>
+        <div className="grow">
+          <b>Contrôle sortie</b>
+        </div>
+        <Status />
+      </header>
+      <main>
+        {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
+        {ticket ? (
+          <>
+            <div className={`notice ${ticket.verdict === 'ok' ? 'info' : ticket.verdict === 'warn' ? 'attention' : 'erreur'}`}>
+              <b>{ticket.verdict === 'ok' ? 'TICKET BON' : ticket.verdict === 'warn' ? 'À VÉRIFIER' : 'NE PAS LAISSER SORTIR'}</b>
+              {ticket.warnings.map((w) => (
+                <div key={w}>{w}</div>
+              ))}
+            </div>
+            <div className="muted">
+              Ticket {ticket.number} · {new Date(ticket.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })} · {fcfa(ticket.total)}
+            </div>
+            <div className="list">
+              {ticket.lines.map((l, i) => (
+                <div key={i} className="row item">
+                  <div className="grow">{l.label}</div>
+                  <b>{l.text}</b>
+                </div>
+              ))}
+            </div>
+            {problem ? (
+              <>
+                <label className="field">
+                  Quel est le problème ?
+                  <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="Article en trop, ticket douteux…" />
+                </label>
+                <button className="big primary" disabled={busy || !note.trim()} onClick={() => void save('problem')}>
+                  Noter le problème
+                </button>
+                <button className="link" onClick={() => setProblem(false)}>
+                  Annuler
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="big primary" disabled={busy} onClick={() => void save('ok')}>
+                  Tout est bon, il sort
+                </button>
+                <button className="big" disabled={busy} onClick={() => setProblem(true)}>
+                  Signaler un problème
+                </button>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <button className="scan" onClick={() => setCamera(true)}>
+              <span className="scan-icon">▥</span>
+              Scanner le ticket
+              <small>code-barres en bas du ticket</small>
+            </button>
+            <input
+              className="search"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void lookupCode(code)}
+              placeholder="Ou tapez le numéro du ticket"
+              enterKeyHint="search"
+            />
+            {busy ? <div className="muted">Recherche…</div> : null}
+          </>
+        )}
+      </main>
     </div>
   );
 }

@@ -60,6 +60,13 @@ export function whatsappLink(phone: string | null | undefined, text: string): st
   return n ? `https://wa.me/${n}?text=${encodeURIComponent(text)}` : null;
 }
 
+/** Message au client qui attendait un produit : il est arrivé. */
+export function arrivalMessage(d: { store: string; customer?: string | null; product: string; price?: number | null }): string {
+  const hello = d.customer?.trim() ? `Bonjour ${d.customer.trim()},` : 'Bonjour,';
+  const price = d.price ? ` au prix de ${d.price.toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ')} F` : '';
+  return `${hello} le produit que vous cherchiez est arrivé chez ${d.store} : ${d.product}${price}. Passez nous voir, à bientôt !`;
+}
+
 /** Ticket envoyé au client par WhatsApp : lignes, total, paiements. */
 export interface TicketMessageData {
   store: string;

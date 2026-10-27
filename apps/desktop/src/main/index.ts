@@ -7,6 +7,7 @@ import { fixesFor } from './fixes';
 import { createCloudBackup } from './cloudBackup';
 import { createCustomerDisplay } from './customerDisplay';
 import { createDigestMailer } from './digest';
+import { createScheduler } from './schedules';
 import { createDossiers } from './dossiers';
 import { createFingerprintReceiver } from './fingerprint';
 import { createPrinter } from './print';
@@ -165,11 +166,14 @@ void app.whenReady().then(() => {
   const customerDisplay = createCustomerDisplay();
   // Pointeuses à empreinte par le réseau, et alertes de retard et d'absence du personnel.
   const fingerprint = createFingerprintReceiver(services);
+  // Prix programmés et commandes répétées des clients pros.
+  const scheduler = createScheduler(services);
   /** Ferme proprement la boutique ouverte (changement de boutique, restauration, installation). */
   const shutdown = () => {
     customerDisplay.close();
     sync.stop();
     digest.stop();
+    scheduler.stop();
     fingerprint.stop();
     updater.stop();
     clearTimeout(backupStart);

@@ -26,6 +26,7 @@ import { EmoneyService } from './emoney';
 import type { QuoteService } from './quotes';
 import { SUPPLIER_PAYMENT_METHODS, type PurchaseService } from './purchases';
 import { Base, type Clock, type Context } from './util';
+import type { GiftVoucher } from './vouchers';
 
 const money = (v: number) => formatFcfa(v, false);
 
@@ -559,6 +560,25 @@ export class ReceiptService extends Base {
       { t: 'feed' },
       { t: 'feed' },
       { t: 'row', left: '................', right: '................' },
+    );
+    return r;
+  }
+
+  /** Bon d'achat imprimé : montant, code-barres à scanner en caisse, date de fin. */
+  giftVoucher(v: GiftVoucher): Receipt {
+    const titles = { sold: "BON D'ACHAT", refund: "BON D'AVOIR", change: 'BON DE MONNAIE' } as const;
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: titles[v.kind], align: 'center', bold: true, big: true },
+      { t: 'text', text: `${money(v.amount)} FCFA`, align: 'center', bold: true, big: true },
+      { t: 'feed' },
+    ];
+    if (v.holder || v.customer_name) r.push({ t: 'text', text: `Pour : ${v.holder ?? v.customer_name}`, align: 'center' });
+    r.push(
+      { t: 'text', text: `Émis le ${dateFr(v.created_at)}${v.sale_number ? ` (ticket ${v.sale_number})` : ''}`, align: 'center' },
+      { t: 'text', text: v.expires_on ? `Valable jusqu'au ${v.expires_on.split('-').reverse().join('/')}` : 'Sans date de fin', align: 'center', bold: true },
+      { t: 'barcode', code: v.code },
+      { t: 'text', text: 'À présenter en caisse, dans ce magasin. Utilisable en plusieurs fois ; non remboursable en espèces.', align: 'center' },
     );
     return r;
   }

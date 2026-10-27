@@ -14,6 +14,7 @@ import {
   purchaseTermsError,
   weightedAverageCost,
 } from '@superette/core';
+import { recalledLot } from './recalls';
 import { AppError, Base, type Context, newId } from './util';
 
 export interface ReceptionLine {
@@ -224,9 +225,10 @@ export class StockService extends Base {
       .run(lotId, lotId);
   }
 
-  private lots(articleId: string, warehouseId: string) {
+  /** Lots en stock ; un lot rappelé (rappel ouvert) n'est pris que s'il est demandé exprès (retour au fournisseur). */
+  private lots(articleId: string, warehouseId: string, withRecalled = false) {
     return this.db
-      .prepare('SELECT id, qty, expiry, received_at AS receivedAt FROM lots WHERE article_id = ? AND warehouse_id = ? AND qty > 0')
+      .prepare(`SELECT id, qty, expiry, received_at AS receivedAt FROM lots l WHERE article_id = ? AND warehouse_id = ? AND qty > 0${withRecalled ? '' : ` AND NOT ${recalledLot('l')}`}`)
       .all(articleId, warehouseId) as { id: string; qty: number; expiry: string | null; receivedAt: string }[];
   }
 
@@ -243,7 +245,7 @@ export class StockService extends Base {
     if (m.qty <= 0) throw new AppError('Quantité à sortir invalide', 'INVALID');
     // Service (frais de livraison) : vendu sans stock, sans coût.
     if (this.db.prepare('SELECT is_service FROM articles WHERE id = ?').pluck().get(m.articleId) === 1) return { unitCost: 0, lots: [] };
-    const candidates = this.lots(m.articleId, m.warehouseId).filter((l) => !m.lotId || l.id === m.lotId);
+    const candidates = this.lots(m.articleId, m.warehouseId, Boolean(m.lotId)).filter((l) => !m.lotId || l.id === m.lotId);
     const { allocations, unallocated } = allocateFefo(candidates, m.qty);
     const parts: { lotId: string | null; qty: Milli }[] = allocations.map((a) => ({ lotId: a.lotId, qty: a.qty }));
     if (unallocated > 0) parts.push({ lotId: null, qty: unallocated });
@@ -451,9 +453,9 @@ export class StockService extends Base {
   /** Sortie d'un transfert : FEFO, et les lots sortis (numéro, péremption, date d'entrée) pour les recréer à l'arrivée. */
   transferOut(
     ctx: Context,
-    m: { articleId: string; warehouseId: string; qty: Milli; refId: string; reason?: string | null },
+    m: { articleId: string; warehouseId: string; qty: Milli; refId: string; reason?: string | null; refType?: string },
   ): { unitCost: Fcfa; lots: TransferLot[] } {
-    const out = this.issue(ctx, { type: 'TRANSFER_OUT', articleId: m.articleId, warehouseId: m.warehouseId, qty: m.qty, refType: 'transfer', refId: m.refId, reason: m.reason ?? null });
+    const out = this.issue(ctx, { type: 'TRANSFER_OUT', articleId: m.articleId, warehouseId: m.warehouseId, qty: m.qty, refType: m.refType ?? 'transfer', refId: m.refId, reason: m.reason ?? null });
     const lotOf = this.db.prepare('SELECT lot_number, expiry, received_at FROM lots WHERE id = ?');
     const lots = out.lots.map((part) => {
       const src = part.lotId ? (lotOf.get(part.lotId) as { lot_number: string | null; expiry: string | null; received_at: string }) : null;
@@ -465,7 +467,7 @@ export class StockService extends Base {
   /** Entrée d'un transfert : `qty` répartie sur les lots sortis, dans l'ordre ; le surplus éventuel dans le dernier lot. */
   transferIn(
     ctx: Context,
-    m: { articleId: string; warehouseId: string; qty: Milli; unitCost: Fcfa; lots: TransferLot[]; refId: string; reason?: string | null },
+    m: { articleId: string; warehouseId: string; qty: Milli; unitCost: Fcfa; lots: TransferLot[]; refId: string; reason?: string | null; refType?: string },
   ): void {
     let left = m.qty;
     const lots = m.lots.length ? m.lots : [{ qty: m.qty, lot_number: null, expiry: null, received_at: this.now() }];
@@ -475,7 +477,7 @@ export class StockService extends Base {
       left -= qty;
       const lotId = newId();
       this.insertLot(ctx, { id: lotId, articleId: m.articleId, warehouseId: m.warehouseId, lotNumber: src.lot_number, expiry: src.expiry, qty, receivedAt: src.received_at });
-      this.applyMovement(ctx, { type: 'TRANSFER_IN', articleId: m.articleId, warehouseId: m.warehouseId, qty, unitCost: m.unitCost, lotId, refType: 'transfer', refId: m.refId, reason: m.reason ?? null });
+      this.applyMovement(ctx, { type: 'TRANSFER_IN', articleId: m.articleId, warehouseId: m.warehouseId, qty, unitCost: m.unitCost, lotId, refType: m.refType ?? 'transfer', refId: m.refId, reason: m.reason ?? null });
     });
   }
 

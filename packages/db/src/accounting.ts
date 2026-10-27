@@ -242,9 +242,25 @@ export class AccountingService extends Base {
          WHERE ${where} GROUP BY s.session_id, d, p.method, p.clearing, c.code ORDER BY p.method, c.name`,
       )
       .all(params) as { session_id: string; d: string; method: string; code: string | null; name: string | null; amount: number; clearing: number }[];
+    // Monnaie gardée : sur le compte du client (411) ou en bon de monnaie (4191) ; elle est dans les espèces reçues.
+    const kept = this.db
+      .prepare(
+        `SELECT s.session_id, date(s.created_at, 'localtime') AS d, CASE WHEN s.change_voucher IS NULL THEN c.code END AS code, CASE WHEN s.change_voucher IS NULL THEN c.name END AS name,
+                SUM(s.change_kept) AS amount
+         FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+         WHERE ${where} AND s.change_kept > 0 GROUP BY s.session_id, d, code ORDER BY name`,
+      )
+      .all(params) as { session_id: string; d: string; code: string | null; name: string | null; amount: number }[];
     return groups.map((g) => {
       const label = `Ventes ${g.register} du ${g.d.split('-').reverse().join('/')}`;
       const lines: EntryLine[] = [];
+      for (const k of kept.filter((x) => x.session_id === g.session_id && x.d === g.d)) {
+        lines.push(
+          k.code
+            ? side(r.customers, -k.amount, `Monnaie laissée sur le compte ${k.name ?? ''}`, { code: k.code, name: k.name ?? '' })
+            : side(r.voucher, -k.amount, `Bons de monnaie, ${label.toLowerCase()}`),
+        );
+      }
       for (const p of pays.filter((x) => x.session_id === g.session_id && x.d === g.d)) {
         const amount = p.method === 'CASH' ? p.amount - g.change : p.amount;
         if (!amount) continue;

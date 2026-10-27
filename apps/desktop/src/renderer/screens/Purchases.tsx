@@ -1,7 +1,7 @@
 import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useDraft, useLoad, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useDraft, useLoad, useToast, has, openScreen } from '../ui';
 import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
@@ -1326,6 +1326,9 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
   const [boost, setBoost] = useState('0');
   const boostPct = Math.max(-50, Math.min(300, Math.round(Number(boost.replace(',', '.')) || 0)));
   const proposal = useLoad(() => call('purchases.reorder', Number(cover) || 7, { method, boostPct }), [cover, method, boostPct]);
+  // Articles qu'un autre magasin a en trop : à lui demander avant d'acheter au fournisseur.
+  const fromStores = useLoad(() => call('storeTransfers.suggestions').catch(() => []), []);
+  const firstOf = (names: string[]) => (names.length > 3 ? `${names.slice(0, 3).join(', ')}…` : names.join(', '));
   const season = method === 'season';
   const suppliers = useLoad(() => call('suppliers.list'));
   const [warehouseId, setWarehouseId] = useState('');
@@ -1387,6 +1390,14 @@ function Reorder({ onCreated }: { onCreated: () => void }) {
         Articles dont le stock, plus ce qui est déjà commandé, passe sous le stock d'alerte de la fiche ou sous les ventes attendues pendant le délai
         de livraison du fournisseur (moyenne des 4 dernières semaines). Les quantités sont arrondies au colisage.
       </p>
+      {Boolean(fromStores.data?.length) && (
+        <p className="tre-warning">
+          {fromStores.data!.length} article{fromStores.data!.length > 1 ? 's' : ''} en trop dans un autre magasin ({firstOf(fromStores.data!.map((x) => x.name))}) : demandez-les avant d'acheter.{' '}
+          <button className="link" onClick={() => openScreen('stock', 'stores')}>
+            Demandes entre magasins
+          </button>
+        </p>
+      )}
       <div className="grid3">
         <Field label="Jours de vente à couvrir après livraison">
           <input inputMode="numeric" value={cover} onChange={(e) => setCover(e.target.value)} />

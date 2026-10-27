@@ -41,6 +41,16 @@ const POS: PageHelp = {
   intro: 'C’est l’écran de vente. On scanne ou on tape les produits, puis on encaisse. La caisse doit être ouverte (Trésorerie) avant la première vente.',
   sections: [
     {
+      title: "Bon d'achat, monnaie et carnet à souches",
+      steps: [
+        "« Bon d'achat » : vendez un bon cadeau payé en espèces ou Mobile Money. Il s'imprime avec un code-barres et vaut jusqu'à sa date de fin.",
+        "Pour payer avec un bon : choisissez « Bon d'achat » à l'encaissement et scannez son code. Le solde est vérifié ; le reste du bon sert une autre fois.",
+        "Pas de monnaie : cochez « Pas de monnaie » à l'encaissement. Le montant va sur le compte du client choisi, ou devient un bon de monnaie imprimé pour un client de passage.",
+        "Panne de courant : écrivez les ventes sur le carnet à souches. Ensuite, « Carnet » : tapez le numéro de la souche et l'heure notée, puis saisissez la vente. Le Z montre ces ventes à part.",
+        "Bandeau « Trop d'espèces dans le tiroir » : le plafond réglé est dépassé, le gérant est prévenu sur son téléphone. Cliquez « Verser » pour faire le prélèvement vers la caisse centrale.",
+      ],
+    },
+    {
       title: 'Faire une vente',
       steps: [
         'Scannez le code-barres, ou tapez le début du nom (2 lettres suffisent) : les produits trouvés s’affichent en tuiles. Touchez une tuile, ou choisissez avec les flèches et Entrée.',
@@ -125,6 +135,17 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Factures et registre des ventes',
     intro: 'Retrouver une vente, la réimprimer, voir les clôtures Z et les opérations de caisse.',
     sections: [
+    {
+      tab: 'vouchers',
+      title: "Bons d'achat et bons d'avoir",
+      perm: 'vouchers',
+      steps: [
+        "Tous les bons du magasin : vendus, donnés pour un retour (bon d'avoir) ou pour la monnaie. Le reste se calcule d'après les tickets payés avec.",
+        "Un bon ne sert jamais au-delà de son montant ni après sa date de fin ; un ancien bon papier (sans code ONIX) ne sert qu'une fois.",
+        "Un bon vendu jamais utilisé s'annule : l'encaissement est annulé et l'argent rendu au client.",
+        "Le total encore dû aux clients est au compte 4191.",
+      ],
+    },
       {
         tab: 'tickets',
         title: 'Mes dernières factures',
@@ -151,6 +172,17 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Produits',
     intro: 'La liste de tous les produits avec leurs prix, codes-barres et conditionnements.',
     sections: [
+    {
+      tab: 'schedules',
+      title: 'Prix programmés',
+      perm: ['price_schedule', 'price_update'],
+      steps: [
+        "Dans « Mise à jour des prix », choisissez « À une date » : les nouveaux prix s'appliquent seuls ce jour-là, sur un PC du magasin.",
+        "« Nouveau prix à une date » programme un prix article par article.",
+        "La veille, l'onglet Prix programmés propose d'imprimer les étiquettes aux nouveaux prix, à poser le matin.",
+        "Contenu net (fiche produit, « 900 g », « 1,5 L ») : l'étiquette affiche aussi le prix au kilo ou au litre. Vide, il est lu dans la désignation.",
+      ],
+    },
       {
         tab: 'list',
         title: 'Chercher et modifier un produit',
@@ -217,6 +249,24 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Stock',
     intro: 'Quantités par dépôt, réceptions, pertes, transferts, inventaires et péremptions.',
     sections: [
+    {
+      tab: 'recalls',
+      title: 'Rappels de lots',
+      perm: 'lot_recall',
+      steps: [
+        "Un fournisseur rappelle un lot : « Nouveau rappel de lot », l'article, le numéro de lot (vide : tous les lots) et le motif. La caisse refuse aussitôt de le vendre.",
+        "La fiche du rappel montre le stock du lot dépôt par dépôt, les clients connus qui l'ont acheté (avec un message WhatsApp prêt) et prépare le retour au fournisseur.",
+      ],
+    },
+    {
+      tab: 'stores',
+      title: 'Marchandise entre magasins',
+      perm: 'store_transfers',
+      steps: [
+        "Avant d'acheter au fournisseur : la liste « À demander plutôt qu'acheter » montre les articles sous leur seuil ici et en trop dans un autre magasin.",
+        "« Demander » envoie la demande. L'autre magasin la voit, « Expédier » sort le stock chez lui. Vous « Réceptionnez » la quantité arrivée, au même coût.",
+      ],
+    },
       {
         tab: 'tasks',
         title: 'Tâches du jour',
@@ -304,6 +354,15 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Achats',
     intro: 'Commandes aux fournisseurs, réceptions, factures et paiements.',
     sections: [
+    {
+      tab: 'missed',
+      title: 'Clients à prévenir',
+      perm: 'missed_report',
+      steps: [
+        "Dans « Le client voulait… », notez le nom et le téléphone du client.",
+        "Quand le produit arrive en stock, il apparaît dans « Clients à prévenir » : « Prévenir par WhatsApp » ouvre le message prêt à envoyer.",
+      ],
+    },
       {
         tab: 'calendar',
         title: 'Calendrier des passages fournisseurs',
@@ -527,6 +586,15 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Commandes clients',
     intro: 'Les commandes prises par téléphone ou WhatsApp avant la vente : préparées, puis encaissées à la caisse à la livraison ou au retrait.',
     sections: [
+    {
+      title: 'Commandes répétées des clients pros',
+      perm: 'recurring_orders',
+      steps: [
+        "Onglet « Commandes répétées » : le client, ses jours de livraison, la fréquence et les articles.",
+        "La commande se crée toute seule avant chaque livraison (la veille par défaut) et passe « préparée » : le stock lui est réservé.",
+        "Arrêtez-la quand le client ne commande plus ; une commande annulée à la main ne revient pas.",
+      ],
+    },
       {
         title: 'Prendre une commande',
         steps: [
@@ -569,6 +637,10 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Promotions',
     intro: 'Prix promotionnels et offres « 3 pour 2 » appliqués tout seuls à la caisse.',
     sections: [
+    {
+      title: 'Affiches promo',
+      steps: ["« Affiches promo » : cochez les promotions, choisissez A4 ou A5 (deux par page) et imprimez. L'affiche montre le prix promo, l'ancien prix barré, le prix au kilo et les dates."],
+    },
       { title: 'Créer une promotion', steps: ['Produit, type (prix promo, N achetés M payés, lot à prix fixe), période et magasins.', 'La caisse applique la meilleure promotion de chaque article, sans code gérant.'] },
       { title: 'Suivre', steps: ['Quantités vendues et économie accordée ; « Arrêter » met fin à une promotion tout de suite.'] },
     ],
@@ -1015,6 +1087,28 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Approvisionner la flotte » achète de la flotte avec les espèces de la caisse ; « Revendre de la flotte » fait l’inverse ; « Commission reçue de l’opérateur » ajoute à la flotte la commission versée sur la puce.',
           'Le bilan de la période donne, par compte, le nombre d’opérations, les montants par type, les commissions, les frais et les espèces nettes.',
         ],
+      },
+    ],
+  },
+  exit: {
+    title: 'Contrôle à la sortie',
+    intro: 'Le vigile scanne le code-barres du ticket à la porte (douchette sur un PC, ou téléphone) et voit les articles payés.',
+    sections: [
+      {
+        tab: 'door',
+        title: 'À la porte',
+        perm: 'exit_check',
+        steps: [
+          'Scannez le ticket : la liste des articles payés s’affiche en grand, moins ce qui a été rapporté au magasin.',
+          'Un ticket déjà contrôlé, ancien, annulé ou de retour est signalé en rouge ou en orange.',
+          '« Contrôlé, le client sort » ; « Problème » note ce qui ne va pas, le gérant est prévenu sur son téléphone.',
+        ],
+      },
+      {
+        tab: 'report',
+        title: 'Rapport',
+        perm: 'exit_report',
+        steps: ['Part des tickets du jour contrôlés, problèmes et tickets présentés deux fois.'],
       },
     ],
   },

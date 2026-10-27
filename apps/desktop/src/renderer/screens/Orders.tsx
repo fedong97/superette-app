@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, askText, dateFr, dateTime, Empty, fcfa, Field, has, Modal, parseAmount, parseQty, qty, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, askText, dateFr, dateTime, Empty, fcfa, Field, has, Modal, parseAmount, parseQty, qty, Tabs, today, useCan, useLoad, useToast } from '../ui';
+import { RecurringOrders } from './RecurringOrders';
 import { type Customer, CustomerPickDialog } from './customerDialogs';
 import { ArticlePicker, SupplierSelect } from './pickers';
 
@@ -34,7 +35,27 @@ export function waPhone(phone: string | null): string {
  * Commandes clients prises par téléphone ou WhatsApp : on les prépare (la marchandise
  * est mise de côté), puis on les charge à la caisse au moment de la livraison ou du retrait.
  */
-export function Orders({ user }: { user: User }) {
+export function Orders({ user, initialView = 'orders' }: { user: User; initialView?: 'orders' | 'recurring' }) {
+  const [view, setView] = useState<'orders' | 'recurring'>(initialView === 'recurring' && has(user, 'recurring_orders') ? 'recurring' : 'orders');
+  if (view === 'recurring')
+    return (
+      <div className="page">
+        <header className="page-head">
+          <h1>Commandes clients</h1>
+        </header>
+        <Tabs value={view} onChange={setView} tabs={ORDER_TABS(user)} />
+        <RecurringOrders user={user} />
+      </div>
+    );
+  return <OrderList user={user} view={view} setView={setView} />;
+}
+
+const ORDER_TABS = (user: User): ['orders' | 'recurring', string][] => [
+  ['orders', 'Commandes'],
+  ...(has(user, 'recurring_orders') ? ([['recurring', 'Commandes répétées']] as ['recurring', string][]) : []),
+];
+
+function OrderList({ user, view, setView }: { user: User; view: 'orders' | 'recurring'; setView: (v: 'orders' | 'recurring') => void }) {
   const [status, setStatus] = useState<Status | 'open' | ''>('open');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Order | 'new' | null>(null);
@@ -46,6 +67,7 @@ export function Orders({ user }: { user: User }) {
       <header className="page-head">
         <h1>Commandes clients</h1>
       </header>
+      {has(user, 'recurring_orders') && <Tabs value={view} onChange={setView} tabs={ORDER_TABS(user)} />}
       <div className="filters">
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | 'open' | '')}>
           <option value="open">En cours (à préparer et préparées)</option>

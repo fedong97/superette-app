@@ -115,7 +115,7 @@ export interface CustomerAccount {
 
 export interface StatementLine {
   date: string;
-  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening' | 'rejected' | 'offset';
+  kind: 'sale' | 'return' | 'payment' | 'rebate' | 'refund' | 'opening' | 'rejected' | 'offset' | 'change';
   ref_id: string;
   number: string;
   label: string;
@@ -336,7 +336,8 @@ export class CustomerService extends Base {
         `SELECT (SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE store_id = @s AND customer_id = @c)
               + (SELECT COALESCE(SUM(amount), 0) FROM rebate_entries WHERE store_id = @s AND customer_id = @c AND kind = 'credit')
               - (SELECT COALESCE(SUM(amount), 0) FROM treasury_entries WHERE store_id = @s AND customer_id = @c AND kind = 'customer_refund' AND status = 'active')
-              + (SELECT COALESCE(SUM(amount), 0) FROM account_offsets WHERE store_id = @s AND customer_id = @c AND status = 'active')`,
+              + (SELECT COALESCE(SUM(amount), 0) FROM account_offsets WHERE store_id = @s AND customer_id = @c AND status = 'active')
+              + (SELECT COALESCE(SUM(change_kept), 0) FROM sales WHERE store_id = @s AND customer_id = @c AND status = 'completed' AND change_kept > 0 AND change_voucher IS NULL)`,
       )
       .pluck()
       .get({ s: storeId, c: customerId }) as number;
@@ -505,6 +506,9 @@ export class CustomerService extends Base {
          SELECT rejected_on, 'rejected', id, number, amount + fees FROM cheque_rejections WHERE store_id = @storeId AND customer_id = @customerId AND status = 'active'
          UNION ALL
          SELECT offset_date, 'offset', id, number, -amount FROM account_offsets WHERE store_id = @storeId AND customer_id = @customerId AND status = 'active'
+         UNION ALL
+         SELECT created_at, 'change', id, number, -change_kept FROM sales
+         WHERE store_id = @storeId AND customer_id = @customerId AND status = 'completed' AND change_kept > 0 AND change_voucher IS NULL
          ORDER BY 1, 4`,
       )
       .all({ storeId, customerId }) as { date: string; kind: StatementLine['kind']; ref_id: string; number: string; amount: number }[];
@@ -544,6 +548,8 @@ export class CustomerService extends Base {
                   ? 'Chèque revenu impayé (frais compris)'
                 : r.kind === 'offset'
                   ? 'Compensation avec son compte fournisseur'
+                : r.kind === 'change'
+                  ? 'Monnaie laissée sur le compte'
                   : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }

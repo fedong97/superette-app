@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { PROMOTION_KINDS, type PromotionKind, formatQty, promotionLabel } from '@superette/core';
+import { POSTER_SIZES, PROMOTION_KINDS, type PosterSize, type PromotionKind, formatQty, promotionLabel } from '@superette/core';
 import { type Result, call } from '../api';
 import { Empty, Field, Modal, dateFr, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
 import { ArticlePicker } from './pickers';
@@ -32,6 +32,7 @@ export function Promotions({ active }: { active: boolean }) {
   const stores = useLoad(() => call('admin.stores'), []);
   const [filter, setFilter] = useState<'current' | 'all'>('current');
   const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
+  const [posters, setPosters] = useState(false);
   const rows = (list.data ?? []).filter((p) => filter === 'all' || p.status === 'running' || p.status === 'scheduled');
   const storeName = (id: string | null) => (id ? (stores.data?.find((s) => s.id === id)?.name ?? '?') : 'Tous les magasins');
   return (
@@ -49,7 +50,10 @@ export function Promotions({ active }: { active: boolean }) {
             Toutes
           </button>
         </div>
-        <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} disabled={!can('promotion_save')} onClick={() => setEditing('new')}>
+        <button style={{ marginLeft: 'auto' }} onClick={() => setPosters(true)} title="Affichettes A4 ou A5 à poser en rayon ou en vitrine">
+          Affiches promo
+        </button>
+        <button data-new title="Ctrl+J" className="primary" disabled={!can('promotion_save')} onClick={() => setEditing('new')}>
           Nouvelle promotion
         </button>
       </div>
@@ -108,6 +112,7 @@ export function Promotions({ active }: { active: boolean }) {
           </tbody>
         </table>
       )}
+      {posters && <PostersDialog promotions={(list.data ?? []).filter((p) => p.active && (p.status === 'running' || p.status === 'scheduled'))} onClose={() => setPosters(false)} />}
       {editing && (
         <PromotionForm
           promotion={editing === 'new' ? null : editing}
@@ -264,6 +269,55 @@ function PromotionForm({
           <button className="primary">Enregistrer</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** Affichettes des promotions : grand prix, ancien prix barré, prix au kilo, dates. A4 ou A5 (deux par page). */
+function PostersDialog({ promotions, onClose }: { promotions: Promotion[]; onClose: () => void }) {
+  const toast = useToast();
+  const [ids, setIds] = useState<Set<string>>(new Set(promotions.filter((p) => p.status === 'running').map((p) => p.id)));
+  const [size, setSize] = useState<PosterSize>('a5');
+  const chosen = [...ids];
+  const preview = useLoad(() => (chosen.length ? call('promotions.postersPreview', chosen, size) : Promise.resolve('')), [chosen.join(','), size]);
+  const toggle = (id: string) => setIds((s) => (s.has(id) ? (s.delete(id), new Set(s)) : new Set(s).add(id)));
+  return (
+    <Modal title="Affiches promo" onClose={onClose} wide>
+      {promotions.length === 0 ? (
+        <Empty>Aucune promotion en cours ni à venir.</Empty>
+      ) : (
+        <div className="grid2">
+          <div>
+            <Field label="Format">
+              <select value={size} onChange={(e) => setSize(e.target.value as PosterSize)}>
+                {(Object.keys(POSTER_SIZES) as PosterSize[]).map((k) => (
+                  <option key={k} value={k}>
+                    {POSTER_SIZES[k]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <ul className="plain">
+              {promotions.map((p) => (
+                <li key={p.id}>
+                  <label>
+                    <input type="checkbox" checked={ids.has(p.id)} onChange={() => toggle(p.id)} /> {p.name} <small className="muted">({STATUS[p.status]})</small>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="labels-preview">
+            {preview.data ? <iframe title="Aperçu des affiches" srcDoc={preview.data} style={{ width: '100%', height: 420 }} /> : <Empty>Cochez des promotions pour voir l'aperçu.</Empty>}
+          </div>
+        </div>
+      )}
+      <div className="actions">
+        <button onClick={onClose}>Fermer</button>
+        <button className="primary" disabled={!chosen.length} onClick={() => call('promotions.postersPrint', chosen, size).then((ok) => ok && toast.ok('Affiches imprimées'), toast.error)}>
+          Imprimer {chosen.length} affiche{chosen.length > 1 ? 's' : ''}
+        </button>
+      </div>
     </Modal>
   );
 }

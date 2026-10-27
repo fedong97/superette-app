@@ -1,4 +1,4 @@
-import { type BarcodeLabel, type Fcfa, type LabelData, type Milli, type PromotionRule, formatFcfa, promotionLabel } from '@superette/core';
+import { type BarcodeLabel, type Fcfa, type LabelData, type Milli, type PromotionRule, formatFcfa, parseNetContent, promotionLabel, unitPriceText } from '@superette/core';
 import type { Article, CatalogueService } from './catalogue';
 import type { Db } from './database';
 import type { PromotionService } from './promotions';
@@ -133,18 +133,23 @@ export class LabelService extends Base {
   }
 
   /** Contenu des étiquettes, chaque article répété `copies` fois. */
-  build(storeId: string, items: readonly LabelItem[]): LabelData[] {
+  /**
+   * `prices` remplace le prix de l'unité de certains articles (prix programmés :
+   * étiquettes préparées la veille), `date` la date imprimée.
+   */
+  build(storeId: string, items: readonly LabelItem[], opts: { prices?: ReadonlyMap<string, Fcfa>; date?: string } = {}): LabelData[] {
     const total = items.reduce((s, i) => s + Math.max(0, Math.floor(i.copies)), 0);
     if (total === 0) throw new AppError('Aucune étiquette à imprimer', 'INVALID');
     if (total > MAX_LABELS) throw new AppError(`${MAX_LABELS} étiquettes au plus par impression`, 'INVALID');
     const rules = this.rules(storeId);
-    const d = this.today();
+    const d = opts.date ?? this.today();
     const date = `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
     const out: LabelData[] = [];
     for (const item of items) {
       const a = this.catalogue.getArticle(item.articleId, storeId);
       const pack = item.pack ?? '';
-      const price = this.priceOf(a, pack, rules);
+      const planned = pack ? undefined : opts.prices?.get(a.id);
+      const price = planned ?? this.priceOf(a, pack, rules);
       const unitName = (a.unit_name || 'Pièce').toLowerCase();
       let label: LabelData;
       if (pack) {
@@ -159,7 +164,7 @@ export class LabelService extends Base {
           date,
         };
       } else {
-        const rule = rules.get(a.id);
+        const rule = planned === undefined ? rules.get(a.id) : undefined;
         // Le conditionnement juste au-dessus de l'unité (le pack plutôt que la palette).
         const big = a.packs.at(-1);
         label = {
@@ -170,9 +175,9 @@ export class LabelService extends Base {
           detail:
             a.unit !== 'piece'
               ? `Prix ${UNIT_WORD[a.unit]}`
-              : big
-                ? `${big.name} de ${big.units / 1000} : ${formatFcfa(big.sale_price, false)} F`
-                : null,
+              : [unitPriceText(price, parseNetContent(a.net_content ?? a.name)), big ? `${big.name} de ${big.units / 1000} : ${formatFcfa(big.sale_price, false)} F` : null]
+                  .filter(Boolean)
+                  .join(' · ') || null,
           barcode: a.unit === 'piece' ? (a.barcodes.find((b) => b.pack_qty === 1000)?.code ?? null) : null,
           code: a.code,
           date,

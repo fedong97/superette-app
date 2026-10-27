@@ -114,7 +114,7 @@ export const PERMISSIONS = {
   cash_operations: { label: 'Consulter toutes les opérations de caisse (listing, recherche)', group: 'Trésorerie', type: 'Menu', parent: 'sales' },
   central_cash: { label: 'Caisse centrale : apports, dépôts en banque, sorties', group: 'Trésorerie', type: 'Menu', roles: MANAGE },
   cash_desk: { label: 'Encaisser et décaisser dans une caisse ouverte (une sortie demande le code du gérant)', group: 'Trésorerie', type: 'Bouton', parent: 'treasury' },
-  cash_desk_edit: { label: 'Antidater ou supprimer une entrée ou une sortie de la journée, annuler l’impression d’un reçu', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
+  cash_desk_edit: { label: 'Modifier, antidater ou supprimer une entrée ou une sortie de la journée, annuler l’impression d’un reçu', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
 
   // --- Fichier des clients -----------------------------------------------------
   customers: { label: 'Liste et fiches des clients', group: 'Fichier des clients', type: 'Menu', roles: COUNTER },
@@ -148,6 +148,7 @@ export const PERMISSIONS = {
   order_close: { label: 'Envoyer, clôturer ou annuler un bon de commande', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_orders' },
   group_orders: { label: 'Commandes groupées pour plusieurs magasins', group: 'Achat de marchandises', type: 'Bouton', roles: MANAGE },
   purchase_invoices: { label: 'Saisir les factures fournisseurs (à partir des bons de réception)', group: 'Achat de marchandises', type: 'Fonction', roles: [...ACCOUNTING, 'buyer'] },
+  purchase_invoice_edit: { label: 'Modifier une facture ou un avoir fournisseur déjà saisi (n°, dates, montants, articles)', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   supplier_pay: { label: 'Payer une facture fournisseur', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   purchase_due: { label: 'Échéancier des fournisseurs', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
   supplier_returns: { label: 'Retours au fournisseur et avoirs attendus', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
@@ -157,10 +158,11 @@ export const PERMISSIONS = {
   // --- Configuration des produits ----------------------------------------------
   articles: { label: 'Liste et fiches des produits', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
   article_create: { label: 'Ajouter de nouveaux produits', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
-  article_edit: { label: "Modifier la fiche d'un produit (nom, codes-barres, conditionnements, seuils)", group: 'Configuration des produits', type: 'Fonction', parent: 'articles' },
+  article_edit: { label: "Modifier la fiche d'un produit (codes-barres, conditionnements, seuils)", group: 'Configuration des produits', type: 'Fonction', parent: 'articles' },
+  article_rename: { label: "Changer le nom d'un produit déjà créé (bouton « Modifier le nom »)", group: 'Configuration des produits', type: 'Bouton', parent: 'article_edit' },
   article_price: { label: "Modifier les prix de vente et d'achat d'un produit", group: 'Configuration des produits', type: 'Fonction', parent: 'articles' },
   article_deactivate: { label: 'Désactiver ou réactiver un produit', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
-  article_families: { label: 'Créer les rayons et les familles', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
+  article_families: { label: 'Créer, renommer et supprimer les rayons et les familles', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   store_price: { label: 'Prix propre au magasin', group: 'Configuration des produits', type: 'Fonction', roles: MANAGE },
   import: { label: 'Importer le catalogue (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
   article_export: { label: 'Exporter la liste des produits (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },

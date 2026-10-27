@@ -551,6 +551,9 @@ export class ControlService extends Base {
          SELECT d.id, d.name, f.id, f.name, 0, 0, 0, 0
          FROM families f JOIN departments d ON d.id = f.department_id
          WHERE NOT EXISTS (SELECT 1 FROM articles a WHERE a.family_id = f.id AND a.active = 1)
+         UNION ALL
+         SELECT d.id, d.name, NULL, '', 0, 0, 0, 0
+         FROM departments d WHERE NOT EXISTS (SELECT 1 FROM families f WHERE f.department_id = d.id)
          ORDER BY 2, 4`,
       )
       .all({ storeId }) as {

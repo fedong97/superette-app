@@ -658,8 +658,8 @@ export class SyncService extends Base {
       }
       this.upsert(doc.table, p);
       // Un bon de commande brouillon, un devis ou une écriture saisie peuvent être réécrits : on remplace leurs lignes.
-      // Les lignes d'une réception ne changent jamais.
-      const rewritable = event.entity === 'purchase_order' || event.entity === 'quote' || event.entity === 'customer_order' || event.entity === 'manual_entry';
+      // Une réception aussi, quand on corrige les articles de sa facture directe.
+      const rewritable = event.entity === 'purchase_order' || event.entity === 'quote' || event.entity === 'customer_order' || event.entity === 'manual_entry' || (event.entity === 'reception' && Array.isArray(p['lines']) && (p['lines'] as unknown[]).length > 0);
       if (rewritable) this.db.prepare(`DELETE FROM ${doc.lines} WHERE ${doc.fk} = ?`).run(event.entityId);
       for (const line of (p['lines'] as Record<string, unknown>[]) ?? []) this.upsert(doc.lines, line, ['id'], !rewritable);
       return;

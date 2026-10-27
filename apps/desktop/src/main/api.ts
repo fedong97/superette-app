@@ -1026,6 +1026,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'admin.registers': (storeId: string) => (requireUser(ADMIN), s.admin.listRegisters(storeId)),
     'admin.createRegister': (storeId: string, name?: string, kind?: RegisterKind) => s.admin.createRegister(requireAdmin().id, storeId, name, kind),
     'admin.updateRegister': (id: string, patch: { name?: string; active?: boolean; methods?: string[] | null }) => s.admin.updateRegister(requireAdmin().id, id, patch),
+    'admin.changeRegisterKind': (id: string, kind: RegisterKind) => s.admin.changeRegisterKind(requireAdmin().id, id, kind),
+    'admin.deleteRegister': (id: string) => s.admin.deleteRegister(requireAdmin().id, id),
     'admin.warehouses': (opts?: { includeInactive?: boolean }) => s.admin.listWarehouses(ctx().storeId, opts),
     'admin.createWarehouse': (name: string, kind: 'shop' | 'reserve' | 'cold', opts?: { purpose?: WarehousePurpose; customerId?: string | null }) =>
       s.admin.createWarehouse(ctx(['warehouses_manage']).storeId, name, kind, false, opts),
@@ -1279,8 +1281,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         (input.packPurchasePrice !== undefined && input.packPurchasePrice !== cur.pack_purchase_price);
       if (priceChanged && !can(u, ['article_price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix des produits", 'FORBIDDEN');
       if ((input.active ?? true) !== (cur.active === 1) && !can(u, ['article_deactivate'])) throw new AppError("Vous n'avez pas le droit de désactiver un produit", 'FORBIDDEN');
+      // Le nom d'un produit déjà créé ne change que par le bouton « Modifier le nom » (catalogue.rename).
+      if (input.name.trim() !== cur.name.trim()) throw new AppError("Le nom du produit se change par le bouton « Modifier le nom »", 'FORBIDDEN');
       const otherChanged =
-        input.name.trim() !== cur.name ||
         (input.familyId ?? null) !== cur.family_id ||
         input.unit !== cur.unit ||
         input.vatRateId !== cur.vat_rate_id ||
@@ -1291,6 +1294,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (otherChanged && !can(u, ['article_edit'])) throw new AppError("Vous n'avez pas le droit de modifier la fiche d'un produit", 'FORBIDDEN');
       return s.catalogue.saveArticle(u.id, input, id, { autoBarcode: autoBarcode() });
     },
+    'catalogue.rename': (id: string, name: string, reason = '') => s.catalogue.renameArticle(requireUser(['article_rename']).id, id, name, reason),
     'catalogue.setStorePrice': (articleId: string, price: Fcfa | null) => {
       const c = ctx(['store_price']);
       s.catalogue.setStorePrice(c.userId, articleId, c.storeId, price);
@@ -1299,6 +1303,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'catalogue.departments': () => (requireUser(), s.catalogue.listDepartments()),
     'catalogue.createDepartment': (name: string) => (requireUser(['article_families']), s.catalogue.createDepartment(name)),
     'catalogue.createFamily': (departmentId: string, name: string) => (requireUser(['article_families']), s.catalogue.createFamily(departmentId, name)),
+    'catalogue.renameDepartment': (id: string, name: string) => s.catalogue.renameDepartment(requireUser(['article_families']).id, id, name),
+    'catalogue.updateFamily': (id: string, input: { name: string; departmentId?: string }) => s.catalogue.updateFamily(requireUser(['article_families']).id, id, input),
+    'catalogue.deleteDepartment': (id: string) => s.catalogue.deleteDepartment(requireUser(['article_families']).id, id),
+    'catalogue.deleteFamily': (id: string) => s.catalogue.deleteFamily(requireUser(['article_families']).id, id),
     'catalogue.newInternalBarcode': () => (requireUser(['article_create', 'article_edit', 'sale_new_article']), s.catalogue.generateInternalBarcode(settings().barcodeKind)),
     'catalogue.assignMissingBarcodes': () => s.catalogue.assignMissingBarcodes(requireUser(['article_edit']).id, settings().barcodeKind),
     'barcode.info': () => (requireUser(), s.catalogue.internalBarcodeInfo(settings().barcodeKind)),
@@ -1513,6 +1521,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!can(user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
       if (input.payment && !can(user!, ['supplier_pay'])) throw new AppError("Vous n'avez pas le droit de régler les fournisseurs", 'FORBIDDEN');
       return s.purchases.directInvoice(c, input);
+    },
+    'purchases.updateInvoice': (id: string, input: Parameters<Services['purchases']['updateInvoice']>[2]) => s.purchases.updateInvoice(ctx(['purchase_invoice_edit']), id, input),
+    /** Corriger les articles d'une facture directe refait aussi la réception : il faut le droit de réceptionner. */
+    'purchases.correctDirectInvoice': (id: string, input: Parameters<Services['purchases']['correctDirectInvoice']>[2]) => {
+      const c = ctx(['purchase_invoice_edit']);
+      if (!can(user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
+      return s.purchases.correctDirectInvoice(c, id, input);
     },
     'purchases.printInvoice': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (
       requireUser(['purchase_invoices', 'supplier_pay', 'purchase_due']), printer.purchaseInvoice(id, opts)
@@ -2097,6 +2112,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
       if (source === 'expense') return void s.expenses.cancel(c, id, by, reason);
       s.cashdesk.cancel(c, id, by, reason);
+    },
+    /** Modifier une entrée ou une sortie de la journée ouverte : le gérant, ou son code. */
+    'cashdesk.update': (source: 'entry' | 'expense', id: string, patch: { amount?: Fcfa; label?: string; party?: string | null; reference?: string | null }, supervisorPin?: string) => {
+      const c = ctx(TREASURY);
+      const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      if (source === 'expense') return void s.expenses.update(c, id, by, { amount: patch.amount, label: patch.label, beneficiary: patch.party, reference: patch.reference });
+      s.cashdesk.update(c, id, by, patch);
     },
     'cashdesk.convert': (id: string, target: { type: 'supplier'; invoiceId: string } | { type: 'customer'; customerId: string }, supervisorPin?: string) => {
       const c = ctx(TREASURY);
@@ -2755,6 +2777,25 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       printer.journal(ctx(ACCOUNTING).storeId, from, to, journal),
 
     // --- Sauvegardes -------------------------------------------------------
+    // --- Remise à zéro après l'installation ---------------------------------------
+    'reset.preview': () => (requireAdmin(), { ...s.reset.preview(), connected: Boolean(s.sync.credentials()), backupDir: s.backups.status().dir }),
+    /**
+     * Efface les données d'essai (ventes, achats, caisses, stock…) et garde les
+     * réglages et les fiches. Code de l'administrateur, phrase de confirmation,
+     * et une sauvegarde faite juste avant pour revenir en arrière.
+     */
+    'reset.run': async (opts: { keepStock?: boolean }, pin: string, confirm: string) => {
+      const u = requireAdmin();
+      if (s.fiches.current()) throw new AppError('Ouvrez la boutique elle-même (pas une fiche ni le mode formation) pour la remettre à zéro', 'FICHE');
+      if (s.sync.credentials()) {
+        throw new AppError('Ce PC est relié au serveur central : les autres PC lui renverraient les données d’essai. Faites la remise à zéro avant de relier les PC, ou demandez au support de vider le serveur', 'INVALID');
+      }
+      if ((confirm ?? '').trim().toUpperCase() !== 'REMETTRE A ZERO') throw new AppError('Tapez REMETTRE A ZERO pour confirmer', 'INVALID');
+      s.admin.login(u.login, pin ?? '');
+      if (!s.backups.status().dir) throw new AppError('Choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes) : une sauvegarde est faite juste avant la remise à zéro', 'INVALID');
+      const backup = await s.backups.backup(u.id, { kind: 'safety' });
+      return { ...s.reset.run(u.id, opts), backup: backup.file };
+    },
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),
     'backup.now': () => s.backups.saveNow(requireUser(['backups']).id),

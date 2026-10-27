@@ -197,7 +197,92 @@ export class CatalogueService extends Base {
     return { id, name: name.trim() };
   }
 
+  /** Renomme un rayon. */
+  renameDepartment(userId: string, id: string, name: string): { id: string; name: string } {
+    const clean = name.trim();
+    if (!clean) throw new AppError('Donnez un nom au rayon', 'INVALID');
+    const old = this.db.prepare('SELECT name FROM departments WHERE id = ?').pluck().get(id) as string | undefined;
+    if (old === undefined) throw new AppError('Rayon introuvable', 'NOT_FOUND');
+    if (this.db.prepare('SELECT 1 FROM departments WHERE name = ? AND id <> ?').get(clean, id)) throw new AppError(`Le rayon « ${clean} » existe déjà`, 'DUPLICATE');
+    this.db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(clean, id);
+    this.enqueue(null, 'department', id, 'upsert', {});
+    this.audit(userId, 'department.rename', 'department', id, { from: old, to: clean });
+    return { id, name: clean };
+  }
+
+  /** Renomme une famille ou la range dans un autre rayon. */
+  updateFamily(userId: string, id: string, input: { name: string; departmentId?: string }): { id: string; name: string } {
+    const clean = input.name.trim();
+    if (!clean) throw new AppError('Donnez un nom à la famille', 'INVALID');
+    const old = this.db.prepare('SELECT department_id, name FROM families WHERE id = ?').get(id) as { department_id: string; name: string } | undefined;
+    if (!old) throw new AppError('Famille introuvable', 'NOT_FOUND');
+    const departmentId = input.departmentId || old.department_id;
+    if (!this.db.prepare('SELECT 1 FROM departments WHERE id = ?').get(departmentId)) throw new AppError('Rayon introuvable', 'NOT_FOUND');
+    if (this.db.prepare('SELECT 1 FROM families WHERE department_id = ? AND name = ? AND id <> ?').get(departmentId, clean, id)) {
+      throw new AppError(`La famille « ${clean} » existe déjà dans ce rayon`, 'DUPLICATE');
+    }
+    this.db.prepare('UPDATE families SET name = ?, department_id = ? WHERE id = ?').run(clean, departmentId, id);
+    this.enqueue(null, 'family', id, 'upsert', {});
+    this.audit(userId, 'family.update', 'family', id, { from: old, to: { name: clean, department_id: departmentId } });
+    return { id, name: clean };
+  }
+
+  /** Supprime une famille sans produit (actif ou désactivé) ni ristourne qui la cite. */
+  deleteFamily(userId: string, id: string): void {
+    const fam = this.db.prepare('SELECT name FROM families WHERE id = ?').pluck().get(id) as string | undefined;
+    if (fam === undefined) throw new AppError('Famille introuvable', 'NOT_FOUND');
+    const used = this.db.prepare('SELECT COUNT(*) FROM articles WHERE family_id = ?').pluck().get(id) as number;
+    if (used) throw new AppError(`La famille « ${fam} » a encore ${used} produit${used > 1 ? 's' : ''} : rangez-les dans une autre famille avant de la supprimer`, 'IN_USE');
+    if (this.db.prepare('SELECT 1 FROM rebate_rules WHERE family_id = ?').get(id)) throw new AppError(`La famille « ${fam} » sert dans les ristournes : retirez-la des ristournes d'abord`, 'IN_USE');
+    this.tx(() => {
+      // Remises par famille des clients : la famille disparaît de leurs réglages.
+      const customers = this.db.prepare("SELECT id, family_discounts FROM customers WHERE family_discounts LIKE '%' || ? || '%'").all(id) as { id: string; family_discounts: string }[];
+      for (const c of customers) {
+        try {
+          const d = JSON.parse(c.family_discounts) as Record<string, number>;
+          delete d[id];
+          this.db.prepare('UPDATE customers SET family_discounts = ? WHERE id = ?').run(Object.keys(d).length ? JSON.stringify(d) : null, c.id);
+          this.enqueue(null, 'customer', c.id, 'upsert', {});
+        } catch {
+          // Réglage illisible : laissé tel quel.
+        }
+      }
+      this.db.prepare('DELETE FROM families WHERE id = ?').run(id);
+      this.enqueue(null, 'family', id, 'delete', null);
+      this.audit(userId, 'family.delete', 'family', id, { name: fam });
+    });
+  }
+
+  /** Supprime un rayon vide (sans famille). */
+  deleteDepartment(userId: string, id: string): void {
+    const dep = this.db.prepare('SELECT name FROM departments WHERE id = ?').pluck().get(id) as string | undefined;
+    if (dep === undefined) throw new AppError('Rayon introuvable', 'NOT_FOUND');
+    const families = this.db.prepare('SELECT COUNT(*) FROM families WHERE department_id = ?').pluck().get(id) as number;
+    if (families) throw new AppError(`Le rayon « ${dep} » a encore ${families} famille${families > 1 ? 's' : ''} : supprimez-les ou rangez-les dans un autre rayon d'abord`, 'IN_USE');
+    this.db.prepare('DELETE FROM departments WHERE id = ?').run(id);
+    this.enqueue(null, 'department', id, 'delete', null);
+    this.audit(userId, 'department.delete', 'department', id, { name: dep });
+  }
+
   // --- Articles -------------------------------------------------------------
+
+  /**
+   * Change le nom d'un produit déjà créé, par le bouton « Modifier le nom » (un
+   * droit à part) : l'ancien nom, le nouveau et le motif vont au journal d'audit.
+   */
+  renameArticle(userId: string, id: string, name: string, reason: string): void {
+    const clean = name.trim();
+    if (!clean) throw new AppError('Donnez le nouveau nom du produit', 'INVALID');
+    const old = this.db.prepare('SELECT name FROM articles WHERE id = ?').pluck().get(id) as string | undefined;
+    if (old === undefined) throw new AppError('Article introuvable', 'NOT_FOUND');
+    if (old === clean) return;
+    this.tx(() => {
+      this.db.prepare('UPDATE articles SET name = ?, updated_at = ? WHERE id = ?').run(clean, this.now(), id);
+      this.enqueue(null, 'article', id, 'upsert', {});
+      this.audit(userId, 'article.rename', 'article', id, { from: old, to: clean, reason: reason.trim() || null });
+    });
+  }
+
 
   private withBarcodes(rows: Omit<Article, 'barcodes' | 'packs'>[]): Article[] {
     if (rows.length === 0) return [];

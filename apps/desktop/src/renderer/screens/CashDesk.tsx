@@ -17,6 +17,7 @@ export interface DeskRow {
   nature: string;
   label: string;
   party: string | null;
+  reference?: string | null;
   closing?: boolean;
 }
 
@@ -476,9 +477,13 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
   );
 }
 
-type ActionDialog = null | 'backdate' | 'delete' | 'unprint' | 'to-supplier' | 'to-customer';
+type ActionDialog = null | 'edit' | 'backdate' | 'delete' | 'unprint' | 'to-supplier' | 'to-customer';
 
-/** Bouton « Action » d'un volet : ce qu'on peut faire sur la ligne choisie. */
+/**
+ * Boutons d'un volet sur la ligne choisie. Entrées : imprimer le reçu,
+ * modifier, supprimer. Sorties : décharge, impression du bon, modifier,
+ * supprimer. Le reste (A4, antidater, convertir…) est dans « Plus ▾ ».
+ */
 export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT'; row: DeskRow | null; desk: DeskProps }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -494,6 +499,7 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
   const editable = Boolean(row && desk.open && !row.closing && (entry || row.source === 'expense'));
   const otherOut = Boolean(row && desk.open && entry && row.kind === 'other');
   const why = !row ? 'Choisissez d’abord une ligne' : !desk.open ? 'La journée est clôturée' : undefined;
+  const onlyDesk = direction === 'IN' ? 'Seulement une entrée faite par « Encaisser »' : 'Seulement une sortie faite par « Décaisser » ou une dépense';
   const run = (fn: () => Promise<unknown>) => {
     setOpen(false);
     fn().catch(toast.error);
@@ -503,37 +509,44 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
       {label}
     </button>
   );
+  const print = (format: 'ticket' | 'a4') => run(() => call('cashdesk.print', desk.sessionId, row!.source, row!.id, format));
   return (
-    <div className="menu desk-action" ref={ref}>
-      <button type="button" onClick={() => setOpen(!open)}>
-        Action ▾
-      </button>
-      {open && (
-        <div className="menu-drop right">
-          {direction === 'IN' ? (
-            <>
-              <small className="menu-title">Imprimer le reçu ▸</small>
-              {item('Ticket de caisse', Boolean(row), () => run(() => call('cashdesk.print', desk.sessionId, row!.source, row!.id, 'ticket')))}
-              {item('Page A4', Boolean(row), () => run(() => call('cashdesk.print', desk.sessionId, row!.source, row!.id, 'a4')))}
-              {item("Annuler l'impression du reçu", Boolean(row && entry), () => (setOpen(false), setDialog('unprint')), 'Seulement pour une entrée faite par « Encaisser »')}
-              <hr />
-              {item('Antidater…', editable, () => (setOpen(false), setDialog('backdate')), why ?? 'Seulement une entrée faite par « Encaisser »')}
-              {item('Supprimer', editable, () => (setOpen(false), setDialog('delete')), why ?? 'Seulement une entrée faite par « Encaisser »')}
-            </>
-          ) : (
-            <>
-              {item('Décharge…', Boolean(row && !row.closing), () => run(() => call('cashdesk.discharge', desk.sessionId, row!.source, row!.id)))}
-              {item('Imprimer le bon de sortie', Boolean(row && !row.closing), () => run(() => call('cashdesk.print', desk.sessionId, row!.source, row!.id, 'ticket')))}
-              {item('Antidater…', editable, () => (setOpen(false), setDialog('backdate')), why ?? 'Seulement une sortie faite par « Décaisser » ou une dépense')}
-              <hr />
-              {item('Convertir en règlement fournisseur', otherOut, () => (setOpen(false), setDialog('to-supplier')), why ?? 'Seulement une sortie de type « Autre »')}
-              {item('Convertir en remboursement client', otherOut, () => (setOpen(false), setDialog('to-customer')), why ?? 'Seulement une sortie de type « Autre »')}
-              <hr />
-              {item('Supprimer', editable, () => (setOpen(false), setDialog('delete')), why ?? 'Seulement une sortie faite par « Décaisser » ou une dépense')}
-            </>
-          )}
-        </div>
+    <span className="desk-action-buttons">
+      {direction === 'IN' ? (
+        item('Imprimer le reçu', Boolean(row), () => print('ticket'))
+      ) : (
+        <>
+          {item('Décharge', Boolean(row && !row.closing), () => run(() => call('cashdesk.discharge', desk.sessionId, row!.source, row!.id)))}
+          {item('Imprimer', Boolean(row && !row.closing), () => print('ticket'))}
+        </>
       )}
+      {item('Modifier', editable, () => setDialog('edit'), why ?? onlyDesk)}
+      {item('Supprimer', editable, () => setDialog('delete'), why ?? onlyDesk)}
+      <div className="menu desk-action" ref={ref}>
+        <button type="button" onClick={() => setOpen(!open)}>
+          Plus ▾
+        </button>
+        {open && (
+          <div className="menu-drop right">
+            {direction === 'IN' ? (
+              <>
+                {item('Reçu en page A4', Boolean(row), () => print('a4'))}
+                {item("Annuler l'impression du reçu", Boolean(row && entry), () => (setOpen(false), setDialog('unprint')), 'Seulement pour une entrée faite par « Encaisser »')}
+                <hr />
+                {item('Antidater…', editable, () => (setOpen(false), setDialog('backdate')), why ?? onlyDesk)}
+              </>
+            ) : (
+              <>
+                {item('Bon de sortie en page A4', Boolean(row && !row.closing), () => print('a4'))}
+                {item('Antidater…', editable, () => (setOpen(false), setDialog('backdate')), why ?? onlyDesk)}
+                <hr />
+                {item('Convertir en règlement fournisseur', otherOut, () => (setOpen(false), setDialog('to-supplier')), why ?? 'Seulement une sortie de type « Autre »')}
+                {item('Convertir en remboursement client', otherOut, () => (setOpen(false), setDialog('to-customer')), why ?? 'Seulement une sortie de type « Autre »')}
+              </>
+            )}
+          </div>
+        )}
+      </div>
       {dialog && row && (
         <RowDialog
           kind={dialog}
@@ -546,7 +559,7 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
           }}
         />
       )}
-    </div>
+    </span>
   );
 }
 
@@ -565,19 +578,34 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
   const [reason, setReason] = useState('');
   const [target, setTarget] = useState('');
   const [pin, setPin] = useState('');
+  const [amount, setAmount] = useState(String(row.amount));
+  const [label, setLabel] = useState(row.label);
+  const [party, setParty] = useState(row.party ?? '');
+  const [reference, setReference] = useState(row.reference ?? '');
   if (!o) return null;
   const source = row.source as 'entry' | 'expense';
-  const title = { backdate: 'Antidater', delete: 'Supprimer', unprint: "Annuler l'impression du reçu", 'to-supplier': 'Convertir en règlement fournisseur', 'to-customer': 'Convertir en remboursement client' }[kind];
+  // Le tiers se corrige sur une autre entrée ou sortie et sur une dépense (bénéficiaire) ; le montant, sauf consigne, point MoMo, bon d'achat.
+  const partyEditable = source === 'expense' || row.kind === 'other';
+  const amountEditable = source === 'expense' || ['other', 'staff_advance', 'staff_repayment', 'staff_salary', 'customer_refund'].includes(row.kind ?? '');
+  const title = { edit: 'Modifier', backdate: 'Antidater', delete: 'Supprimer', unprint: "Annuler l'impression du reçu", 'to-supplier': 'Convertir en règlement fournisseur', 'to-customer': 'Convertir en remboursement client' }[kind];
   const invoices = o.invoices.filter((i) => i.kind === 'invoice' && i.balance >= row.amount);
   const credits = o.customers.filter((c) => -c.balance >= row.amount);
   const p = o.canEdit ? undefined : pin;
-  const ready = (o.canEdit || pin.length >= 4) && (kind !== 'delete' || reason.trim()) && (!kind.startsWith('to-') || target);
+  const ready = (o.canEdit || pin.length >= 4) && (kind !== 'delete' || reason.trim()) && (!kind.startsWith('to-') || target) && (kind !== 'edit' || (label.trim() && parseAmount(amount)));
   return (
     <Modal title={title} onClose={onClose}>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
           try {
+            if (kind === 'edit')
+              await call(
+                'cashdesk.update',
+                source,
+                row.id,
+                { amount: amountEditable ? (parseAmount(amount) ?? row.amount) : undefined, label, party: partyEditable ? party : undefined, reference: reference || null },
+                p,
+              );
             if (kind === 'backdate') await call('cashdesk.backdate', source, row.id, new Date(at).toISOString(), p);
             if (kind === 'delete') await call('cashdesk.cancel', source, row.id, reason, p);
             if (kind === 'unprint') await call('cashdesk.unprint', row.id, p);
@@ -594,6 +622,25 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
           <b>{row.nature}</b> · {row.label} · {fcfa(row.amount)}
           {row.party ? ` · ${row.party}` : ''}
         </p>
+        {kind === 'edit' && (
+          <>
+            <Field label="Montant (FCFA)" hint={amountEditable ? undefined : 'Le montant de cette opération ne se modifie pas : supprimez-la et refaites-la'}>
+              <input autoFocus inputMode="numeric" className="r" value={amount} disabled={!amountEditable} onChange={(e) => setAmount(e.target.value)} />
+            </Field>
+            <Field label="Motif">
+              <input value={label} onChange={(e) => setLabel(e.target.value)} />
+            </Field>
+            {partyEditable && (
+              <Field label={source === 'expense' ? 'Bénéficiaire' : 'Tiers / bénéficiaire'}>
+                <input value={party} onChange={(e) => setParty(e.target.value)} />
+              </Field>
+            )}
+            <Field label="Référence ou n° de pièce">
+              <input value={reference} onChange={(e) => setReference(e.target.value)} />
+            </Field>
+            <p className="muted small">L’ancienne version reste dans le journal d’audit.</p>
+          </>
+        )}
         {kind === 'backdate' && (
           <Field label="Nouvelle date et heure" hint="Entre l’ouverture de la journée et maintenant.">
             <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />

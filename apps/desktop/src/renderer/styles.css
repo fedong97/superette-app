@@ -215,6 +215,10 @@ table.list.journal tr.entry-first td { border-top: 2px solid var(--line); }
 .grid2.statements { align-items: start; gap: 16px; }
 table.statements tr.total td, .grid2.statements tr.total td { font-weight: 800; }
 button.link { border: none; background: none; padding: 0; color: #2457a6; text-decoration: underline; }
+button.link.danger { color: var(--danger); }
+button.link:disabled { color: var(--muted, #8a8f98); text-decoration: none; cursor: default; }
+.row-actions { margin-left: 10px; font-weight: 400; font-size: 12px; }
+.row-actions button.link + button.link { margin-left: 8px; }
 tr.selected td { background: #dbe7f7 !important; }
 .actions.sticky { position: sticky; bottom: 0; background: var(--panel, #fff); padding: 8px 0; justify-content: flex-start; }
 label.button-like { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; background: #fff; }
@@ -609,6 +613,8 @@ html.large-text { zoom: 1.15; }
 .tre-pane h3.desk-title { display: flex; align-items: center; gap: 8px; }
 .desk-buttons { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .desk-buttons button { padding: 4px 12px; font-size: 13px; }
+.desk-action-buttons { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.desk-buttons { flex-wrap: wrap; justify-content: flex-end; }
 .desk-action > button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font-weight: 700; color: var(--text, #14213d); }
 form.desk-form { min-width: 640px; }
 .desk-head { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 10px; }

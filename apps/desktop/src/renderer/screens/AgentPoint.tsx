@@ -60,6 +60,7 @@ export function AgentPoint({ initialTab = 'counter' }: { initialTab?: AgentTab }
         <span className="muted">Dépôts, retraits, crédit de communication et factures : les espèces passent par la journée de la caisse</span>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={(

@@ -20,6 +20,7 @@ export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTa
         <h1>Fournisseurs</h1>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={[

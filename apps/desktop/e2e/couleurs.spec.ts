@@ -28,7 +28,9 @@ test('les couleurs de l’entreprise et le badge se règlent dans Administration
     const set = await invoke<{ brandColor: string; badge: { model: string } }>(page, 'admin.storeSettings');
     expect(set.brandColor).toBe('#c62828');
     expect(set.badge.model).toBe('arc');
-    await page.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
+    // Utilisateurs s'ouvre dans sa propre fenêtre, par le menu Réglages.
+    await page.locator('nav.rail .rail-item', { hasText: 'Réglages' }).first().click();
+    await page.locator('.menu-drop').getByRole('button', { name: 'Utilisateurs', exact: true }).click();
     await page.getByRole('cell', { name: 'Gérant Test', exact: true }).click();
     await expect(page.getByText('Prendre une photo')).toBeVisible();
     expect(errors).toEqual([]);

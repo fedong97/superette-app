@@ -146,10 +146,12 @@ test('personnel sans accès au logiciel, borne de pointage, équipes et prestata
     await shot(page, '10-qui-est-la');
 
     // Pointage du mois, détail d'une personne et passages avec photo.
-    await page.getByRole('button', { name: 'Pointage', exact: true }).click();
-    await expect(page.getByRole('cell', { name: /Ali MOUSSA/ })).toBeVisible();
+    await openMenu(page, 'Personnel', 'Pointage du personnel');
+    // « Qui est là » reste ouverte derrière, dans sa fenêtre : on regarde celle de devant.
+    const front = page.locator('main.windows > section.mdi.active');
+    await expect(front.getByRole('cell', { name: /Ali MOUSSA/ })).toBeVisible();
     await shot(page, '11-pointage-du-mois');
-    await page.getByRole('cell', { name: /Ali MOUSSA/ }).click();
+    await front.getByRole('cell', { name: /Ali MOUSSA/ }).click();
     await page.getByRole('button', { name: 'Passages' }).first().click();
     await expect(page.locator('.punch-photos img').first()).toBeVisible();
     await shot(page, '12-passages-avec-photo');
@@ -157,11 +159,11 @@ test('personnel sans accès au logiciel, borne de pointage, équipes et prestata
     await page.keyboard.press('Escape');
 
     // Équipes, entrées et borne de ce PC ; sociétés prestataires.
-    await page.getByRole('button', { name: 'Équipes et entrées' }).click();
-    await expect(page.getByRole('cell', { name: /Nuit/ })).toBeVisible();
+    await openMenu(page, 'Personnel', 'Équipes, rotations et pointeuses');
+    await expect(front.getByRole('cell', { name: /Nuit/ }).first()).toBeVisible();
     await shot(page, '13-equipes-et-entrees');
-    await page.getByRole('button', { name: 'Sociétés prestataires' }).click();
-    await expect(page.getByRole('cell', { name: /Sécurité Plus/ })).toBeVisible();
+    await openMenu(page, 'Personnel', /^Sociétés prestataires/);
+    await expect(front.getByRole('cell', { name: /Sécurité Plus/ }).first()).toBeVisible();
     await shot(page, '14-societes-prestataires');
 
     // Ce PC devient la borne de l'entrée principale : elle remplace l'écran de connexion.

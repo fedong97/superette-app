@@ -34,12 +34,12 @@ import { AgentPoint, type AgentTab } from './screens/AgentPoint';
 import { CashierControl } from './screens/CashierControl';
 import { CommandPalette, GettingStarted, HelpDialog, type PaletteEntry, QuickTabsEditor, RailEditor, WhatsNew } from './screens/Guide';
 import { ROLE_TILES } from './guide';
-import { AskHost, DRAFT_SCREENS, KeyHints, THEMES, type Theme, applyTheme, askConfirm, Field, Mascot, Modal, OPEN_EVENT, RefreshCtx, dateTime, pageShortcuts, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
+import { AskHost, DRAFT_SCREENS, KeyHints, THEMES, type Theme, applyTheme, askConfirm, Field, Mascot, Modal, OPEN_EVENT, RefreshCtx, SingleViewCtx, dateTime, pageShortcuts, RightsProvider, StoreSettingsProvider, ToastProvider, fcfa, useLoad, useToast } from './ui';
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
 import { type ListPrefs, ListTools } from './listTools';
 import { DayTasks } from './screens/Floor';
-import { type Area, type Geo, MdiWindow, defaultGeo } from './mdi';
+import { type Area, type Geo, MdiWindow, defaultGeo, dialogGeo, tileGeos } from './mdi';
 import { type Lang, currentLang, setLang, storedLang } from './i18n';
 
 type AppState = Result<'app.state'>;
@@ -47,8 +47,12 @@ type User = NonNullable<AppState['user']>;
 type Role = User['role'];
 
 interface Win {
+  /** Un écran = une fenêtre : « admin:settings » (Paramètres) n'est pas « admin:users ». */
+  id: string;
   kind: WinKind;
   tab?: string;
+  /** Réduite dans la barre du bas. */
+  min?: boolean;
   /** Chemin affiché en haut de la page : « Trésorerie › Opérations de trésorerie ». */
   crumb?: string;
   /** Change à chaque réouverture sur un autre onglet, pour repartir de cet onglet. */
@@ -91,6 +95,46 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   control: { label: 'Contrôle des caissiers', perm: ['cashier_control'] },
   exit: { label: 'Contrôle à la sortie', perm: ['exit_check', 'exit_report'] },
 };
+
+const winId = (kind: WinKind, tab?: string) => `${kind}:${tab ?? ''}`;
+
+/**
+ * Écrans qui s'ouvrent en boîte de dialogue, comme les paramètres dans Sage :
+ * réglages qu'on fait puis qu'on quitte, opérations de caisse, traitements et
+ * impressions. Ils n'ont que ✕ ; les listes et les saisies se réduisent.
+ */
+const DIALOG_WINDOWS = new Set([
+  // Réglages du magasin et des utilisateurs
+  'admin:settings',
+  'admin:brand',
+  'admin:templates',
+  'admin:fiches',
+  'admin:shopTemplates',
+  'admin:users',
+  'admin:rights',
+  'admin:privileges',
+  'admin:mobilepay',
+  // Technique
+  'admin:backups',
+  'admin:server',
+  'admin:relay',
+  'admin:takeover',
+  'admin:repair',
+  'admin:updates',
+  'admin:license',
+  // Réglages des autres menus
+  'accounting:fiscal',
+  'expenses:categories',
+  'expenses:plans',
+  'staff:teams',
+  // Opérations de caisse : ouverture, fond de caisse, versement, clôture
+  'treasury:day',
+  // Traitements et impressions
+  'purchases:reorder',
+  'labels:',
+  'containers:types',
+  'sales:export',
+]);
 
 interface MenuItem {
   label: string;
@@ -206,7 +250,10 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Livraisons du jour', open: ['deliveries'], perm: 'deliveries' },
       H('Au comptoir'),
       { label: 'Point Mobile Money (dépôts, retraits, factures)', open: ['agent', 'counter'], perm: 'agent_point' },
+      { label: 'Historique du Point Mobile Money', open: ['agent', 'history'], perm: ['agent_point', 'agent_accounts'] },
       { label: 'Emballages consignés', open: ['containers', 'situation'], perm: ['containers', 'containers_counter'] },
+      { label: 'Mouvements des emballages', open: ['containers', 'moves'], perm: ['containers', 'containers_counter'] },
+      { label: "Types d'emballages", words: 'casier bouteille consigne', open: ['containers', 'types'], perm: 'containers' },
       { label: "Bons d'achat et bons d'avoir", words: 'avoir bon cadeau', open: ['sales', 'vouchers'], perm: 'vouchers' },
       { label: 'Contrôle des tickets à la sortie', open: ['exit', 'door'], perm: 'exit_check', setting: ['exitCheck'] },
       H('Factures'),
@@ -416,6 +463,8 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Couleurs et badges', open: ['admin', 'brand'] },
       { label: "Modèles d'impression", open: ['admin', 'templates'] },
       { label: 'Fiches boutique', open: ['admin', 'fiches'] },
+      { label: 'Modèles de boutique', open: ['admin', 'shopTemplates'], adminOnly: true },
+      { label: 'Paiement mobile (MTN, Orange)', words: 'momo om marchand', open: ['admin', 'mobilepay'], perm: 'settings_edit' },
       H('Utilisateurs'),
       { label: 'Utilisateurs', open: ['admin', 'users'] },
       { label: 'Droits par rôle', words: 'rôles permissions', open: ['admin', 'rights'] },
@@ -425,8 +474,10 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Sauvegardes', open: ['admin', 'backups'], perm: 'backups' },
       { label: 'Serveur central', open: ['admin', 'server'] },
       { label: 'État des PC du magasin', open: ['admin', 'stations'], perm: 'stations' },
+      { label: 'Postes distants', words: 'caisse à distance relais', open: ['admin', 'relay'] },
       { label: 'Reprise des données (clients, fournisseurs, stock)', open: ['admin', 'takeover'], perm: 'data_takeover' },
       { label: 'Réparation', open: ['admin', 'repair'], adminOnly: true },
+      { label: 'Mises à jour', words: 'nouvelle version', open: ['admin', 'updates'] },
       { label: 'Licence', open: ['admin', 'license'] },
     ],
   ],
@@ -443,6 +494,15 @@ const MENUS: [string, MenuItem[]][] = [
     ],
   ],
 ];
+
+/** Titre d'une fenêtre : « Menu › Écran », d'après le menu qui ouvre cet écran. */
+function crumbOf(kind: WinKind, tab?: string): string | undefined {
+  for (const [name, items] of MENUS) {
+    const item = items.find((i) => i.open && i.open[0] === kind && (i.open[1] ?? '') === (tab ?? ''));
+    if (item) return `${name} › ${item.label}`;
+  }
+  return undefined;
+}
 
 /** Onglets rapides en haut de l'écran : quelques écrans du jour selon le rôle, que chacun peut personnaliser. */
 const QUICK_BY_ROLE: Record<Role, QuickTab[]> = {
@@ -605,11 +665,13 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
   // Le caissier et le vendeur arrivent sur leur fiche de facturation ; les autres sur la page d'accueil.
   const startOnPos = ['cashier', 'seller'].includes(user.role);
-  const [wins, setWins] = useState<Win[]>(() => (startOnPos ? [{ kind: first, nonce: 0, crumb: 'Vente › Vente au comptant 1' }] : []));
-  // null : la page d'accueil.
-  const [active, setActive] = useState<WinKind | null>(startOnPos ? first : null);
+  const [wins, setWins] = useState<Win[]>(() => (startOnPos ? [{ id: winId(first), kind: first, nonce: 0, crumb: crumbOf(first) }] : []));
+  // Fenêtre de devant ; null : la page d'accueil.
+  const [active, setActive] = useState<string | null>(startOnPos ? winId(first) : null);
   /** Ordre des fenêtres, de la plus en arrière à celle de devant. */
-  const [stack, setStack] = useState<WinKind[]>(() => (startOnPos ? [first] : []));
+  const [stack, setStack] = useState<string[]>(() => (startOnPos ? [winId(first)] : []));
+  /** Menu « Fenêtres » ouvert (liste des fenêtres, cascade, mosaïque…). */
+  const [winMenu, setWinMenu] = useState(false);
   const [area, setArea] = useState<Area>({ w: 0, h: 0 });
   const areaRef = useRef<HTMLElement>(null);
   const [menu, setMenu] = useState<string | null>(null);
@@ -714,16 +776,18 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     document.title = `ONIX 360 v${state.version} : ${state.station?.store.name ?? ''}, ${state.register?.name ?? 'sans caisse'}, utilisateur ${user.name}`;
   }, [state, user]);
   useEffect(() => {
-    if (!menu && !ctxMenu) return;
+    if (!menu && !ctxMenu && !winMenu) return;
     const close = () => {
       setMenu(null);
       setCtxMenu(null);
+      setWinMenu(false);
     };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
-  }, [menu, ctxMenu]);
+  }, [menu, ctxMenu, winMenu]);
   // Ctrl+K cherche un écran ; F1 ouvre l'aide de la page (sauf à la caisse, où F1 cherche un produit).
-  const onPos = active === 'cash1' || active === 'cash2' || active === 'credit';
+  const activeWin = wins.find((w) => w.id === active);
+  const onPos = activeWin?.kind === 'cash1' || activeWin?.kind === 'cash2' || activeWin?.kind === 'credit';
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setAllMenus(false);
@@ -747,11 +811,19 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         // F5 actualise la fenêtre de devant (à la caisse, F5 ouvre le tiroir).
         e.preventDefault();
         if (active) refreshWin(active);
+      } else if (e.ctrlKey && e.key === 'F4' && !onPos) {
+        // Ctrl+F4 ferme la fenêtre de devant, comme dans Sage (pas à la caisse : la fiche en cours y resterait).
+        e.preventDefault();
+        if (active) close(active);
+      } else if (e.ctrlKey && e.key === 'Tab') {
+        // Ctrl+Tab passe à la fenêtre suivante (Ctrl+Maj+Tab : la précédente).
+        e.preventDefault();
+        cycle(e.shiftKey ? -1 : 1);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onPos, active]);
+  });
 
   // Taille de la zone de travail : les fenêtres restent dedans quand l'écran change.
   useEffect(() => {
@@ -764,30 +836,72 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => ro.disconnect();
   }, []);
   /** Place de chaque fenêtre sur ce poste ; la caisse s'ouvre en plein écran. */
-  const geos = (prefs.winGeo as Partial<Record<WinKind, Geo>> | undefined) ?? {};
+  const geos = (prefs.winGeo as Record<string, Geo> | undefined) ?? {};
   const isPosKind = (kind: WinKind) => kind === 'cash1' || kind === 'cash2' || kind === 'credit';
   // Place donnée à l'ouverture (en cascade) tant que la fenêtre n'a pas été déplacée.
-  const [placed, setPlaced] = useState<Partial<Record<WinKind, Geo>>>({});
-  const geoOf = (kind: WinKind): Geo => geos[kind] ?? placed[kind] ?? defaultGeo(area, 0, isPosKind(kind));
-  const saveGeo = (kind: WinKind, g: Geo) => savePref('winGeo', { ...geos, [kind]: g });
-  /** Met une fenêtre devant les autres. */
-  const focus = (kind: WinKind | null) => {
-    setActive(kind);
-    if (kind) setStack((st) => (st[st.length - 1] === kind ? st : [...st.filter((k) => k !== kind), kind]));
+  const [placed, setPlaced] = useState<Record<string, Geo>>({});
+  const isDialog = (id: string) => DIALOG_WINDOWS.has(id);
+  // Avant 0.90.0 la place était gardée par module (« admin ») : elle sert encore à son premier écran.
+  const geoOf = (w: Win): Geo => (isDialog(w.id) ? placed[w.id] ?? dialogGeo(area) : geos[w.id] ?? geos[w.kind] ?? placed[w.id] ?? defaultGeo(area, 0, isPosKind(w.kind)));
+  const saveGeo = (w: Win, g: Geo) => (isDialog(w.id) ? setPlaced((p) => ({ ...p, [w.id]: g })) : savePref('winGeo', { ...geos, [w.id]: g }));
+  /** Met une fenêtre devant les autres (et la sort de la barre du bas si elle était réduite). */
+  const focus = (id: string | null) => {
+    setActive(id);
+    if (!id) return;
+    setWins((ws) => (ws.some((w) => w.id === id && w.min) ? ws.map((w) => (w.id === id ? { ...w, min: false } : w)) : ws));
+    setStack((st) => (st[st.length - 1] === id ? st : [...st.filter((k) => k !== id), id]));
   };
 
   const open = (kind: WinKind, tab?: string, crumb?: string) => {
     if (!canWin(kind)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
-    if (!wins.some((w) => w.kind === kind)) setPlaced((p) => ({ ...p, [kind]: defaultGeo(area, wins.length, isPosKind(kind)) }));
-    setWins((ws) => {
-      const existing = ws.find((w) => w.kind === kind);
-      if (!existing) return [...ws, { kind, tab, nonce: 0, crumb }];
-      if (tab && tab !== existing.tab) return ws.map((w) => (w === existing ? { ...w, tab, crumb, nonce: w.nonce + 1 } : w));
-      return crumb ? ws.map((w) => (w === existing ? { ...w, crumb } : w)) : ws;
-    });
+    const id = winId(kind, tab);
+    if (!wins.some((w) => w.id === id)) setPlaced((p) => ({ ...p, [id]: isDialog(id) ? dialogGeo(area) : defaultGeo(area, wins.filter((w) => !w.min).length, isPosKind(kind)) }));
+    // Le titre vient du menu (« Administration › Paramètres ») ; à défaut, du libellé reçu.
+    // Un chemin complet reçu (« Vente › Modifier la facture … ») remplace le titre d'une fenêtre déjà ouverte.
+    const full = crumb?.includes(' › ') ? crumb : undefined;
+    const title = full ?? crumbOf(kind, tab) ?? crumb;
+    setWins((ws) => (!ws.some((w) => w.id === id) ? [...ws, { id, kind, tab, nonce: 0, crumb: title }] : full ? ws.map((w) => (w.id === id ? { ...w, crumb: full } : w)) : ws));
     // Un écran déjà ouvert revient devant au lieu de s'ouvrir une deuxième fois.
-    focus(kind);
+    focus(id);
   };
+  /** – : la fenêtre va dans la barre du bas ; celle de derrière passe devant. */
+  const minimize = (id: string) => {
+    setWins((ws) => ws.map((w) => (w.id === id ? { ...w, min: true } : w)));
+    if (active === id) setActive([...stack].reverse().find((k) => k !== id && !wins.find((w) => w.id === k)?.min) ?? null);
+  };
+  /** Ctrl+Tab : fenêtre suivante dans l'ordre d'ouverture, réduites comprises. */
+  const cycle = (step: 1 | -1) => {
+    if (!wins.length) return;
+    const at = wins.findIndex((w) => w.id === active);
+    const next = wins[(at + step + wins.length) % wins.length] ?? wins[0]!;
+    focus(next.id);
+  };
+  /** Fenêtres › Cascade ou Mosaïque : ressort les fenêtres réduites et les replace (les boîtes de dialogue gardent leur place). */
+  const arrange = (how: 'cascade' | 'tile') => {
+    const shown = wins.filter((w) => !isDialog(w.id));
+    const tiles = tileGeos(area, shown.length);
+    const next = { ...geos };
+    shown.forEach((w, i) => (next[w.id] = how === 'cascade' ? defaultGeo(area, i, false) : tiles[i]!));
+    savePref('winGeo', next);
+    setWins((ws) => ws.map((w) => (w.min && !isDialog(w.id) ? { ...w, min: false } : w)));
+    const last = shown[shown.length - 1];
+    if (last) focus(last.id);
+    setWinMenu(false);
+  };
+  const minimizeAll = () => {
+    setWins((ws) => ws.map((w) => ({ ...w, min: true })));
+    setActive(null);
+    setWinMenu(false);
+  };
+  const closeAll = () => {
+    setWins([]);
+    setStack([]);
+    setActive(null);
+    setWinMenu(false);
+  };
+  /** L'écran passe de lui-même à une autre vue (« Privilèges… » depuis Utilisateurs) : la fenêtre en prend le nom. */
+  const retitle = (id: string, label: string) =>
+    setWins((ws) => ws.map((w) => (w.id === id ? { ...w, crumb: `${(w.crumb ?? WINDOWS[w.kind].label).split(' › ')[0]} › ${label}` } : w)));
   /** Facture à modifier : elle se recharge dans la fiche au comptant 1, ou à crédit pour une vente à crédit. */
   const [editReq, setEditReq] = useState<{ kind: WinKind; sale: Result<'sales.editable'> & { id: string }; nonce: number } | null>(null);
   useEffect(() => {
@@ -812,14 +926,14 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     return () => window.removeEventListener(OPEN_EVENT, onOpen);
   });
   /** ⟳ : recharge les données de la fenêtre sans la fermer. */
-  const refreshWin = (kind: WinKind) => setWins((ws) => ws.map((w) => (w.kind === kind ? { ...w, rev: (w.rev ?? 0) + 1 } : w)));
-  const close = (kind: WinKind | null) => {
-    if (!kind) return;
-    setWins(wins.filter((w) => w.kind !== kind));
-    const rest = stack.filter((k) => k !== kind);
+  const refreshWin = (id: string) => setWins((ws) => ws.map((w) => (w.id === id ? { ...w, rev: (w.rev ?? 0) + 1 } : w)));
+  const close = (id: string | null) => {
+    if (!id) return;
+    setWins(wins.filter((w) => w.id !== id));
+    const rest = stack.filter((k) => k !== id);
     setStack(rest);
     // La fenêtre juste derrière passe devant ; sans fenêtre ouverte, la page d'accueil s'affiche.
-    if (active === kind) setActive(rest[rest.length - 1] ?? null);
+    if (active === id) setActive([...rest].reverse().find((k) => !wins.find((w) => w.id === k)?.min) ?? null);
   };
 
   /**
@@ -976,8 +1090,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   };
 
   const syncLabel = !sync.data?.connected ? 'Serveur : non relié' : sync.data.lastError ? 'Serveur : hors ligne' : sync.data.pending ? `Serveur : ${sync.data.pending} en attente` : 'Serveur : connecté';
-  const activeWin = wins.find((w) => w.kind === active);
-  const showHome = !activeWin;
+  const showHome = !activeWin || activeWin.min;
   // Retour à l'accueil : les saisies en cours sont relues (l'une vient peut-être d'être enregistrée).
   useEffect(() => {
     if (showHome) drafts.reload();
@@ -1047,10 +1160,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       <header className="topbar">
         <div className="quick-tabs">
           {quickTabs.map((q, idx) => {
-            // Plusieurs onglets rapides partagent la fenêtre Stock ou Ventes : seul celui de l'onglet affiché est en relief.
-            const win = wins.find((w) => w.kind === q.open[0] && (!q.open[1] || w.tab === q.open[1]));
-            const isOpen = Boolean(win);
-            const isActive = isOpen && active === q.open[0];
+            // Chaque onglet rapide a sa fenêtre : en relief quand elle est devant, marqué quand elle est ouverte.
+            const id = winId(q.open[0], q.open[1]);
+            const isOpen = wins.some((w) => w.id === id);
+            const isActive = isOpen && active === id && !showHome;
             return (
               <button
                 key={`${q.label}-${idx}`}
@@ -1068,6 +1181,37 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             );
           })}
         </div>
+        {wins.length > 0 && (
+          <div className="menu">
+            <button
+              className={`top-icon win-btn ${winMenu ? 'open' : ''}`}
+              title="Fenêtres ouvertes : passer de l'une à l'autre, cascade, mosaïque"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenu(null);
+                setWinMenu((v) => !v);
+              }}
+            >
+              ❐ <small>{wins.length}</small>
+            </button>
+            {winMenu && (
+              <div className="menu-drop right win-menu" onClick={(e) => e.stopPropagation()}>
+                <div className="menu-title">Fenêtres</div>
+                {wins.map((w) => (
+                  <button key={w.id} className={w.id === active && !w.min ? 'on' : ''} onClick={() => (focus(w.id), setWinMenu(false))}>
+                    {w.crumb ?? WINDOWS[w.kind].label}
+                    {w.min && <small>réduite</small>}
+                  </button>
+                ))}
+                <hr />
+                <button onClick={() => arrange('cascade')}>Cascade</button>
+                <button onClick={() => arrange('tile')}>Mosaïque</button>
+                <button onClick={minimizeAll}>Tout réduire</button>
+                <button onClick={closeAll}>Tout fermer</button>
+              </div>
+            )}
+          </div>
+        )}
         <button className="top-icon tab-add" title="Personnaliser les onglets rapides" onClick={() => setHelp('tabs')}>
           ＋
         </button>
@@ -1151,18 +1295,22 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         </section>
         {wins.map((w) => (
           <MdiWindow
-            key={`${w.kind}-${w.nonce}`}
+            key={`${w.id}-${w.nonce}`}
             title={w.crumb ?? WINDOWS[w.kind].label}
             icon={MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)}
-            geo={geoOf(w.kind)}
+            geo={geoOf(w)}
             area={area}
-            z={stack.indexOf(w.kind) + 1}
-            active={w.kind === active}
-            onFocus={() => focus(w.kind)}
-            onChange={(g) => saveGeo(w.kind, g)}
-            onClose={() => close(w.kind)}
-            onRefresh={() => refreshWin(w.kind)}
+            z={stack.indexOf(w.id) + 1}
+            active={w.id === active}
+            dialog={isDialog(w.id)}
+            minimized={w.min}
+            onMinimize={() => minimize(w.id)}
+            onFocus={() => focus(w.id)}
+            onChange={(g) => saveGeo(w, g)}
+            onClose={() => close(w.id)}
+            onRefresh={() => refreshWin(w.id)}
           >
+            <SingleViewCtx.Provider value={{ onView: (label) => retitle(w.id, label) }}>
             <RefreshCtx.Provider value={w.rev ?? 0}>
             {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
               <Pos
@@ -1176,9 +1324,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ignoreStock={state.station?.store.ignore_stock === 1}
                 layout={state.posLayout}
                 edit={editReq?.kind === w.kind ? editReq : null}
-                active={w.kind === active}
+                active={w.id === active && !w.min}
                 title={w.kind === 'cash1' ? 'Fiche de facturation 1' : w.kind === 'cash2' ? 'Fiche de facturation 2' : 'Facture à crédit'}
-                onClose={() => close(w.kind)}
+                onClose={() => close(w.id)}
                 onSwitchMode={() => (w.kind === 'credit' ? open('cash1', undefined, 'Vente › Vente au comptant 1') : open('credit', undefined, 'Vente › Vente à crédit'))}
                 onTreasury={() => open('treasury', 'day', 'Trésorerie › Opérations de trésorerie')}
               />
@@ -1191,11 +1339,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'customers' && <Customers user={user} initialTab={w.tab as CustomersTab | undefined} />}
             {w.kind === 'production' && <Production user={user} initialTab={w.tab as ProductionTab | undefined} />}
             {w.kind === 'quotes' && <Quotes user={user} startNew={w.tab === 'new'} />}
-            {w.kind === 'deliveries' && <Deliveries active={w.kind === active} />}
+            {w.kind === 'deliveries' && <Deliveries active={w.id === active && !w.min} />}
             {w.kind === 'orders' && <Orders user={user} initialView={w.tab === 'recurring' ? 'recurring' : 'orders'} />}
             {w.kind === 'exit' && <ExitChecks initialTab={w.tab as ExitTab | undefined} />}
-            {w.kind === 'promotions' && <Promotions active={w.kind === active} />}
-            {w.kind === 'labels' && <Labels active={w.kind === active} />}
+            {w.kind === 'promotions' && <Promotions active={w.id === active && !w.min} />}
+            {w.kind === 'labels' && <Labels active={w.id === active && !w.min} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
             {w.kind === 'staff' && <Staff user={user} initialTab={w.tab as StaffTab | undefined} />}
@@ -1207,8 +1355,26 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload(), fichesWaiting.reload())} initialTab={w.tab as AdminTab | undefined} />}
             </RefreshCtx.Provider>
+            </SingleViewCtx.Provider>
           </MdiWindow>
         ))}
+        {wins.some((w) => w.min) && (
+          <div className="mdi-tray" aria-label="Fenêtres réduites">
+            {wins
+              .filter((w) => w.min)
+              .map((w) => (
+                <div key={w.id} className="mdi-tray-item">
+                  <button className="mdi-tray-open" title="Rouvrir cette fenêtre" onClick={() => focus(w.id)}>
+                    <i aria-hidden>{MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)}</i>
+                    {(w.crumb ?? WINDOWS[w.kind].label).split(' › ').pop()}
+                  </button>
+                  <button className="mdi-tray-x" title="Fermer cette fenêtre" onClick={() => close(w.id)}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
       </main>
       <footer className="statusbar">
         <span title="Version du logiciel">ONIX 360 v{state.version}</span>
@@ -1476,6 +1642,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier)'],
                 ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière en listing)'],
                 ['F5', 'Actualiser la page (à la caisse : ouvrir le tiroir)'],
+                ['Ctrl+Tab', 'Passer à la fenêtre suivante (Ctrl+Maj+Tab : la précédente)'],
+                ['Ctrl+F4', 'Fermer la fenêtre de devant (sauf à la caisse)'],
                 ['Ctrl+J', 'Nouveau (article, client, fournisseur…) ; dans un formulaire : enregistrer et en ouvrir un nouveau'],
                 ['F4 ou Entrée sur saisie vide', 'Enregistrer la fiche sans imprimer'],
                 ['Ctrl+E', 'Encaisser : Mobile Money, carte, paiements mixtes'],

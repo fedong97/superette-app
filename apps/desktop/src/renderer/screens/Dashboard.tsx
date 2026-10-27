@@ -36,6 +36,7 @@ export function Dashboard({ initialTab = 'day', onOpen }: { initialTab?: Dashboa
   return (
     <div className="page">
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={[

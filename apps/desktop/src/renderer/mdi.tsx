@@ -25,6 +25,25 @@ export function defaultGeo(area: Area, index: number, max: boolean): Geo {
   return fit({ x: 16 + step, y: 12 + step, w, h, max }, area);
 }
 
+/**
+ * Boîte de dialogue (réglages, traitements) : centrée, à taille fixe, comme
+ * les fenêtres de paramètres de Sage qu'on ne peut que fermer.
+ */
+export function dialogGeo(area: Area): Geo {
+  const w = Math.min(area.w, Math.max(MIN_W, Math.min(1040, area.w - 60)));
+  const h = Math.min(area.h, Math.max(MIN_H, area.h - 40));
+  return fit({ x: Math.round((area.w - w) / 2), y: Math.round((area.h - h) / 2), w, h, max: false }, area);
+}
+
+/** Fenêtres côte à côte (Fenêtres › Mosaïque) : en colonnes puis en lignes. */
+export function tileGeos(area: Area, n: number): Geo[] {
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const w = Math.floor(area.w / cols);
+  const h = Math.floor(area.h / rows);
+  return Array.from({ length: n }, (_, i) => ({ x: (i % cols) * w, y: Math.floor(i / cols) * h, w, h, max: false }));
+}
+
 /** Garde la fenêtre entière dans la zone de travail (écran plus petit, fenêtre tirée trop loin). */
 export function fit(g: Geo, area: Area): Geo {
   if (!area.w || !area.h) return g;
@@ -37,9 +56,10 @@ export function fit(g: Geo, area: Area): Geo {
 
 /**
  * Fenêtre à l'intérieur du logiciel : on la déplace par sa barre verte, on
- * l'agrandit par le coin, ▢ (ou double-clic sur la barre) la met en plein
- * écran et ✕ la ferme. Pendant un déplacement seule la fenêtre se redessine ;
- * la nouvelle place est enregistrée au lâcher.
+ * l'agrandit par le coin, – la réduit dans la barre du bas, ▢ (ou double-clic
+ * sur la barre) la met en plein écran et ✕ la ferme. Une boîte de dialogue
+ * (`dialog`) n'a que ✕ et garde sa taille. Pendant un déplacement seule la
+ * fenêtre se redessine ; la nouvelle place est enregistrée au lâcher.
  */
 export function MdiWindow({
   title,
@@ -48,6 +68,9 @@ export function MdiWindow({
   area,
   z,
   active,
+  dialog,
+  minimized,
+  onMinimize,
   onFocus,
   onChange,
   onClose,
@@ -60,6 +83,11 @@ export function MdiWindow({
   area: Area;
   z: number;
   active: boolean;
+  /** Réglage ou traitement : seulement ✕, ni réduire, ni agrandir, ni tirer le coin. */
+  dialog?: boolean;
+  /** Réduite : cachée (elle garde sa saisie) et rangée dans la barre du bas. */
+  minimized?: boolean;
+  onMinimize?: () => void;
   onFocus: () => void;
   onChange: (g: Geo) => void;
   onClose: () => void;
@@ -69,7 +97,7 @@ export function MdiWindow({
 }) {
   const [live, setLive] = useState<Geo | null>(null);
   const liveRef = useRef<Geo | null>(null);
-  const g = fit(live ?? geo, area);
+  const g = fit(live ?? (dialog ? { ...geo, max: false } : geo), area);
 
   const drag = (e: React.PointerEvent, mode: 'move' | 'size') => {
     if (e.button !== 0 || g.max) return;
@@ -94,11 +122,11 @@ export function MdiWindow({
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
-  const toggleMax = () => onChange({ ...g, max: !g.max });
+  const toggleMax = () => !dialog && onChange({ ...g, max: !g.max });
 
   return (
     <section
-      className={`mdi ${active ? 'active' : ''} ${g.max ? 'max' : ''}`}
+      className={`mdi ${active ? 'active' : ''} ${g.max ? 'max' : ''} ${dialog ? 'dialog' : ''} ${minimized ? 'minimized' : ''}`}
       style={g.max ? { zIndex: z } : { zIndex: z, left: g.x, top: g.y, width: g.w, height: g.h }}
       onPointerDownCapture={() => !active && onFocus()}
     >
@@ -110,9 +138,16 @@ export function MdiWindow({
             ⟳
           </button>
         )}
-        <button type="button" title={g.max ? 'Remettre en fenêtre' : 'Plein écran'} onPointerDown={(e) => e.stopPropagation()} onClick={toggleMax}>
-          {g.max ? '❐' : '▢'}
-        </button>
+        {!dialog && onMinimize && (
+          <button type="button" className="mdi-min" title="Réduire (la fenêtre garde sa saisie)" onPointerDown={(e) => e.stopPropagation()} onClick={onMinimize}>
+            –
+          </button>
+        )}
+        {!dialog && (
+          <button type="button" title={g.max ? 'Remettre en fenêtre' : 'Agrandir'} onPointerDown={(e) => e.stopPropagation()} onClick={toggleMax}>
+            {g.max ? '❐' : '▢'}
+          </button>
+        )}
         <button type="button" className="mdi-x" title="Fermer cette fenêtre" onPointerDown={(e) => e.stopPropagation()} onClick={onClose}>
           ✕
         </button>
@@ -120,7 +155,7 @@ export function MdiWindow({
       <div className="window">
         <ScreenGuard>{children}</ScreenGuard>
       </div>
-      {!g.max && <span className="mdi-grip" title="Tirer pour agrandir" onPointerDown={(e) => drag(e, 'size')} />}
+      {!g.max && !dialog && <span className="mdi-grip" title="Tirer pour agrandir" onPointerDown={(e) => drag(e, 'size')} />}
     </section>
   );
 }

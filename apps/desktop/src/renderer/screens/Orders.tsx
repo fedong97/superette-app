@@ -43,7 +43,7 @@ export function Orders({ user, initialView = 'orders' }: { user: User; initialVi
         <header className="page-head">
           <h1>Commandes clients</h1>
         </header>
-        <Tabs value={view} onChange={setView} tabs={ORDER_TABS(user)} />
+        <Tabs main value={view} onChange={setView} tabs={ORDER_TABS(user)} />
         <RecurringOrders user={user} />
       </div>
     );
@@ -67,7 +67,7 @@ function OrderList({ user, view, setView }: { user: User; view: 'orders' | 'recu
       <header className="page-head">
         <h1>Commandes clients</h1>
       </header>
-      {has(user, 'recurring_orders') && <Tabs value={view} onChange={setView} tabs={ORDER_TABS(user)} />}
+      {has(user, 'recurring_orders') && <Tabs main value={view} onChange={setView} tabs={ORDER_TABS(user)} />}
       <div className="filters">
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | 'open' | '')}>
           <option value="open">En cours (à préparer et préparées)</option>

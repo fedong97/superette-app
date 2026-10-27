@@ -749,7 +749,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         F9: printA4,
         F10: () => can('sale_resume') && setDialog('held'),
       };
-      if (fn[e.key]) {
+      // Ctrl+F4 ferme une fenêtre ailleurs : à la caisse il ne valide pas la fiche.
+      if (fn[e.key] && !e.ctrlKey) {
         e.preventDefault();
         fn[e.key]!();
       } else if (e.ctrlKey && e.key.toLowerCase() === 'm' && can('missed_sale')) {

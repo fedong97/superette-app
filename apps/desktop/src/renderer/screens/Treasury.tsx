@@ -209,6 +209,7 @@ function FullTreasury({
       ) : (
         <>
           <Tabs
+            main
             value={tab}
             onChange={setTab}
             tabs={[

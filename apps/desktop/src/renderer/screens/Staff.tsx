@@ -49,6 +49,7 @@ export function Staff({ user, initialTab = 'list' }: { user: User; initialTab?: 
         <h1>Collaborateurs et salaires</h1>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={[

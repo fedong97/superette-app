@@ -42,7 +42,7 @@ function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string
       <header className="page-head">
         <h1>Ventes et caisses</h1>
       </header>
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      <Tabs main value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'tickets' && (can('sales') ? <Tickets /> : <MyLastInvoices embedded />)}
       {tab === 'register' && <SalesRegister preset={preset} focusSearch={initialTab === 'find'} />}
       {tab === 'alerts' && <SalesAlerts />}

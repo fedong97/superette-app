@@ -32,6 +32,7 @@ export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab
         <h1>Charges et dépenses</h1>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={[

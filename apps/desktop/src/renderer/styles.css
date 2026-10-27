@@ -710,6 +710,9 @@ pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; lin
 .menu-drop button:hover:not(:disabled) { background: var(--brand-soft); }
 .menu-drop small { color: var(--muted); font-style: italic; }
 .menu-drop hr { border: none; border-top: 1px solid var(--line); margin: 4px 6px; width: auto; }
+/* Petit titre qui regroupe les écrans d'un menu. */
+.menu-drop .menu-head { padding: 10px 10px 2px; font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; border-top: 1px solid var(--line); margin-top: 4px; }
+.menu-drop .menu-title + .menu-head { border-top: none; margin-top: 0; padding-top: 2px; }
 .topbar { display: flex; align-items: flex-start; gap: 8px; padding: 7px 12px; background: #fff; border-bottom: 1px solid var(--line); min-width: 0; }
 .topbar .menu { position: relative; }
 .quick-tabs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
@@ -734,6 +737,7 @@ pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; lin
 .all-menus-grid { columns: 4 280px; column-gap: 14px; }
 .menu-card { break-inside: avoid; margin-bottom: 14px; background: #fff; border-radius: 16px; border-top: 4px solid var(--c); box-shadow: 0 1px 3px color-mix(in srgb, var(--brand-deep) 8%, transparent); padding: 12px 10px 10px; display: flex; flex-direction: column; }
 .menu-card h2 { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 800; padding: 0 6px 6px; }
+.menu-card h3 { font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 6px 2px; }
 .menu-card h2 i { font-style: normal; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-size: 19px; background: color-mix(in srgb, var(--c) 18%, white); }
 .menu-card button { border: none; background: transparent !important; text-align: left; padding: 6px 8px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); }
 .menu-card button::before { content: '› '; color: var(--c); font-weight: 800; }

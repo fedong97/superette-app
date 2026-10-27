@@ -12,7 +12,7 @@ const STEPS: Record<TakeoverKind, string> = {
   suppliers:
     'Une ligne par fournisseur : nom, téléphone, NIU, délai de paiement et ce que vous lui devez aujourd’hui, avec le n° de sa facture et l’échéance. La dette reprise se paie ensuite comme une facture d’achat, mais ce n’est pas un achat : ni charge, ni TVA déductible.',
   stock:
-    'Une ligne par article : code-barres (ou code interne, ou désignation exacte), quantité et coût de revient unitaire. Le code-barres d’un carton compte en cartons, au prix du carton. Lot et date de péremption pour les articles périssables. Importez d’abord le catalogue (Produit › Importer).',
+    'Une ligne par article : code-barres (ou code interne, ou désignation exacte), quantité et coût de revient unitaire. Le code-barres d’un carton compte en cartons, au prix du carton. Lot et date de péremption pour les articles périssables. Importez d’abord le catalogue (Articles › Importer).',
 };
 
 /** Lit un fichier CSV (point-virgule, virgule ou tabulation) ou Excel en cellules texte. */

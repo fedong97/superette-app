@@ -855,7 +855,7 @@ function Statements({ onOpen }: { onOpen: (account: string) => void }) {
       {d && d.uninvoiced.amount > 0 && (
         <p className="warn-text">
           {fcfa(d.uninvoiced.amount)} HT de marchandises sont entrées en stock sans facture fournisseur. Le stock les compte mais pas les achats : le
-          résultat est surévalué d'autant tant que ces factures ne sont pas saisies (Fournisseur › Factures et avoirs fournisseurs). Pour le stock
+          résultat est surévalué d'autant tant que ces factures ne sont pas saisies (Achats › Factures fournisseurs). Pour le stock
           de départ, faites passer une écriture d'à-nouveaux par votre comptable.
         </p>
       )}
@@ -1102,7 +1102,7 @@ function VatReturn() {
               </p>
               <p className="muted">
                 L'acompte d'impôt sur le résultat (minimum de perception) est calculé sur le chiffre d'affaires HT du mois, au taux du régime choisi dans
-                Fiscal › Impôt sur le résultat. Les précomptes et le droit d'accises restent à ajouter par votre comptable.
+                Compta › Impôt sur le résultat. Les précomptes et le droit d'accises restent à ajouter par votre comptable.
               </p>
             </div>
           </div>

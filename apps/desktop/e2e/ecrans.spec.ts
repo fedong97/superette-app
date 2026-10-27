@@ -10,35 +10,32 @@ async function dismiss(page: Page) {
   await page.mouse.click(700, 790);
 }
 
-test('la roulette fait défiler chaque menu ouvert sans le fermer', async () => {
+test('chaque menu ouvert s’affiche en entier, sans défiler, même sur un petit écran', async () => {
   const { app, page } = await launch();
+  await page.setViewportSize({ width: 1366, height: 700 });
   try {
     await createStore(page);
     const items = page.locator('nav.rail .rail-item');
     const drop = page.locator('.menu-drop');
     // La barre verte s'affiche après la fermeture du guide de démarrage.
     await expect(items.first()).toBeVisible();
-    let scrolled = 0;
+    let columns = 0;
     for (let m = 0; m < (await items.count()); m++) {
       const name = (await items.nth(m).innerText()).split('\n').pop()!.trim();
-      if (/Tous les menus|Personnaliser/.test(name)) continue;
+      if (/Tous les menus/.test(name)) continue;
       await items.nth(m).click();
       if (!(await drop.waitFor({ timeout: 2000 }).then(() => true, () => false))) continue;
       await page.waitForTimeout(150);
-      if (await drop.evaluate((d) => d.scrollHeight > d.clientHeight + 4)) {
-        const box = (await drop.boundingBox())!;
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-        await page.mouse.wheel(0, 400);
-        await page.waitForTimeout(250);
-        await expect(drop, `menu ${name} fermé par la roulette`).toBeVisible();
-        expect(await drop.evaluate((d) => d.scrollTop), `menu ${name} n'a pas défilé`).toBeGreaterThan(0);
-        scrolled++;
-      }
+      expect(await drop.evaluate((d) => d.scrollHeight <= d.clientHeight + 4), `menu ${name} à faire défiler`).toBe(true);
+      const box = (await drop.boundingBox())!;
+      expect(box.y, `menu ${name} coupé en haut`).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height, `menu ${name} coupé en bas`).toBeLessThanOrEqual(700);
+      if (await drop.evaluate((d) => d.classList.contains('cols'))) columns++;
       await page.keyboard.press('Escape');
-      await page.mouse.click(700, 790);
+      await page.mouse.click(700, 690);
     }
-    // Au moins Clients et un autre menu dépassent une fenêtre de 800 pixels.
-    expect(scrolled).toBeGreaterThanOrEqual(2);
+    // Sur 700 pixels de haut, les plus longs menus (Stock, Achats) passent sur plusieurs colonnes.
+    expect(columns).toBeGreaterThanOrEqual(2);
   } finally {
     await app.close();
   }

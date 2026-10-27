@@ -230,6 +230,32 @@ async function orderLines(order: Order): Promise<RecLine[]> {
   );
 }
 
+/** Articles d'une facture directe enregistrée, remis en saisie pour la corriger. */
+async function invoiceRecLines(lines: Result<'purchases.invoice'>['lines']): Promise<RecLine[]> {
+  return Promise.all(
+    lines.map(async (l) => {
+      const a = await call('catalogue.get', l.article_id);
+      const promo = Boolean(l.promo_buy && l.promo_pay !== null);
+      const bonus = promo ? 0 : l.free_qty;
+      const paid = l.qty - bonus;
+      let units = unitsFor(paid, packChoices(a), purchaseUnits(a));
+      if (bonus % units) units = 1000;
+      const t = termsFrom(l);
+      return {
+        ...newRecLine(a),
+        qty: num((paid * 1000) / units),
+        cost: String(Math.round(((l.gross_cost ?? l.unit_cost) * units) / 1000)),
+        packUnits: units,
+        bonus: bonus ? num((bonus * 1000) / units) : '',
+        lot: l.lot_number ?? '',
+        expiry: l.expiry ?? '',
+        ...t,
+        discType: t.disc && t.promo ? undefined : t.promo ? 'promo' : 'pct',
+      };
+    }),
+  );
+}
+
 function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: string | null) => void }) {
   const toast = useToast();
   const can = useCan();
@@ -305,10 +331,10 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         <div className="actions">
           <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
           <button onClick={() => onDone(order?.id ?? null)}>Retour</button>
-          <button disabled={!lines.length} onClick={() => void save(false)}>
-            Enregistrer le brouillon
+          <button className={order?.status === 'sent' ? 'primary' : undefined} disabled={!lines.length} onClick={() => void save(false)}>
+            {order?.status === 'sent' ? 'Enregistrer les modifications' : 'Enregistrer le brouillon'}
           </button>
-          {can('order_close') && (
+          {can('order_close') && order?.status !== 'sent' && (
             <button className="primary" disabled={!lines.length} onClick={() => void save(true)}>
               Enregistrer et envoyer
             </button>
@@ -411,7 +437,7 @@ function OrderDetail({ id, canEdit, onBack, onEdit, onReceive }: { id: string; c
           WhatsApp au fournisseur
         </button>
         {whatsapp && <WhatsappOrderDialog orderId={o.id} number={o.number} supplier={o.supplier_name} onClose={() => setWhatsapp(false)} />}
-        {canEdit && o.state === 'draft' && <button onClick={() => onEdit(o)}>Modifier</button>}
+        {canEdit && (o.state === 'draft' || o.state === 'sent') && <button onClick={() => onEdit(o)}>Modifier</button>}
         {canClose && o.state === 'draft' && (
           <>
             <button className="danger" onClick={() => void setStatus('cancelled', 'Annuler ce bon de commande ?')}>
@@ -629,9 +655,22 @@ function ReceiveOrder({ id, onDone, phone }: { id: string; onDone: () => void; p
 // --- Réceptions ----------------------------------------------------------------
 
 function Receptions() {
+  const can = useCan();
   const list = useLoad(() => call('purchases.receptions', {}));
   const [open, setOpen] = useState<string | null>(null);
-  const detail = useLoad(() => (open ? call('purchases.reception', open) : Promise.resolve(null)), [open]);
+  const [correcting, setCorrecting] = useState(false);
+  const detail = useLoad(() => (open ? call('purchases.reception', open) : Promise.resolve(null)), [open, correcting]);
+  const d = detail.data;
+  if (open && correcting && d)
+    return (
+      <ReceptionEditor
+        reception={d}
+        onDone={() => {
+          setCorrecting(false);
+          list.reload();
+        }}
+      />
+    );
   return (
     <>
       {list.data?.length === 0 ? (
@@ -677,9 +716,66 @@ function Receptions() {
             {hasVat() ? `Total HT ${fcfa(detail.data.total_ht)} · TVA ${fcfa(detail.data.total_tva)} · TTC ${fcfa(detail.data.total_ttc)}` : `Total ${fcfa(detail.data.total_ttc)}`}
             {detail.data.discount ? ` · dont remise globale ${fcfa(detail.data.discount)}` : ''}
           </p>
+          {can('reception_edit') && (
+            <div className="actions">
+              <button
+                disabled={Boolean(detail.data.invoice_id || detail.data.opening || detail.data.discount)}
+                title={detail.data.invoice_id ? 'Déjà facturé : corrigez la facture fournisseur' : detail.data.opening ? 'Stock de départ : corrigez-le par un inventaire' : undefined}
+                onClick={() => setCorrecting(true)}
+              >
+                Corriger les articles
+              </button>
+            </div>
+          )}
         </Modal>
       )}
     </>
+  );
+}
+
+/** Corriger un bon de réception pas encore facturé : ce qui était entré ressort, les articles corrigés entrent. */
+function ReceptionEditor({ reception: r, onDone }: { reception: Result<'purchases.reception'>; onDone: () => void }) {
+  const toast = useToast();
+  const [lines, setLines] = useState<RecLine[]>([]);
+  const [note, setNote] = useState(r.delivery_note ?? '');
+  useEffect(() => {
+    invoiceRecLines(r.lines).then(setLines, (err) => toast.error(err));
+  }, [r.id]);
+  const total = lines.reduce((t, l) => t + lineNet(l), 0);
+  return (
+    <div>
+      <h2>Corriger le bon de réception {r.number}</h2>
+      <p className="warn-text">
+        {r.supplier_name ?? 'Sans fournisseur'} · dépôt {r.warehouse_name}
+        {r.order_number ? ` · commande ${r.order_number}` : ''}. Ce qui était entré en stock ressort et les articles corrigés entrent à leur place.
+      </p>
+      <div className="grid3">
+        <Field label="BL du fournisseur">
+          <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </div>
+      <PurchaseEntry lines={lines} setLines={setLines}>
+        <div className="actions">
+          <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
+          <button onClick={onDone}>Retour</button>
+          <button
+            className="primary"
+            disabled={!lines.length}
+            onClick={async () => {
+              try {
+                await call('purchases.correctReception', r.id, { lines: lines.map(recLineInput), deliveryNote: note || null });
+                toast.ok(`Bon ${r.number} corrigé, stock mis à jour`);
+                onDone();
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          >
+            Enregistrer la correction
+          </button>
+        </div>
+      </PurchaseEntry>
+    </div>
   );
 }
 
@@ -935,9 +1031,22 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const receptions = useLoad(() => call('purchases.receptions', {}), [id]);
   const [paying, setPaying] = useState(false);
   const [preview, setPreview] = useState(false);
+  const [editing, setEditing] = useState(false);
   if (!data.data) return null;
   const { invoice: i, payments, lines } = data.data;
   if (preview) return <DocPreview source={{ kind: 'purchaseInvoice', id: i.id }} onClose={() => setPreview(false)} />;
+  const done = () => {
+    setEditing(false);
+    data.reload();
+    receptions.reload();
+  };
+  if (editing && i.direct === 1 && lines.length > 0)
+    return (
+      <Modal title={`Corriger la facture ${i.number} · ${i.supplier_name}`} onClose={() => setEditing(false)} wide>
+        <DirectInvoice canPay={false} edit={{ invoice: i, lines, onDone: done }} />
+      </Modal>
+    );
+  if (editing) return <InvoiceEditDialog invoice={i} onClose={() => setEditing(false)} onSaved={done} />;
   return (
     <Modal title={`${i.kind === 'invoice' ? 'Facture' : 'Avoir'} ${i.number} · ${i.supplier_name}`} onClose={onClose} wide>
       <p>
@@ -998,6 +1107,11 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
       )}
       <div className="actions">
         <button onClick={() => setPreview(true)}>Aperçu et impression…</button>
+        {can('purchase_invoice_edit') && (
+          <button onClick={() => setEditing(true)} title={i.direct === 1 ? 'Corriger le n°, les dates ou les articles (le stock reçu suit)' : 'Corriger le n°, les dates ou les montants'}>
+            Modifier
+          </button>
+        )}
         {i.balance > 0 && can('supplier_pay') && (
           <button className="primary" onClick={() => setPaying(true)}>
             {i.kind === 'invoice' ? 'Régler' : 'Enregistrer le remboursement'}
@@ -1014,6 +1128,76 @@ function InvoiceDetail({ id, onClose }: { id: string; onClose: () => void }) {
           }}
         />
       )}
+    </Modal>
+  );
+}
+
+/** Modifier une facture ou un avoir saisi à partir des bons de réception : n°, dates, notes, montants. */
+function InvoiceEditDialog({ invoice: i, onClose, onSaved }: { invoice: Invoice; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const vat = hasVat();
+  const [f, setF] = useState({
+    number: i.supplier_number,
+    date: i.invoice_date,
+    due: i.due_date,
+    notes: i.notes ?? '',
+    ht: String(vat ? i.total_ht : i.total_ttc),
+    tva: vat ? String(i.total_tva) : '',
+  });
+  const ht = parseAmount(f.ht) ?? 0;
+  const tva = vat ? (parseAmount(f.tva) ?? 0) : 0;
+  return (
+    <Modal title={`Modifier ${i.kind === 'invoice' ? 'la facture' : "l'avoir"} ${i.number} · ${i.supplier_name}`} onClose={onClose} wide>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await call('purchases.updateInvoice', i.id, { supplierNumber: f.number, invoiceDate: f.date, dueDate: f.due || null, notes: f.notes || null, totalHt: ht, totalTva: tva });
+            toast.ok('Pièce fournisseur modifiée');
+            onSaved();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <div className="grid3">
+          <Field label="N° de la pièce du fournisseur">
+            <input autoFocus value={f.number} onChange={(e) => setF({ ...f, number: e.target.value })} />
+          </Field>
+          <Field label="Date de la pièce">
+            <input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+          </Field>
+          <Field label="Échéance">
+            <input type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} />
+          </Field>
+          <Field label={tx('Total HT (FCFA)')}>
+            <input inputMode="numeric" value={f.ht} onChange={(e) => setF({ ...f, ht: e.target.value })} />
+          </Field>
+          {vat && (
+            <>
+              <Field label="TVA (FCFA)">
+                <input inputMode="numeric" value={f.tva} onChange={(e) => setF({ ...f, tva: e.target.value })} />
+              </Field>
+              <Field label="Total TTC">
+                <input readOnly value={fcfa(ht + tva)} />
+              </Field>
+            </>
+          )}
+          <Field label="Notes">
+            <input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
+          </Field>
+        </div>
+        {i.paid > 0 && <p className="muted">Déjà réglé : {fcfa(i.paid)}. Le nouveau total ne peut pas être plus petit.</p>}
+        <p className="muted small">L’ancienne version reste dans le journal d’audit.</p>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!f.number.trim() || !ht}>
+            Enregistrer
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }
@@ -1086,7 +1270,14 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
  * entrent en stock au coût net (remise, gratuits, remise globale), et la
  * facture va au registre des achats, réglée tout de suite ou à l'échéance.
  */
-function DirectInvoice({ canPay }: { canPay: boolean }) {
+function DirectInvoice({
+  canPay,
+  edit,
+}: {
+  canPay: boolean;
+  /** Correction d'une facture directe enregistrée : ses articles reviennent en saisie, le dépôt ne change pas. */
+  edit?: { invoice: Invoice; lines: Result<'purchases.invoice'>['lines']; onDone: () => void };
+}) {
   const toast = useToast();
   const [preview, setPreview] = useState<string | null>(null);
   const app = useLoad(() => call('app.state'), []);
@@ -1108,6 +1299,20 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
   const [done, setDone] = useState<Invoice | null>(null);
   const [received, setReceived] = useState<{ articleId: string; qty: number; packUnits: number }[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => {
+    if (!edit) return;
+    const inv = edit.invoice;
+    setSupplierId(inv.supplier_id);
+    setNumber(inv.supplier_number);
+    setDate(inv.invoice_date);
+    setDue(inv.due_date);
+    setNotes(inv.notes ?? '');
+    if (inv.discount) {
+      setDiscMode('amount');
+      setDisc(String(inv.discount));
+    }
+    invoiceRecLines(edit.lines).then(setLines, (err) => toast.error(err));
+  }, [edit?.invoice.id]);
   const sum = lines.reduce((s, l) => s + lineNet(l), 0);
   const d = Number(disc.replace(',', '.').replace('%', '').trim() || 0);
   const global = !Number.isFinite(d) || d <= 0 ? 0 : discMode === 'pct' ? Math.round((sum * Math.min(d, 100)) / 100) : Math.min(sum, Math.round(d));
@@ -1152,14 +1357,29 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
     );
   return (
     <div>
-      <h2>Facture d'achat directe (sans bon de commande)</h2>
-      <p className="muted">Saisissez la facture du fournisseur avec ses articles : la marchandise entre en stock au coût net et la facture va au registre des achats.</p>
+      {edit ? (
+        <p className="warn-text">
+          Corrigez les articles, les quantités ou les prix : ce qui était entré en stock ressort et les articles corrigés entrent à leur place. Le fournisseur et le dépôt ne
+          changent pas.
+        </p>
+      ) : (
+        <>
+          <h2>Facture d'achat directe (sans bon de commande)</h2>
+          <p className="muted">Saisissez la facture du fournisseur avec ses articles : la marchandise entre en stock au coût net et la facture va au registre des achats.</p>
+        </>
+      )}
       <div className="grid3">
-        <SupplierSelect value={supplierId} onChange={setSupplierId} />
+        {edit ? (
+          <Field label="Fournisseur">
+            <input readOnly value={edit.invoice.supplier_name} />
+          </Field>
+        ) : (
+          <SupplierSelect value={supplierId} onChange={setSupplierId} />
+        )}
         <Field label="N° de la facture du fournisseur">
           <input value={number} onChange={(e) => setNumber(e.target.value)} />
         </Field>
-        <WarehouseSelect value={warehouseId} onChange={setWarehouseId} label="Dépôt qui reçoit" />
+        {!edit && <WarehouseSelect value={warehouseId} onChange={setWarehouseId} label="Dépôt qui reçoit" />}
         <Field label="Date de la facture">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
@@ -1183,7 +1403,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
                 </select>
               </div>
             </Field>
-            {canPay && (
+            {canPay && !edit && (
               <label className="check">
                 <input type="checkbox" checked={pay} onChange={(e) => setPay(e.target.checked)} /> Réglée tout de suite
               </label>
@@ -1253,6 +1473,31 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
         </div>
       )}
       <div className="actions">
+        {edit && (
+          <button
+            className="primary"
+            disabled={!lines.length || !number.trim()}
+            onClick={async () => {
+              try {
+                const inv = await call('purchases.correctDirectInvoice', edit.invoice.id, {
+                  supplierNumber: number,
+                  invoiceDate: date,
+                  dueDate: due || null,
+                  notes: notes || null,
+                  lines: lines.map(recLineInput),
+                  ...(discMode === 'pct' ? { discountBp: Math.round(Math.min(Math.max(d, 0), 100) * 100) } : { discountAmount: global }),
+                });
+                toast.ok(`Facture ${inv.number} corrigée, stock mis à jour`);
+                edit.onDone();
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          >
+            Enregistrer la correction
+          </button>
+        )}
+        {!edit && (
         <button
           className="primary"
           disabled={!lines.length || !supplierId || !number.trim()}
@@ -1281,6 +1526,7 @@ function DirectInvoice({ canPay }: { canPay: boolean }) {
         >
           Enregistrer la facture et la réception
         </button>
+        )}
       </div>
       </PurchaseEntry>
     </div>

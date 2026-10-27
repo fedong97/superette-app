@@ -228,6 +228,7 @@ export function ArticleForm({
     active: article ? article.active === 1 : true,
   });
   const [printing, setPrinting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   // Emballage consigné (casier, bouteille) : un emballage pour `units` unités vendues.
   const canContainer = can('containers', 'article_edit');
   const containerTypes = useLoad(() => (canContainer ? call('containers.types') : Promise.resolve([])), []);
@@ -390,14 +391,36 @@ export function ArticleForm({
   };
 
   return (
-    <Modal title={article ? `${article.code} · ${article.name}` : 'Nouvel article'} onClose={onClose} wide>
+    <Modal title={article ? `${article.code} · ${f.name}` : 'Nouvel article'} onClose={onClose} wide>
+      {renaming && article && (
+        <RenameDialog
+          articleId={article.id}
+          current={f.name}
+          onClose={() => setRenaming(false)}
+          onDone={(name) => {
+            setRenaming(false);
+            setF({ ...f, name });
+          }}
+        />
+      )}
       <form onSubmit={save}>
         {draft.banner}
         <div className="article-top">
         <div className="grid3">
-          <Field label="Désignation">
-            <input autoFocus value={f.name} onChange={set('name')} required />
-          </Field>
+          {article ? (
+            <Field label="Désignation">
+              <div className="inline">
+                <input value={f.name} disabled title="Cliquez sur « Modifier le nom » pour changer le nom" />
+                <button type="button" disabled={!can('article_rename')} title={can('article_rename') ? undefined : 'Vous n’avez pas le droit de changer le nom d’un produit'} onClick={() => setRenaming(true)}>
+                  Modifier le nom
+                </button>
+              </div>
+            </Field>
+          ) : (
+            <Field label="Désignation">
+              <input autoFocus value={f.name} onChange={set('name')} required />
+            </Field>
+          )}
           <Field label="Code article" hint="Laisser vide pour numérotation automatique">
             <input value={f.code} onChange={set('code')} />
           </Field>
@@ -702,5 +725,51 @@ function SubstituteInput({ value, exclude, onChange }: { value: { id: string; la
       />
       <SuggestionList s={s} onPick={pick} query={q} />
     </div>
+  );
+}
+
+/**
+ * Changer le nom d'un produit déjà créé : sur la fiche, le nom est grisé pour
+ * ne pas le modifier par erreur ; ce bouton ouvre cette petite fenêtre.
+ * L'ancien nom reste dans le journal d'audit.
+ */
+function RenameDialog({ articleId, current, onClose, onDone }: { articleId: string; current: string; onClose: () => void; onDone: (name: string) => void }) {
+  const toast = useToast();
+  const [name, setName] = useState(current);
+  const [reason, setReason] = useState('');
+  const clean = name.trim();
+  return (
+    <Modal title="Modifier le nom du produit" onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await call('catalogue.rename', articleId, clean, reason);
+            toast.ok('Nom du produit changé');
+            onDone(clean);
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        <p className="muted">
+          Nom actuel : <b>{current}</b>. Le nouveau nom apparaîtra sur les tickets, les factures, les étiquettes et les inventaires.
+        </p>
+        <Field label="Nouveau nom">
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Motif (facultatif)" hint="Gardé dans le journal d'audit avec l'ancien nom">
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Faute de frappe, nouveau format du fournisseur…" />
+        </Field>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!clean || clean === current}>
+            Enregistrer le nom
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

@@ -109,6 +109,17 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.89.0',
+    items: [
+      'Remise à zéro des données d’essai (Administration › Sauvegardes) : après l’installation et la formation, efface les ventes, achats, caisses, dépenses et mouvements de stock, et garde les réglages, les produits, les clients, les fournisseurs et le personnel. Le stock actuel peut être gardé comme stock de départ.',
+      'Documents modifiables : factures d’achat (y compris les achats directs et leurs articles), bons de commande déjà envoyés, bons de réception pas encore facturés, dépenses, entrées et sorties de caisse.',
+      'Le nom d’un produit est grisé sur sa fiche : il se change par le bouton « Modifier le nom », pour éviter de le changer par erreur.',
+      'Trésorerie : boutons directs sur chaque ligne. Entrées : Imprimer le reçu, Modifier, Supprimer. Sorties : Décharge, Imprimer, Modifier, Supprimer.',
+      'Rayons et familles : renommer, changer de rayon et supprimer ceux qui ne servent plus.',
+      'Caisses : changer le type d’une caisse ou la supprimer tant qu’elle n’a pas servi.',
+    ],
+  },
+  {
     version: '0.88.0',
     items: [
       'Menus rangés par métier : 10 menus au lieu de 15 (Vente, Trésorerie, Stock, Articles, Achats, Clients, Dépenses, Personnel, Suivi, Compta). Chaque écran n’y est plus qu’une fois, sous de petits titres (Commander, Recevoir, Payer…).',

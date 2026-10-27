@@ -155,6 +155,8 @@ export interface Reception {
   received_at: string;
   /** Remise globale (facture directe), déjà répartie sur les lignes. */
   discount: Fcfa;
+  /** Stock de départ repris d'un ancien logiciel. */
+  opening?: number;
   total_ht: Fcfa;
   total_tva: Fcfa;
   total_ttc: Fcfa;
@@ -546,7 +548,10 @@ export class PurchaseService extends Base {
   ): PurchaseOrder {
     this.validateLines(input.lines);
     const order = this.getOrder(id);
-    if (order.status !== 'draft') throw new AppError('Seule une commande en brouillon peut être modifiée', 'INVALID_STATE');
+    // Une commande envoyée se modifie encore tant que rien n'en est reçu (le fournisseur a appelé, une erreur de quantité…).
+    if (order.status !== 'draft' && (order.status !== 'sent' || order.lines.some((l) => l.received > 0))) {
+      throw new AppError('Une commande déjà reçue, même en partie, ne se modifie plus : soldez-la et faites-en une autre', 'INVALID_STATE');
+    }
     this.getSupplier(input.supplierId);
     return this.tx(() => {
       this.db
@@ -554,6 +559,7 @@ export class PurchaseService extends Base {
         .run(input.supplierId, input.warehouseId, input.expectedDate ?? order.expected_date, input.notes?.trim() || null, this.now(), id);
       this.writeLines(id, input.lines);
       this.enqueue(ctx, 'purchase_order', id, 'upsert', {});
+      if (order.status === 'sent') this.audit(ctx.userId, 'order.update', 'purchase_order', id, { number: order.number, lines: input.lines.length });
       return this.getOrder(id);
     });
   }
@@ -1032,6 +1038,139 @@ export class PurchaseService extends Base {
       this.enqueue(ctx, 'supplier_invoice', invoice.id, 'upsert', {});
       if (input.payment) this.paySupplier(ctx, { ...input.payment, amount: input.payment.amount || this.getInvoice(invoice.id).balance, invoiceId: invoice.id });
       return this.getInvoice(invoice.id);
+    });
+  }
+
+  /**
+   * Corrige les articles d'un bon de réception pas encore facturé (quantité,
+   * prix, article oublié ou en trop) : le stock reçu est refait. Pour une
+   * réception de commande, chaque article reste rattaché à sa ligne de commande.
+   */
+  correctReception(ctx: Context, id: string, input: { lines: ReceptionLine[]; deliveryNote?: string | null }): ReceptionDetail {
+    const rec = this.db.prepare('SELECT id, number, store_id, order_id, invoice_id, opening, discount FROM receptions WHERE id = ?').get(id) as
+      | { id: string; number: string; store_id: string; order_id: string | null; invoice_id: string | null; opening: number; discount: number }
+      | undefined;
+    if (!rec || rec.store_id !== ctx.storeId) throw new AppError('Bon de réception introuvable', 'NOT_FOUND');
+    if (rec.opening) throw new AppError('Le stock de départ se corrige par un inventaire', 'INVALID');
+    if (rec.invoice_id) throw new AppError('Ce bon est déjà facturé : corrigez la facture fournisseur (bouton Modifier de la facture)', 'INVALID');
+    if (rec.discount) throw new AppError('Ce bon porte une remise globale : corrigez sa facture', 'INVALID');
+    // Réception de commande : un article garde sa ligne de commande (ce qui reste à recevoir suit).
+    const orderLines = rec.order_id
+      ? new Map((this.db.prepare('SELECT article_id, id FROM purchase_order_lines WHERE order_id = ? ORDER BY line_no').all(rec.order_id) as { article_id: string; id: string }[]).map((l) => [l.article_id, l.id]))
+      : new Map<string, string>();
+    return this.tx(() => {
+      this.stock.rewriteReception(ctx, id, {
+        lines: input.lines.map((l) => ({ ...l, orderLineId: orderLines.get(l.articleId) ?? null })),
+        reference: input.deliveryNote,
+        reason: `Correction du bon ${rec.number}`,
+      });
+      if (rec.order_id) this.enqueue(ctx, 'purchase_order', rec.order_id, 'upsert', {});
+      return this.getReception(id);
+    });
+  }
+
+  /**
+   * Modifie une facture ou un avoir fournisseur déjà saisi : n° de la pièce,
+   * dates, notes et, hors facture directe (dont les montants viennent des
+   * articles), les montants. Le total ne descend pas sous ce qui est déjà réglé.
+   */
+  updateInvoice(
+    ctx: Context,
+    id: string,
+    input: { supplierNumber: string; invoiceDate: string; dueDate?: string | null; notes?: string | null; totalHt?: Fcfa; totalTva?: Fcfa },
+  ): SupplierInvoice {
+    const inv = this.getInvoice(id);
+    if (inv.store_id !== ctx.storeId) throw new AppError('Facture fournisseur introuvable', 'NOT_FOUND');
+    const supplierNumber = input.supplierNumber.trim();
+    if (!supplierNumber) throw new AppError('Le numéro de la facture du fournisseur est obligatoire', 'INVALID');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.invoiceDate)) throw new AppError('Date de facture invalide', 'INVALID');
+    if (input.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) throw new AppError("Date d'échéance invalide", 'INVALID');
+    this.assertPeriodOpen(ctx.storeId, inv.invoice_date);
+    this.assertPeriodOpen(ctx.storeId, input.invoiceDate);
+    const duplicate = this.db
+      .prepare('SELECT number FROM supplier_invoices WHERE supplier_id = ? AND kind = ? AND supplier_number = ? AND id <> ?')
+      .pluck()
+      .get(inv.supplier_id, inv.kind, supplierNumber, id) as string | undefined;
+    if (duplicate) throw new AppError(`Cette facture fournisseur est déjà saisie (${duplicate})`, 'DUPLICATE');
+    let totalHt = inv.total_ht;
+    let totalTva = inv.total_tva;
+    if (!inv.direct && (input.totalHt !== undefined || input.totalTva !== undefined)) {
+      const ht = input.totalHt ?? inv.total_ht;
+      const tva = input.totalTva ?? inv.total_tva;
+      for (const v of [ht, tva]) if (!Number.isSafeInteger(v) || v < 0) throw new AppError('Montant invalide', 'INVALID');
+      if (ht + tva <= 0) throw new AppError('Le montant de la facture doit être positif', 'INVALID');
+      const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
+      totalHt = vatEnabled ? ht : ht + tva;
+      totalTva = vatEnabled ? tva : 0;
+    }
+    if (totalHt + totalTva < inv.paid) throw new AppError(`${inv.paid} FCFA sont déjà réglés sur cette pièce : le total ne peut pas être plus petit`, 'INVALID');
+    const supplier = this.getSupplier(inv.supplier_id);
+    const due = input.dueDate || (input.invoiceDate !== inv.invoice_date ? dueDate(input.invoiceDate, supplier.payment_terms_days) : inv.due_date);
+    return this.tx(() => {
+      this.db
+        .prepare('UPDATE supplier_invoices SET supplier_number = ?, invoice_date = ?, due_date = ?, notes = ?, total_ht = ?, total_tva = ?, total_ttc = ? WHERE id = ?')
+        .run(supplierNumber, input.invoiceDate, due, input.notes === undefined ? inv.notes : input.notes?.trim() || null, totalHt, totalTva, totalHt + totalTva, id);
+      this.enqueue(ctx, 'supplier_invoice', id, 'upsert', {});
+      this.audit(ctx.userId, 'supplier_invoice.update', 'supplier_invoice', id, {
+        number: inv.number,
+        from: { supplierNumber: inv.supplier_number, invoiceDate: inv.invoice_date, dueDate: inv.due_date, ttc: inv.total_ttc },
+        to: { supplierNumber, invoiceDate: input.invoiceDate, dueDate: due, ttc: totalHt + totalTva },
+      });
+      return this.getInvoice(id);
+    });
+  }
+
+  /**
+   * Corrige les articles d'une facture directe (quantité, prix, remise, article
+   * oublié ou en trop) : le stock reçu est refait (voir `StockService.rewriteReception`)
+   * et les montants de la facture suivent.
+   */
+  correctDirectInvoice(
+    ctx: Context,
+    id: string,
+    input: {
+      supplierNumber: string;
+      invoiceDate: string;
+      dueDate?: string | null;
+      notes?: string | null;
+      lines: ReceptionLine[];
+      discountBp?: number;
+      discountAmount?: Fcfa;
+    },
+  ): SupplierInvoice {
+    const inv = this.getInvoice(id);
+    if (inv.store_id !== ctx.storeId) throw new AppError('Facture fournisseur introuvable', 'NOT_FOUND');
+    if (!inv.direct) throw new AppError("Seule une facture directe (saisie avec ses articles) se corrige article par article", 'INVALID');
+    const recIds = this.db.prepare('SELECT id FROM receptions WHERE invoice_id = ?').pluck().all(id) as string[];
+    if (recIds.length !== 1) throw new AppError('Bon de réception de la facture introuvable', 'NOT_FOUND');
+    if (input.lines.length === 0) throw new AppError('La facture est vide : ajoutez au moins un article', 'EMPTY');
+    const nets = input.lines.map((l) => {
+      const err = purchaseTermsError({ qty: l.qty, unitCost: l.unitCost, discountBp: l.discountBp, freeQty: l.freeQty });
+      if (err) throw new AppError(err, 'INVALID');
+      return purchaseAmounts({ qty: l.qty, unitCost: l.unitCost, discountBp: l.discountBp, freeQty: l.freeQty }).net;
+    });
+    const sum = nets.reduce((a, n) => a + n, 0);
+    const bp = input.discountBp ?? 0;
+    if (!Number.isSafeInteger(bp) || bp < 0 || bp > 10_000) throw new AppError('Remise globale invalide : entre 0 et 100 %', 'INVALID');
+    const global = input.discountAmount !== undefined && input.discountAmount !== null && input.discountAmount > 0 ? input.discountAmount : Math.round((sum * bp) / 10_000);
+    if (!Number.isSafeInteger(global) || global < 0 || global > sum) throw new AppError('La remise globale dépasse le montant de la facture', 'INVALID');
+    const shares = spreadDiscount(nets, global);
+    return this.tx(() => {
+      this.updateInvoice(ctx, id, { supplierNumber: input.supplierNumber, invoiceDate: input.invoiceDate, dueDate: input.dueDate, notes: input.notes });
+      this.stock.rewriteReception(ctx, recIds[0]!, {
+        lines: input.lines.map((l, i) => ({ ...l, globalDiscount: shares[i] })),
+        discount: global,
+        reference: input.supplierNumber,
+        reason: `${inv.supplier_name} · correction de la facture ${inv.number}`,
+      });
+      const totals = this.receptionTotals(recIds[0]!);
+      if (totals.total_ttc < inv.paid) throw new AppError(`${inv.paid} FCFA sont déjà réglés sur cette facture : le nouveau total (${totals.total_ttc} FCFA) ne peut pas être plus petit`, 'INVALID');
+      this.db
+        .prepare('UPDATE supplier_invoices SET total_ht = ?, total_tva = ?, total_ttc = ?, received_ht = ?, discount = ? WHERE id = ?')
+        .run(totals.total_ht, totals.total_tva, totals.total_ttc, totals.total_ht, global, id);
+      this.enqueue(ctx, 'supplier_invoice', id, 'upsert', {});
+      this.audit(ctx.userId, 'supplier_invoice.correct', 'supplier_invoice', id, { number: inv.number, from: inv.total_ttc, to: totals.total_ttc, lines: input.lines.length });
+      return this.getInvoice(id);
     });
   }
 

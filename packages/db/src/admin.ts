@@ -626,6 +626,81 @@ export class AdminService extends Base {
     return reg;
   }
 
+  /**
+   * Pièces qui citent déjà la caisse (journées, ventes, mouvements…) : une
+   * caisse qui a servi garde son type et ne se supprime plus, elle se désactive.
+   */
+  registerUsage(id: string): number {
+    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('registers', 'users', 'outbox', 'audit_log', 'settings')").pluck().all() as string[];
+    let n = 0;
+    for (const t of tables) {
+      const cols = (this.db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name).filter((c) => c === 'register_id' || c === 'other_register_id' || c === 'to_register_id');
+      for (const c of cols) n += this.db.prepare(`SELECT COUNT(*) FROM ${t} WHERE ${c} = ?`).pluck().get(id) as number;
+    }
+    return n;
+  }
+
+  private registerLocked(reg: Register): string | null {
+    if (this.registerUsage(reg.id) > 0) return `${reg.name} a déjà servi (journées, ventes ou mouvements) : désactivez-la plutôt`;
+    if (this.getSetting('station.registerId') === reg.id || reg.activated_at) return `${reg.name} est rattachée à un PC (code d'activation déjà utilisé)`;
+    if (this.storeSettings(reg.store_id).emoneyCentralRegisterId === reg.id) return `${reg.name} est la caisse électronique centrale (Paramètres)`;
+    return null;
+  }
+
+  /** Retire une caisse aux utilisateurs qui la tiennent (avant un changement de type ou une suppression). */
+  private detachRegister(reg: Register): string[] {
+    const names: string[] = [];
+    const holders = this.db
+      .prepare('SELECT id, name, register_id, emoney_register_id, emoney_register_ids, bank_register_id FROM users WHERE register_id = @id OR bank_register_id = @id OR emoney_register_id = @id OR emoney_register_ids LIKE @like')
+      .all({ id: reg.id, like: `%${reg.id}%` }) as (Pick<User, 'id' | 'name' | 'register_id' | 'emoney_register_id' | 'emoney_register_ids' | 'bank_register_id'>)[];
+    for (const u of holders) {
+      const emoney = emoneyRegisterIds(u).filter((x) => x !== reg.id);
+      this.db
+        .prepare('UPDATE users SET register_id = ?, bank_register_id = ?, emoney_register_id = ?, emoney_register_ids = ? WHERE id = ?')
+        .run(u.register_id === reg.id ? null : u.register_id, u.bank_register_id === reg.id ? null : u.bank_register_id, emoney[0] ?? null, emoney.length ? JSON.stringify(emoney) : null, u.id);
+      this.enqueue(null, 'user', u.id, 'upsert', this.getUser(u.id));
+      names.push(u.name);
+    }
+    return names;
+  }
+
+  /**
+   * Change le type d'une caisse créée par erreur (espèces au lieu d'électronique…).
+   * Seulement tant qu'elle n'a pas servi ; elle est retirée aux utilisateurs qui la tenaient.
+   */
+  changeRegisterKind(userId: string, id: string, kind: RegisterKind): { register: Register; detached: string[] } {
+    if (!(kind in REGISTER_KINDS)) throw new AppError('Type de caisse inconnu', 'INVALID');
+    const reg = this.getRegister(id);
+    if (reg.kind === kind) return { register: reg, detached: [] };
+    const locked = this.registerLocked(reg);
+    if (locked) throw new AppError(`Type non modifiable : ${locked}`, 'IN_USE');
+    return this.tx(() => {
+      const detached = this.detachRegister(reg);
+      this.db.prepare('UPDATE registers SET kind = ?, methods = NULL WHERE id = ?').run(kind, id);
+      const next = this.getRegister(id);
+      this.enqueue({ storeId: next.store_id, registerId: null }, 'register', id, 'upsert', next);
+      this.audit(userId, 'register.kind', 'register', id, { from: reg.kind, to: kind, detached });
+      return { register: next, detached };
+    });
+  }
+
+  /** Supprime une caisse qui n'a jamais servi (créée en trop ou par erreur). */
+  deleteRegister(userId: string, id: string): { detached: string[] } {
+    const reg = this.getRegister(id);
+    const locked = this.registerLocked(reg);
+    if (locked) throw new AppError(`Suppression impossible : ${locked}`, 'IN_USE');
+    if (this.db.prepare('SELECT COUNT(*) FROM registers WHERE store_id = ? AND kind = ? AND id <> ?').pluck().get(reg.store_id, 'cash', id) === 0 && reg.kind === 'cash') {
+      throw new AppError('Le magasin doit garder au moins une caisse espèces', 'INVALID');
+    }
+    return this.tx(() => {
+      const detached = this.detachRegister(reg);
+      this.db.prepare('DELETE FROM registers WHERE id = ?').run(id);
+      this.enqueue({ storeId: reg.store_id, registerId: null }, 'register', id, 'delete', null);
+      this.audit(userId, 'register.delete', 'register', id, { number: reg.number, name: reg.name, kind: reg.kind, detached });
+      return { detached };
+    });
+  }
+
   /** Utilisateurs à qui une caisse est attribuée. */
   registerUsers(registerId: string): User[] {
     return this.db

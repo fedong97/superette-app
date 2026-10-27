@@ -5,6 +5,7 @@ import { ROLE_LABELS } from '../App';
 import { askConfirm, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
 import { Digest } from './AdminDigest';
+import { ResetData } from './AdminReset';
 import { MobilePay } from './AdminMobilePay';
 import { Settings } from './AdminSettings';
 import { BrandAndBadge, UserPhotoField } from './AdminBrand';
@@ -229,7 +230,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
   const [code, setCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newKind, setNewKind] = useState<RegisterKind>('cash');
-  const [editing, setEditing] = useState<{ id: string; name: string; active: boolean; kind: RegisterKind; methods: string[] } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; name: string; active: boolean; kind: RegisterKind; initialKind: RegisterKind; methods: string[] } | null>(null);
   const assigned = (id: string) =>
     (users.data ?? []).filter((u) => (u.register_id === id || emoneyIds(u).includes(id) || u.bank_register_id === id) && u.active === 1).map((u) => u.name);
   return (
@@ -277,7 +278,7 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
               <td>{r.active ? 'Active' : 'Désactivée'}</td>
               {isAdmin && (
                 <td>
-                  <button className="link" onClick={() => setEditing({ id: r.id, name: r.name, active: r.active === 1, kind: r.kind, methods: registerMethods(r.methods) })}>
+                  <button className="link" onClick={() => setEditing({ id: r.id, name: r.name, active: r.active === 1, kind: r.kind, initialKind: r.kind, methods: registerMethods(r.methods) })}>
                     Modifier
                   </button>
                 </td>
@@ -321,10 +322,15 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             onSubmit={async (e) => {
               e.preventDefault();
               try {
+                if (editing.kind !== editing.initialKind) {
+                  const changed = await call('admin.changeRegisterKind', editing.id, editing.kind);
+                  if (changed.detached.length) toast.ok(`Caisse retirée à ${changed.detached.join(', ')} : attribuez-leur une caisse du bon type`);
+                }
                 await call('admin.updateRegister', editing.id, { name: editing.name, active: editing.active, ...(editing.kind === 'electronic' ? { methods: editing.methods } : {}) });
                 toast.ok('Caisse enregistrée');
                 setEditing(null);
                 registers.reload();
+                users.reload();
                 onChanged();
               } catch (err) {
                 toast.error(err);
@@ -334,6 +340,16 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             <Field label="Nom">
               <input autoFocus value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
+            <Field label="Type" hint="Le type se change tant que la caisse n'a pas servi (aucune journée, vente ni mouvement).">
+              <select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value as RegisterKind, methods: [] })}>
+                {(Object.keys(KIND_LABEL) as RegisterKind[]).map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {editing.kind !== editing.initialKind && <p className="warn-text">La caisse sera retirée aux utilisateurs qui la tiennent : attribuez-leur ensuite une caisse du bon type.</p>}
             {editing.kind === 'electronic' && (
               <Field label="Moyens reçus" hint="Un paiement va dans la caisse électronique du caissier qui reçoit ce moyen.">
                 <div className="checks columns3">
@@ -355,6 +371,27 @@ function Registers({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => 
             </label>
             {!editing.active && <p className="warn-text">Les utilisateurs de cette caisse ne pourront plus vendre tant qu'on ne leur en attribue pas une autre.</p>}
             <div className="actions">
+              <button
+                type="button"
+                className="danger"
+                style={{ marginRight: 'auto' }}
+                title="Seulement une caisse qui n'a jamais servi ; sinon, désactivez-la"
+                onClick={async () => {
+                  if (!(await askConfirm(`Supprimer définitivement la caisse « ${editing.name} » ?`))) return;
+                  try {
+                    const r = await call('admin.deleteRegister', editing.id);
+                    toast.ok(r.detached.length ? `Caisse supprimée, retirée à ${r.detached.join(', ')}` : 'Caisse supprimée');
+                    setEditing(null);
+                    registers.reload();
+                    users.reload();
+                    onChanged();
+                  } catch (err) {
+                    toast.error(err);
+                  }
+                }}
+              >
+                Supprimer la caisse
+              </button>
               <button type="submit" className="primary">
                 Enregistrer
               </button>
@@ -1749,6 +1786,14 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
         </table>
       )}
       <CloudBackup isAdmin={isAdmin} onDownloaded={status.reload} />
+      {isAdmin && (
+        <ResetData
+          onDone={() => {
+            status.reload();
+            onChanged();
+          }}
+        />
+      )}
       {restoring && <RestoreDialog backup={restoring} onClose={() => setRestoring(null)} />}
     </div>
   );

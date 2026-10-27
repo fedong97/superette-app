@@ -305,79 +305,119 @@ export class StockService extends Base {
            VALUES (@id, @number, @store_id, @warehouse_id, @supplier_id, @order_id, @delivery_note, @invoice_id, @user_id, @received_at, @discount)`,
         )
         .run(reception);
-      // Magasin non assujetti : le coût saisi est le prix payé, sans TVA récupérable.
-      const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
-      const insertLine = this.db.prepare(
-        `INSERT INTO reception_lines (id, reception_id, line_no, article_id, order_line_id, qty, unit_cost, vat_rate_bp, lot_id, lot_number, expiry,
-           gross_cost, discount_bp, free_qty, promo_buy, promo_pay, amount)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      input.lines.forEach((line, i) => {
-        if (line.qty <= 0) throw new AppError('Quantité reçue invalide', 'INVALID');
-        if (!Number.isSafeInteger(line.unitCost) || line.unitCost < 0) throw new AppError("Coût d'achat invalide", 'INVALID');
-        const termsError = purchaseTermsError({ qty: line.qty, unitCost: line.unitCost, discountBp: line.discountBp, freeQty: line.freeQty });
-        if (termsError) throw new AppError(termsError, 'INVALID');
-        // Remise, gratuits et part de remise globale : le stock entre au coût net.
-        const amounts = purchaseAmounts({ qty: line.qty, unitCost: line.unitCost, discountBp: line.discountBp, freeQty: line.freeQty });
-        const global = Math.max(0, Math.min(line.globalDiscount ?? 0, amounts.net));
-        const net = amounts.net - global;
-        const netCost = Math.round((net * 1000) / line.qty);
-        const article = this.db
-          .prepare('SELECT a.perishable, a.name, v.rate_bp FROM articles a JOIN vat_rates v ON v.id = a.vat_rate_id WHERE a.id = ?')
-          .get(line.articleId) as { perishable: number; name: string; rate_bp: number } | undefined;
-        if (!article) throw new AppError('Article introuvable', 'NOT_FOUND');
-        if (article.perishable && !line.expiry) {
-          throw new AppError(`Date limite obligatoire pour « ${article.name} » (article périssable)`, 'EXPIRY_REQUIRED');
-        }
-        // Stock négatif (vendu sans stock) : la réception en couvre d'abord le manque.
-        const before = (this.db.prepare('SELECT qty FROM stock WHERE article_id = ? AND warehouse_id = ?').pluck().get(line.articleId, input.warehouseId) as Milli | undefined) ?? 0;
-        const lotId = newId();
-        this.insertLot(ctx, {
-          id: lotId,
-          articleId: line.articleId,
-          warehouseId: input.warehouseId,
-          lotNumber: line.lotNumber,
-          expiry: line.expiry,
-          qty: line.qty,
-          receivedAt: now,
-        });
-        this.applyMovement(ctx, {
-          type: 'RECEPTION',
-          articleId: line.articleId,
-          warehouseId: input.warehouseId,
-          qty: line.qty,
-          unitCost: netCost,
-          lotId,
-          reason: [supplierName, input.reference].filter(Boolean).join(' · ') || null,
-          refType: 'reception',
-          refId: receptionId,
-        });
-        if (before < 0) this.regularize(ctx, line.articleId, input.warehouseId, lotId, Math.min(line.qty, -before), receptionId);
-        insertLine.run(
-          newId(),
-          receptionId,
-          i + 1,
-          line.articleId,
-          line.orderLineId ?? null,
-          line.qty,
-          netCost,
-          vatEnabled ? article.rate_bp : 0,
-          lotId,
-          line.lotNumber ?? null,
-          line.expiry ?? null,
-          line.unitCost,
-          line.discountBp ?? 0,
-          line.freeQty ?? 0,
-          line.promoBuy ?? null,
-          line.promoPay ?? null,
-          net,
-        );
-        this.updatePurchasePrice(line, now);
-        this.enqueue(null, 'article', line.articleId, 'upsert', {});
-      });
+      this.receiveLines(ctx, { receptionId, warehouseId: input.warehouseId, reason: [supplierName, input.reference].filter(Boolean).join(' · ') || null, at: now }, input.lines);
       this.enqueue(ctx, 'reception', receptionId, 'upsert', reception);
       this.audit(ctx.userId, 'stock.receive', 'reception', receptionId, { number, reference: input.reference, lines: input.lines.length });
       return { id: receptionId, number };
+    });
+  }
+
+  /**
+   * Corrige les articles d'un bon de réception (facture directe saisie avec une
+   * erreur) : ce qui était entré ressort du stock (mouvement « Réception »
+   * négatif, pris dans les lots du bon), puis les lignes corrigées entrent à
+   * leur tour. Le stock final est celui qu'aurait donné la bonne saisie.
+   */
+  rewriteReception(ctx: Context, receptionId: string, input: { lines: ReceptionLine[]; discount?: Fcfa; reference?: string | null; reason: string }): void {
+    if (input.lines.length === 0) throw new AppError('Réception vide', 'INVALID');
+    const rec = this.db.prepare('SELECT id, warehouse_id, delivery_note FROM receptions WHERE id = ?').get(receptionId) as
+      | { id: string; warehouse_id: string; delivery_note: string | null }
+      | undefined;
+    if (!rec) throw new AppError('Bon de réception introuvable', 'NOT_FOUND');
+    const old = this.db.prepare('SELECT article_id, qty, lot_id FROM reception_lines WHERE reception_id = ? ORDER BY line_no').all(receptionId) as {
+      article_id: string;
+      qty: Milli;
+      lot_id: string | null;
+    }[];
+    this.tx(() => {
+      for (const l of old) {
+        // D'abord le lot du bon, puis (s'il a déjà été vendu en partie) les autres lots en FEFO.
+        const base = { type: 'RECEPTION' as const, articleId: l.article_id, warehouseId: rec.warehouse_id, reason: input.reason, refType: 'reception', refId: receptionId };
+        const inLot = l.lot_id ? Math.max(0, Math.min(l.qty, (this.db.prepare('SELECT qty FROM lots WHERE id = ?').pluck().get(l.lot_id) as number | undefined) ?? 0)) : 0;
+        if (inLot > 0) this.issue(ctx, { ...base, qty: inLot, lotId: l.lot_id });
+        if (l.qty - inLot > 0) this.issue(ctx, { ...base, qty: l.qty - inLot });
+      }
+      this.db.prepare('DELETE FROM reception_lines WHERE reception_id = ?').run(receptionId);
+      const reference = input.reference === undefined ? rec.delivery_note : input.reference?.trim() || null;
+      this.db.prepare('UPDATE receptions SET discount = ?, delivery_note = ? WHERE id = ?').run(input.discount ?? 0, reference, receptionId);
+      this.receiveLines(ctx, { receptionId, warehouseId: rec.warehouse_id, reason: input.reason, at: this.now() }, input.lines);
+      this.enqueue(ctx, 'reception', receptionId, 'upsert', {});
+      this.audit(ctx.userId, 'stock.receive.correct', 'reception', receptionId, { before: old.length, after: input.lines.length, reason: input.reason });
+    });
+  }
+
+  /** Lignes d'un bon de réception : lots, mouvements au coût net, lignes du bon, dernier prix d'achat. */
+  private receiveLines(ctx: Context, r: { receptionId: string; warehouseId: string; reason: string | null; at: string }, lines: ReceptionLine[]): void {
+    const { receptionId, at: now } = r;
+    // Magasin non assujetti : le coût saisi est le prix payé, sans TVA récupérable.
+    const vatEnabled = (this.db.prepare('SELECT vat_enabled FROM stores WHERE id = ?').pluck().get(ctx.storeId) as number | undefined) !== 0;
+    const insertLine = this.db.prepare(
+      `INSERT INTO reception_lines (id, reception_id, line_no, article_id, order_line_id, qty, unit_cost, vat_rate_bp, lot_id, lot_number, expiry,
+         gross_cost, discount_bp, free_qty, promo_buy, promo_pay, amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    lines.forEach((line, i) => {
+      if (line.qty <= 0) throw new AppError('Quantité reçue invalide', 'INVALID');
+      if (!Number.isSafeInteger(line.unitCost) || line.unitCost < 0) throw new AppError("Coût d'achat invalide", 'INVALID');
+      const termsError = purchaseTermsError({ qty: line.qty, unitCost: line.unitCost, discountBp: line.discountBp, freeQty: line.freeQty });
+      if (termsError) throw new AppError(termsError, 'INVALID');
+      // Remise, gratuits et part de remise globale : le stock entre au coût net.
+      const amounts = purchaseAmounts({ qty: line.qty, unitCost: line.unitCost, discountBp: line.discountBp, freeQty: line.freeQty });
+      const global = Math.max(0, Math.min(line.globalDiscount ?? 0, amounts.net));
+      const net = amounts.net - global;
+      const netCost = Math.round((net * 1000) / line.qty);
+      const article = this.db
+        .prepare('SELECT a.perishable, a.name, v.rate_bp FROM articles a JOIN vat_rates v ON v.id = a.vat_rate_id WHERE a.id = ?')
+        .get(line.articleId) as { perishable: number; name: string; rate_bp: number } | undefined;
+      if (!article) throw new AppError('Article introuvable', 'NOT_FOUND');
+      if (article.perishable && !line.expiry) {
+        throw new AppError(`Date limite obligatoire pour « ${article.name} » (article périssable)`, 'EXPIRY_REQUIRED');
+      }
+      // Stock négatif (vendu sans stock) : la réception en couvre d'abord le manque.
+      const before = (this.db.prepare('SELECT qty FROM stock WHERE article_id = ? AND warehouse_id = ?').pluck().get(line.articleId, r.warehouseId) as Milli | undefined) ?? 0;
+      const lotId = newId();
+      this.insertLot(ctx, {
+        id: lotId,
+        articleId: line.articleId,
+        warehouseId: r.warehouseId,
+        lotNumber: line.lotNumber,
+        expiry: line.expiry,
+        qty: line.qty,
+        receivedAt: now,
+      });
+      this.applyMovement(ctx, {
+        type: 'RECEPTION',
+        articleId: line.articleId,
+        warehouseId: r.warehouseId,
+        qty: line.qty,
+        unitCost: netCost,
+        lotId,
+        reason: r.reason,
+        refType: 'reception',
+        refId: receptionId,
+      });
+      if (before < 0) this.regularize(ctx, line.articleId, r.warehouseId, lotId, Math.min(line.qty, -before), receptionId);
+      insertLine.run(
+        newId(),
+        receptionId,
+        i + 1,
+        line.articleId,
+        line.orderLineId ?? null,
+        line.qty,
+        netCost,
+        vatEnabled ? article.rate_bp : 0,
+        lotId,
+        line.lotNumber ?? null,
+        line.expiry ?? null,
+        line.unitCost,
+        line.discountBp ?? 0,
+        line.freeQty ?? 0,
+        line.promoBuy ?? null,
+        line.promoPay ?? null,
+        net,
+      );
+      this.updatePurchasePrice(line, now);
+      this.enqueue(null, 'article', line.articleId, 'upsert', {});
     });
   }
 

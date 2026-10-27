@@ -511,6 +511,61 @@ export class CashDeskService extends Base {
     return e;
   }
 
+  /**
+   * Corrige une entrée ou sortie de la journée ouverte : motif, tiers, référence
+   * et, pour une autre entrée ou sortie, une avance, un salaire ou un avoir
+   * remboursé, le montant (dans la limite de ce que la personne doit ou a).
+   */
+  update(ctx: Context, id: string, by: string, patch: { amount?: Fcfa; label?: string; party?: string | null; reference?: string | null; piece?: string | null }): TreasuryEntry {
+    const e = this.editable(id);
+    const amount = patch.amount ?? e.amount;
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new AppError('Montant invalide', 'INVALID');
+    if (amount !== e.amount) {
+      const delta = amount - e.amount;
+      switch (e.kind) {
+        case 'other':
+          break;
+        case 'staff_advance':
+          if (this.staff.balance(e.staff_id!).advances + delta < 0) throw new AppError("Cette avance est déjà retenue ou remboursée en partie : le montant ne peut pas descendre si bas", 'INVALID');
+          break;
+        case 'staff_repayment': {
+          const left = this.staff.balance(e.staff_id!).advances;
+          if (delta > left) throw new AppError(`Il ne doit plus que ${Math.max(0, left)} FCFA d'avances`, 'INVALID');
+          break;
+        }
+        case 'staff_salary': {
+          const rest = this.staff.getSalary(e.salary_id!).rest;
+          if (delta > rest) throw new AppError(`Il ne reste que ${rest} FCFA à payer sur ce salaire`, 'INVALID');
+          break;
+        }
+        case 'customer_refund': {
+          const credit = Math.max(0, -this.customers.account(e.store_id, e.customer_id!).balance);
+          if (delta > credit) throw new AppError(`Le client n'a plus que ${credit} FCFA d'avoir`, 'INVALID');
+          break;
+        }
+        default:
+          throw new AppError('Le montant de cette opération ne se modifie pas : supprimez-la et refaites-la', 'INVALID');
+      }
+    }
+    const label = patch.label === undefined ? e.label : patch.label.trim();
+    if (!label) throw new AppError('Indiquez le motif', 'INVALID');
+    const reference = patch.reference === undefined ? e.reference : patch.reference?.trim() || null;
+    if (e.method !== 'CASH' && !reference) throw new AppError('Indiquez la référence de la transaction', 'REFERENCE_REQUIRED');
+    const party = e.kind === 'other' && patch.party !== undefined ? patch.party?.trim() || null : e.party;
+    const piece = patch.piece === undefined ? e.piece : patch.piece?.trim() || null;
+    this.tx(() => {
+      this.db.prepare('UPDATE treasury_entries SET amount = ?, label = ?, party = ?, reference = ?, piece = ?, updated_at = ? WHERE id = ?').run(amount, label, party, reference, piece, this.now(), id);
+      this.enqueue(ctx, 'treasury_entry', id, 'upsert', {});
+      this.audit(by, 'treasury_entry.update', 'treasury_entry', id, {
+        number: e.number,
+        from: { amount: e.amount, label: e.label, party: e.party, reference: e.reference, piece: e.piece },
+        to: { amount, label, party, reference, piece },
+        by: ctx.userId,
+      });
+    });
+    return this.get(id);
+  }
+
   /** Supprime une entrée ou sortie saisie par erreur : elle reste dans l'historique, barrée. */
   cancel(ctx: Context, id: string, by: string, reason: string): TreasuryEntry {
     const e = this.editable(id);

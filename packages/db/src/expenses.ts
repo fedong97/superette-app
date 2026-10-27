@@ -203,6 +203,36 @@ export class ExpenseService extends Base {
     });
   }
 
+  /**
+   * Corrige une dépense (objet, bénéficiaire, montant, référence) tant que sa
+   * journée de caisse est ouverte ; une dépense faite au bureau se corrige tant
+   * que sa période comptable est ouverte.
+   */
+  update(ctx: Context, id: string, by: string, patch: { amount?: Fcfa; label?: string; beneficiary?: string | null; reference?: string | null }): Expense {
+    const e = this.get(id);
+    if (e.status === 'cancelled') throw new AppError('Cette dépense est annulée', 'INVALID');
+    if (e.session_id) {
+      const status = this.db.prepare('SELECT status FROM cash_sessions WHERE id = ?').pluck().get(e.session_id);
+      if (status !== 'open') throw new AppError('La journée de cette dépense est clôturée : elle ne se modifie plus', 'SESSION_CLOSED');
+    }
+    if (e.method !== 'CASH') new EmoneyService(this.db, this.clock).assertNotCarried(e.register_id, e.session_id, e.created_at);
+    this.assertPeriodOpen(ctx.storeId, e.expense_date);
+    const amount = patch.amount ?? e.amount;
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new AppError('Montant invalide', 'INVALID');
+    if (e.vat >= amount) throw new AppError('Le montant doit rester supérieur à la TVA de la dépense', 'INVALID');
+    const label = patch.label === undefined ? e.label : patch.label.trim();
+    if (!label) throw new AppError("Indiquez l'objet de la dépense", 'INVALID');
+    const reference = patch.reference === undefined ? e.reference : patch.reference?.trim() || null;
+    if (e.method !== 'CASH' && !reference) throw new AppError('Référence obligatoire pour ce mode de paiement', 'REFERENCE_REQUIRED');
+    const beneficiary = patch.beneficiary === undefined ? e.beneficiary : patch.beneficiary?.trim() || null;
+    this.tx(() => {
+      this.db.prepare('UPDATE expenses SET amount = ?, label = ?, beneficiary = ?, reference = ?, updated_at = ? WHERE id = ?').run(amount, label, beneficiary, reference, this.now(), id);
+      this.enqueue(ctx, 'expense', id, 'upsert', {});
+      this.audit(by, 'expense.update', 'expense', id, { number: e.number, from: { amount: e.amount, label: e.label, beneficiary: e.beneficiary, reference: e.reference }, to: { amount, label, beneficiary, reference }, by: ctx.userId });
+    });
+    return this.get(id);
+  }
+
   /** Annulation (erreur de saisie). Une sortie de caisse ne s'annule plus une fois le Z clôturé. */
   cancel(ctx: Context, id: string, supervisorId: string, reason: string): Expense {
     const e = this.get(id);

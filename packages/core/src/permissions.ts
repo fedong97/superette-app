@@ -114,7 +114,7 @@ export const PERMISSIONS = {
   cash_operations: { label: 'Consulter toutes les opérations de caisse (listing, recherche)', group: 'Trésorerie', type: 'Menu', parent: 'sales' },
   central_cash: { label: 'Caisse centrale : apports, dépôts en banque, sorties', group: 'Trésorerie', type: 'Menu', roles: MANAGE },
   cash_desk: { label: 'Encaisser et décaisser dans une caisse ouverte (une sortie demande le code du gérant)', group: 'Trésorerie', type: 'Bouton', parent: 'treasury' },
-  cash_desk_edit: { label: 'Antidater ou supprimer une entrée ou une sortie de la journée, annuler l’impression d’un reçu', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
+  cash_desk_edit: { label: 'Modifier, antidater ou supprimer une entrée ou une sortie de la journée, annuler l’impression d’un reçu', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
 
   // --- Fichier des clients -----------------------------------------------------
   customers: { label: 'Liste et fiches des clients', group: 'Fichier des clients', type: 'Menu', roles: COUNTER },
@@ -148,6 +148,7 @@ export const PERMISSIONS = {
   order_close: { label: 'Envoyer, clôturer ou annuler un bon de commande', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_orders' },
   group_orders: { label: 'Commandes groupées pour plusieurs magasins', group: 'Achat de marchandises', type: 'Bouton', roles: MANAGE },
   purchase_invoices: { label: 'Saisir les factures fournisseurs (à partir des bons de réception)', group: 'Achat de marchandises', type: 'Fonction', roles: [...ACCOUNTING, 'buyer'] },
+  purchase_invoice_edit: { label: 'Modifier une facture ou un avoir fournisseur déjà saisi (n°, dates, montants, articles)', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   supplier_pay: { label: 'Payer une facture fournisseur', group: 'Achat de marchandises', type: 'Bouton', parent: 'purchase_invoices' },
   purchase_due: { label: 'Échéancier des fournisseurs', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
   supplier_returns: { label: 'Retours au fournisseur et avoirs attendus', group: 'Achat de marchandises', type: 'Menu', parent: 'purchase_invoices' },
@@ -157,10 +158,11 @@ export const PERMISSIONS = {
   // --- Configuration des produits ----------------------------------------------
   articles: { label: 'Liste et fiches des produits', group: 'Configuration des produits', type: 'Menu', roles: STOCK },
   article_create: { label: 'Ajouter de nouveaux produits', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
-  article_edit: { label: "Modifier la fiche d'un produit (nom, codes-barres, conditionnements, seuils)", group: 'Configuration des produits', type: 'Fonction', parent: 'articles' },
+  article_edit: { label: "Modifier la fiche d'un produit (codes-barres, conditionnements, seuils)", group: 'Configuration des produits', type: 'Fonction', parent: 'articles' },
+  article_rename: { label: "Changer le nom d'un produit déjà créé (bouton « Modifier le nom »)", group: 'Configuration des produits', type: 'Bouton', parent: 'article_edit' },
   article_price: { label: "Modifier les prix de vente et d'achat d'un produit", group: 'Configuration des produits', type: 'Fonction', parent: 'articles' },
   article_deactivate: { label: 'Désactiver ou réactiver un produit', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
-  article_families: { label: 'Créer les rayons et les familles', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
+  article_families: { label: 'Créer, renommer et supprimer les rayons et les familles', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
   store_price: { label: 'Prix propre au magasin', group: 'Configuration des produits', type: 'Fonction', roles: MANAGE },
   import: { label: 'Importer le catalogue (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', roles: MANAGE },
   article_export: { label: 'Exporter la liste des produits (Excel, CSV)', group: 'Configuration des produits', type: 'Bouton', parent: 'articles' },
@@ -176,6 +178,7 @@ export const PERMISSIONS = {
   stock_moves: { label: "Consulter l'historique des mouvements de stock", group: 'Gestion des stocks', type: 'Menu', parent: 'stock' },
   stock_monitoring: { label: "Monitoring de l'évolution des stocks", group: 'Gestion des stocks', type: 'Menu', parent: 'stock' },
   stock_receive: { label: 'Saisir une réception sans commande', group: 'Gestion des stocks', type: 'Bouton', parent: 'stock' },
+  reception_edit: { label: 'Corriger un bon de réception pas encore facturé (articles, quantités, prix)', group: 'Gestion des stocks', type: 'Bouton', roles: MANAGE },
   stock_loss: { label: 'Déstocker des marchandises (pertes, casse, périmés)', group: 'Gestion des stocks', type: 'Bouton', parent: 'stock' },
   containers: { label: 'Emballages consignés : types, vides, fournisseurs', group: 'Gestion des stocks', type: 'Menu', roles: STOCK },
   clearance: { label: 'Déstockage avant péremption et rapport de démarque', group: 'Gestion des stocks', type: 'Menu', roles: MANAGE },
@@ -220,7 +223,7 @@ export const PERMISSIONS = {
   // --- Suivi des charges -------------------------------------------------------
   expenses: { label: 'Consulter toutes les dépenses', group: 'Suivi des charges', type: 'Menu', roles: ACCOUNTING },
   expense_record: { label: 'Saisir une dépense au bureau', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
-  expense_cancel: { label: 'Annuler une dépense (avec le code du gérant)', group: 'Suivi des charges', type: 'Bouton', roles: COUNTER },
+  expense_cancel: { label: 'Modifier ou annuler une dépense (avec le code du gérant)', group: 'Suivi des charges', type: 'Bouton', roles: COUNTER },
   expense_categories: { label: 'Fixer les types de charge', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
   charge_plans: { label: 'Définir les charges fixes et constater les charges', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
 

@@ -394,6 +394,19 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
   const [reason, setReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
   const [askPin, setAskPin] = useState(false);
+  const [editing, setEditing] = useState<{ amount: string; label: string; beneficiary: string; reference: string } | null>(null);
+  const [askEditPin, setAskEditPin] = useState(false);
+  const save = async (pin?: string) => {
+    if (!editing) return;
+    try {
+      await call('expenses.update', id, { amount: parseAmount(editing.amount) ?? undefined, label: editing.label, beneficiary: editing.beneficiary || null, reference: editing.reference || null }, pin);
+      toast.ok('Dépense modifiée');
+      setEditing(null);
+      onChanged();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   const cancel = async (pin?: string) => {
     try {
       await call('expenses.cancel', id, reason, pin);
@@ -460,6 +473,22 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
           )}
         </tbody>
       </table>
+      {editing && (
+        <div className="grid2">
+          <Field label="Montant (FCFA)">
+            <input autoFocus inputMode="numeric" value={editing.amount} onChange={(ev) => setEditing({ ...editing, amount: ev.target.value })} />
+          </Field>
+          <Field label="Objet">
+            <input value={editing.label} onChange={(ev) => setEditing({ ...editing, label: ev.target.value })} />
+          </Field>
+          <Field label="Bénéficiaire">
+            <input value={editing.beneficiary} onChange={(ev) => setEditing({ ...editing, beneficiary: ev.target.value })} />
+          </Field>
+          <Field label="Référence">
+            <input value={editing.reference} onChange={(ev) => setEditing({ ...editing, reference: ev.target.value })} />
+          </Field>
+        </div>
+      )}
       {cancelling && (
         <Field label="Motif de l'annulation">
           <input autoFocus value={reason} onChange={(ev) => setReason(ev.target.value)} />
@@ -469,6 +498,17 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
         <button onClick={() => call('expenses.print', id).catch(toast.error)}>Imprimer la pièce</button>
         {e.status === 'active' &&
           has(user, 'expense_cancel') &&
+          !cancelling &&
+          (editing ? (
+            <button className="primary" disabled={!editing.label.trim() || !parseAmount(editing.amount)} onClick={() => (isManager(user) ? void save() : setAskEditPin(true))}>
+              Enregistrer les modifications
+            </button>
+          ) : (
+            <button onClick={() => setEditing({ amount: String(e.amount), label: e.label, beneficiary: e.beneficiary ?? '', reference: e.reference ?? '' })}>Modifier</button>
+          ))}
+        {e.status === 'active' &&
+          !editing &&
+          has(user, 'expense_cancel') &&
           (cancelling ? (
             <button className="danger" disabled={!reason.trim()} onClick={() => (isManager(user) ? void cancel() : setAskPin(true))}>
               Confirmer l'annulation
@@ -477,6 +517,26 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
             <button onClick={() => setCancelling(true)}>Annuler la dépense</button>
           ))}
       </div>
+      {askEditPin && (
+        <SupervisorPrompt
+          action={`Modification de la dépense ${e.number}`}
+          onCancel={() => setAskEditPin(false)}
+          onConfirm={(pin) => {
+            setAskEditPin(false);
+            void save(pin);
+          }}
+        />
+      )}
+      {askEditPin && (
+        <SupervisorPrompt
+          action={`Modification de la dépense ${e.number}`}
+          onCancel={() => setAskEditPin(false)}
+          onConfirm={(pin) => {
+            setAskEditPin(false);
+            void save(pin);
+          }}
+        />
+      )}
       {askPin && (
         <SupervisorPrompt
           action={`Annulation de la dépense ${e.number}`}

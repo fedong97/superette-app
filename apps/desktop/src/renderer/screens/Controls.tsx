@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PAYMENT_METHODS, type PaymentMethod, type XlsxSheet, xlsxWorkbook } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateFr, dateTime, fcfa, qty, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, askConfirm, dateFr, dateTime, fcfa, qty, today, useLoad, useToast } from '../ui';
 import { SaleDetail } from './Sales';
 import { tx } from '../tax';
 
@@ -890,10 +890,27 @@ export function CreditControl() {
 
 /** Rayonnage des articles : rayons et familles avec articles, stock et ruptures. */
 export function Shelving({ canEdit }: { canEdit: boolean }) {
+  const toast = useToast();
   const data = useLoad(() => call('stock.shelving'), []);
   const departments = useLoad(() => call('catalogue.departments'), []);
   const d = data.data;
   const [adding, setAdding] = useState<'department' | 'family' | null>(null);
+  const [editing, setEditing] = useState<ShelfEdit | null>(null);
+  const reload = () => {
+    data.reload();
+    departments.reload();
+  };
+  const remove = async (kind: 'department' | 'family', id: string, name: string) => {
+    if (!(await askConfirm(kind === 'department' ? `Supprimer le rayon « ${name} » ?` : `Supprimer la famille « ${name} » ?`))) return;
+    try {
+      if (kind === 'department') await call('catalogue.deleteDepartment', id);
+      else await call('catalogue.deleteFamily', id);
+      toast.ok(kind === 'department' ? 'Rayon supprimé' : 'Famille supprimée');
+      reload();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   let last = '';
   return (
     <>
@@ -924,6 +941,7 @@ export function Shelving({ canEdit }: { canEdit: boolean }) {
             <th className="r">Sans stock</th>
             <th className="r">Valeur du stock</th>
             <th className="r">Part</th>
+            {canEdit && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -932,18 +950,50 @@ export function Shelving({ canEdit }: { canEdit: boolean }) {
             last = r.department;
             return (
               <tr key={`${r.department_id}-${r.family_id}`} className={first ? 'group-start' : ''}>
-                <td className="b">{first ? r.department : ''}</td>
-                <td>{r.family}</td>
-                <td className="r">{r.articles}</td>
-                <td className="r">{r.in_stock}</td>
+                <td className="b">
+                  {first ? r.department : ''}
+                  {first && canEdit && r.department_id && (
+                    <span className="row-actions">
+                      <button className="link" title="Renommer le rayon" onClick={() => setEditing({ kind: 'department', id: r.department_id!, name: r.department })}>
+                        Renommer
+                      </button>
+                      <button className="link danger" title="Supprimer le rayon (sans famille)" onClick={() => void remove('department', r.department_id!, r.department)}>
+                        Supprimer
+                      </button>
+                    </span>
+                  )}
+                </td>
+                <td>{r.family || <span className="muted">aucune famille</span>}</td>
+                <td className="r">{r.family_id || r.articles ? r.articles : ''}</td>
+                <td className="r">{r.family_id || r.articles ? r.in_stock : ''}</td>
                 <td className={`r ${r.out_of_stock ? 'neg' : ''}`}>{r.out_of_stock || ''}</td>
-                <td className="r">{fcfa(r.value)}</td>
-                <td className="r muted">{d.value ? `${((r.value / d.value) * 100).toFixed(1).replace('.', ',')} %` : ''}</td>
+                <td className="r">{r.family_id || r.articles ? fcfa(r.value) : ''}</td>
+                <td className="r muted">{d.value && r.value ? `${((r.value / d.value) * 100).toFixed(1).replace('.', ',')} %` : ''}</td>
+                {canEdit && (
+                  <td className="r nowrap">
+                    {r.family_id && r.department_id && (
+                      <>
+                        <button className="link" onClick={() => setEditing({ kind: 'family', id: r.family_id!, name: r.family, departmentId: r.department_id! })}>
+                          Modifier
+                        </button>{' '}
+                        <button
+                          className="link danger"
+                          disabled={r.articles > 0}
+                          title={r.articles > 0 ? 'Rangez d’abord ses produits dans une autre famille' : 'Supprimer la famille'}
+                          onClick={() => void remove('family', r.family_id!, r.family)}
+                        >
+                          Supprimer
+                        </button>
+                      </>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+      {canEdit && <p className="muted small">Une famille se supprime quand elle n’a plus de produit, même désactivé ; un rayon, quand il n’a plus de famille.</p>}
       {adding && (
         <ShelfDialog
           kind={adding}
@@ -951,12 +1001,71 @@ export function Shelving({ canEdit }: { canEdit: boolean }) {
           onClose={() => setAdding(null)}
           onSaved={() => {
             setAdding(null);
-            data.reload();
-            departments.reload();
+            reload();
+          }}
+        />
+      )}
+      {editing && (
+        <ShelfEditDialog
+          edit={editing}
+          departments={departments.data ?? []}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            reload();
           }}
         />
       )}
     </>
+  );
+}
+
+type ShelfEdit = { kind: 'department'; id: string; name: string } | { kind: 'family'; id: string; name: string; departmentId: string };
+
+/** Renommer un rayon, renommer une famille ou la ranger dans un autre rayon. */
+function ShelfEditDialog({ edit, departments, onClose, onSaved }: { edit: ShelfEdit; departments: { id: string; name: string }[]; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [name, setName] = useState(edit.name);
+  const [departmentId, setDepartmentId] = useState(edit.kind === 'family' ? edit.departmentId : '');
+  return (
+    <Modal title={edit.kind === 'department' ? `Renommer le rayon ${edit.name}` : `Modifier la famille ${edit.name}`} onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            if (edit.kind === 'department') await call('catalogue.renameDepartment', edit.id, name);
+            else await call('catalogue.updateFamily', edit.id, { name, departmentId });
+            toast.ok('Enregistré');
+            onSaved();
+          } catch (err) {
+            toast.error(err);
+          }
+        }}
+      >
+        {edit.kind === 'family' && (
+          <Field label="Rayon">
+            <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} required>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <Field label="Nom">
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required />
+        </Field>
+        <div className="actions">
+          <button type="button" onClick={onClose}>
+            Annuler
+          </button>
+          <button type="submit" className="primary" disabled={!name.trim()}>
+            Enregistrer
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

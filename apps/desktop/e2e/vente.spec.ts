@@ -21,7 +21,7 @@ test('le caissier vend au comptant en scannant un code-barres, et le stock baiss
     await invoke(page, 'treasury.open', 0, undefined, reg.id);
 
     // Vente à l'écran : 2 pièces scannées, réglées en espèces au montant exact.
-    await page.getByRole('button', { name: 'Caisse 1', exact: true }).click();
+    await page.getByRole('button', { name: 'V. cash 1', exact: true }).click();
     const scan = page.getByPlaceholder(/code-barres/).first();
     await scan.fill('2*6001234567899');
     await scan.press('Enter');

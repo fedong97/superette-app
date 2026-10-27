@@ -84,6 +84,8 @@ export interface PaletteEntry {
   /** Menu d'où vient l'écran, par exemple « Trésorerie ». */
   menu: string;
   label: string;
+  /** Autres mots qui trouvent cet écran (synonymes, anciens noms), sans s'afficher. */
+  words?: string;
   run: () => void;
 }
 
@@ -100,7 +102,7 @@ export function CommandPalette({ entries, onClose }: { entries: PaletteEntry[]; 
         const key = `${e.menu}›${e.label}`;
         if (seen.has(key)) return false;
         seen.add(key);
-        const text = fold(`${e.menu} ${e.label}`);
+        const text = fold(`${e.menu} ${e.label} ${e.words ?? ''}`);
         return words.every((w) => text.includes(w));
       })
       // Les mots trouvés dans le nom de l'écran (plutôt que dans celui du menu) passent devant.
@@ -124,11 +126,11 @@ export function CommandPalette({ entries, onClose }: { entries: PaletteEntry[]; 
     e.run();
   };
   return (
-    <Modal title="Rechercher un écran" onClose={onClose}>
+    <Modal title="Rechercher une fonction" onClose={onClose}>
       <div className="palette">
         <input
           autoFocus
-          placeholder="Tapez : clôture, inventaire, client, TVA…"
+          placeholder="Tapez : vente, inventaire, réception fournisseur, clôture, TVA…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {

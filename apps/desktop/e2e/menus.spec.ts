@@ -62,6 +62,11 @@ test('menus rangés par métier, onglets du haut selon le rôle', async () => {
     await shot(page, '16-magasinier');
     await railMenu(page, 'Stock');
     await shot(page, '17-magasinier-menu-stock');
+    // Petit écran : le menu passe sur deux colonnes au lieu de défiler.
+    await page.locator('nav.rail .rail-item[title="Stock"]').click();
+    await page.setViewportSize({ width: 1366, height: 680 });
+    await railMenu(page, 'Stock');
+    await shot(page, '18-petit-ecran-menu-en-colonnes');
     expect(errors).toEqual([]);
   } finally {
     await app.close();

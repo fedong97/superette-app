@@ -92,7 +92,7 @@ test('paie d’après le pointage, pointeuse à empreinte, alertes et avertissem
     await page.locator('button.mdi-x').last().click();
 
     // Pointeuse : le fichier de la clé USB (journées de Marie), puis un envoi par le réseau.
-    await openMenu(page, 'Personnel', 'Pointeuses à empreinte');
+    await openMenu(page, 'Personnel', 'Équipes, rotations et pointeuses');
     await maximize(page);
     const usb = join(dir, '1_attlog.dat');
     const lines = days.slice(0, 12).flatMap((d) => [`  ${marie.punch_number}\t${d} 07:58:12\t0\t1\t0\t0`, `  ${marie.punch_number}\t${d} 16:02:40\t1\t1\t0\t0`]);

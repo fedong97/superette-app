@@ -712,7 +712,7 @@ pre.contract { white-space: pre-wrap; font-family: inherit; font-size: 13px; lin
 .menu-drop hr { border: none; border-top: 1px solid var(--line); margin: 4px 6px; width: auto; }
 /* Petit titre qui regroupe les écrans d'un menu. */
 .menu-drop .menu-head { padding: 10px 10px 2px; font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; border-top: 1px solid var(--line); margin-top: 4px; }
-.menu-drop .menu-title + .menu-head { border-top: none; margin-top: 0; padding-top: 2px; }
+.menu-drop .menu-title + .menu-group > .menu-head:first-child { border-top: none; margin-top: 0; padding-top: 2px; }
 .topbar { display: flex; align-items: flex-start; gap: 8px; padding: 7px 12px; background: #fff; border-bottom: 1px solid var(--line); min-width: 0; }
 .topbar .menu { position: relative; }
 .quick-tabs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
@@ -1138,6 +1138,11 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .rail-item.small { padding: 3px 2px; font-size: 10px; }
 .rail-item.small i { font-size: 15px; }
 .menu-drop.fixed { position: fixed; }
+/* Menu trop long pour la hauteur de l'écran : en colonnes, chaque groupe d'un seul tenant. */
+.menu-drop.cols { display: block; column-gap: 6px; }
+.menu-drop.cols .menu-title { column-span: all; }
+.menu-group { display: flex; flex-direction: column; break-inside: avoid; }
+.menu-drop.cols .menu-group > .menu-head:first-child { border-top: none; margin-top: 0; }
 .mobile-pay { border: 1px solid var(--brand-line); background: var(--brand-pale); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
 .mobile-pay .inline input { flex: 1; }
 .mobile-pay.pending { display: flex; gap: 12px; align-items: center; justify-content: space-between; background: #fffaeb; border-color: #f5d27a; }

@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.88.0',
+    items: [
+      'Menus rangés par métier : 10 menus au lieu de 15 (Vente, Trésorerie, Stock, Articles, Achats, Clients, Dépenses, Personnel, Suivi, Compta). Chaque écran n’y est plus qu’une fois, sous de petits titres (Commander, Recevoir, Payer…).',
+      'Un menu ouvert s’affiche en entier, sur plusieurs colonnes si l’écran est trop bas : plus besoin de défiler.',
+      'Onglets du haut selon le rôle : le caissier a V. cash 1, V. cash 2, V. crédit, Mes factures et Ma caisse ; le magasinier ses tâches, la réception et le stock ; le gérant son tableau de bord. Chacun peut toujours les personnaliser.',
+      'Ctrl+K « Rechercher une fonction » trouve aussi les mots du métier et les anciens noms : inventaire, réception fournisseur, facture, magasinier…',
+      'Fichier devient « Mon compte », sous votre nom en haut à droite. Les barres déjà personnalisées sont gardées et suivent les nouveaux noms.',
+    ],
+  },
+  {
     version: '0.87.0',
     items: [
       'Bons d’achat : vendus à la caisse ou offerts, imprimés avec un code-barres et payés par ce code au moment de l’achat ; un remboursement peut aussi se faire en bon. Ventes › Bons d’achat suit ce qui reste sur chacun.',
@@ -176,7 +186,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Messages avec la solution : une erreur propose le bouton qui la règle (ouvrir la caisse, monter du stock de la réserve, relier le serveur…).',
       'Saisies retrouvées : un bon de commande, un devis, une fiche article ou une réception en cours sont gardés ; après une coupure, l’accueil propose de les reprendre.',
       'Annuler pendant 10 secondes (ou Ctrl+Z) au lieu de « Êtes-vous sûr ? » pour les actions simples, comme vider une fiche.',
-      'Clavier : Ctrl+/ montre les raccourcis de la page ; les boutons affichent leur touche ; Ctrl+Entrée valide la fenêtre ouverte. Thème sombre et contraste fort (Fichier › Thème).',
+      'Clavier : Ctrl+/ montre les raccourcis de la page ; les boutons affichent leur touche ; Ctrl+Entrée valide la fenêtre ouverte. Thème sombre et contraste fort (Mon compte › Thème).',
       'Caisse : le ticket porte le code-barres de son numéro ; scanné en caisse, il ouvre retour (toujours avec le code du gérant), réimpression et facture A4. Touches rapides rangées par rayon, avec photos. « Avant de clôturer » rappelle les tickets en attente et paiements non confirmés.',
       'Le client voulait… (Ctrl+M en caisse, ou au rayon sur le téléphone) : les ventes manquées sont comptées dans la proposition de commande. Le téléphone montre aussi le stock des autres dépôts et magasins, la prochaine livraison et le produit de remplacement.',
       'Magasinier : réception au téléphone devant le camion (le PC valide), réassort du rayon depuis la réserve, tâches du jour sur l’accueil.',
@@ -190,12 +200,12 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Prix négociés par article : dans la fiche d’un client, un prix convenu pour chaque article. La caisse le prend tout seul quand il est plus bas que le prix du jour.',
       'Zones et tournées : rangez vos clients par quartier (fiche client) ; la liste et la balance âgée se filtrent par zone pour la tournée du livreur ou du recouvreur.',
       'Lettrage : en encaissant un règlement client, cochez les factures qu’il règle.',
-      'Compensation : un grossiste qui est aussi votre fournisseur ? Reliez ses deux fiches, puis « Compenser avec son compte fournisseur » solde une facture fournisseur avec ce qu’il vous doit, sans argent (Client › Compensations).',
+      'Compensation : un grossiste qui est aussi votre fournisseur ? Reliez ses deux fiches, puis « Compenser avec son compte fournisseur » solde une facture fournisseur avec ce qu’il vous doit, sans argent (Clients › Compensations).',
       'Demande de modification de facture : le vendeur sans le droit la demande avec un motif depuis la facture ; le gérant l’accorde ou la refuse (Vente › Demandes de modification de facture).',
-      'Dépôt-vente chez les revendeurs : confiez de la marchandise à un client, puis la fiche de contrôle facture ce qu’il a vendu et reprend le reste (Client › Dépôt-vente).',
+      'Dépôt-vente chez les revendeurs : confiez de la marchandise à un client, puis la fiche de contrôle facture ce qu’il a vendu et reprend le reste (Clients › Dépôt-vente).',
       'Dépôt d’avaries : un dépôt d’usage « Avaries » garde la marchandise abîmée hors de la vente et des propositions de commande (Administration › Dépôts).',
-      'Bonus fournisseurs : « 12 achetés, 10 payés » sur l’article du fournisseur, proposé sur les bons de commande ; Fournisseur › Bonus fournisseurs chiffre les unités gratuites reçues.',
-      'Courbe du patrimoine (Trésorerie › Courbe du patrimoine) et sociétés : regroupez vos magasins par société et voyez leurs chiffres consolidés (Administration › Sociétés).',
+      'Bonus fournisseurs : « 12 achetés, 10 payés » sur l’article du fournisseur, proposé sur les bons de commande ; Achats › Bonus fournisseurs chiffre les unités gratuites reçues.',
+      'Courbe du patrimoine (Compta › Courbe du patrimoine) et sociétés : regroupez vos magasins par société et voyez leurs chiffres consolidés (Administration › Sociétés).',
     ],
   },
   {
@@ -218,7 +228,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     items: [
       'Retours fournisseur : Achats › Retours fournisseur et avoirs attendus. La marchandise rendue (casse, périmés, erreur) sort du stock, le bon s’imprime, et l’avoir du fournisseur se saisit depuis le bon pour venir en déduction de sa dette.',
       'Prix par quantité : dans la fiche d’un produit, jusqu’à 3 paliers (à partir de N pièces, tel prix). Remises par famille : dans la fiche d’un client, un pourcentage par famille d’articles. La caisse applique les deux toute seule.',
-      'Factures récapitulatives : Client › Factures récapitulatives. Les tickets et factures d’un client sur le mois, sur une seule facture à imprimer (sans nouvelle écriture comptable).',
+      'Factures récapitulatives : Clients › Factures récapitulatives. Les tickets et factures d’un client sur le mois, sur une seule facture à imprimer (sans nouvelle écriture comptable).',
       'Contremarque : dans une commande client, « Commander au fournisseur ce qui manque » ajoute les quantités manquantes au bon de commande du fournisseur ; la commande montre où en est la livraison.',
       'Comptabilité : trésorerie prévisionnelle semaine par semaine, budgets mensuels par compte comparés au réel, analytique par rayon et par magasin.',
       'Remises de chèques : les chèques reçus à partir de cette version restent au compte 513 jusqu’au bordereau de remise en banque (Trésorerie › Remises de chèques en banque).',
@@ -263,7 +273,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.69.0',
     items: [
       'Accueil › « Ma journée » pour le caissier et le vendeur : ses ventes du jour, ses tickets, son panier moyen, la barre de son objectif et sa commission du mois.',
-      'Fichier › « Mode formation… » : ONIX 360 s’ouvre sur une copie de la boutique avec un bandeau orange. On y vend pour s’entraîner ; rien ne compte dans la boutique ni ne part au serveur. « Quitter la formation » ramène à la boutique.',
+      'Mon compte › « Mode formation… » : ONIX 360 s’ouvre sur une copie de la boutique avec un bandeau orange. On y vend pour s’entraîner ; rien ne compte dans la boutique ni ne part au serveur. « Quitter la formation » ramène à la boutique.',
     ],
   },
   {
@@ -272,7 +282,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Fiche utilisateur : l’identifiant se modifie, et « Supprimer l’utilisateur » efface un compte jamais utilisé ou retire des listes celui qui a déjà travaillé (son nom reste sur ses tickets).',
       '« Ajouter un employé » : utilisateur, rôle, caisses, fiche collaborateur (poste, téléphone, salaire) et badge en une seule fiche.',
       'Badge : une carte avec code-barres ; scannée à l’écran de connexion, elle remplit l’identifiant.',
-      'Charge › Collaborateurs › Pointage : arrivée à la première connexion, départ à la fermeture de la caisse ou avec « Je pars ». Heures, retards et absences du mois ; le gérant corrige un oubli avec un motif. Horaires dans Administration › Paramètres.',
+      'Personnel › Collaborateurs › Pointage : arrivée à la première connexion, départ à la fermeture de la caisse ou avec « Je pars ». Heures, retards et absences du mois ; le gérant corrige un oubli avec un motif. Horaires dans Administration › Paramètres.',
     ],
   },
   {
@@ -291,7 +301,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.65.0',
     items: [
-      'Charge › Collaborateurs › Objectifs et commissions : un objectif du mois et du jour par vendeur, le taux atteint, et sa commission (taux général et taux par famille d’articles). Les ventes comptées sont celles validées sous son compte, à crédit comprises, moins ses retours.',
+      'Personnel › Collaborateurs › Objectifs et commissions : un objectif du mois et du jour par vendeur, le taux atteint, et sa commission (taux général et taux par famille d’articles). Les ventes comptées sont celles validées sous son compte, à crédit comprises, moins ses retours.',
       'Salaires du mois : la commission du mois s’ajoute au brut proposé, dans sa propre colonne.',
     ],
   },
@@ -326,7 +336,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.61.0',
     items: [
-      'Comptabilité › Immobilisations : enregistrez congélateurs, PC, véhicules et travaux du magasin. Le plan d’amortissement se calcule seul et s’imprime ; la dotation est passée à chaque fin d’exercice, et la vente ou la mise au rebut d’un bien passe ses écritures.',
+      'Compta › Immobilisations : enregistrez congélateurs, PC, véhicules et travaux du magasin. Le plan d’amortissement se calcule seul et s’imprime ; la dotation est passée à chaque fin d’exercice, et la vente ou la mise au rebut d’un bien passe ses écritures.',
     ],
   },
   {
@@ -353,7 +363,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.58.0',
     items: [
       'Fiches boutique : Administration › Fiches boutique sort une copie de la boutique sur une clé USB pendant que la caisse vend. La boutique n’est jamais arrêtée.',
-      'Fiche d’intervention : le technicien l’ouvre sur son PC (Fichier › Ouvrir une boutique › Ouvrir une fiche), sans réinstaller ni toucher à la base, y travaille puis la rapporte. « Rapporter une fiche » ajoute ses modifications à la boutique sans rien effacer de ce qu’elle a vendu entre-temps ; si un même élément a changé des deux côtés, la modification la plus récente est gardée.',
+      'Fiche d’intervention : le technicien l’ouvre sur son PC (Mon compte › Ouvrir une boutique › Ouvrir une fiche), sans réinstaller ni toucher à la base, y travaille puis la rapporte. « Rapporter une fiche » ajoute ses modifications à la boutique sans rien effacer de ce qu’elle a vendu entre-temps ; si un même élément a changé des deux côtés, la modification la plus récente est gardée.',
       'Copie pour le comptable : il fait ses états chez lui pendant que la boutique tourne, et prend une nouvelle copie à sa prochaine visite.',
       'Installation préparée : paramétrez la boutique du client au bureau (magasin, utilisateurs, articles) dans une nouvelle boutique, puis « Préparer l’installation ». Sur le PC du client, au premier démarrage : « Installer une boutique préparée ».',
       'Un PC peut tenir plusieurs boutiques : l’écran de connexion propose « Changer de boutique », et chaque boutique garde ses utilisateurs, sa licence et ses réglages de PC.',
@@ -416,7 +426,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.51.0',
     items: [
-      'Relances par WhatsApp : dans Client › Situation (balance âgée) ou le compte d’un client, « Relancer » ouvre WhatsApp avec un message prêt (solde, retard, factures dues), modifiable avant l’envoi.',
+      'Relances par WhatsApp : dans Clients › Situation et échéances (balance âgée) ou le compte d’un client, « Relancer » ouvre WhatsApp avec un message prêt (solde, retard, factures dues), modifiable avant l’envoi.',
       '« Relancer les clients en retard » enchaîne tous les clients en retard, un par un ; « Relevé en PDF » prépare le relevé à joindre au message.',
       'Chaque relance est notée (date, auteur, montant dû) et s’affiche dans la balance âgée. Le message se règle dans Administration › Paramètres › Crédit clients.',
     ],
@@ -450,14 +460,14 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.43.1',
     items: [
       'Barre verte : tous les menus y sont (Fichier, Fabrication, Fournisseurs, Charges, Transferts, Comptabilité, Fiscal en plus). Si l’écran est petit, la barre défile à la molette.',
-      '« ✎ Personnaliser » en bas de la barre (ou Fichier › Personnaliser la barre latérale) : cochez les menus à afficher et rangez-les avec ↑ ↓. Le choix vaut pour chaque utilisateur ; « Rétablir » revient à tous les menus.',
+      '« ✎ Personnaliser » en bas de la barre (ou Mon compte › Personnaliser la barre latérale) : cochez les menus à afficher et rangez-les avec ↑ ↓. Le choix vaut pour chaque utilisateur ; « Rétablir » revient à tous les menus.',
     ],
   },
   {
     version: '0.43.0',
     items: [
       'Bouton ⟳ dans la barre de chaque fenêtre (ou F5) : la page se recharge sans la fermer. À la caisse, F5 ouvre toujours le tiroir.',
-      'Exercices comptables (Comptabilité › Exercices, ou Administration) : ouvrir un exercice, changer ses dates, le clôturer et le rouvrir. La clôture reporte les soldes en à-nouveaux sur l’exercice suivant, avec le résultat au 121 ou au 129 ; aucune écriture ne se passe plus sur un exercice clôturé.',
+      'Exercices comptables (Compta › Exercices, ou Administration) : ouvrir un exercice, changer ses dates, le clôturer et le rouvrir. La clôture reporte les soldes en à-nouveaux sur l’exercice suivant, avec le résultat au 121 ou au 129 ; aucune écriture ne se passe plus sur un exercice clôturé.',
       'Plan comptable SYSCOHADA complet (classes 1 à 8). Bouton 📖 « Plan comptable » en créant une catégorie de dépense ou une écriture : recherche par numéro ou intitulé, et création d’un sous-compte sans quitter la saisie.',
       'Sauvegarde automatique à fréquence choisie (toutes les 15 min, 1 h, 2 h… jusqu’à 12 h) dans le dossier choisi : Administration › Sauvegardes.',
       'Menu Transfert : « Nouveau transfert » et « Liste des transferts » (par période, dépôt et état), avec Modifier et Supprimer. Un transfert reçu supprimé ou modifié remet la marchandise dans le dépôt de départ.',
@@ -526,7 +536,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.39.0',
     items: [
-      'Résumé du jour (Administration › Résumé du jour) : ventes, encaissements par moyen de paiement, état des caisses et écarts, meilleures ventes et points à surveiller, à envoyer au gérant par WhatsApp en un clic.',
+      'Résumé du jour (Suivi › Résumé du jour) : ventes, encaissements par moyen de paiement, état des caisses et écarts, meilleures ventes et points à surveiller, à envoyer au gérant par WhatsApp en un clic.',
       'L’administrateur peut aussi faire partir ce résumé chaque soir par e-mail, à l’heure choisie, depuis le PC où il le règle.',
       'Le contrat de licence s’affiche à l’installation et dans Administration › Licence.',
     ],
@@ -558,7 +568,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.35.0',
     items: [
       'Photo de l’article sur sa fiche, en miniature dans la liste des produits et dans la recherche de la caisse.',
-      'Achats › Saisir une facture directe : la facture avec ses articles, sans bon de commande. Le stock entre, le bon de réception est créé, et la facture peut être réglée tout de suite.',
+      'Achats › Facture directe : la facture avec ses articles, sans bon de commande. Le stock entre, le bon de réception est créé, et la facture peut être réglée tout de suite.',
       'Remise % et promo « N achetés, M payés » sur chaque ligne du bon de commande, de la réception et de la facture directe ; remise globale sur la facture directe. Le stock entre au coût net.',
       'Collaborateurs : compte de rattachement au choix (Personnel 4211, CNPS 4311, État 4471, Associés 4621 ou autre compte de la classe 4), son sous-compte est créé dessous.',
     ],
@@ -569,7 +579,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Opérations de trésorerie : boutons « Encaisser » et « Décaisser » sur chaque volet, avec le type (client, fournisseur, personnel, charge, reversement, autre), le n° de pièce et le motif.',
       'Bouton « Action » : imprimer le reçu (ticket ou A4), décharge à faire signer, antidater, convertir une sortie en règlement fournisseur ou en remboursement client, supprimer.',
       '« Totaux par nature d’entrée / sortie » sous les volets de la journée.',
-      'Charge › Collaborateurs : fiche de chaque employé, avec ses sous-comptes 4211… (salaires dus) et 4251… (avances) créés en comptabilité.',
+      'Personnel › Collaborateurs : fiche de chaque employé, avec ses sous-comptes 4211… (salaires dus) et 4251… (avances) créés en comptabilité.',
       'Salaires du mois : constater le salaire, retenir les avances, payer le net au bureau ou à la caisse, imprimer le bulletin et l’extrait de compte.',
     ],
   },

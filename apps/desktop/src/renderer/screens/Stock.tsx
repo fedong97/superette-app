@@ -333,7 +333,7 @@ function Reception() {
       {received && <ReceptionLabels title="Réception enregistrée · imprimer les étiquettes ?" lines={received} onClose={() => setReceived(null)} />}
       <p className="muted">
         Réception libre, sans bon de commande (lot et date limite). Pour réceptionner une commande : Achats › Bons de commande. Pour saisir la facture en même temps :
-        Achats › Saisir une facture directe.
+        Achats › Facture directe.
       </p>
       <div className="grid3">
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} />

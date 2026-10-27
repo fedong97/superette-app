@@ -656,7 +656,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         },
         {
           label: 'Borne de pointage à l’entrée',
-          hint: 'Un PC ou une tablette près de la porte : chacun y pointe en arrivant et en partant, même sans compte. Ce PC devient borne dans Personnel › Équipes et entrées.',
+          hint: 'Un PC ou une tablette près de la porte : chacun y pointe en arrivant et en partant, même sans compte. Ce PC devient borne dans Personnel › Équipes, rotations et pointeuses.',
           render: () => yes('punchKiosk'),
         },
         ...(sv('punchKiosk')
@@ -707,7 +707,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         },
         {
           label: 'Pointeuse à empreinte (ZKTeco)',
-          hint: 'La pointeuse envoie les passages à un PC du magasin par le réseau, ou on importe le fichier de sa clé USB. Les empreintes restent dans l’appareil. Réglage du PC : Personnel › Équipes et entrées.',
+          hint: 'La pointeuse envoie les passages à un PC du magasin par le réseau, ou on importe le fichier de sa clé USB. Les empreintes restent dans l’appareil. Réglage du PC : Personnel › Équipes, rotations et pointeuses.',
           render: () => yes('fingerprint'),
         },
         {

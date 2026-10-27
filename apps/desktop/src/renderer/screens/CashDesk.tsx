@@ -402,7 +402,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
               ))}
             </div>
             {loan === 'staff_advance' && (
-              <Field label="Collaborateur" hint={o.staff.length ? undefined : 'Ajoutez d’abord vos collaborateurs dans Charge › Collaborateurs.'}>
+              <Field label="Collaborateur" hint={o.staff.length ? undefined : 'Ajoutez d’abord vos collaborateurs dans Personnel › Collaborateurs.'}>
                 <select value={target} onChange={(e) => setTarget(e.target.value)}>
                   <option value="">Choisir…</option>
                   {o.staff.map((x) => (
@@ -416,7 +416,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
               </Field>
             )}
             {loan === 'staff_salary' && (
-              <Field label="Salaire à payer" hint={o.salaries.length ? undefined : 'Aucun salaire constaté à payer : constatez-les dans Charge › Salaires du mois.'}>
+              <Field label="Salaire à payer" hint={o.salaries.length ? undefined : 'Aucun salaire constaté à payer : constatez-les dans Personnel › Salaires du mois.'}>
                 <select value={target} onChange={(e) => choose(e.target.value, o.salaries.find((x) => x.id === e.target.value)?.rest)}>
                   <option value="">Choisir…</option>
                   {o.salaries.map((x) => (

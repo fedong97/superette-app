@@ -3,7 +3,7 @@ import { type Page, expect, test } from '@playwright/test';
 import { createStore, invoke, launch } from './app';
 
 /** Menus que voient le caissier et le vendeur : tout y est en anglais. */
-const CASHIER_MENUS = ['Register', 'Sales', 'Treasury', 'Customers'];
+const CASHIER_MENUS = ['Sales', 'Treasury', 'Customers'];
 const SKIP = /Quit|Switch user|Sign out|Sync/i;
 
 /** Textes encore en français à l'écran (mots courants ou lettres accentuées), hors données saisies. */
@@ -72,7 +72,7 @@ test('en anglais, les écrans du caissier et la vente sont traduits', async () =
     };
 
     // Vente en anglais : scan, montant exact, VALIDATE.
-    await page.getByRole('button', { name: 'Register 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Cash 1', exact: true }).click();
     const scan = page.getByPlaceholder(/barcode/).first();
     await scan.fill('2*6001234567899');
     await scan.press('Enter');

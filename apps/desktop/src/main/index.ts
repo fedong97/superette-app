@@ -51,6 +51,12 @@ function createWindow(): BrowserWindow {
   // Sous Windows, après une question ou une fenêtre d'impression, la page peut
   // rester sans clavier : quand la fenêtre redevient active, on le lui rend.
   win.on('focus', () => win.webContents.focus());
+  // F11 bascule le mode « Caisse seule » de l'écran (et non le seul plein écran de la fenêtre, comme le menu caché d'Electron).
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.key !== 'F11') return;
+    event.preventDefault();
+    win.webContents.send('shortcut', 'F11');
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: 'deny' };
@@ -189,6 +195,7 @@ void app.whenReady().then(() => {
     }, 500);
 
   const system: SystemHooks = {
+    fullScreen: (on) => mainWindow?.setFullScreen(on),
     chooseFolder: async (title) => {
       const r = await dialog.showOpenDialog({ title, properties: ['openDirectory', 'createDirectory'] });
       return r.canceled ? null : (r.filePaths[0] ?? null);

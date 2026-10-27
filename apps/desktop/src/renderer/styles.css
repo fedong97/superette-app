@@ -1405,3 +1405,14 @@ ul.plain li { padding: 3px 0; }
 .win-menu { top: calc(100% + 6px); min-width: 300px; max-height: 70vh; overflow: auto; }
 .win-menu button.on { font-weight: 800; color: var(--brand); }
 .win-menu button small { margin-left: 8px; }
+
+/* Mode « Caisse seule » : la fiche de vente couvre l'écran ; ni barre des menus, ni onglets, ni fenêtres réduites. */
+.desk.pos-full { display: flex; flex-direction: column; }
+.desk.pos-full > .rail, .desk.pos-full > .topbar, .desk.pos-full .mdi-tray { display: none; }
+.desk.pos-full > .windows { flex: 1; min-height: 0; }
+.desk.pos-full .modal-back { left: 0; }
+.mdi-bar button.mdi-full { width: auto; min-width: 32px; margin-left: 8px; padding: 0 6px; font-size: 16px; }
+.mdi-bar button.mdi-full.on { padding: 0 10px; font-size: 13px; background: rgba(255, 255, 255, 0.18); }
+.pos-switch { display: flex; gap: 4px; flex: none; }
+.mdi-bar .pos-switch button { width: auto; padding: 0 10px; font-size: 13px; font-weight: 700; border: 1px solid rgba(255, 255, 255, 0.45); }
+.mdi-bar .pos-switch button.on { background: #fff; color: var(--brand-deep); }

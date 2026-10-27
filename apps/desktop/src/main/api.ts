@@ -202,6 +202,8 @@ export interface SystemHooks {
   customerDisplay?: CustomerDisplay;
   /** Fenêtre de choix d'un fichier d'un type donné (modèle de boutique, fichier de journée). */
   chooseOpenFile?(title: string, name: string, extensions: string[]): Promise<string | null>;
+  /** Mode « Caisse seule » : la fenêtre du logiciel couvre tout l'écran, barre des tâches comprise (absent dans les tests). */
+  fullScreen?(on: boolean): void;
   /** Réception des pointeuses à empreinte par le réseau (absente dans les tests). */
   fingerprint?: { apply(): void; state(): { port: number | null; listening: boolean; error: string | null; lastAt: string | null; addresses: string[] } };
 }
@@ -669,6 +671,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       })(),
     }),
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
+    /** Plein écran du PC pour le mode « Caisse seule » ; on en sort aussi à la déconnexion (sans utilisateur). */
+    'window.fullScreen': (on: boolean) => system.fullScreen?.(Boolean(on) && Boolean(user)),
     /** Langue de l'utilisateur connecté : celle de ses bons de caisse et rapports imprimés. */
     'prefs.lang': (): DocLang => (user && s.admin.prefs(user.id).lang === 'en' ? 'en' : 'fr'),
     /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */

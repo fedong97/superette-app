@@ -75,6 +75,9 @@ export function MdiWindow({
   onChange,
   onClose,
   onRefresh,
+  onFull,
+  full,
+  extra,
   children,
 }: {
   title: string;
@@ -93,11 +96,16 @@ export function MdiWindow({
   onClose: () => void;
   /** ⟳ : recharge les données de la fenêtre. */
   onRefresh?: () => void;
+  /** ⛶ : mode « Caisse seule » (fiches de vente) ; `full` : la fenêtre couvre tout l'écran, sans – ni ▢. */
+  onFull?: () => void;
+  full?: boolean;
+  /** Boutons ajoutés dans la barre verte, avant ⟳ (passer d'une caisse à l'autre en mode Caisse seule). */
+  extra?: ReactNode;
   children: ReactNode;
 }) {
   const [live, setLive] = useState<Geo | null>(null);
   const liveRef = useRef<Geo | null>(null);
-  const g = fit(live ?? (dialog ? { ...geo, max: false } : geo), area);
+  const g = fit(live ?? (dialog ? { ...geo, max: false } : full ? { ...geo, max: true } : geo), area);
 
   const drag = (e: React.PointerEvent, mode: 'move' | 'size') => {
     if (e.button !== 0 || g.max) return;
@@ -122,28 +130,40 @@ export function MdiWindow({
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
-  const toggleMax = () => !dialog && onChange({ ...g, max: !g.max });
+  const toggleMax = () => !dialog && !full && onChange({ ...g, max: !g.max });
 
   return (
     <section
-      className={`mdi ${active ? 'active' : ''} ${g.max ? 'max' : ''} ${dialog ? 'dialog' : ''} ${minimized ? 'minimized' : ''}`}
+      className={`mdi ${active ? 'active' : ''} ${g.max ? 'max' : ''} ${dialog ? 'dialog' : ''} ${minimized ? 'minimized' : ''} ${full ? 'full' : ''}`}
       style={g.max ? { zIndex: z } : { zIndex: z, left: g.x, top: g.y, width: g.w, height: g.h }}
       onPointerDownCapture={() => !active && onFocus()}
     >
       <header className="mdi-bar" onPointerDown={(e) => drag(e, 'move')} onDoubleClick={toggleMax}>
         <i aria-hidden>{icon}</i>
         <span className="mdi-title">{title}</span>
+        {extra}
         {onRefresh && (
           <button type="button" className="mdi-refresh" title="Actualiser la page (F5)" onPointerDown={(e) => e.stopPropagation()} onClick={onRefresh}>
             ⟳
           </button>
         )}
-        {!dialog && onMinimize && (
+        {onFull && (
+          <button
+            type="button"
+            className={`mdi-full ${full ? 'on' : ''}`}
+            title={full ? 'Revenir à l’affichage habituel (F11)' : 'Caisse seule : plein écran, sans menus ni onglets (F11)'}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={onFull}
+          >
+            {full ? '⛶ Quitter le plein écran' : '⛶'}
+          </button>
+        )}
+        {!dialog && !full && onMinimize && (
           <button type="button" className="mdi-min" title="Réduire (la fenêtre garde sa saisie)" onPointerDown={(e) => e.stopPropagation()} onClick={onMinimize}>
             –
           </button>
         )}
-        {!dialog && (
+        {!dialog && !full && (
           <button type="button" title={g.max ? 'Remettre en fenêtre' : 'Agrandir'} onPointerDown={(e) => e.stopPropagation()} onClick={toggleMax}>
             {g.max ? '❐' : '▢'}
           </button>

@@ -98,6 +98,13 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
 
 const winId = (kind: WinKind, tab?: string) => `${kind}:${tab ?? ''}`;
 
+/** Fiches de vente qu'on passe l'une à l'autre en mode « Caisse seule ». */
+const POS_SWITCH: [WinKind, string][] = [
+  ['cash1', 'V. cash 1'],
+  ['cash2', 'V. cash 2'],
+  ['credit', 'V. crédit'],
+];
+
 /**
  * Écrans qui s'ouvrent en boîte de dialogue, comme les paramètres dans Sage :
  * réglages qu'on fait puis qu'on quitte, opérations de caisse, traitements et
@@ -663,8 +670,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // Sans tout le registre, le caissier garde « Mes factures » pour ses trois dernières.
   const canWin = (kind: WinKind) => WINDOWS[kind].perm.some(can) || (kind === 'sales' && (can('cash') || can('credit')));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
+  // Rôles cochés dans Paramètres › Écran de caisse : leur fiche de vente s'ouvre en mode « Caisse seule ».
+  const fullRole = (state.storeSettings?.posFullRoles ?? '').split(',').includes(user.role);
   // Le caissier et le vendeur arrivent sur leur fiche de facturation ; les autres sur la page d'accueil.
-  const startOnPos = ['cashier', 'seller'].includes(user.role);
+  const startOnPos = ['cashier', 'seller'].includes(user.role) || (fullRole && canWin('cash1'));
   const [wins, setWins] = useState<Win[]>(() => (startOnPos ? [{ id: winId(first), kind: first, nonce: 0, crumb: crumbOf(first) }] : []));
   // Fenêtre de devant ; null : la page d'accueil.
   const [active, setActive] = useState<string | null>(startOnPos ? winId(first) : null);
@@ -684,6 +693,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [finding, setFinding] = useState(false);
   /** Borne de pointage ouverte en plein écran par le gérant sur ce PC. */
   const [kiosk, setKiosk] = useState(false);
+  /** Mode « Caisse seule » voulu : coché pour le rôle, ou laissé ainsi par l'utilisateur à sa dernière session. */
+  const [posFull, setPosFull] = useState(() => fullRole || state.prefs?.posFull === true);
   const [dossiers, setDossiers] = useState(false);
   const [found, setFound] = useState<Result<'pos.sale'> | null>(null);
   // Menu du clic droit : sur un onglet rapide (le déplacer, le retirer) ou sur un écran d'un menu (l'épingler).
@@ -788,9 +799,25 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // Ctrl+K cherche un écran ; F1 ouvre l'aide de la page (sauf à la caisse, où F1 cherche un produit).
   const activeWin = wins.find((w) => w.id === active);
   const onPos = activeWin?.kind === 'cash1' || activeWin?.kind === 'cash2' || activeWin?.kind === 'credit';
+  // La caisse seule à l'écran tant qu'une fiche de vente est devant ; ailleurs (trésorerie, clôture) l'affichage habituel revient.
+  const full = posFull && onPos && !activeWin?.min;
+  const toggleFull = () => {
+    setPosFull(!full);
+    savePref('posFull', !full);
+  };
+  useEffect(() => {
+    call('window.fullScreen', full).catch(() => undefined);
+  }, [full]);
+  useEffect(() => () => void call('window.fullScreen', false).catch(() => undefined), []);
+  // F11 est gardée par le logiciel avant Electron, qui l'envoie ici.
+  useEffect(() => window.superette.onShortcut?.((key) => key === 'F11' && onPos && toggleFull()));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setAllMenus(false);
+      if (e.key === 'F11' && onPos) {
+        e.preventDefault();
+        toggleFull();
+      }
       if (e.ctrlKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setAllMenus(false);
@@ -1100,7 +1127,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   return (
     <RightsProvider value={user.rights}>
     <StoreSettingsProvider value={state.storeSettings ?? DEFAULT_STORE_SETTINGS}>
-    <div className={`desk ${onPos ? 'on-pos' : ''}`}>
+    <div className={`desk ${onPos ? 'on-pos' : ''} ${full ? 'pos-full' : ''}`}>
       <nav className="rail">
         <button className={`rail-logo ${showHome ? 'on' : ''}`} title="Page d'accueil" onClick={() => (setAllMenus(false), setActive(null))}>
           <img src={logo} alt="" />
@@ -1309,6 +1336,19 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             onChange={(g) => saveGeo(w, g)}
             onClose={() => close(w.id)}
             onRefresh={() => refreshWin(w.id)}
+            onFull={isPosKind(w.kind) ? toggleFull : undefined}
+            full={full && w.id === active}
+            extra={
+              full && w.id === active ? (
+                <span className="pos-switch" onPointerDown={(e) => e.stopPropagation()}>
+                  {POS_SWITCH.filter(([kind]) => canWin(kind)).map(([kind, label]) => (
+                    <button key={kind} type="button" className={w.kind === kind ? 'on' : ''} title="Passer à cette fiche de vente sans quitter le plein écran" onClick={() => open(kind)}>
+                      {label}
+                    </button>
+                  ))}
+                </span>
+              ) : undefined
+            }
           >
             <SingleViewCtx.Provider value={{ onView: (label) => retitle(w.id, label) }}>
             <RefreshCtx.Provider value={w.rev ?? 0}>

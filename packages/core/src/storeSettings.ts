@@ -98,6 +98,8 @@ export interface StoreSettings {
 
   /** Présentation de l'écran de caisse pour tout le magasin ; un poste peut avoir son exception (Paramètres). */
   posLayout: PosLayout;
+  /** Rôles dont la fiche de vente s'ouvre en mode « Caisse seule » (plein écran, sans menus), séparés par des virgules. */
+  posFullRoles: string;
 
   /** Donner un code-barres interne à l'enregistrement d'un article sans code (unité, cartons et packs). */
   barcodeAuto: boolean;
@@ -215,6 +217,8 @@ export type BarcodeKind = 'ean8' | 'ean13';
 /** Présentations de l'écran de caisse : mêmes fonctions et mêmes touches, disposition différente. */
 export type PosLayout = 'modern' | 'classic' | 'conventional';
 export const POS_LAYOUTS: Record<PosLayout, string> = { modern: 'Moderne', classic: 'Classique', conventional: 'Conventionnel' };
+/** Rôles qui vendent et peuvent passer en mode « Caisse seule » dès la connexion. */
+export const POS_FULL_ROLES = ['cashier', 'seller', 'manager', 'admin'] as const;
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   rccm: '',
@@ -256,6 +260,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   prefixOrder: 'BC',
   prefixCustomerOrder: 'CC',
   posLayout: 'modern',
+  posFullRoles: '',
   barcodeAuto: true,
   barcodeKind: 'ean8',
   articleCodeByFamily: false,
@@ -394,6 +399,10 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       if (k === 'barcodeKind' && s !== 'ean8' && s !== 'ean13') throw new Error('Format des codes internes : EAN-8 ou EAN-13');
       if (k === 'labelFormat' && !isBarcodeLabelFormat(s)) throw new Error("Format d'étiquette inconnu");
       if (k === 'workStart' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) throw new Error("Heure d'arrivée : HH:MM, par exemple 08:00");
+      if (k === 'posFullRoles') {
+        const roles = s.split(/[,\s]+/);
+        s = POS_FULL_ROLES.filter((r) => roles.includes(r)).join(',');
+      }
       if (k === 'workDays') {
         s = [...new Set(s.replace(/[^0-6]/g, ''))].sort().join('');
         if (!s) throw new Error('Choisissez au moins un jour travaillé');

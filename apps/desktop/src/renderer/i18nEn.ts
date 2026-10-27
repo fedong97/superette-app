@@ -5180,6 +5180,12 @@ export const EN: Record<string, string> = {
   "V. cash 2": "Cash 2",
   "V. crédit": "Credit",
   "Multi-magasin": "Multi-store",
+  "Remise à zéro des données d’essai (Administration › Sauvegardes) : après l’installation et la formation, efface les ventes, achats, caisses, dépenses et mouvements de stock, et garde les réglages, les produits, les clients, les fournisseurs et le personnel. Le stock actuel peut être gardé comme stock de départ.": "Reset of the test data (Administration › Backups): after installation and training, erases sales, purchases, registers, expenses and stock movements, and keeps settings, products, customers, suppliers and staff. The current stock can be kept as opening stock.",
+  "Documents modifiables : factures d’achat (y compris les achats directs et leurs articles), bons de commande déjà envoyés, bons de réception pas encore facturés, dépenses, entrées et sorties de caisse.": "Editable documents: purchase invoices (including direct purchases and their items), purchase orders already sent, receipt notes not yet invoiced, expenses, cash entries and exits.",
+  "Le nom d’un produit est grisé sur sa fiche : il se change par le bouton « Modifier le nom », pour éviter de le changer par erreur.": "A product's name is greyed out on its sheet: it is changed with the “Edit name” button, so it is not changed by mistake.",
+  "Trésorerie : boutons directs sur chaque ligne. Entrées : Imprimer le reçu, Modifier, Supprimer. Sorties : Décharge, Imprimer, Modifier, Supprimer.": "Treasury: direct buttons on each line. Entries: Print receipt, Edit, Delete. Exits: Discharge, Print, Edit, Delete.",
+  "Rayons et familles : renommer, changer de rayon et supprimer ceux qui ne servent plus.": "Departments and families: rename, move to another department and delete those no longer used.",
+  "Caisses : changer le type d’une caisse ou la supprimer tant qu’elle n’a pas servi.": "Registers: change a register's type or delete it as long as it has not been used.",
 };
 
 /** Textes avec un nombre, un numéro ou un nom : le premier motif qui correspond s'applique. */

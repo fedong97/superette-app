@@ -27,7 +27,7 @@ beforeEach(() => {
 
 const stockOf = (articleId: string) => s.stock.list(storeId).find((r) => r.article_id === articleId)?.qty ?? 0;
 
-describe('rayons et familles', () => {
+describe('0.89.0 : rayons et familles', () => {
   it('se renomment, se déplacent et se suppriment une fois vides', () => {
     const epicerie = s.catalogue.createDepartment('Epicerie');
     const boissons = s.catalogue.createDepartment('Boissons');
@@ -53,7 +53,7 @@ describe('rayons et familles', () => {
   });
 });
 
-describe('type et suppression d’une caisse', () => {
+describe('0.89.0 : type et suppression d’une caisse', () => {
   it('une caisse qui n’a pas servi change de type ou se supprime ; celle qui a servi non', () => {
     const extra = s.admin.createRegister(adminId, storeId, 'Caisse en trop', 'cash');
     const awa = s.admin.createUser(adminId, { name: 'Awa', login: 'awa', pin: '5555', role: 'cashier', storeId, registerId: extra.id });
@@ -70,7 +70,7 @@ describe('type et suppression d’une caisse', () => {
   });
 });
 
-describe('nom d’un produit', () => {
+describe('0.89.0 : nom d’un produit', () => {
   it('se change par le renommage, avec l’ancien nom au journal d’audit', () => {
     expect(() => s.catalogue.renameArticle(adminId, riz, '  ', '')).toThrow(/nouveau nom/);
     s.catalogue.renameArticle(adminId, riz, 'RIZ PARFUMÉ 5 KG', 'Faute de frappe');
@@ -80,7 +80,7 @@ describe('nom d’un produit', () => {
   });
 });
 
-describe('modifier une entrée ou une sortie de caisse', () => {
+describe('0.89.0 : modifier une entrée ou une sortie de caisse', () => {
   it('montant, motif et tiers se corrigent tant que la journée est ouverte', () => {
     s.pos.openSession(ctx, 50_000);
     const day = s.pos.currentSession(ctx.registerId!)!.id;
@@ -101,7 +101,7 @@ describe('modifier une entrée ou une sortie de caisse', () => {
   });
 });
 
-describe('modifier une facture d’achat', () => {
+describe('0.89.0 : modifier une facture d’achat', () => {
   it('le n°, les dates et les montants d’une facture rapprochée des réceptions', () => {
     const rec = s.stock.receive(ctx, { warehouseId: wh, supplierId: sup, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });
     const inv = s.purchases.createInvoice(ctx, { supplierId: sup, supplierNumber: 'F-1', invoiceDate: '2026-10-20', totalHt: 30_000, totalTva: 0, receptionIds: [rec.id] });
@@ -141,7 +141,7 @@ describe('modifier une facture d’achat', () => {
   });
 });
 
-describe('bons de commande et de réception', () => {
+describe('0.89.0 : bons de commande et de réception', () => {
   it('une commande envoyée se modifie tant que rien n’est reçu', () => {
     const o = s.purchases.createOrder(ctx, { supplierId: sup, warehouseId: wh, lines: [{ articleId: riz, qty: 10_000, unitCost: 3_000 }] });
     s.purchases.setOrderStatus(ctx, o.id, 'sent');
@@ -166,7 +166,7 @@ describe('bons de commande et de réception', () => {
   });
 });
 
-describe('remise à zéro des données d’essai', () => {
+describe('0.89.0 : remise à zéro des données d’essai', () => {
   const play = () => {
     const cust = s.customers.saveCustomer(adminId, { name: 'Mballa', creditLimit: 100_000 });
     s.purchases.directInvoice(ctx, { supplierId: sup, supplierNumber: 'FAC-1', invoiceDate: '2026-10-27', warehouseId: wh, lines: [{ articleId: riz, qty: 20_000, unitCost: 3_000 }] });

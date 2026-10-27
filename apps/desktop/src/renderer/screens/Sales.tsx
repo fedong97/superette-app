@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { PAYMENT_METHODS } from '@superette/core';
 import { type Result, call } from '../api';
+import { Vouchers } from './Vouchers';
 import { Field, Modal, Tabs, dateTime, downloadText, fcfa, qty, today, useCan, useLoad, useToast, PhoneApproval } from '../ui';
 import { CashOperations, type RegisterPreset, SalesAlerts, SalesRegister } from './Controls';
 import { WhatsappTicketDialog, ZView } from './PosDialogs';
 import { InvoicePreview } from './docPreview';
 import { tx } from '../tax';
 
-export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export' | 'requests';
+export type SalesTab = 'tickets' | 'register' | 'returns' | 'cancelled' | 'find' | 'alerts' | 'cashops' | 'z' | 'export' | 'requests' | 'vouchers';
 type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
 
 /**
@@ -15,7 +16,7 @@ type ShownTab = Exclude<SalesTab, 'returns' | 'cancelled' | 'find'>;
  * les trois dernières factures de l'utilisateur, pour les réimprimer.
  */
 export function Sales({ initialTab = 'tickets', rights }: { initialTab?: SalesTab; rights: string[] }) {
-  const wide = ['sales', 'sales_alerts', 'cash_operations', 'cash_z', 'accounting_export', 'report_export', 'sale_edit_approve'].some((r) => rights.includes(r));
+  const wide = ['sales', 'sales_alerts', 'cash_operations', 'cash_z', 'accounting_export', 'report_export', 'sale_edit_approve', 'vouchers'].some((r) => rights.includes(r));
   return wide ? <AllSales initialTab={initialTab} rights={rights} /> : <MyLastInvoices />;
 }
 
@@ -30,6 +31,7 @@ function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string
     ...(can('cash_amounts') && can('cash_z') ? ([['z', 'Clôtures Z']] as [ShownTab, string][]) : []),
     ...(can('accounting_export', 'report_export') ? ([['export', 'Export comptable']] as [ShownTab, string][]) : []),
     ...(can('sale_edit_approve', 'sale_edit_request') ? ([['requests', 'Demandes de modification']] as [ShownTab, string][]) : []),
+    ...(can('vouchers') ? ([['vouchers', "Bons d'achat"]] as [ShownTab, string][]) : []),
   ];
   // Retours, annulés et recherche s'ouvrent sur le registre, déjà filtré.
   const preset: RegisterPreset = initialTab === 'returns' ? 'returns' : initialTab === 'cancelled' ? 'cancelled' : 'all';
@@ -48,6 +50,7 @@ function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string
       {tab === 'z' && <Sessions />}
       {tab === 'export' && <Export />}
       {tab === 'requests' && <EditRequests approve={can('sale_edit_approve')} />}
+      {tab === 'vouchers' && <Vouchers />}
     </div>
   );
 }

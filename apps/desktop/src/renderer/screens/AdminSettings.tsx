@@ -502,6 +502,11 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
         { label: 'Délai maximal pour annuler une vente', hint: 'Passé ce délai, on fait un retour client. 0 : sans limite.', render: () => num('cancelMinutes', 'minutes') },
         { label: 'Nombre maximal de factures en attente par caisse', hint: '0 : sans limite', render: () => num('maxHeld') },
         { label: 'Vente sous le prix de revient', hint: 'Non : un prix négocié ne descend jamais sous le coût. Oui : permis et noté dans le journal d’audit.', render: () => yes('allowBelowCost') },
+        { label: 'Plafond d’espèces dans le tiroir', hint: 'Au-delà, la caisse affiche une alerte, le gérant est prévenu sur son téléphone et un versement à la caisse centrale est proposé. 0 : pas de plafond.', render: () => num('cashCeiling', 'FCFA') },
+        { label: 'Monnaie sur le compte du client', hint: 'Oui : sans monnaie, le caissier garde le rendu sur le compte du client, ou donne un bon de monnaie à un client de passage.', render: () => yes('changeToAccount') },
+        { label: 'Validité des bons d’achat', hint: 'Bons vendus, bons d’avoir et bons de monnaie. 0 : sans date de fin.', render: () => num('voucherValidityDays', 'jours') },
+        { label: 'Contrôle des tickets à la sortie', hint: 'Oui : le menu « Contrôle des tickets à la sortie » et le mode « Sortie » du téléphone servent au vigile de la porte.', render: () => yes('exitCheck') },
+        { label: 'Ticket ancien au contrôle de sortie', hint: 'Un ticket payé depuis plus longtemps est signalé au vigile.', render: () => num('exitCheckHours', 'heures') },
       ],
     ],
     [

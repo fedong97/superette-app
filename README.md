@@ -325,6 +325,18 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Logo : lames vertes en relief autour de l'œil des chiffres (iris en graphique en anneau), dessiné en SVG dans `packages/core/src/mascot.ts` (`logoSvg`, `logoDoc`) ; icônes du logiciel et du serveur générées depuis `iconDoc('app' | 'server')`.
 - Mascottes : Awa (caisse, vente) et Paul (gérant) jouent les six humeurs (`mascotSvg(mood, { who })`) ; l'écran choisit Paul quand l'utilisateur a le droit `admin`, sinon Awa.
 
+**Dix améliorations du magasin (0.87.0)**
+- Bons d'achat (`gift_vouchers`, `packages/db/src/vouchers.ts`) : vendus ou offerts, code-barres imprimé, moyen de paiement « Bon d'achat » ; bons d'avoir au remboursement et bons de monnaie ; encours au compte 4191.
+- Plafond du tiroir (`cashCeiling`) : bandeau à la caisse, versement proposé, alerte `cash_alerts` sur le téléphone du gérant.
+- Contrôle des tickets à la sortie (`exit_checks`, réglage `exitCheck`) : écran du vigile sur un PC et mode « Sortie » du téléphone (`/api/v1/mobile/exit`), rapport du jour, alerte en cas de problème.
+- Ventes au carnet à souches pendant une coupure : numéro et heure de la souche gardés sur le ticket, comptés à part dans le Z.
+- Monnaie gardée (`changeToAccount`) : sur le compte du client ou en bon de monnaie.
+- Rappels de lots (`lot_recalls`) : lot bloqué à la caisse, stock par dépôt, acheteurs connus avec message, retour fournisseur préparé.
+- Prix programmés (`price_schedules`) : appliqués à leur date par un PC du magasin, étiquettes de la veille ; contenu net et prix au kilo ou au litre sur les étiquettes ; affiches de promotion A4 et A5.
+- Prévenir à l'arrivage : téléphone du client dans « Le client voulait… », message WhatsApp quand le produit revient (`missed.toNotify`).
+- Commandes répétées des clients professionnels (`recurring_orders`) : créées et préparées seules, numéros stables entre PC.
+- Demandes entre magasins (`store_transfer_requests`) : proposées avant l'achat, expédiées puis reçues avec leurs lots et leur coût.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

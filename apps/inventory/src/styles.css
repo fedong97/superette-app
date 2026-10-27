@@ -282,6 +282,10 @@ main {
   background: var(--bleu-clair);
   color: var(--bleu);
 }
+.notice.attention {
+  background: var(--orange-clair);
+  color: var(--orange);
+}
 
 .places {
   display: flex;

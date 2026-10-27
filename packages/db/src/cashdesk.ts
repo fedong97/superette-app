@@ -8,6 +8,7 @@ import { type StaffService, periodLabel } from './staff';
 import type { TreasuryService } from './treasury';
 import { AppError, Base, type Clock, type Context, newId } from './util';
 import { CONTAINER_ACCOUNT } from './containers';
+import type { GiftVoucher, VoucherService } from './vouchers';
 import type { Db } from './database';
 
 
@@ -21,6 +22,7 @@ const ENTRY_DIRECTION: Record<EntryKind, 'IN' | 'OUT' | null> = {
   container_refund: 'OUT',
   agent_in: 'IN',
   agent_out: 'OUT',
+  voucher_sale: 'IN',
   other: null,
 };
 
@@ -137,8 +139,50 @@ export class CashDeskService extends Base {
     private readonly expenses: ExpenseService,
     private readonly staff: StaffService,
     private readonly treasury: TreasuryService,
+    private readonly vouchers: VoucherService,
   ) {
     super(db, clock);
+  }
+
+  // --- Bons d'achat -------------------------------------------------------------
+
+  /**
+   * Bon d'achat vendu à la caisse : l'argent entre dans la journée (espèces,
+   * MoMo, carte…) comme une avance du client, et le bon numéroté est créé.
+   */
+  sellVoucher(ctx: Context, sessionId: string, input: { amount: Fcfa; method: string; reference?: string | null; holder?: string | null; customerId?: string | null; validityDays?: number | null }): GiftVoucher {
+    const c = this.deskCtx(ctx, sessionId);
+    if (!Number.isSafeInteger(input.amount) || input.amount < 500) throw new AppError("Un bon d'achat vaut au moins 500 FCFA", 'INVALID');
+    if (input.amount > 10_000_000) throw new AppError('Montant du bon trop élevé', 'INVALID');
+    if (!['CASH', 'MTN_MOMO', 'ORANGE_MONEY'].includes(input.method)) throw new AppError("Un bon d'achat se paie en espèces, MTN MoMo ou Orange Money", 'INVALID');
+    return this.tx(() => {
+      const code = this.vouchers.newCode();
+      const entry = this.record(c, {
+        direction: 'IN',
+        kind: 'voucher_sale',
+        amount: input.amount,
+        method: input.method,
+        reference: input.reference ?? null,
+        label: `Bon d'achat ${code}${input.holder?.trim() ? ` pour ${input.holder.trim()}` : ''}`,
+        customerId: null,
+        // Espèces au tiroir ; MoMo ou Orange Money sur la caisse électronique du caissier.
+        sessionId: this.pos.sessionFor(c, input.method, sessionId),
+      });
+      return this.vouchers.issue(c, { kind: 'sold', amount: input.amount, code, holder: input.holder, customerId: input.customerId ?? null, entryId: entry.id, validityDays: input.validityDays ?? null });
+    });
+  }
+
+  /** Bon vendu par erreur, pas encore utilisé : il est annulé et son encaissement supprimé (journée encore ouverte). */
+  cancelVoucher(ctx: Context, id: string, by: string, reason: string): GiftVoucher {
+    const v = this.vouchers.get(id);
+    if (v.store_id !== ctx.storeId) throw new AppError('Bon introuvable', 'NOT_FOUND');
+    if (v.kind !== 'sold' || !v.entry_id) throw new AppError("Seul un bon vendu s'annule ; un bon d'avoir ou de monnaie reste valable jusqu'à sa date", 'INVALID');
+    if (v.used > 0) throw new AppError('Ce bon a déjà servi : il ne peut plus être annulé', 'INVALID');
+    if (!reason.trim()) throw new AppError("Indiquez le motif de l'annulation", 'INVALID');
+    return this.tx(() => {
+      this.cancel(ctx, v.entry_id!, by, `Bon ${v.code} annulé : ${reason.trim()}`);
+      return this.vouchers.markCancelled(ctx, id, reason.trim());
+    });
   }
 
   private get emoney() {
@@ -243,6 +287,10 @@ export class CashDeskService extends Base {
       // Consigne d'emballages : dette envers les clients (4194), pas une vente.
       if (method !== 'CASH') throw new AppError('La consigne se paie en espèces', 'INVALID');
       accountId = CONTAINER_ACCOUNT;
+      label ||= ENTRY_KINDS[kind];
+    } else if (kind === 'voucher_sale') {
+      // Bon d'achat vendu : une avance du client (4191), pas encore une vente.
+      accountId = (this.db.prepare("SELECT id FROM accounts WHERE role = 'voucher'").pluck().get() as string | undefined) ?? '4191';
       label ||= ENTRY_KINDS[kind];
     } else if (kind === 'agent_in' || kind === 'agent_out') {
       // Point Mobile Money : les espèces contre la flotte de l'agent (55xx) ou les frais (7072).

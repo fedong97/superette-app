@@ -19,7 +19,10 @@ export type AttentionKey =
   | 'inventories'
   | 'supplier_invoices'
   | 'late_customers'
-  | 'production';
+  | 'production'
+  | 'cash_alerts'
+  | 'to_notify'
+  | 'store_requests';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -227,6 +230,62 @@ export class AttentionService extends Base {
         amount: null,
         detail: rows.length ? firstNames(rows.map((n) => `n° ${n}`)) : 'Aucun ordre en brouillon',
         tone: 'info',
+      });
+    }
+
+    if (want('cash_alerts')) {
+      const rows = this.db
+        .prepare(
+          `SELECT r.name, a.amount FROM cash_alerts a JOIN registers r ON r.id = a.register_id JOIN cash_sessions s ON s.id = a.session_id
+           WHERE a.store_id = ? AND s.status = 'open' ORDER BY a.created_at DESC`,
+        )
+        .all(storeId) as { name: string; amount: Fcfa }[];
+      const byRegister = [...new Map(rows.map((r) => [r.name, r])).values()];
+      items.push({
+        key: 'cash_alerts',
+        label: 'Trop d’espèces dans un tiroir',
+        count: byRegister.length,
+        amount: byRegister.reduce((t, r) => t + r.amount, 0),
+        detail: byRegister.length ? firstNames(byRegister.map((r) => `${r.name} (${formatFcfa(r.amount)})`)) : 'Aucun tiroir au-dessus du plafond',
+        tone: 'warning',
+      });
+    }
+
+    if (want('to_notify')) {
+      const since = new Date(this.clock().getTime() - 60 * 86_400_000).toISOString();
+      const rows = this.db
+        .prepare(
+          `SELECT COALESCE(m.customer_name, m.phone) AS who FROM missed_sales m
+           WHERE m.store_id = @storeId AND m.phone IS NOT NULL AND m.notified_at IS NULL AND m.article_id IS NOT NULL AND m.created_at >= @since
+             AND (SELECT COALESCE(SUM(s.qty), 0) FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE s.article_id = m.article_id AND w.store_id = @storeId AND w.purpose = 'stock') > 0`,
+        )
+        .pluck()
+        .all({ storeId, since }) as string[];
+      items.push({
+        key: 'to_notify',
+        label: 'Clients à prévenir : leur produit est arrivé',
+        count: rows.length,
+        amount: null,
+        detail: rows.length ? firstNames(rows) : 'Personne à prévenir',
+        tone: 'info',
+      });
+    }
+
+    if (want('store_requests')) {
+      const r = this.db
+        .prepare(
+          `SELECT COUNT(CASE WHEN from_store_id = @storeId AND status = 'requested' THEN 1 END) AS ship,
+                  COUNT(CASE WHEN to_store_id = @storeId AND status = 'shipped' THEN 1 END) AS receive
+           FROM store_transfer_requests WHERE status IN ('requested', 'shipped')`,
+        )
+        .get({ storeId }) as { ship: number; receive: number };
+      items.push({
+        key: 'store_requests',
+        label: 'Demandes de marchandise entre magasins',
+        count: r.ship + r.receive,
+        amount: null,
+        detail: r.ship + r.receive ? [r.ship ? `${r.ship} à expédier` : '', r.receive ? `${r.receive} à réceptionner` : ''].filter(Boolean).join(', ') : 'Rien à expédier ni à réceptionner',
+        tone: 'warning',
       });
     }
 

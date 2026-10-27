@@ -41,6 +41,8 @@ import type { TreasuryService } from './treasury';
 import { DELIVERY_FEE_ARTICLE_ID, type DeliveryInput, type DeliveryService } from './deliveries';
 import { ENTRY_KINDS, type EmoneyRow, type EmoneyService, type EntryKind, isEmoney } from './emoney';
 import { AppError, type ErrorFix, Base, type Clock, type Context, newId } from './util';
+import type { VoucherService } from './vouchers';
+import { recalledQty } from './recalls';
 import type { Db } from './database';
 
 export interface CashSession {
@@ -195,6 +197,13 @@ export interface SaleInput {
   sellerId?: string | null;
   /** Facture d'une fiche de contrôle de dépôt-vente : la marchandise sort du dépôt du revendeur. */
   fromConsignment?: boolean;
+  /**
+   * Monnaie que le caissier n'a pas : ce montant (au plus le rendu) reste sur le
+   * compte du client choisi, ou devient un bon de monnaie pour un client de passage.
+   */
+  keepChange?: Fcfa | null;
+  /** Vente notée sur le carnet à souches pendant une panne : numéro de la souche et heure écrite. */
+  book?: { number: string; at: string } | null;
 }
 
 export interface Sale {
@@ -218,6 +227,12 @@ export interface Sale {
   change_given: Fcfa;
   /** Arrondi des espèces accordé (compris dans les remises). */
   rounding: Fcfa;
+  /** Monnaie gardée sur le compte du client, ou en bon de monnaie (`change_voucher`). */
+  change_kept: Fcfa;
+  change_voucher: string | null;
+  /** Vente saisie depuis le carnet à souches : numéro de la souche et heure notée. */
+  book_number: string | null;
+  book_at: string | null;
   /** Tickets et factures (A4, listing) déjà imprimés : la réimpression porte « DUPLICATA ». */
   ticket_prints: number;
   invoice_prints: number;
@@ -283,6 +298,10 @@ export interface ZReport {
   emoneyDeposit: { centralName: string; number: string } | null;
   /** Tickets de cette caisse payés sur la caisse électronique ou banque du caissier. */
   elsewhere: { method: PaymentMethod; label: string; registerName: string; amount: Fcfa }[];
+  /** Monnaie laissée sur le compte des clients ou en bons de monnaie (elle reste dans le tiroir). */
+  keptChange: Fcfa;
+  /** Ventes saisies depuis le carnet à souches (panne). */
+  bookSales: { count: number; total: Fcfa };
   /** Relèves d'équipe de la journée, dans l'ordre. */
   handovers: CashHandover[];
   /** Ventes et écart de chaque caissier de la journée (plusieurs après une relève). */
@@ -358,6 +377,7 @@ export class PosService extends Base {
     private readonly deliveries: DeliveryService,
     private readonly loyalty: LoyaltyService,
     private readonly orders: OrderService,
+    private readonly vouchers: VoucherService,
   ) {
     super(db, clock);
   }
@@ -886,7 +906,11 @@ export class PosService extends Base {
         throw new AppError(`Référence de transaction obligatoire pour ${PAYMENT_METHODS[p.method]}`, 'REFERENCE_REQUIRED');
       }
     }
-    const plan = this.planStock(ctx.storeId, input.fromConsignment ? [warehouse] : this.saleSources(ctx.storeId, ctx.userId, warehouse), lines, this.orders.reserved(ctx.storeId, input.orderId));
+    const sources = input.fromConsignment ? [warehouse] : this.saleSources(ctx.storeId, ctx.userId, warehouse);
+    this.assertNotRecalled(sources, lines);
+    this.vouchers.checkPayments(ctx.storeId, input.payments);
+    const book = input.book ? this.checkBook(ctx, input.book) : null;
+    const plan = this.planStock(ctx.storeId, sources, lines, this.orders.reserved(ctx.storeId, input.orderId));
     const withoutStock = plan.short;
     // Chaque paiement va à la journée de la caisse de son type (espèces, électronique, banque).
     const paymentSessions = input.payments.map((p) => this.sessionFor(ctx, p.method, session.id));
@@ -904,6 +928,9 @@ export class PosService extends Base {
     const due = customer && onCredit > 0 ? this.customers.dueDateFor(customer) : null;
     const inPoints = input.payments.filter((p) => p.method === 'LOYALTY').reduce((t, p) => t + p.amount, 0);
     this.loyalty.checkRedeem(ctx.storeId, customer?.id, inPoints);
+    // Monnaie gardée : au plus le rendu, si le magasin le permet.
+    const kept = Math.min(settlement.change, Math.max(0, Math.floor(input.keepChange ?? 0)));
+    if (kept > 0 && !set.changeToAccount) throw new AppError('La monnaie sur le compte du client est désactivée dans les paramètres', 'INVALID');
 
     return this.tx(() => {
       const saleId = newId();
@@ -928,7 +955,7 @@ export class PosService extends Base {
           totals.totalDiscount,
           totals.totalPromo,
           level,
-          settlement.change,
+          settlement.change - kept,
           customer?.id ?? null,
           customer ? null : input.clientName?.trim().slice(0, 80) || null,
           due,
@@ -940,6 +967,14 @@ export class PosService extends Base {
         this.admin.getUser(input.sellerId);
         this.db.prepare('UPDATE sales SET seller_id = ? WHERE id = ?').run(input.sellerId, saleId);
       }
+      if (book) this.db.prepare('UPDATE sales SET book_number = ?, book_at = ? WHERE id = ?').run(book.number, book.at, saleId);
+      if (kept > 0) {
+        // Client connu : la monnaie reste sur son compte (avoir) ; sinon un bon de monnaie imprimé avec le ticket.
+        const voucher = customer ? null : this.vouchers.issue(ctx, { kind: 'change', amount: kept, saleId, holder: input.clientName ?? null });
+        this.db.prepare('UPDATE sales SET change_kept = ?, change_voucher = ? WHERE id = ?').run(kept, voucher?.code ?? null, saleId);
+        this.audit(ctx.userId, 'sale.change_kept', 'sale', saleId, { amount: kept, customer: customer?.name ?? null, voucher: voucher?.code ?? null });
+      }
+      if (book) this.audit(ctx.userId, 'sale.book', 'sale', saleId, { number, book: book.number, at: book.at });
       const insertLine = this.db.prepare(
         `INSERT INTO sale_lines (id, sale_id, line_no, article_id, label, barcode, qty, unit_price, discount, vat_rate_bp, total_ttc, unit_cost, promo, promotion_id,
            pack_name, pack_units, pack_price)
@@ -960,7 +995,15 @@ export class PosService extends Base {
       // Un chèque reçu attend sa remise en banque (bordereau) : compte 513 d'ici là.
       const insertPayment = this.db.prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id, clearing) VALUES (?, ?, ?, ?, ?, ?, ?)');
       input.payments.forEach((p, i) =>
-        insertPayment.run(newId(), saleId, p.method, p.amount, p.reference?.trim() || null, paymentSessions[i], p.method === 'CHEQUE' && p.amount > 0 ? 1 : 0),
+        insertPayment.run(
+          newId(),
+          saleId,
+          p.method,
+          p.amount,
+          p.method === 'VOUCHER' ? this.vouchers.normalize(p.reference) : p.reference?.trim() || null,
+          paymentSessions[i],
+          p.method === 'CHEQUE' && p.amount > 0 ? 1 : 0,
+        ),
       );
       if (granted > 0) {
         this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: granted, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
@@ -985,6 +1028,109 @@ export class PosService extends Base {
       if (input.delivery) this.deliveries.create(ctx, saleId, input.delivery);
       return sale;
     });
+  }
+
+  /** Le stock restant d'un lot rappelé ne se vend plus : la vente est refusée si le reste ne suffit pas. */
+  private assertNotRecalled(sources: { id: string }[], lines: { articleId: string; label: string; qty: Milli }[]): void {
+    const asked = new Map<string, { label: string; qty: Milli }>();
+    for (const l of lines) asked.set(l.articleId, { label: l.label, qty: (asked.get(l.articleId)?.qty ?? 0) + l.qty });
+    const open = this.db.prepare("SELECT lot_number, expiry FROM lot_recalls WHERE article_id = ? AND status = 'open' LIMIT 1");
+    const stockOf = this.db.prepare('SELECT COALESCE(qty, 0) FROM stock WHERE article_id = ? AND warehouse_id = ?').pluck();
+    for (const [articleId, l] of asked) {
+      const recall = open.get(articleId) as { lot_number: string | null; expiry: string | null } | undefined;
+      if (!recall) continue;
+      let blocked = 0;
+      let good = 0;
+      for (const w of sources) {
+        const b = recalledQty(this.db, articleId, w.id);
+        blocked += b;
+        good += Math.max(0, ((stockOf.get(articleId, w.id) as number | undefined) ?? 0) - b);
+      }
+      if (blocked > 0 && good < l.qty) {
+        const lot = recall.lot_number ? `du lot ${recall.lot_number}` : `de DLC ${recall.expiry!.split('-').reverse().join('/')}`;
+        throw new AppError(
+          `${l.label} : le stock restant ${good > 0 ? `au-delà de ${String(good / 1000).replace('.', ',')} ` : ''}est ${lot}, rappelé : il ne se vend plus. Mettez-le de côté pour le retour au fournisseur`,
+          'RECALLED',
+        );
+      }
+    }
+  }
+
+  /** Vente du carnet : souche jamais saisie, heure passée d'au plus 7 jours. */
+  private checkBook(ctx: Context, book: { number: string; at: string }): { number: string; at: string } {
+    const number = book.number?.trim().slice(0, 20);
+    if (!number) throw new AppError('Indiquez le numéro de la souche du carnet', 'INVALID');
+    const at = new Date(book.at);
+    if (Number.isNaN(at.getTime())) throw new AppError('Heure de la vente du carnet invalide', 'INVALID');
+    const now = this.clock().getTime();
+    if (at.getTime() > now + 60_000) throw new AppError('L’heure de la vente du carnet est dans le futur', 'INVALID');
+    if (at.getTime() < now - 7 * 86_400_000) throw new AppError('Une vente du carnet se saisit dans les 7 jours', 'INVALID');
+    const twin = this.db
+      .prepare("SELECT number FROM sales WHERE store_id = ? AND book_number = ? AND status = 'completed' LIMIT 1")
+      .pluck()
+      .get(ctx.storeId, number) as string | undefined;
+    if (twin) throw new AppError(`La souche n° ${number} est déjà saisie (ticket ${twin})`, 'DUPLICATE');
+    return { number, at: at.toISOString() };
+  }
+
+  /**
+   * Espèces dans le tiroir maintenant et plafond du magasin. Au-delà, une
+   * alerte par palier franchi part au gérant (PC et téléphone) ; la caisse
+   * propose un prélèvement vers la caisse centrale.
+   */
+  drawerStatus(ctx: Context): { cash: Fcfa; ceiling: Fcfa; over: boolean; suggested: Fcfa; alert: string | null } | null {
+    if (!ctx.registerId) return null;
+    const session = this.currentSession(ctx.registerId);
+    if (!session || this.admin.getRegister(session.register_id).kind !== 'cash') return null;
+    const ceiling = this.admin.storeSettings(ctx.storeId).cashCeiling;
+    const cash = this.zReport(session.id).cash.expected;
+    if (ceiling <= 0) return { cash, ceiling, over: false, suggested: 0, alert: null };
+    const over = cash > ceiling;
+    // Prélèvement proposé : de quoi revenir au fond de caisse du matin (au moins sous le plafond), en billets de 10 000.
+    const keep = Math.min(Math.max(session.opening_float, 0), Math.floor(ceiling / 2));
+    const suggested = over ? Math.max(0, Math.floor((cash - keep) / 10_000) * 10_000) : 0;
+    let alert: string | null = null;
+    if (over) {
+      const step = Math.floor(cash / ceiling);
+      const id = `ceiling:${session.id}:${step}`;
+      if (!this.db.prepare('SELECT 1 FROM cash_alerts WHERE id = ?').get(id)) {
+        const register = this.admin.getRegister(session.register_id);
+        const user = this.admin.getUser(ctx.userId);
+        alert = `${register.name} : ${formatFcfa(cash)} d’espèces dans le tiroir (plafond ${formatFcfa(ceiling)}), caissier ${user.name}. Faites un prélèvement vers la caisse centrale.`;
+        const now = this.now();
+        this.tx(() => {
+          this.db
+            .prepare('INSERT INTO cash_alerts (id, store_id, session_id, register_id, amount, ceiling, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(id, ctx.storeId, session.id, session.register_id, cash, ceiling, alert, now, now);
+          this.enqueue(ctx, 'cash_alert', id, 'upsert', {});
+          this.audit(ctx.userId, 'cash.ceiling', 'cash_session', session.id, { cash, ceiling });
+        });
+      }
+    }
+    return { cash, ceiling, over, suggested, alert };
+  }
+
+  /** Alertes de plafond du tiroir du magasin, les plus récentes d'abord. */
+  cashAlerts(storeId: string, days = 7): { id: string; register_name: string; amount: Fcfa; ceiling: Fcfa; text: string; created_at: string }[] {
+    const since = new Date(this.clock().getTime() - days * 86_400_000).toISOString();
+    return this.db
+      .prepare(
+        `SELECT a.id, r.name AS register_name, a.amount, a.ceiling, a.text, a.created_at FROM cash_alerts a JOIN registers r ON r.id = a.register_id
+         WHERE a.store_id = ? AND a.created_at >= ? ORDER BY a.created_at DESC`,
+      )
+      .all(storeId, since) as never;
+  }
+
+  /** Ventes du carnet saisies : numéro de souche, heure notée, ticket et montant. */
+  bookSales(storeId: string, opts: { from?: string | null; to?: string | null } = {}): { id: string; number: string; book_number: string; book_at: string; total_ttc: Fcfa; user_name: string; created_at: string }[] {
+    return this.db
+      .prepare(
+        `SELECT s.id, s.number, s.book_number, s.book_at, s.total_ttc, u.name AS user_name, s.created_at FROM sales s JOIN users u ON u.id = s.user_id
+         WHERE s.store_id = @storeId AND s.book_number IS NOT NULL AND s.status = 'completed'
+           AND (@from IS NULL OR date(s.book_at, 'localtime') >= @from) AND (@to IS NULL OR date(s.book_at, 'localtime') <= @to)
+         ORDER BY s.book_at DESC LIMIT 2000`,
+      )
+      .all({ storeId, from: opts.from ?? null, to: opts.to ?? null }) as never;
   }
 
   getSale(id: string): Sale {
@@ -1252,9 +1398,11 @@ export class PosService extends Base {
       for (const r of returned) {
         insertLine.run(newId(), id, r.line.line_no, r.line.article_id, r.line.label, r.line.barcode, -r.qty, r.line.unit_price, r.line.vat_rate_bp, -r.amount);
       }
+      // Remboursé en bon d'achat : un bon d'avoir du montant, valable au magasin (compte 4191).
+      const voucher = input.refundMethod === 'VOUCHER' ? this.vouchers.issue(ctx, { kind: 'refund', amount: total, saleId: id, customerId: original.customer_id }) : null;
       this.db
-        .prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id) VALUES (?, ?, ?, ?, NULL, ?)')
-        .run(newId(), id, input.refundMethod, -total, refundSession);
+        .prepare('INSERT INTO sale_payments (id, sale_id, method, amount, reference, session_id) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(newId(), id, input.refundMethod, -total, voucher?.code ?? null, refundSession);
       const qtyByArticle = new Map<string, Milli>();
       for (const r of returned) qtyByArticle.set(r.line.article_id, (qtyByArticle.get(r.line.article_id) ?? 0) + r.qty);
       this.restockSaleMovements(ctx, original.id, 'sale_return', id, qtyByArticle);
@@ -1310,7 +1458,10 @@ export class PosService extends Base {
            COALESCE(SUM(CASE WHEN status = 'completed' THEN total_promo END), 0) AS promotions,
            COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 END), 0) AS cancelledCount,
            COALESCE(SUM(CASE WHEN status = 'cancelled' THEN total_ttc END), 0) AS cancelledAmount,
-           COALESCE(SUM(CASE WHEN status = 'completed' THEN change_given END), 0) AS changeGiven
+           COALESCE(SUM(CASE WHEN status = 'completed' THEN change_given END), 0) AS changeGiven,
+           COALESCE(SUM(CASE WHEN status = 'completed' THEN change_kept END), 0) AS changeKept,
+           COALESCE(SUM(CASE WHEN status = 'completed' AND book_number IS NOT NULL THEN 1 END), 0) AS bookCount,
+           COALESCE(SUM(CASE WHEN status = 'completed' AND book_number IS NOT NULL THEN total_ttc END), 0) AS bookTotal
          FROM sales WHERE session_id = ?`,
       )
       .get(sessionId) as {
@@ -1322,6 +1473,9 @@ export class PosService extends Base {
       cancelledCount: number;
       cancelledAmount: number;
       changeGiven: number;
+      changeKept: number;
+      bookCount: number;
+      bookTotal: number;
     };
     const methods = this.db
       .prepare(
@@ -1346,7 +1500,8 @@ export class PosService extends Base {
       .map((m) => ({
         method: m.method,
         label: PAYMENT_METHODS[m.method],
-        amount: m.method === 'CASH' ? cashSales - cashRefunds : m.received - m.refunded,
+        // La monnaie gardée sur le compte du client n'est pas une vente en espèces de plus.
+        amount: m.method === 'CASH' ? cashSales - cashRefunds - agg.changeKept : m.received - m.refunded,
       }))
       .sort((a, b) => b.amount - a.amount);
     const vatRows = this.db
@@ -1412,6 +1567,8 @@ export class PosService extends Base {
       cash: { ...cash, expected },
       counted: session.counted_cash,
       difference: session.difference,
+      keptChange: agg.changeKept,
+      bookSales: { count: agg.bookCount, total: agg.bookTotal },
       ...this.shifts(session),
     };
   }

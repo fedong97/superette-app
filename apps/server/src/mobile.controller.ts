@@ -80,6 +80,17 @@ export class MobileController {
     return this.mobile.recordMissed(await this.mobile.caller(auth, session), body);
   }
 
+  @Get('api/v1/mobile/exit')
+  async exitLookup(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('code') code?: string) {
+    return this.mobile.exitLookup(await this.mobile.caller(auth, session), code ?? '');
+  }
+
+  @Post('api/v1/mobile/exit')
+  @HttpCode(200)
+  async exitRecord(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: Parameters<MobileService['exitRecord']>[1]) {
+    return this.mobile.exitRecord(await this.mobile.caller(auth, session), body);
+  }
+
   @Get('api/v1/mobile/articles/:id/info')
   async productInfo(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Param('id') id: string) {
     return this.mobile.productInfo(await this.mobile.caller(auth, session), id);

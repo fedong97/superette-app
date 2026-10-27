@@ -2463,4 +2463,198 @@ CREATE TABLE staff_alerts (
 CREATE INDEX staff_alerts_store ON staff_alerts(store_id, day);
 `,
   },
+  {
+    version: 61,
+    name: 'bons d’achat, plafond du tiroir, contrôle à la sortie, ventes du carnet, monnaie au compte, rappels de lots, prix programmés, clients à prévenir, commandes répétées, transferts entre magasins',
+    rebuild: true,
+    sql: `
+-- Bons d'achat numérotés : vendus en caisse, donnés en avoir d'un retour ou pour la monnaie. Le solde se calcule d'après les tickets payés avec.
+CREATE TABLE gift_vouchers (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  code TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL CHECK (kind IN ('sold', 'refund', 'change')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  expires_on TEXT,
+  customer_id TEXT,
+  holder TEXT,
+  entry_id TEXT,
+  sale_id TEXT,
+  user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX gift_vouchers_store ON gift_vouchers(store_id, created_at);
+CREATE INDEX sale_payments_reference ON sale_payments(method, reference);
+
+-- Monnaie gardée sur le compte du client (ou en bon de monnaie), et ventes saisies depuis le carnet à souches.
+ALTER TABLE sales ADD COLUMN change_kept INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sales ADD COLUMN change_voucher TEXT;
+ALTER TABLE sales ADD COLUMN book_number TEXT;
+ALTER TABLE sales ADD COLUMN book_at TEXT;
+CREATE INDEX sales_book ON sales(store_id, book_number) WHERE book_number IS NOT NULL;
+
+-- Trop d'espèces dans le tiroir : une alerte par palier franchi, vue sur le PC et le téléphone du gérant.
+CREATE TABLE cash_alerts (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  register_id TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  ceiling INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  handled_by TEXT,
+  handled_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX cash_alerts_store ON cash_alerts(store_id, created_at);
+
+-- Contrôle des tickets à la sortie du magasin (vigile, sur un téléphone ou un PC).
+CREATE TABLE exit_checks (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  sale_id TEXT NOT NULL,
+  sale_number TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('ok', 'problem')),
+  note TEXT,
+  repeat INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  source TEXT NOT NULL DEFAULT 'pc',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX exit_checks_sale ON exit_checks(sale_id);
+CREATE INDEX exit_checks_store ON exit_checks(store_id, created_at);
+
+-- Rappel d'un lot par le fournisseur ou l'administration : bloqué à la caisse tant qu'il est ouvert.
+CREATE TABLE lot_recalls (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  article_id TEXT NOT NULL,
+  lot_number TEXT,
+  expiry TEXT,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  note TEXT,
+  user_id TEXT,
+  closed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX lot_recalls_article ON lot_recalls(article_id, status);
+
+-- Nouveaux prix préparés à l'avance : ils s'appliquent seuls à leur date (prix calculés le jour de la préparation).
+CREATE TABLE price_schedules (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  effective_on TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'cancelled')),
+  applied_at TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX price_schedules_due ON price_schedules(status, effective_on);
+-- Contenu net du produit (« 900 g », « 1,5 L ») pour le prix au kilo ou au litre ; vide : lu dans la désignation.
+ALTER TABLE articles ADD COLUMN net_content TEXT;
+
+-- « Le client voulait… » : le client à prévenir quand le produit arrive.
+ALTER TABLE missed_sales ADD COLUMN customer_name TEXT;
+ALTER TABLE missed_sales ADD COLUMN phone TEXT;
+ALTER TABLE missed_sales ADD COLUMN notified_at TEXT;
+ALTER TABLE missed_sales ADD COLUMN notified_by TEXT;
+
+-- Commandes répétées des clients pros (restaurant, école, boutiquier) : la commande se recrée seule.
+CREATE TABLE recurring_orders (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  customer_id TEXT,
+  customer_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  address TEXT,
+  weekdays TEXT NOT NULL,
+  every_weeks INTEGER NOT NULL DEFAULT 1,
+  start_date TEXT NOT NULL,
+  lead_days INTEGER NOT NULL DEFAULT 1,
+  slot TEXT,
+  delivery_fee INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  lines TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  last_date TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Demandes de marchandise d'un magasin à un autre : le magasin qui en a trop expédie, l'autre réceptionne.
+CREATE TABLE store_transfer_requests (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL,
+  from_store_id TEXT NOT NULL,
+  to_store_id TEXT NOT NULL,
+  article_id TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'shipped', 'received', 'refused', 'cancelled')),
+  note TEXT,
+  requested_by TEXT,
+  shipped_qty INTEGER,
+  unit_cost INTEGER,
+  lots TEXT,
+  from_warehouse_id TEXT,
+  shipped_by TEXT,
+  shipped_at TEXT,
+  to_warehouse_id TEXT,
+  received_qty INTEGER,
+  received_by TEXT,
+  received_at TEXT,
+  answer TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX store_transfer_requests_from ON store_transfer_requests(from_store_id, status);
+CREATE INDEX store_transfer_requests_to ON store_transfer_requests(to_store_id, status);
+
+-- Pièces d'« Encaisser » : la vente d'un bon d'achat en plus.
+CREATE TABLE treasury_entries_new (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  direction TEXT NOT NULL CHECK (direction IN ('IN', 'OUT')),
+  kind TEXT NOT NULL CHECK (kind IN ('staff_advance', 'staff_salary', 'staff_repayment', 'customer_refund', 'container_deposit', 'container_refund', 'agent_in', 'agent_out', 'voucher_sale', 'other')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  method TEXT NOT NULL,
+  reference TEXT,
+  piece TEXT,
+  label TEXT NOT NULL,
+  party TEXT,
+  staff_id TEXT,
+  salary_id TEXT,
+  customer_id TEXT,
+  account_id TEXT,
+  register_id TEXT,
+  session_id TEXT,
+  from_central INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  cancelled_by TEXT,
+  authorized_by TEXT,
+  printed INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+INSERT INTO treasury_entries_new SELECT id, number, store_id, direction, kind, amount, method, reference, piece, label, party, staff_id, salary_id, customer_id, account_id,
+  register_id, session_id, from_central, status, cancel_reason, cancelled_by, authorized_by, printed, user_id, at, updated_at FROM treasury_entries;
+DROP TABLE treasury_entries;
+ALTER TABLE treasury_entries_new RENAME TO treasury_entries;
+CREATE INDEX treasury_entries_session ON treasury_entries(session_id);
+CREATE INDEX treasury_entries_staff ON treasury_entries(staff_id);
+`,
+  },
 ];

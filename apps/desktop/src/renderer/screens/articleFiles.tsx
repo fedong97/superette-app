@@ -730,6 +730,8 @@ export function PriceUpdateDialog({ onClose, onDone }: { onClose: () => void; on
   });
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
+  // Date d'application : vide = tout de suite ; sinon les prix sont programmés pour ce jour-là.
+  const [on, setOn] = useState('');
   const families = departments.data?.find((d) => d.id === f.departmentId)?.families ?? [];
   const value = Number(f.value.replace(',', '.').replace(/\s/g, ''));
   const input = (): PriceInput => ({
@@ -844,6 +846,13 @@ export function PriceUpdateDialog({ onClose, onDone }: { onClose: () => void; on
           </label>
         )}
       </div>
+      <Field label="Quand" hint="Programmé : les prix changent seuls ce jour-là, les étiquettes sont prêtes la veille">
+        <select value={on ? 'later' : 'now'} onChange={(e) => setOn(e.target.value === 'now' ? '' : new Date(Date.now() + 86_400_000).toISOString().slice(0, 10))}>
+          <option value="now">Tout de suite</option>
+          <option value="later">À une date</option>
+        </select>
+        {on && <input type="date" value={on} onChange={(e) => setOn(e.target.value)} />}
+      </Field>
       {plan && (
         <section className="card">
           <h3>3. Contrôle avant mise à jour</h3>
@@ -896,6 +905,19 @@ export function PriceUpdateDialog({ onClose, onDone }: { onClose: () => void; on
           className="primary"
           disabled={busy || !plan?.articles.length}
           onClick={async () => {
+            if (on) {
+              setBusy(true);
+              try {
+                await call('priceSchedules.create', { label: `${f.method === 'percent' ? `${value > 0 ? '+' : ''}${value} %` : f.method === 'amount' ? `${value > 0 ? '+' : ''}${value} F` : `Coefficient ${value}`} sur ${where}`, effectiveOn: on, update: input() });
+                toast.ok(`${plan!.articles.length} articles changeront de prix le ${on.split('-').reverse().join('/')}. Étiquettes prêtes la veille (Produits › Prix programmés).`);
+                onDone();
+              } catch (err) {
+                toast.error(err);
+              } finally {
+                setBusy(false);
+              }
+              return;
+            }
             if (!(await askConfirm(`Mettre à jour ${plan!.lines} prix sur ${plan!.articles.length} articles ? L'historique des prix garde les anciens prix.`))) return;
             setBusy(true);
             try {
@@ -909,7 +931,7 @@ export function PriceUpdateDialog({ onClose, onDone }: { onClose: () => void; on
             }
           }}
         >
-          Appliquer
+          {on ? 'Programmer' : 'Appliquer'}
         </button>
       </div>
     </Modal>

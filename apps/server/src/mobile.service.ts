@@ -284,15 +284,21 @@ export class MobileService {
   }
 
   /** Ce que la personne connectée peut faire sur le téléphone. */
-  async rights(caller: MobileCaller): Promise<{ count: boolean; cart: boolean; missed: boolean; receive: boolean }> {
-    if (caller.guest) return { count: true, cart: false, missed: false, receive: false };
+  async rights(caller: MobileCaller): Promise<{ count: boolean; cart: boolean; missed: boolean; receive: boolean; exit: boolean }> {
+    if (caller.guest) return { count: true, cart: false, missed: false, receive: false, exit: false };
     const { id, role } = caller.user;
     return {
       count: await this.canCount(id, role),
       cart: await this.canCart(id, role),
       missed: await this.hasRight(id, role, 'missed_sale', ['manager', 'cashier', 'seller', 'accountant', 'stock']),
       receive: await this.hasChainRight(id, role, ['mobile_reception', 'order_receive', 'purchase_orders'], ['manager', 'stock', 'buyer']),
+      exit: (await this.exitCheckOn(caller.device.store_id)) && (await this.hasRight(id, role, 'exit_check', ['manager', 'cashier', 'seller', 'stock'])),
     };
+  }
+
+  /** Le contrôle des tickets à la sortie n'existe que dans les magasins qui l'ont activé. */
+  private async exitCheckOn(storeId: string): Promise<boolean> {
+    return json<Record<string, unknown>>((await this.one('store', storeId))?.['settings'], {})['exitCheck'] === true;
   }
 
   // ——— Rattachement du téléphone ———
@@ -566,7 +572,10 @@ export class MobileService {
    * Vente manquée notée au rayon : elle part aux PC comme une saisie faite sur
    * un PC (`missed_sale`) ; le gérant la voit et la commande en tient compte.
    */
-  async recordMissed(caller: MobileCaller, input: { id?: string; articleId?: string | null; label?: string | null; qty?: number; reason?: string; note?: string | null }) {
+  async recordMissed(
+    caller: MobileCaller,
+    input: { id?: string; articleId?: string | null; label?: string | null; qty?: number; reason?: string; note?: string | null; customerName?: string | null; phone?: string | null },
+  ) {
     if (!(await this.rights(caller)).missed) throw new ForbiddenException('Vous n’avez pas le droit de noter une vente manquée. Demandez-le au gérant.');
     const id = str(input?.id).trim() || randomUUID();
     if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Demande invalide');
@@ -578,6 +587,9 @@ export class MobileService {
     const qty = Math.round(Number(input?.qty ?? 1000));
     if (!Number.isSafeInteger(qty) || qty <= 0 || qty > 1_000_000_000) throw new BadRequestException('Quantité invalide');
     const reason = ['absent', 'rupture', 'prix', 'autre'].includes(str(input?.reason)) ? str(input!.reason) : article ? 'rupture' : 'absent';
+    // Client à prévenir quand le produit arrive : chiffres seulement (8 à 15).
+    const phone = str(input?.phone).replace(/\D/g, '');
+    if (phone && (phone.length < 8 || phone.length > 15)) throw new BadRequestException('Numéro de téléphone invalide');
     const { rows: dup } = await this.pg.query("SELECT 1 FROM events WHERE entity = 'missed_sale' AND entity_id = $1 LIMIT 1", [id]);
     if (dup.length) return { id };
     const now = new Date().toISOString();
@@ -589,6 +601,8 @@ export class MobileService {
       qty,
       reason: !article && reason === 'rupture' ? 'absent' : reason,
       note: str(input?.note).trim().slice(0, 200) || null,
+      customer_name: str(input?.customerName).trim().slice(0, 80) || null,
+      phone: phone || null,
       user_id: caller.user.id,
       source: 'phone',
       created_at: now,
@@ -600,6 +614,92 @@ export class MobileService {
       [randomUUID(), caller.device.id, id, caller.device.store_id, JSON.stringify(payload)],
     );
     return { id };
+  }
+
+  // ——— Contrôle des tickets à la sortie ———
+
+  /**
+   * Ticket scanné par le vigile : articles payés (moins ce qui a été rapporté),
+   * contrôles déjà faits et ce qui doit l'alerter. D'après les ventes reçues des PC.
+   */
+  async exitLookup(caller: MobileCaller, raw: string) {
+    if (!(await this.rights(caller)).exit) throw new ForbiddenException('Vous n’avez pas le droit de contrôler les tickets. Demandez-le au gérant.');
+    const code = str(raw).trim().toUpperCase();
+    if (!code) throw new BadRequestException('Scannez le code-barres du ticket');
+    const { rows } = await this.pg.query<{ entity_id: string; store_id: string | null; payload: Json }>(
+      "SELECT entity_id, store_id, payload FROM events WHERE entity = 'sale' AND op = 'upsert' AND payload->>'number' = $1 ORDER BY seq DESC LIMIT 1",
+      [code],
+    );
+    const found = rows[0];
+    if (!found) throw new NotFoundException(`Aucun ticket n° ${code} reçu par le serveur : faites vérifier par la caisse`);
+    const sale = found.payload;
+    const saleId = found.entity_id;
+    const returns = await this.latest('sale', "AND payload->>'original_sale_id' = $2", [saleId]);
+    const returned = new Map<number, number>();
+    for (const r of returns)
+      if (r.payload['status'] === 'completed')
+        for (const l of (r.payload['lines'] as Json[] | undefined) ?? []) returned.set(Number(l['line_no']), (returned.get(Number(l['line_no'])) ?? 0) - Number(l['qty']));
+    const lines = ((sale['lines'] as Json[] | undefined) ?? [])
+      .filter((l) => str(l['article_id']) !== 'svc-delivery-fee')
+      .map((l) => {
+        const qty = Number(l['qty']) - (returned.get(Number(l['line_no'])) ?? 0);
+        const units = Number(l['pack_units']) || 0;
+        const packs = l['pack_name'] && units ? qty / units : null;
+        const text = packs && Number.isInteger(packs) ? `${packs} ${str(l['pack_name'])}` : `${(qty / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 3 })}`;
+        return { label: str(l['label']), qty, text };
+      })
+      .filter((l) => l.qty > 0);
+    const checks = (await this.latest('exit_check', "AND payload->>'sale_id' = $2", [saleId]))
+      .map((c) => ({ status: str(c.payload['status']), at: str(c.payload['created_at']), user: str(c.payload['user_name']) || null }))
+      .sort((a, b) => a.at.localeCompare(b.at));
+    const warnings: string[] = [];
+    let verdict: 'ok' | 'warn' | 'stop' = 'ok';
+    const stop = (w: string) => (warnings.push(w), (verdict = 'stop'));
+    const warn = (w: string) => (warnings.push(w), verdict === 'ok' && (verdict = 'warn'));
+    if (found.store_id && found.store_id !== caller.device.store_id) stop('Ticket d’un autre magasin');
+    if (sale['status'] !== 'completed') stop('Ticket ANNULÉ : la vente n’existe plus');
+    if (sale['kind'] === 'return') stop('C’est un ticket de RETOUR, pas un achat');
+    if (sale['status'] === 'completed' && sale['kind'] === 'sale' && !lines.length) stop('Tous les articles de ce ticket ont été rapportés au magasin');
+    if (checks.length) warn(`Ticket DÉJÀ CONTRÔLÉ le ${new Date(checks[0]!.at).toLocaleString('fr-FR', { timeZone: 'Africa/Douala', dateStyle: 'short', timeStyle: 'short' })}`);
+    const settings = json<Record<string, unknown>>((await this.one('store', caller.device.store_id))?.['settings'], {});
+    const hours = Number(settings['exitCheckHours']) || 3;
+    const age = (Date.now() - Date.parse(str(sale['created_at']))) / 3_600_000;
+    if (age > hours) warn(`Ticket ancien : payé il y a ${age < 48 ? `${Math.floor(age)} h` : `${Math.floor(age / 24)} jours`}`);
+    return { saleId, number: code, at: str(sale['created_at']), total: Number(sale['total_ttc']) || 0, lines, checks, warnings, verdict };
+  }
+
+  /** Contrôle noté par le vigile : il part aux PC (rapport du gérant) et un problème alerte le gérant. */
+  async exitRecord(caller: MobileCaller, input: { id?: string; saleId: string; number: string; status: 'ok' | 'problem'; note?: string | null }) {
+    if (!(await this.rights(caller)).exit) throw new ForbiddenException('Vous n’avez pas le droit de contrôler les tickets. Demandez-le au gérant.');
+    const id = str(input?.id).trim() || randomUUID();
+    if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Contrôle invalide');
+    const status = input?.status === 'problem' ? 'problem' : 'ok';
+    const note = str(input?.note).trim().slice(0, 200) || null;
+    if (status === 'problem' && !note) throw new BadRequestException('Dites quel est le problème');
+    const { rows: dup } = await this.pg.query("SELECT 1 FROM events WHERE entity = 'exit_check' AND entity_id = $1 LIMIT 1", [id]);
+    if (dup.length) return { id };
+    const before = await this.latest('exit_check', "AND payload->>'sale_id' = $2", [str(input.saleId)]);
+    const now = new Date().toISOString();
+    const payload = {
+      id,
+      store_id: caller.device.store_id,
+      sale_id: str(input.saleId),
+      sale_number: str(input.number),
+      status,
+      note,
+      repeat: before.length ? 1 : 0,
+      user_id: caller.user.id,
+      user_name: caller.user.name,
+      source: 'phone',
+      created_at: now,
+      updated_at: now,
+    };
+    await this.pg.query(
+      `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
+       VALUES ($1, $2, 'exit_check', $3, 'upsert', $4, NULL, $5, now())`,
+      [randomUUID(), caller.device.id, id, caller.device.store_id, JSON.stringify(payload)],
+    );
+    return { id, repeat: payload.repeat };
   }
 
   // ——— Fiche produit : stock ailleurs, prochaine livraison, remplaçant ———

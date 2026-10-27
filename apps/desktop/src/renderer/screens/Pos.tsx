@@ -28,7 +28,7 @@ import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
-import { CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, ScannedTicketDialog, WhatsappTicketDialog } from './PosDialogs';
+import { BookSaleDialog, CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, ScannedTicketDialog, SellVoucherDialog, WhatsappTicketDialog } from './PosDialogs';
 import { MissedSaleDialog } from './Floor';
 import { tx } from '../tax';
 
@@ -106,7 +106,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket';
+type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
 type PrintChoice = 'none' | 'ticket' | 'listing';
@@ -174,6 +174,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
 }) {
   const toast = useToast();
   const session = useLoad(() => call('pos.session'), []);
+  // Vente du carnet à souches (panne) : la prochaine vente porte le numéro de la souche et l'heure écrite.
+  const [book, setBook] = useState<{ number: string; at: string } | null>(null);
+  // Espèces du tiroir au-dessus du plafond : bandeau et versement proposé.
+  const drawer = useLoad(() => call('pos.drawerStatus'), []);
   const quickKeys = useLoad(() => call('catalogue.quickKeys'), []);
   // Grille tactile : les touches rapides rangées par rayon.
   const [rayon, setRayon] = useState<string | null>(null);
@@ -524,7 +528,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    * Envoie la vente ; si le serveur demande l'accord d'un gérant (remise d'un
    * caissier, plafond de crédit dépassé), on demande son code puis on relance.
    */
-  const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string } = {}) => {
+  const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string; keepChange?: number | null } = {}) => {
     try {
       if (delivery.on && !delivery.address.trim()) {
         setPane('delivery');
@@ -544,9 +548,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           delivery: deliveryInput(),
           replacesId: replacing?.id ?? null,
           sellerId: seller?.id ?? null,
+          book,
           ...pins,
         }),
       );
+      setBook(null);
+      drawer.reload();
       setCashGiven(0);
       setPending(null);
     } catch (err) {
@@ -979,10 +986,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         allowCredit={Boolean(customer)}
         loyalty={fidelity.data?.enabled ? fidelity.data : null}
         payerPhone={customer?.phone ?? null}
+        customerName={customer?.name ?? null}
         onClose={() => setDialog(null)}
-        onPaid={async (payments, supervisorPin) => {
+        onPaid={async (payments, supervisorPin, keepChange) => {
           setDialog(null);
-          await sell(payments, { supervisorPin });
+          await sell(payments, { supervisorPin, keepChange });
         }}
       />
     )}
@@ -1163,6 +1171,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
     {dialog === 'return' && <ReturnDialog initialSale={returnOf} onClose={() => (setDialog(null), setReturnOf(null))} />}
     {dialog === 'missed' && <MissedSaleDialog onClose={() => (setDialog(null), focusScan())} />}
+    {dialog === 'book' && <BookSaleDialog current={book} onClose={() => (setDialog(null), focusScan())} onSet={(b) => (setBook(b), setDialog(null), focusScan())} />}
+    {dialog === 'voucher' && <SellVoucherDialog sessionId={session.data.id} onClose={() => (setDialog(null), drawer.reload(), focusScan())} />}
     {dialog === 'ticket' && scanned && (
       <ScannedTicketDialog
         sale={scanned}
@@ -1173,7 +1183,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       />
     )}
     {(dialog === 'cashIn' || dialog === 'cashOut') && (
-      <CashOpDialog type={dialog === 'cashIn' ? 'IN' : 'OUT'} needsSupervisor={!has(user, 'cashout')} onClose={() => setDialog(null)} />
+      <CashOpDialog
+        type={dialog === 'cashIn' ? 'IN' : 'OUT'}
+        needsSupervisor={!has(user, 'cashout')}
+        initialAmount={dialog === 'cashOut' && drawer.data?.over ? drawer.data.suggested : undefined}
+        onClose={() => (setDialog(null), drawer.reload())}
+      />
     )}
     </>
   );
@@ -1241,14 +1256,36 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         ))}
       </select>
     ) : null;
-  const staleNote = stale && (
-    <div className="tre-warning">
-      Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
-      <button className="link" onClick={onTreasury}>
-        Trésorerie
-      </button>{' '}
-      puis rouvrez la caisse.
-    </div>
+  const staleNote = (
+    <>
+      {stale && (
+        <div className="tre-warning">
+          Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
+          <button className="link" onClick={onTreasury}>
+            Trésorerie
+          </button>{' '}
+          puis rouvrez la caisse.
+        </div>
+      )}
+      {drawer.data?.over && (
+        <div className="tre-warning">
+          Trop d'espèces dans le tiroir : {fcfa(drawer.data.cash)} pour un plafond de {fcfa(drawer.data.ceiling)}. Le gérant est prévenu.{' '}
+          {(can('cash_withdraw') || can('cashout')) && (
+            <button className="link" onClick={() => setDialog('cashOut')}>
+              Verser {fcfa(drawer.data.suggested)} à la caisse centrale
+            </button>
+          )}
+        </div>
+      )}
+      {book && (
+        <div className="tre-warning">
+          Vente du carnet à souches n° {book.number} écrite à {new Date(book.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} : saisissez les articles et encaissez.{' '}
+          <button className="link" onClick={() => setBook(null)}>
+            Annuler
+          </button>
+        </div>
+      )}
+    </>
   );
   const bandText = replacing
     ? `Modification de la facture ${replacing.number} · déjà réglé ${amount(replacing.paid)} · ${
@@ -1562,6 +1599,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                 Le client voulait… <kbd>Ctrl+M</kbd>
               </button>
             )}
+            {can('voucher_sell') && (
+              <button onClick={() => setDialog('voucher')} title="Vendre un bon d'achat (cadeau) avec son code-barres">
+                Bon d'achat
+              </button>
+            )}
+            {can('sale_book') && (
+              <button className={book ? 'on' : ''} onClick={() => setDialog('book')} title="Saisir une vente écrite sur le carnet à souches pendant une panne">
+                Carnet{book ? ` n° ${book.number}` : ''}
+              </button>
+            )}
             <hr />
             <button disabled={!sel} onClick={() => setDialog('vary')}>
               Varier
@@ -1617,6 +1664,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           {can('missed_sale') && (
             <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre (Ctrl+M)">
               <i>🙋</i>Le client voulait…
+            </button>
+          )}
+          {can('voucher_sell') && (
+            <button onClick={() => setDialog('voucher')} title="Vendre un bon d'achat (cadeau) avec son code-barres">
+              <i>🎁</i>Bon d'achat
+            </button>
+          )}
+          {can('sale_book') && (
+            <button className={book ? 'on' : ''} onClick={() => setDialog('book')} title="Saisir une vente écrite sur le carnet à souches pendant une panne">
+              <i>📒</i>Carnet{book ? ` n° ${book.number}` : ''}
             </button>
           )}
           <button className={pane === 'delivery' ? 'on' : ''} onClick={() => setPane(pane === 'delivery' ? 'lines' : 'delivery')}>

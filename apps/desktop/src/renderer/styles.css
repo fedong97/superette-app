@@ -1357,3 +1357,14 @@ ul.plain li { padding: 3px 0; }
 .alert-row .link {
   margin-right: 10px;
 }
+
+/* Contrôle à la sortie (0.87.0) */
+.exit-door { max-width: 760px; }
+.exit-door .search.big { font-size: 1.4em; padding: 10px; }
+.exit-door .card.exit-ok { border-left: 8px solid var(--ok, #2e7d32); }
+.exit-door .card.exit-warn { border-left: 8px solid var(--warn, #ef6c00); }
+.exit-door .card.exit-stop { border-left: 8px solid var(--danger, #c62828); }
+.exit-door .exit-warning { font-weight: 700; font-size: 1.15em; color: var(--danger, #c62828); }
+.exit-door .exit-lines td { font-size: 1.15em; }
+.keep-change { margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.keep-change .qty { width: 90px; }

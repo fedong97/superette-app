@@ -14,11 +14,13 @@ import { tx } from '../tax';
 import { ReceptionLabels } from './barcodePrint';
 import { PurchaseEntry } from './purchaseEntry';
 import { DayTasks, Restock } from './Floor';
+import { Recalls } from './Recalls';
+import { StoreTransfers } from './StoreTransfers';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle' | 'restock' | 'tasks';
+type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle' | 'restock' | 'tasks' | 'stores' | 'recalls';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
@@ -46,6 +48,8 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
     cycle: has(user, 'cycle_count'),
     restock: has(user, 'restock'),
     tasks: has(user, 'day_tasks'),
+    stores: has(user, 'store_transfers'),
+    recalls: has(user, 'lot_recall'),
   };
   const tabs = (
     [
@@ -57,8 +61,10 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       ['loss', 'Pertes et casse'],
       ['restock', 'Réassort du rayon'],
       ['transfer', 'Transfert'],
+      ['stores', 'Entre magasins'],
       ['inventory', 'Inventaires'],
       ['expiry', 'Péremptions'],
+      ['recalls', 'Rappels de lots'],
       ['moves', 'Mouvements'],
       ['adjustments', 'Ajustements'],
       ['monitoring', 'Monitoring'],
@@ -89,6 +95,8 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'losses' && allowed.losses && <Losses />}
       {tab === 'restock' && allowed.restock && <Restock />}
       {tab === 'tasks' && allowed.tasks && <DayTasks />}
+      {tab === 'stores' && allowed.stores && <StoreTransfers />}
+      {tab === 'recalls' && allowed.recalls && <Recalls />}
       {tab === 'cycle' && allowed.cycle && <CycleCount onOpenInventory={allowed.inventory ? () => setTab('inventory') : undefined} />}
     </div>
   );

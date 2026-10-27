@@ -11,6 +11,8 @@ export const ALERT_KINDS = {
   stockout: 'Ruptures de stock',
   silent: 'PC qui ne donnent plus de nouvelles',
   staff: 'Retards et absences du personnel',
+  cash: 'Trop d’argent dans un tiroir',
+  exit: 'Problèmes au contrôle de sortie',
 } as const;
 export type AlertKind = keyof typeof ALERT_KINDS;
 
@@ -87,7 +89,7 @@ export class AlertsService {
       `SELECT e.seq, e.entity, e.entity_id, e.store_id, e.payload, e.created_at,
          NOT EXISTS (SELECT 1 FROM events p WHERE p.entity = e.entity AND p.entity_id = e.entity_id AND p.seq < e.seq) AS first,
          (SELECT p.payload FROM events p WHERE p.entity = e.entity AND p.entity_id = e.entity_id AND p.seq < e.seq ORDER BY p.seq DESC LIMIT 1) AS was
-       FROM events e WHERE e.seq > $1 AND e.seq <= $2 AND e.op = 'upsert' AND e.entity IN ('cash_session', 'sale', 'stock_level', 'staff_alert') ORDER BY e.seq LIMIT 2000`,
+       FROM events e WHERE e.seq > $1 AND e.seq <= $2 AND e.op = 'upsert' AND e.entity IN ('cash_session', 'sale', 'stock_level', 'staff_alert', 'cash_alert', 'exit_check') ORDER BY e.seq LIMIT 2000`,
       [since, upTo],
     );
     if (!rows.length) return [];
@@ -122,6 +124,17 @@ export class AlertsService {
       } else if (r.entity === 'staff_alert') {
         // Levée par le PC du magasin d'après l'horaire prévu ; une seule fois par personne, jour et sorte.
         if (r.first) out.push({ key: `staff:${r.entity_id}`, kind: 'staff', store: storeName, title: p['kind'] === 'absent' ? 'Absence du personnel' : 'Retard du personnel', text: String(p['text'] ?? ''), at });
+      } else if (r.entity === 'cash_alert') {
+        // Levée par la caisse quand le tiroir dépasse le plafond réglé.
+        if (r.first) out.push({ key: `cash:${r.entity_id}`, kind: 'cash', store: storeName, title: 'Trop d’argent dans le tiroir', text: String(p['text'] ?? '') || `${name(registers, p['register_id'])} : ${fcfa(num(p['amount']))} (plafond ${fcfa(num(p['ceiling']))})`, at });
+      } else if (r.entity === 'exit_check') {
+        if (r.first && (p['status'] === 'problem' || num(p['repeat']) === 1 || p['repeat'] === true)) {
+          const who = name(users, p['user_id']);
+          const what = p['status'] === 'problem' ? String(p['note'] ?? 'problème signalé') : 'ticket déjà présenté une fois';
+          out.push({ key: `exit:${r.entity_id}`, kind: 'exit', store: storeName, title: 'Contrôle de sortie', text: `${String(p['sale_number'] ?? '')} : ${what}${who ? ` (${who})` : ''}`, at });
+        }
+      } else if (r.entity !== 'stock_level') {
+        continue;
       } else if (num(p['qty']) <= 0 && (r.first || num(r.was?.['qty']) > 0)) {
         const article = name(articles, p['article_id']);
         if (!article) continue;

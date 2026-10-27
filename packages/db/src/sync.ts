@@ -94,6 +94,13 @@ const TABLES: Record<string, string> = {
   fingerprint_device: 'fingerprint_devices',
   staff_warning: 'staff_warnings',
   staff_alert: 'staff_alerts',
+  gift_voucher: 'gift_vouchers',
+  cash_alert: 'cash_alerts',
+  exit_check: 'exit_checks',
+  lot_recall: 'lot_recalls',
+  price_schedule: 'price_schedules',
+  recurring_order: 'recurring_orders',
+  store_transfer_request: 'store_transfer_requests',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -120,6 +127,11 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   time_punches: { active: 0, cancelled: 1 },
   staff_documents: { active: 0, cancelled: 1 },
   staff_warnings: { active: 0, cancelled: 1 },
+  gift_vouchers: { active: 0, cancelled: 1 },
+  lot_recalls: { open: 0, closed: 1 },
+  // Deux PC qui appliquent les mêmes prix programmés : « appliqué » ne redevient pas « à venir ».
+  price_schedules: { pending: 0, applied: 1, cancelled: 1 },
+  store_transfer_requests: { requested: 0, shipped: 1, refused: 2, cancelled: 2, received: 3 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */

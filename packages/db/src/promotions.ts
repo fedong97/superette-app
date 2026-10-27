@@ -1,4 +1,4 @@
-import { type Fcfa, type PromotionKind, type PromotionRule, checkPromotion } from '@superette/core';
+import { type Fcfa, type PromoPoster, type PromotionKind, type PromotionRule, checkPromotion, parseNetContent, unitPriceText } from '@superette/core';
 import type { CatalogueService } from './catalogue';
 import type { Db } from './database';
 import { AppError, Base, type Clock, newId } from './util';
@@ -54,6 +54,27 @@ export class PromotionService extends Base {
     private readonly catalogue: CatalogueService,
   ) {
     super(db, clock);
+  }
+
+  /** Affichettes des promotions choisies (en cours ou à venir) pour la vitrine et les rayons. */
+  posters(storeId: string, ids: string[], storeName: string | null): PromoPoster[] {
+    const fr = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+    return this.list(storeId)
+      .filter((p) => ids.includes(p.id) && (p.status === 'running' || p.status === 'scheduled'))
+      .map((p) => {
+        const a = this.catalogue.getArticle(p.article_id, storeId);
+        const content = parseNetContent(a.net_content ?? a.name);
+        const price = p.kind === 'price' ? p.promo_price : p.kind === 'lot' ? p.lot_price : a.store_price;
+        return {
+          name: a.name,
+          offer: p.kind === 'price' ? 'PROMO' : p.kind === 'x_for_y' ? `${p.buy_qty} POUR ${p.pay_qty}` : `LES ${p.buy_qty}`,
+          price,
+          oldPrice: p.kind === 'price' ? a.store_price : p.kind === 'lot' ? a.store_price * (p.buy_qty ?? 1) : null,
+          unitPrice: p.kind === 'price' && price ? unitPriceText(price, content) : p.kind === 'x_for_y' ? `Vous payez ${p.pay_qty}, vous en emportez ${p.buy_qty}` : null,
+          dates: `Du ${fr(p.starts_on)} au ${fr(p.ends_on)}`,
+          store: storeName,
+        };
+      });
   }
 
   list(storeId: string | null): Promotion[] {

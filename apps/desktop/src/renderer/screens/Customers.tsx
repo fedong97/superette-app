@@ -39,7 +39,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       <header className="page-head">
         <h1>Clients</h1>
       </header>
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      <Tabs main value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'list' && <CustomerList user={user} />}
       {tab === 'statement' && <StatementPicker />}
       {tab === 'receivables' && accounting && <Receivables user={user} />}

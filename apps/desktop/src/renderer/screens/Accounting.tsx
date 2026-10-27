@@ -91,6 +91,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
         <span className="muted">Plan SYSCOHADA révisé · les écritures se passent toutes seules à partir des Z, factures et règlements</span>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={(

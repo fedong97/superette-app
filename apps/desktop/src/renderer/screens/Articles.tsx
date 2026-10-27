@@ -32,6 +32,7 @@ export function Articles({ user, view = 'list' }: { user: User; view?: ArticlesV
         <h1>Produits</h1>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={[

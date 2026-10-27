@@ -29,6 +29,7 @@ export function Production({ user, initialTab = 'orders' }: { user: User; initia
         <h1>Fabrication</h1>
       </header>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={[

@@ -78,7 +78,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       <header className="page-head">
         <h1>Stock</h1>
       </header>
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      <Tabs main value={tab} onChange={setTab} tabs={tabs} />
       {!allowed[tab] && <Empty>Vous n'avez pas accès à cet onglet.</Empty>}
       {tab === 'state' && <StockState critical={initialTab === 'critical'} />}
       {tab === 'multi' && <StockByStore />}

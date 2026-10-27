@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.90.0',
+    items: [
+      'Fenêtres façon Sage : chaque écran s’ouvre dans sa propre fenêtre. Paramètres s’ouvre seul, sans les autres onglets de l’administration ; Utilisateurs, État du stock ou Bons de commande ont chacun la leur.',
+      'Chaque fenêtre se réduit (–) dans la barre du bas, s’agrandit (▢) ou se ferme (✕). Le bouton ❐ en haut à droite liste les fenêtres ouvertes et les range en cascade ou en mosaïque ; Ctrl+Tab passe à la suivante, Ctrl+F4 ferme celle de devant.',
+      'Les réglages, les opérations de caisse et les traitements (Paramètres, Utilisateurs, Droits, Licence, Sauvegardes, Ma caisse, Proposition de commande, Étiquettes…) s’ouvrent en boîte de dialogue qu’on ne peut que fermer.',
+      'Petites fenêtres (ticket, confirmations…) : les boutons du bas passent à la ligne au lieu d’être coupés à gauche.',
+    ],
+  },
+  {
     version: '0.89.0',
     items: [
       'Remise à zéro des données d’essai (Administration › Sauvegardes) : après l’installation et la formation, efface les ventes, achats, caisses, dépenses et mouvements de stock, et garde les réglages, les produits, les clients, les fournisseurs et le personnel. Le stock actuel peut être gardé comme stock de départ.',

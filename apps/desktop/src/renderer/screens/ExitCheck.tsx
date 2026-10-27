@@ -24,7 +24,7 @@ export function ExitChecks({ initialTab = 'door' }: { initialTab?: ExitTab }) {
       <header className="page-head">
         <h1>Contrôle à la sortie</h1>
       </header>
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      <Tabs main value={tab} onChange={setTab} tabs={tabs} />
       {!tabs.length && <Empty>Vous n'avez pas accès au contrôle à la sortie.</Empty>}
       {tab === 'door' && can('exit_check') && <Door />}
       {tab === 'report' && can('exit_report') && <ExitReport />}

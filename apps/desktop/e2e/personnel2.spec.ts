@@ -104,14 +104,15 @@ test('paie d’après le pointage, pointeuse à empreinte, alertes et avertissem
     expect(await (await fetch(`${base}/cdata?SN=CQZ7232460123&options=all`)).text()).toContain('GET OPTION FROM: CQZ7232460123');
     const res = await fetch(`${base}/cdata?SN=CQZ7232460123&table=ATTLOG&Stamp=1`, { method: 'POST', body: `${marie.punch_number}\t${days[12]} 07:59:00\t0\t1\n${marie.punch_number}\t${days[12]} 16:00:00\t1\t1\n` });
     expect(await res.text()).toBe('OK: 2');
-    await page.getByRole('button', { name: 'Qui est là', exact: true }).click();
-    await page.getByRole('button', { name: 'Équipes et entrées' }).click();
+    // Fenêtre déjà ouverte : elle revient devant, F5 relit les passages reçus de la pointeuse.
+    await openMenu(page, 'Personnel', 'Équipes, rotations et pointeuses');
+    await page.keyboard.press('F5');
     await page.getByRole('heading', { name: 'Pointeuses à empreinte' }).evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await expect(page.getByRole('cell', { name: 'CQZ7232460123' })).toBeVisible();
     await shot(page, '03-pointeuses-a-empreinte');
 
     // Salaires du mois dernier, proposés d'après le pointage.
-    await page.getByRole('button', { name: 'Salaires du mois' }).click();
+    await openMenu(page, 'Personnel', 'Salaires du mois');
     await page.getByLabel('Mois').fill(period);
     await expect(page.getByRole('cell', { name: /Luc TCHOUA/ })).toBeVisible();
     await shot(page, '04-salaires-d-apres-le-pointage');
@@ -125,20 +126,20 @@ test('paie d’après le pointage, pointeuse à empreinte, alertes et avertissem
     expect(sal.attendance).toContain('Heures supplémentaires');
 
     // Fiche d'un journalier : tarif de la journée.
-    await page.getByRole('button', { name: 'Collaborateurs', exact: true }).click();
+    await openMenu(page, 'Personnel', /^Collaborateurs/);
     await page.getByRole('row', { name: /Marie NGO/ }).getByRole('button', { name: 'Modifier' }).click();
     await expect(page.getByLabel('Tarif d’une journée (FCFA)')).toHaveValue('3000');
     await shot(page, '06-fiche-journalier');
     await page.keyboard.press('Escape');
 
     // Qui est là : le vigile n'a pas pointé, l'alerte propose les messages WhatsApp.
-    await page.getByRole('button', { name: 'Qui est là', exact: true }).click();
+    await openMenu(page, 'Personnel', /Qui est là/);
     await expect(page.locator('.alert-row', { hasText: 'Ali MOUSSA' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'WhatsApp à Sécurité Plus' })).toBeVisible();
     await shot(page, '07-alertes-whatsapp');
 
     // Avertissements : Luc a deux retards le mois dernier ? Seuls ceux du mois en cours comptent ; on en donne un à la main.
-    await page.getByRole('button', { name: 'Avertissements', exact: true }).click();
+    await openMenu(page, 'Personnel', 'Avertissements');
     await page.getByRole('button', { name: 'Nouvel avertissement…' }).click();
     await page.locator('.modal').getByLabel('Collaborateur').selectOption({ label: 'Luc TCHOUA' });
     await page.locator('.modal').getByLabel('Sorte').selectOption('written');

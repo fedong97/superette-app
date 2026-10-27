@@ -64,7 +64,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       <header className="page-head">
         <h1>Administration</h1>
       </header>
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      <Tabs main value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'stores' && <Stores onChanged={onChanged} />}
       {tab === 'registers' && <Registers isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'warehouses' && <Warehouses canCreate={can('warehouses_manage')} />}

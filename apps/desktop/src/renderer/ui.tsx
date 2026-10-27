@@ -478,7 +478,28 @@ export function Empty({ children, action, mood = 'veille' }: { children: ReactNo
   );
 }
 
-export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; onChange: (v: T) => void; tabs: [T, string][] }) {
+/**
+ * Fenêtre ouverte sur un seul écran (façon Sage) : la rangée d'onglets du module
+ * n'y est pas affichée, et quand l'écran passe de lui-même à une autre vue
+ * (« Privilèges… » depuis Utilisateurs), la fenêtre prend le nom de cette vue.
+ */
+export const SingleViewCtx = createContext<{ onView: (label: string) => void } | null>(null);
+
+/**
+ * `main` : la rangée d'onglets du module (Stock, Administration…). Dans une
+ * fenêtre d'un seul écran elle disparaît avec le bandeau du module ; les
+ * onglets d'une fiche ou d'une sous-partie restent toujours affichés.
+ */
+export function Tabs<T extends string>({ value, onChange, tabs, main }: { value: T; onChange: (v: T) => void; tabs: [T, string][]; main?: boolean }) {
+  const single = useContext(SingleViewCtx);
+  const first = useRef(value);
+  useEffect(() => {
+    if (!main || !single || value === first.current) return;
+    const label = tabs.find(([k]) => k === value)?.[1];
+    if (label) single.onView(label);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  if (main && single) return <div className="tabs-main" hidden />;
   return (
     <div className="tabs">
       {tabs.map(([key, label]) => (

@@ -56,6 +56,7 @@ export function Containers({ initialTab = 'situation' }: { initialTab?: Containe
         )}
       </div>
       <Tabs
+        main
         value={tab}
         onChange={setTab}
         tabs={(

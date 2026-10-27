@@ -76,7 +76,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       <header className="page-head">
         <h1>Achats</h1>
       </header>
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
+      <Tabs main value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'orders' && <Orders canEdit={buying} startNew={initialTab === 'new-order' && buying} />}
       {tab === 'receptions' && <Receptions />}
       {tab === 'pending' && <PendingReceipts />}

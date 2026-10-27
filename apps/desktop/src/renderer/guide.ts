@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.93.0',
+    items: [
+      "Barre latérale plus étroite : plus de place pour les fenêtres.",
+      "Nouveau menu Fournisseurs dans la barre latérale : liste des fournisseurs, extraits de compte, situation, bonus et soldes qui ont bougé. Le menu Achats garde les commandes, les réceptions et les factures.",
+    ],
+  },
+  {
     version: '0.92.0',
     items: [
       'Nouvelle interface : fond clair, cartes blanches, police Inter et icônes au trait. La couleur du magasin ne sert plus qu’aux accents (bouton principal, élément choisi, graphiques) ; boutons, champs, tableaux, fenêtres et messages ont le même style sur tous les écrans.',

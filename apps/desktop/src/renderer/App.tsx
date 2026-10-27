@@ -178,6 +178,7 @@ const MENU_ICONS: Record<string, string> = {
   Stock: '🗄️',
   Articles: '📦',
   Achats: '🛒',
+  Fournisseurs: '🚚',
   Clients: '👥',
   Dépenses: '💸',
   Personnel: '🪪',
@@ -217,7 +218,9 @@ const OLD_MENUS: Record<string, string[]> = {
   Magasinier: ['Stock'],
   Transfert: ['Stock'],
   Fabrication: ['Articles'],
-  Fournisseur: ['Achats'],
+  Fournisseur: ['Fournisseurs'],
+  /** 0.93.0 : les fournisseurs quittent le menu Achats pour leur propre menu. */
+  Achats: ['Achats', 'Fournisseurs'],
   Client: ['Clients'],
   Charge: ['Dépenses'],
   Comptabilité: ['Compta'],
@@ -362,6 +365,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Échéancier fournisseurs', words: 'dettes fournisseurs payer échéances', open: ['purchases', 'due'], perm: 'purchase_due' },
       { label: 'Retours fournisseur et avoirs attendus', open: ['purchases', 'returns'], perm: 'supplier_returns' },
       { label: 'Achats par produit', open: ['purchases', 'byproduct'] },
+    ],
+  ],
+  [
+    'Fournisseurs',
+    [
       H('Fournisseurs'),
       { label: 'Liste des fournisseurs', words: 'fournisseur nouveau fournisseur', open: ['suppliers', 'list'], perm: 'suppliers' },
       { label: 'Extrait de compte fournisseur', open: ['suppliers', 'statement'], perm: 'supplier_statement' },

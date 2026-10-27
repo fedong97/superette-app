@@ -21,6 +21,7 @@ import {
   UserRound,
   Users,
   Wallet,
+  Truck,
   IdCard,
   FolderOpen,
 } from 'lucide-react';
@@ -33,6 +34,7 @@ const MENU: Record<string, LucideIcon> = {
   Stock: Boxes,
   Articles: Package,
   Achats: ShoppingCart,
+  Fournisseurs: Truck,
   Clients: Users,
   Dépenses: HandCoins,
   Personnel: IdCard,

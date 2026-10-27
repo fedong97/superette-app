@@ -883,7 +883,7 @@ export function CreditControl() {
           </tbody>
         </table>
       )}
-      <p className="muted small">Au-delà du plafond, une vente à crédit demande le code du gérant ; chaque dépassement accordé figure dans Vente › Alertes sur les ventes.</p>
+      <p className="muted small">Au-delà du plafond, une vente à crédit demande le code du gérant ; chaque dépassement accordé figure dans Suivi › Alertes sur les ventes.</p>
     </>
   );
 }

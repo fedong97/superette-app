@@ -922,7 +922,7 @@ export function PriceUpdateDialog({ onClose, onDone }: { onClose: () => void; on
             setBusy(true);
             try {
               const r = await call('catalogue.priceApply', input());
-              toast.ok(`${r.articles} articles mis à jour. Pensez à réimprimer les étiquettes (Produit › Étiquettes).`);
+              toast.ok(`${r.articles} articles mis à jour. Pensez à réimprimer les étiquettes (Articles › Étiquettes).`);
               onDone();
             } catch (err) {
               toast.error(err);

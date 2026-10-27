@@ -28,7 +28,7 @@ const lastOfPrevMonth = () => {
 const pct = (bp: number) => `${(bp / 100).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} %`;
 
 /**
- * Ristournes des clients spécifiques, comme le menu Client › Ristournes &
+ * Ristournes des clients spécifiques, comme le menu Clients › Ristournes &
  * Autres : état, reports à nouveau, réglages de base et des
  * clients, régularisations.
  */

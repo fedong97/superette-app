@@ -34,9 +34,11 @@ function displayedTexts(file: string): string[] {
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
       const p = n.parent;
       const key = ts.isPropertyAssignment(p) && p.name === n;
+      // Mots de recherche d'un menu (Ctrl+K) : jamais affichés.
+      const synonyms = ts.isPropertyAssignment(p) && p.name.getText() === 'words';
       const compared = ts.isBinaryExpression(p) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(p.operatorToken.kind);
       const hidden = ts.isCallExpression(p) && NOT_SHOWN.test(p.expression.getText().split('.').pop()!);
-      if (!key && !compared && !hidden && !ts.isElementAccessExpression(p)) add(n.text);
+      if (!key && !synonyms && !compared && !hidden && !ts.isElementAccessExpression(p)) add(n.text);
     } else if (ts.isJsxText(n)) add(n.text);
     else if (ts.isTemplateExpression(n)) [n.head.text, ...n.templateSpans.map((s) => s.literal.text)].forEach(add);
     ts.forEachChild(n, visit);

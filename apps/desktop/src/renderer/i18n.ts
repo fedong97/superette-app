@@ -61,7 +61,7 @@ function lookup(s: string): string | null {
     const m = re.exec(s);
     if (m) return typeof to === 'string' ? s.replace(re, to) : to(m, (fr) => lookup(fr) ?? fr);
   }
-  // Chemins « Facturation › Vente au comptant 1 » et listes « Caisse 1 · Steve ».
+  // Chemins « Vente › Vente au comptant 1 » et listes « Caisse 1 · Steve ».
   for (const sep of [' › ', ' · ', ' / ']) {
     if (!s.includes(sep)) continue;
     const parts = s.split(sep);

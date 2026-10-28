@@ -258,7 +258,7 @@ test('captures du manuel', async () => {
     await page.getByLabel('Adresse').fill('Rue Joss, Akwa, Douala');
     await page.getByLabel('Téléphone').fill('677 00 00 00');
     await page.getByLabel('Métier').selectOption({ label: 'Superette / alimentation générale' });
-    await page.getByLabel('Nom complet').fill('Steve Fedong');
+    await page.getByLabel('Nom complet').fill('Alain Ngono');
     await page.getByLabel('Identifiant').fill('admin');
     await page.getByLabel(/^Code secret/).fill('1234');
     await page.getByLabel('Confirmer le code').fill('1234');

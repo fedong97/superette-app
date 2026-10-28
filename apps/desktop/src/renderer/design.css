@@ -444,7 +444,7 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
   --row: color-mix(in srgb, var(--brand) 3%, white);
   --row-alt: color-mix(in srgb, var(--brand) 10%, white);
   --head-bg: color-mix(in srgb, var(--brand) 32%, white);
-  --side-bg: linear-gradient(180deg, color-mix(in srgb, var(--brand) 42%, white) 0%, color-mix(in srgb, var(--brand) 26%, white) 100%);
+  --side-bg: linear-gradient(180deg, color-mix(in srgb, var(--brand) 70%, black) 0%, color-mix(in srgb, var(--brand) 55%, black) 100%);
 }
 /* Barre latérale teintée de la couleur du magasin ; chaque menu a sa pastille de couleur. */
 .rail { background: var(--side-bg); border-right: 1px solid color-mix(in srgb, var(--brand) 25%, white); }
@@ -463,6 +463,21 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
 .side-user-wrap { border-top-color: color-mix(in srgb, var(--brand) 22%, white); }
 .side-user:hover, .side-toggle:hover { background: rgba(255, 255, 255, 0.65) !important; }
 .side-user b { background: var(--brand); color: var(--brand-ink, #fff); }
+/* Barre foncée : texte blanc, pastilles d'icônes blanches pour garder la couleur de chaque menu. */
+.rail { border-right-color: rgba(0, 0, 0, 0.25); }
+.side-head, .side-user-wrap { border-color: rgba(255, 255, 255, 0.16) !important; }
+.side-brand b, .side-brand small { color: #fff; }
+.side-brand small { opacity: 0.8; }
+.rail :is(.rail-item, .rail-link), .rail .side-user, .rail .side-toggle { color: #fff !important; }
+.rail .rail-chev { color: rgba(255, 255, 255, 0.75); }
+.rail :is(.rail-item, .rail-link):hover:not(:disabled), .rail .side-user:hover, .rail .side-toggle:hover { background: rgba(255, 255, 255, 0.14) !important; color: #fff !important; }
+.rail :is(.rail-item, .rail-link).open, .rail :is(.rail-item, .rail-link).on { background: #fff !important; color: var(--ink) !important; }
+.rail :is(.rail-item, .rail-link).open .rail-chev, .rail :is(.rail-item, .rail-link).on .rail-chev { color: var(--muted); }
+.rail :is(.rail-item, .rail-link).open::before, .rail :is(.rail-item, .rail-link).on::before { background: #fff; }
+.rail .side-search { background: rgba(255, 255, 255, 0.12) !important; border-color: rgba(255, 255, 255, 0.22) !important; }
+.rail .rail-kbd { background: rgba(255, 255, 255, 0.15); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
+.rail .side-user .rail-label, .rail .side-user small { color: #fff; }
+.rail .side-user b { background: #fff; color: var(--brand); }
 
 /* Barre du haut et barre d'état légèrement teintées */
 .topbar { background: color-mix(in srgb, var(--brand) 5%, white); border-bottom-color: color-mix(in srgb, var(--brand) 18%, white); }

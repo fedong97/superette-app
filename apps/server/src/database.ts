@@ -373,6 +373,39 @@ CREATE TABLE mobile_receptions (
 CREATE INDEX mobile_receptions_waiting ON mobile_receptions (store_id, created_at) WHERE taken_at IS NULL;
 `,
   },
+  {
+    version: 11,
+    sql: `
+-- Vendeur et caissier séparés : la facture préparée sur le PC du vendeur attend une caisse
+-- du magasin. Une seule personne la tient à la fois (le vendeur qui la modifie, ou le
+-- caissier qui l'encaisse) ; le stock et la vente ne naissent qu'à l'encaissement.
+CREATE TABLE counter_invoices (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  number INT NOT NULL,
+  device_id UUID NOT NULL REFERENCES devices(id),
+  seller_id TEXT NOT NULL,
+  seller_name TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('waiting', 'editing', 'returned', 'paying', 'paid', 'cancelled')),
+  version INT NOT NULL DEFAULT 1,
+  payload JSONB NOT NULL,
+  total BIGINT NOT NULL,
+  line_count INT NOT NULL,
+  customer_name TEXT,
+  note TEXT,
+  lock_device UUID,
+  lock_name TEXT,
+  locked_at TIMESTAMPTZ,
+  sale_id TEXT,
+  sale_number TEXT,
+  done_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX counter_invoices_open ON counter_invoices (store_id, created_at) WHERE status NOT IN ('paid', 'cancelled');
+CREATE INDEX counter_invoices_seller ON counter_invoices (store_id, seller_id, created_at);
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

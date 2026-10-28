@@ -2657,4 +2657,21 @@ CREATE INDEX treasury_entries_session ON treasury_entries(session_id);
 CREATE INDEX treasury_entries_staff ON treasury_entries(staff_id);
 `,
   },
+  {
+    version: 62,
+    name: 'vendeur et caissier séparés : factures encaissées à confirmer au serveur',
+    sql: `
+-- Facture envoyée par un vendeur, encaissée sur cette caisse : l'avis « encaissée » repart
+-- vers le serveur central tant qu'il ne l'a pas reçu (réseau coupé au mauvais moment).
+CREATE TABLE counter_paid (
+  invoice_id TEXT PRIMARY KEY,
+  sale_id TEXT NOT NULL,
+  sale_number TEXT NOT NULL,
+  user_name TEXT,
+  created_at TEXT NOT NULL,
+  sent_at TEXT
+);
+CREATE INDEX counter_paid_sale ON counter_paid(sale_id);
+`,
+  },
 ];

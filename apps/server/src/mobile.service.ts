@@ -24,6 +24,14 @@ const GUEST_MS = 24 * 3_600_000;
 const GUEST_MAX_FAILURES = 20;
 export const GUEST_PREFIX = 'guest:';
 
+/**
+ * Numéro du jour d'un panier du téléphone ou d'une facture envoyée à la caisse :
+ * une seule suite pour les deux, le client ne voit jamais deux « n° 12 ».
+ */
+export const DAY_NUMBER = (store: string) =>
+  `GREATEST((SELECT COALESCE(MAX(number), 0) FROM shelf_carts WHERE store_id = ${store} AND created_at >= date_trunc('day', now())),
+     (SELECT COALESCE(MAX(number), 0) FROM counter_invoices WHERE store_id = ${store} AND created_at >= date_trunc('day', now()))) + 1`;
+
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
 const json = <T>(v: unknown, fallback: T): T => {
@@ -529,7 +537,7 @@ export class MobileService {
     const label = str(input?.label).trim().slice(0, 60) || null;
     const { rows } = await this.pg.query<{ number: number }>(
       `INSERT INTO shelf_carts (id, device_id, store_id, user_id, user_name, label, lines, number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT COALESCE(MAX(number), 0) + 1 FROM shelf_carts WHERE store_id = $3 AND created_at >= date_trunc('day', now())))
+       VALUES ($1, $2, $3, $4, $5, $6, $7, ${DAY_NUMBER('$3')})
        ON CONFLICT (id) DO NOTHING RETURNING number`,
       [id, caller.device.id, caller.device.store_id, caller.user.id, caller.user.name, label, JSON.stringify(lines)],
     );

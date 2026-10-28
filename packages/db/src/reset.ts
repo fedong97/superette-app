@@ -20,6 +20,7 @@ const WIPED = [
   'consignment_count_lines',
   'consignment_counts',
   'container_moves',
+  'counter_paid',
   'courier_returns',
   'customer_order_lines',
   'customer_orders',

@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Ip, Param, Post, Query } from '@nestjs/common';
 import { ApprovalsService } from './approvals.service';
+import { CounterService } from './counter.service';
 import { MobileService } from './mobile.service';
 import { type SyncEvent, SyncService } from './sync.service';
 
@@ -12,6 +13,7 @@ export class SyncController {
     @Inject(SyncService) private readonly sync: SyncService,
     @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
     @Inject(MobileService) private readonly mobile: MobileService,
+    @Inject(CounterService) private readonly counter: CounterService,
   ) {}
 
   @Get('health')
@@ -83,6 +85,58 @@ export class SyncController {
   @HttpCode(200)
   async takeCart(@Headers('authorization') auth: string | undefined, @Param('id') id: string) {
     return this.mobile.takeCart(await this.sync.authenticate(auth), id);
+  }
+
+  // ——— Vendeur et caissier séparés : factures envoyées à la caisse ———
+
+  @Post('counter')
+  @HttpCode(200)
+  async counterSend(@Headers('authorization') auth: string | undefined, @Body() body: Parameters<CounterService['send']>[1]) {
+    return this.counter.send(await this.sync.authenticate(auth), body);
+  }
+
+  /** Factures ouvertes du magasin (caisse), ou d'un vendeur (`seller`), ou de tous les vendeurs (`seller=*`). */
+  @Get('counter')
+  async counterList(@Headers('authorization') auth: string | undefined, @Query('seller') seller?: string) {
+    const device = await this.sync.authenticate(auth);
+    return { invoices: seller ? await this.counter.bySeller(device, seller === '*' ? null : seller) : await this.counter.open(device) };
+  }
+
+  @Get('counter/:id')
+  async counterGet(@Headers('authorization') auth: string | undefined, @Param('id') id: string) {
+    return this.counter.get(await this.sync.authenticate(auth), id);
+  }
+
+  @Post('counter/:id/:action')
+  @HttpCode(200)
+  async counterAction(
+    @Headers('authorization') auth: string | undefined,
+    @Param('id') id: string,
+    @Param('action') action: string,
+    @Body() body: { by?: string; note?: string | null; saleId?: string; saleNumber?: string },
+  ) {
+    const device = await this.sync.authenticate(auth);
+    const by = String(body?.by ?? '');
+    switch (action) {
+      case 'edit':
+        return this.counter.edit(device, id, by);
+      case 'unedit':
+        return this.counter.unedit(device, id);
+      case 'take':
+        return this.counter.take(device, id, by);
+      case 'release':
+        return this.counter.release(device, id);
+      case 'return':
+        return this.counter.giveBack(device, id, String(body?.note ?? ''), by);
+      case 'paid':
+        return this.counter.paid(device, id, String(body?.saleId ?? ''), String(body?.saleNumber ?? ''), by);
+      case 'cancel':
+        return this.counter.cancel(device, id, by, body?.note ?? null);
+      case 'unlock':
+        return this.counter.unlock(device, id);
+      default:
+        throw new HttpException('Action inconnue', HttpStatus.NOT_FOUND);
+    }
   }
 
   /** État du PC (toutes les 5 minutes) et état de tous les PC du magasin. */

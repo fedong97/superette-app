@@ -29,6 +29,8 @@ import { Base, type Clock, type Context } from './util';
 import type { GiftVoucher } from './vouchers';
 
 const money = (v: number) => formatFcfa(v, false);
+/** Code-barres du bon « à payer en caisse » : la caisse le scanne pour ouvrir la facture. */
+export const counterCode = (number: number) => `ENC-${number}`;
 
 /** Modèles de fiche de comptage. */
 export const INVENTORY_SHEET_MODELS = {
@@ -649,6 +651,37 @@ export class ReceiptService extends Base {
       { t: 'rule' },
       { t: 'text', text: 'Merci !', align: 'center' },
     ];
+  }
+
+  /**
+   * Bon remis au client par le vendeur (vendeur et caissier séparés) : il le
+   * présente à la caisse, qui retrouve la facture par son numéro ou son code-barres.
+   */
+  counterSlip(slip: {
+    number: number;
+    version: number;
+    sellerName: string;
+    customerName: string | null;
+    at: string;
+    total: number;
+    lines: { label: string; qty: string; amount: number }[];
+  }): Receipt {
+    const r: Receipt = [
+      ...this.header(),
+      { t: 'text', text: 'FACTURE À PAYER EN CAISSE', align: 'center', bold: true },
+      { t: 'text', text: `N° ${slip.number}`, align: 'center', bold: true, big: true },
+      { t: 'text', text: `${dateFr(slip.at)} · Vendeur : ${slip.sellerName}${slip.version > 1 ? ' · modifiée' : ''}`, align: 'center' },
+    ];
+    if (slip.customerName) r.push({ t: 'text', text: `Client : ${slip.customerName}`, align: 'center' });
+    r.push({ t: 'rule' });
+    for (const l of slip.lines) r.push({ t: 'text', text: l.label }, { t: 'row', left: `  ${l.qty}`, right: money(l.amount) });
+    r.push(
+      { t: 'rule' },
+      { t: 'row', left: 'À PAYER FCFA', right: money(slip.total), bold: true, big: true },
+      { t: 'barcode', code: counterCode(slip.number) },
+      { t: 'text', text: 'Présentez ce bon à la caisse. Le ticket de caisse fait foi.', align: 'center' },
+    );
+    return r;
   }
 
   /** Bon de ristourne : avoir sur le compte du client ou paiement en espèces, à faire signer. */

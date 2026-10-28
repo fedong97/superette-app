@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import type { Fcfa } from '@superette/core';
+import type { CounterAction, CounterInvoice, CounterPayload } from './counter';
 import type { Services } from './index';
 import type { SyncEvent } from './sync';
 import { AppError } from './util';
@@ -315,4 +318,55 @@ export async function takeMobileReception(s: Services, id: string): Promise<Mobi
   const creds = s.sync.credentials();
   if (!creds) throw new AppError("Ce PC n'est pas relié au serveur", 'SYNC_NOT_CONFIGURED');
   return request<MobileReception>(creds.url, `/api/v1/mobile-receptions/${encodeURIComponent(id)}/take`, { token: creds.token, body: {} });
+}
+
+// ——— Vendeur et caissier séparés : factures envoyées à la caisse ———
+
+/** Identifiant d'une nouvelle facture : le même renvoi après une coupure ne crée pas de doublon. */
+export const newCounterId = () => `fc-${randomUUID()}`;
+
+function creds(s: Services) {
+  const c = s.sync.credentials();
+  if (!c) throw new AppError('Vendeur et caissier séparés : ce PC doit être relié au serveur central (Administration › Serveur central)', 'SYNC_NOT_CONFIGURED');
+  return c;
+}
+
+/** Envoie (ou renvoie après modification) une facture à la caisse. */
+export async function counterSend(
+  s: Services,
+  input: { id: string; baseVersion: number | null; sellerId: string; sellerName: string; payload: CounterPayload; total: Fcfa; lines: number; customerName: string | null; forMe?: string | null },
+): Promise<CounterInvoice> {
+  const c = creds(s);
+  return request<CounterInvoice>(c.url, '/api/v1/counter', { token: c.token, body: input });
+}
+
+/** Factures ouvertes du magasin (caisse), ou d'un vendeur, ou de tous les vendeurs (`'*'`). */
+export async function counterList(s: Services, seller?: string | null): Promise<CounterInvoice[]> {
+  const c = creds(s);
+  const q = seller ? `?seller=${encodeURIComponent(seller)}` : '';
+  return (await request<{ invoices: CounterInvoice[] }>(c.url, `/api/v1/counter${q}`, { token: c.token })).invoices;
+}
+
+export async function counterGet(s: Services, id: string): Promise<CounterInvoice> {
+  const c = creds(s);
+  return request<CounterInvoice>(c.url, `/api/v1/counter/${encodeURIComponent(id)}`, { token: c.token });
+}
+
+export async function counterAction(s: Services, id: string, action: CounterAction, body: { by?: string; note?: string | null; saleId?: string; saleNumber?: string } = {}): Promise<CounterInvoice> {
+  const c = creds(s);
+  return request<CounterInvoice>(c.url, `/api/v1/counter/${encodeURIComponent(id)}/${action}`, { token: c.token, body });
+}
+
+/** Avis « encaissée » restés sur ce PC (réseau coupé) : renvoyés au serveur. */
+export async function flushCounterPaid(s: Services): Promise<void> {
+  for (const p of s.counter.unsentPaid()) {
+    try {
+      await counterAction(s, p.invoice_id, 'paid', { saleId: p.sale_id, saleNumber: p.sale_number, by: p.user_name ?? '' });
+      s.counter.markPaidSent(p.invoice_id);
+    } catch (e) {
+      // Serveur injoignable : on réessaiera ; facture refusée (annulée entre-temps) : on n'insiste pas.
+      if (e instanceof AppError && e.code === 'SYNC_OFFLINE') return;
+      s.counter.markPaidSent(p.invoice_id);
+    }
+  }
 }

@@ -11,10 +11,10 @@ import { tx } from '../tax';
  * reçues, articles par dépôt, comptes fournisseurs et clients.
  */
 
-const monthStart = () => `${today().slice(0, 7)}-01`;
+export const monthStart = () => `${today().slice(0, 7)}-01`;
 
 /** Période avec raccourcis (aujourd'hui, ce mois, mois dernier). */
-function PeriodPicker({ from, to, onChange }: { from: string; to: string; onChange: (p: { from: string; to: string }) => void }) {
+export function PeriodPicker({ from, to, onChange }: { from: string; to: string; onChange: (p: { from: string; to: string }) => void }) {
   const lastMonth = () => {
     const d = new Date();
     const first = new Date(d.getFullYear(), d.getMonth() - 1, 1);
@@ -50,7 +50,7 @@ export function saveXlsx(filename: string, sheet: XlsxSheet) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const periodTitle = (p: { from: string; to: string }) => (p.from === p.to ? `Le ${dateFr(p.from)}` : `Du ${dateFr(p.from)} au ${dateFr(p.to)}`);
+export const periodTitle = (p: { from: string; to: string }) => (p.from === p.to ? `Le ${dateFr(p.from)}` : `Du ${dateFr(p.from)} au ${dateFr(p.to)}`);
 const methodsOf = (m: string | null) =>
   (m ?? '')
     .split(',')

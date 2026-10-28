@@ -266,6 +266,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const scanRef = useRef<HTMLInputElement>(null);
   /** Impression demandée à la validation : F2 ticket, F7 listing, F4 (VALIDER) aucune. */
   const printRef = useRef<PrintChoice>('none');
+  /** Ctrl+Suppr : vide la fiche en cours (même action que le bouton « Vider »), défini plus bas. */
+  const clearRef = useRef<() => void>(() => undefined);
   /** Promotions du jour : appliquées à l'écran comme elles le seront à l'encaissement. */
   const promoRules = useLoad(() => call('promotions.active'), []);
   const usualLevel = customer?.price_level ?? 'retail';
@@ -838,6 +840,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       } else if (e.ctrlKey && e.key.toLowerCase() === 'm' && can('missed_sale')) {
         e.preventDefault();
         setDialog('missed');
+      } else if (e.ctrlKey && e.key === 'Delete' && lines.length) {
+        e.preventDefault();
+        clearRef.current();
       } else if (e.ctrlKey && e.key.toLowerCase() === 'e' && lines.length) {
         e.preventDefault();
         printRef.current = 'none';
@@ -1321,6 +1326,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     }
     focusScan();
   };
+  clearRef.current = () => void askClear();
   const closeFiche = () => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose());
   /** F2 et F7 : valident la fiche en cours ; sur une fiche vide, réimpriment le dernier ticket ou la dernière facture en listing. */
   const ticketKey = () => (lines.length ? void validate('ticket') : reprint());
@@ -1480,6 +1486,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       </span>
       <span>
         <kbd>Suppr</kbd> Enlever
+      </span>
+      <span>
+        <kbd>Ctrl+Suppr</kbd> Vider
       </span>
     </div>
   );
@@ -1764,8 +1773,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <button disabled={!sel} onClick={() => sel && removeLine(sel.key)}>
               Enlever <kbd>Suppr</kbd>
             </button>
-            <button className="danger" disabled={!lines.length} onClick={() => void askClear()}>
-              Vider
+            <button className="danger" disabled={!lines.length} onClick={() => void askClear()} title="Vider la fiche en cours (Ctrl+Suppr)">
+              Vider <kbd>Ctrl+Suppr</kbd>
             </button>
             <button className="close" onClick={closeFiche}>
               Fermer
@@ -1782,7 +1791,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     return (
       <div className={`pv ${credit ? 'credit' : ''} ${sellerPost ? 'counter-seller' : ''}`}>
         <div className="pv-tool">
-          <button onClick={() => void askClear()} disabled={!lines.length} title="Vider la fiche et en commencer une nouvelle">
+          <button onClick={() => void askClear()} disabled={!lines.length} title="Vider la fiche et en commencer une nouvelle (Ctrl+Suppr)">
             <i>＋</i>Nouveau
           </button>
           <button onClick={() => setDialog('customer')}>
@@ -2438,8 +2447,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         </button>
           </>
         )}
-        <button disabled={!lines.length} onClick={() => void askClear()} style={{ '--c': '#dc2626' } as React.CSSProperties}>
-          <i aria-hidden>🗑</i>Vider
+        <button disabled={!lines.length} onClick={() => void askClear()} title="Vider la fiche en cours (Ctrl+Suppr)" style={{ '--c': '#dc2626' } as React.CSSProperties}>
+          <i aria-hidden>🗑</i>Vider <kbd>Ctrl+Suppr</kbd>
         </button>
         <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>
           <i aria-hidden>✕</i>Fermer

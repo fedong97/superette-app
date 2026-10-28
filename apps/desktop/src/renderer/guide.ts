@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.96.0',
+    items: [
+      'Achats › Registre des achats : toutes les factures fournisseurs, les avoirs et les réceptions pas encore facturées, avec filtres par période, fournisseur, type et état, totaux et export Excel.',
+      'À la caisse, Ctrl+Suppr vide la fiche en cours (récupérable 10 secondes avec Ctrl+Z).',
+    ],
+  },
+  {
     version: '0.95.0',
     items: [
       "Vendeur et caissier séparés (au choix à l'installation ou dans Paramètres › Écran de caisse) : le vendeur facture sur son PC et envoie à la caisse, le caissier encaisse dans « Factures à encaisser ».",

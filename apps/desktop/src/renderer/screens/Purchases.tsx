@@ -2,7 +2,7 @@ import { describeInPacks } from '@superette/core';
 import { useEffect, useMemo, useState } from 'react';
 import { type Result, call } from '../api';
 import { askConfirm, Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useCan, useDraft, useLoad, useToast, has, openScreen } from '../ui';
-import { PendingReceipts, PurchasesByProduct, saveXlsx } from './Controls';
+import { PendingReceipts, PeriodPicker, PurchasesByProduct, monthStart, periodTitle, saveXlsx } from './Controls';
 import { PackUnitSelect, packChoices, packCostText, purchaseUnits, switchUnits, toBase, unitsFor, useArticlePacks } from './packs';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
 import { type RecLine, newRecLine, recLineInput } from './Stock';
@@ -18,7 +18,7 @@ import { MissedReport, SupplierCalendar } from './Floor';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Order = Result<'purchases.order'>;
 type Invoice = Result<'purchases.invoice'>['invoice'];
-export type PurchasesTab = 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns' | 'group' | 'calendar' | 'missed' | 'phone';
+export type PurchasesTab = 'register' | 'orders' | 'new-order' | 'receptions' | 'pending' | 'byproduct' | 'invoices' | 'direct' | 'due' | 'reorder' | 'returns' | 'group' | 'calendar' | 'missed' | 'phone';
 
 const ORDER_STATES: Record<Order['state'], string> = {
   draft: 'Brouillon',
@@ -60,7 +60,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
     ['orders', 'Bons de commande'],
     ['receptions', 'Registre des réceptions'],
     ['pending', 'Non encore reçues'],
-    ...(invoices ? ([['invoices', 'Registre des achats']] as [PurchasesTab, string][]) : []),
+    ...(invoices ? ([['register', 'Registre des achats'], ['invoices', 'Factures fournisseurs']] as [PurchasesTab, string][]) : []),
     ...(direct ? ([['direct', 'Facture directe']] as [PurchasesTab, string][]) : []),
     ...(has(user, 'purchase_due') ? ([['due', 'Échéancier']] as [PurchasesTab, string][]) : []),
     ...(has(user, 'supplier_returns') ? ([['returns', 'Retours fournisseur']] as [PurchasesTab, string][]) : []),
@@ -81,6 +81,7 @@ export function Purchases({ user, initialTab = 'orders' }: { user: User; initial
       {tab === 'receptions' && <Receptions />}
       {tab === 'pending' && <PendingReceipts />}
       {tab === 'byproduct' && <PurchasesByProduct />}
+      {tab === 'register' && invoices && <PurchasesRegister />}
       {tab === 'invoices' && invoices && <Invoices />}
       {tab === 'direct' && direct && <DirectInvoice canPay={has(user, 'supplier_pay')} />}
       {tab === 'due' && has(user, 'purchase_due') && <Due />}
@@ -829,9 +830,286 @@ function ReceivedLines({ lines }: { lines: Result<'purchases.reception'>['lines'
 
 // --- Factures et règlements ------------------------------------------------------
 
+/** Une ligne du registre des achats : une facture, un avoir, ou une réception pas encore facturée. */
+interface RegisterRow {
+  key: string;
+  kind: 'invoice' | 'direct' | 'credit' | 'reception';
+  id: string;
+  number: string;
+  supplierId: string;
+  supplier: string;
+  ref: string;
+  date: string;
+  ht: number;
+  tva: number;
+  ttc: number;
+  balance: number;
+  invoice?: Invoice;
+}
+
+const REGISTER_KINDS: Record<RegisterRow['kind'], string> = {
+  invoice: 'Facture sur BL',
+  direct: 'Facture directe',
+  credit: 'Avoir',
+  reception: 'Non facturée',
+};
+
+/**
+ * Registre des achats : toutes les factures fournisseurs (sur BL et directes), les avoirs
+ * et les réceptions pas encore facturées, sur une période, avec leurs totaux.
+ */
+function PurchasesRegister() {
+  const [period, setPeriod] = useState(() => ({ from: monthStart(), to: today() }));
+  const [supplierId, setSupplierId] = useState('');
+  const [kind, setKind] = useState<'' | RegisterRow['kind']>('');
+  const [state, setState] = useState<'' | 'unpaid' | 'paid'>('');
+  const [search, setSearch] = useState('');
+  const [openInvoice, setOpenInvoice] = useState<string | null>(null);
+  const [openReception, setOpenReception] = useState<string | null>(null);
+  const invoices = useLoad(() => call('purchases.invoices', {}), [openInvoice]);
+  const receptions = useLoad(() => call('purchases.receptions', { uninvoiced: true, limit: 5000 }), []);
+  const all = useMemo<RegisterRow[]>(
+    () => [
+      ...(invoices.data ?? []).map((i): RegisterRow => {
+        const sign = i.kind === 'credit_note' ? -1 : 1;
+        return {
+          key: `i${i.id}`,
+          kind: i.kind === 'credit_note' ? 'credit' : i.direct ? 'direct' : 'invoice',
+          id: i.id,
+          number: i.number,
+          supplierId: i.supplier_id,
+          supplier: i.supplier_name,
+          ref: i.supplier_number,
+          date: i.invoice_date.slice(0, 10),
+          ht: sign * i.total_ht,
+          tva: sign * i.total_tva,
+          ttc: sign * i.total_ttc,
+          balance: sign * i.balance,
+          invoice: i,
+        };
+      }),
+      ...(receptions.data ?? [])
+        .filter((r) => r.supplier_id)
+        .map(
+          (r): RegisterRow => ({
+            key: `r${r.id}`,
+            kind: 'reception',
+            id: r.id,
+            number: r.number,
+            supplierId: r.supplier_id!,
+            supplier: r.supplier_name ?? '',
+            ref: r.delivery_note ? deliveryNote(r.delivery_note) : '',
+            date: r.received_at.slice(0, 10),
+            ht: r.total_ht,
+            tva: r.total_tva,
+            ttc: r.total_ttc,
+            balance: 0,
+          }),
+        ),
+    ],
+    [invoices.data, receptions.data],
+  );
+  const q = search.trim().toLowerCase();
+  const suppliers = useLoad(() => call('suppliers.list'));
+  const supplierName = suppliers.data?.find((f) => f.id === supplierId)?.name;
+  const rows = all
+    .filter(
+      (r) =>
+        r.date >= period.from &&
+        r.date <= period.to &&
+        (!kind || r.kind === kind) &&
+        (!supplierId || r.supplierId === supplierId) &&
+        (!state || (r.kind !== 'reception' && (state === 'paid' ? r.invoice!.state === 'paid' : r.invoice!.state !== 'paid'))) &&
+        (!q || `${r.number} ${r.ref} ${r.supplier}`.toLowerCase().includes(q) || String(Math.abs(r.ttc)) === q.replace(/\s/g, '')),
+    )
+    .sort((a, b) => b.date.localeCompare(a.date) || b.number.localeCompare(a.number));
+  const sum = (f: (r: RegisterRow) => boolean, v: (r: RegisterRow) => number) => rows.filter(f).reduce((t, r) => t + v(r), 0);
+  const invoiced = (r: RegisterRow) => r.kind === 'invoice' || r.kind === 'direct';
+  const totals = {
+    bought: sum(invoiced, (r) => r.ttc),
+    boughtCount: rows.filter(invoiced).length,
+    credits: -sum((r) => r.kind === 'credit', (r) => r.ttc),
+    creditCount: rows.filter((r) => r.kind === 'credit').length,
+    uninvoiced: sum((r) => r.kind === 'reception', (r) => r.ttc),
+    uninvoicedCount: rows.filter((r) => r.kind === 'reception').length,
+    ht: sum(() => true, (r) => r.ht),
+    tva: sum(() => true, (r) => r.tva),
+    ttc: sum(() => true, (r) => r.ttc),
+    balance: sum(() => true, (r) => r.balance),
+  };
+  const loading = !invoices.data || !receptions.data;
+  return (
+    <>
+      <div className="filters">
+        <PeriodPicker from={period.from} to={period.to} onChange={setPeriod} />
+        <input className="search" placeholder="N°, pièce fournisseur ou montant" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+          <option value="">Tous les fournisseurs</option>
+          {(suppliers.data ?? []).map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+          <option value="">Tous les achats</option>
+          <option value="invoice">Factures sur BL</option>
+          <option value="direct">Factures directes</option>
+          <option value="credit">Avoirs</option>
+          <option value="reception">Réceptions non facturées</option>
+        </select>
+        <select value={state} onChange={(e) => setState(e.target.value as typeof state)}>
+          <option value="">Réglées ou non</option>
+          <option value="unpaid">Reste à payer</option>
+          <option value="paid">Réglées</option>
+        </select>
+        <button
+          disabled={!rows.length}
+          onClick={() =>
+            saveXlsx(`registre-achats-${period.from}-au-${period.to}.xlsx`, {
+              name: 'Registre des achats',
+              title: ['Registre des achats', periodTitle(period) + (supplierName ? ` · ${supplierName}` : '')],
+              columns: [
+                { header: 'N°', width: 18 },
+                { header: 'Date', width: 12 },
+                { header: 'Type', width: 16 },
+                { header: 'Fournisseur', width: 24 },
+                { header: 'Pièce fournisseur', width: 18 },
+                ...(hasVat()
+                  ? [
+                      { header: 'Total HT', format: 'money' as const },
+                      { header: 'TVA', format: 'money' as const },
+                    ]
+                  : []),
+                { header: tx('Total TTC'), format: 'money' },
+                { header: 'Reste à payer', format: 'money' },
+                { header: 'État', width: 16 },
+              ],
+              rows: rows.map((r) => [
+                r.number,
+                dateFr(r.date),
+                REGISTER_KINDS[r.kind],
+                r.supplier,
+                r.ref,
+                ...(hasVat() ? [r.ht, r.tva] : []),
+                r.ttc,
+                r.balance,
+                r.invoice ? stateText(r.invoice) : 'À facturer',
+              ]),
+              totalRow: ['Total', '', '', '', '', ...(hasVat() ? [totals.ht, totals.tva] : []), totals.ttc, totals.balance, ''],
+            })
+          }
+        >
+          Exporter vers Excel
+        </button>
+      </div>
+      {!loading && (
+        <div className="kpis kpis-5">
+          <div>
+            <small>Achats facturés</small>
+            <strong>{fcfa(totals.bought)}</strong>
+            <small>{totals.boughtCount} facture(s)</small>
+          </div>
+          <div>
+            <small>Avoirs</small>
+            <strong>{fcfa(totals.credits)}</strong>
+            <small>{totals.creditCount} avoir(s)</small>
+          </div>
+          <div>
+            <small>Reçu non facturé</small>
+            <strong>{fcfa(totals.uninvoiced)}</strong>
+            <small>{totals.uninvoicedCount} réception(s)</small>
+          </div>
+          <div>
+            <small>Total des achats</small>
+            <strong>{fcfa(totals.ttc)}</strong>
+            {hasVat() && <small>dont TVA {fcfa(totals.tva)}</small>}
+          </div>
+          <div className={totals.balance > 0 ? 'neg' : ''}>
+            <small>Reste à payer</small>
+            <strong>{fcfa(totals.balance)}</strong>
+          </div>
+        </div>
+      )}
+      {!loading && rows.length === 0 ? (
+        <Empty>Aucun achat sur cette période. Élargissez la période ou changez les filtres.</Empty>
+      ) : (
+        <table className="list compact">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Fournisseur</th>
+              <th>Pièce fournisseur</th>
+              {hasVat() && <th className="r">{tx('Total HT')}</th>}
+              {hasVat() && <th className="r">TVA</th>}
+              <th className="r">{tx('Montant TTC')}</th>
+              <th className="r">Reste à payer</th>
+              <th>État</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="clickable" onClick={() => (r.invoice ? setOpenInvoice(r.id) : setOpenReception(r.id))}>
+                <td>{r.number}</td>
+                <td>{dateFr(r.date)}</td>
+                <td>{REGISTER_KINDS[r.kind]}</td>
+                <td>{r.supplier}</td>
+                <td>{r.ref}</td>
+                {hasVat() && <td className="r">{fcfa(r.ht)}</td>}
+                {hasVat() && <td className="r">{fcfa(r.tva)}</td>}
+                <td className={`r ${r.ttc < 0 ? 'neg' : ''}`}>{fcfa(r.ttc)}</td>
+                <td className="r">{r.balance ? fcfa(r.balance) : ''}</td>
+                <td>{r.invoice ? <InvoiceState i={r.invoice} /> : <span className="tag alerte">à facturer</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 0 && (
+            <tfoot>
+              <tr className="b">
+                <td colSpan={5}>Total ({rows.length})</td>
+                {hasVat() && <td className="r">{fcfa(totals.ht)}</td>}
+                {hasVat() && <td className="r">{fcfa(totals.tva)}</td>}
+                <td className="r">{fcfa(totals.ttc)}</td>
+                <td className="r">{fcfa(totals.balance)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      )}
+      {openInvoice && <InvoiceDetail id={openInvoice} onClose={() => setOpenInvoice(null)} />}
+      {openReception && <ReceptionView id={openReception} onClose={() => setOpenReception(null)} />}
+    </>
+  );
+}
+
+/** Bon de réception en lecture, ouvert depuis le registre des achats. */
+function ReceptionView({ id, onClose }: { id: string; onClose: () => void }) {
+  const detail = useLoad(() => call('purchases.reception', id), [id]);
+  const d = detail.data;
+  if (!d) return null;
+  return (
+    <Modal title={`Bon de réception ${d.number}`} onClose={onClose} wide>
+      <p>
+        {d.supplier_name ?? 'Sans fournisseur'} · {dateTime(d.received_at)} · dépôt {d.warehouse_name}
+        {d.user_name ? ` · reçu par ${d.user_name}` : ''}
+      </p>
+      <ReceivedLines lines={d.lines} />
+      <p className="b">{hasVat() ? `Total HT ${fcfa(d.total_ht)} · TVA ${fcfa(d.total_tva)} · TTC ${fcfa(d.total_ttc)}` : `Total ${fcfa(d.total_ttc)}`}</p>
+      <p className="muted">Pas encore facturée : saisissez la facture du fournisseur dans « Factures fournisseurs ».</p>
+    </Modal>
+  );
+}
+
+function stateText(i: Invoice) {
+  if (i.state === 'paid') return 'Réglée';
+  return i.overdue ? 'En retard' : i.state === 'partial' ? 'Réglée en partie' : 'À régler';
+}
+
 function InvoiceState({ i }: { i: Invoice }) {
-  if (i.state === 'paid') return <span className="tag normal">Réglée</span>;
-  return <span className={`tag ${i.overdue ? 'rupture' : 'alerte'}`}>{i.overdue ? 'En retard' : i.state === 'partial' ? 'Réglée en partie' : 'À régler'}</span>;
+  return <span className={`tag ${i.state === 'paid' ? 'normal' : i.overdue ? 'rupture' : 'alerte'}`}>{stateText(i)}</span>;
 }
 
 function Invoices() {

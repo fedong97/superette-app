@@ -1,4 +1,4 @@
-import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, CUSTOMER_DISPLAY_MODES, type CustomerDisplayMode, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_FULL_ROLES, POS_LAYOUTS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
+import { BACKUP_FREQUENCIES, BARCODE_LABEL_FORMATS, CUSTOMER_DISPLAY_MODES, type CustomerDisplayMode, BUILTIN_TEMPLATES, CODEPAGES, type Codepage, DEFAULT_PAYROLL, DEFAULT_REMINDER_TEMPLATE, DEFAULT_STORE_SETTINGS, type PayrollBracket, type PayrollRules, REMINDER_FIELDS, type DocFormat, type DocKind, type DocVariant, POS_FULL_ROLES, POS_LAYOUTS, SALE_FLOWS, type PosLayout, type StoreSettings, slotKey } from '@superette/core';
 import { type ReactNode, useState } from 'react';
 import { type Result, call } from '../api';
 import { fold } from '../nav';
@@ -343,6 +343,23 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       'Écran de caisse',
       'Le modèle choisi s’applique à toutes les caisses du magasin. Les trois ont les mêmes fonctions et les mêmes touches (F2 ticket, F7 listing, F4 enregistrer).',
       [
+        {
+          label: 'Organisation de la vente',
+          hint: isAdmin
+            ? sv('saleFlow') === 'split'
+              ? 'Les vendeurs (rôle Vendeur) facturent sur leur PC et envoient à la caisse ; les caissiers (rôle Caissier) encaissent dans « Factures à encaisser ». Le gérant fait les deux. Les PC doivent être reliés au serveur central.'
+              : 'Chaque vendeur ou caissier facture et encaisse sur son poste, avec sa caisse.'
+            : 'Seul un administrateur peut changer l’organisation de la vente.',
+          render: () => (
+            <select disabled={!isAdmin} value={sv('saleFlow')} onChange={(e) => sset('saleFlow', e.target.value as StoreSettings['saleFlow'])}>
+              {(Object.keys(SALE_FLOWS) as StoreSettings['saleFlow'][]).map((k) => (
+                <option key={k} value={k}>
+                  {SALE_FLOWS[k]}
+                </option>
+              ))}
+            </select>
+          ),
+        },
         {
           label: 'Modèle de l’écran de caisse moderne classique conventionnel',
           wide: true,

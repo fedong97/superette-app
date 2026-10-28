@@ -1371,3 +1371,34 @@ ul.plain li { padding: 3px 0; }
 .pos-switch { display: flex; gap: 4px; flex: none; }
 .mdi-bar .pos-switch button { width: auto; padding: 0 10px; font-size: 13px; font-weight: 700; border: 1px solid rgba(255, 255, 255, 0.45); }
 .mdi-bar .pos-switch button.on { background: #fff; color: var(--brand-deep); }
+
+/* Vendeur et caissier séparés : poste du caissier (factures à encaisser, récapitulatif). */
+.counter-desk { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.15fr); gap: 14px; height: 100%; padding: 12px 14px; background: var(--bg); min-height: 0; }
+.cd-queue { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.cd-queue-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cd-scan input { width: 100%; font-size: 18px; padding: 12px 14px; border-radius: 12px; border: 2px solid var(--brand-line); background: var(--panel); }
+.cd-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.cd-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 12px; align-items: center; text-align: left; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel) !important; }
+.cd-row:not(:disabled):hover { border-color: var(--brand); box-shadow: inset 4px 0 0 var(--brand); }
+.cd-row:disabled { opacity: 0.6; }
+.cd-row .cd-no { font-size: 24px; font-weight: 900; color: var(--brand); text-align: center; }
+.cd-row .cd-who { min-width: 0; }
+.cd-row .cd-who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-row .cd-who small { display: block; color: var(--muted); }
+.cd-row .cd-state { color: var(--warn) !important; font-weight: 800; }
+.cd-row strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.cd-recap .tk-head { border-bottom-style: solid; }
+.cd-recap-title b { display: block; font-size: 20px; }
+.cd-recap-title small { color: var(--muted); }
+.cd-lines td, .cd-lines th { font-size: 14px; }
+.cd-cash .pos-bills { grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+.cd-cash .pos-bills button { height: 46px; font-size: 16px; }
+.cd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cd-actions .big { grid-column: 1 / -1; font-size: 18px; padding: 14px; }
+.cd-idle { flex: 1; display: grid; place-content: center; text-align: center; gap: 10px; padding: 20px; }
+@media (max-width: 900px) {
+  .counter-desk { grid-template-columns: 1fr; overflow: auto; }
+}
+/* Poste du vendeur : ni billets, ni reçu, ni rendu ; la facture part à la caisse. */
+.counter-seller .pos-bills, .counter-seller .tk-er, .counter-seller .pc-bills, .counter-seller .pc-er, .counter-seller .pv-pay { display: none !important; }
+.counter-band { background: var(--brand-soft); color: var(--brand-deep); border: 1px solid var(--brand-line); border-radius: 10px; padding: 6px 12px; font-weight: 700; }

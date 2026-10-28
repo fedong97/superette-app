@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SALE_FLOWS, type SaleFlow } from '@superette/core';
 import { call, type Result } from '../api';
 import { Field, Mascot, askConfirm, useToast } from '../ui';
 import { DossierPicker } from './Dossiers';
@@ -80,6 +81,8 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   /** Beaucoup de superettes sont au régime simplifié : pas de TVA tant qu'on ne la coche pas. */
   const [vatEnabled, setVatEnabled] = useState(false);
+  /** Organisation de la vente : vendeur-caissier (comme avant) ou vendeur et caissier séparés. */
+  const [saleFlow, setSaleFlow] = useState<SaleFlow>('combined');
   /** Métier de départ : rayons, familles et réglages déjà prêts. */
   const [templates, setTemplates] = useState<Result<'template.list'>>([]);
   const [template, setTemplate] = useState('');
@@ -102,7 +105,7 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
     if (f.adminPin !== f.pin2) return toast.error('Les deux codes ne correspondent pas');
     try {
       const { pin2: _, ...input } = f;
-      await call('setup.bootstrap', { ...input, vatEnabled, template: template || null });
+      await call('setup.bootstrap', { ...input, vatEnabled, template: template || null, saleFlow });
       toast.ok('Magasin créé');
       onDone();
     } catch (err) {
@@ -147,6 +150,23 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
             ? 'Les prix sont TTC : la TVA (19,25 %) est calculée et imprimée sur les tickets et les factures.'
             : 'Régime simplifié : aucune TVA sur les ventes, les achats ni les dépenses. Les tickets portent « TVA non applicable ». Un administrateur pourra l’activer plus tard.'}
         </p>
+        <h3>Organisation de la vente</h3>
+        <div className="layout-cards" role="radiogroup" aria-label="Organisation de la vente">
+          {(Object.keys(SALE_FLOWS) as SaleFlow[]).map((k) => (
+            <label key={k} className={`layout-card ${saleFlow === k ? 'on' : ''}`}>
+              <span className="layout-name">
+                <input type="radio" name="saleFlow" checked={saleFlow === k} onChange={() => setSaleFlow(k)} />
+                {k === 'combined' ? 'Vendeur-caissier' : 'Vendeur et caissier séparés'}
+              </span>
+              <small className="muted">
+                {k === 'combined'
+                  ? 'La même personne facture et encaisse sur son poste, avec sa caisse. C’est le fonctionnement habituel.'
+                  : 'Le vendeur facture sur son PC et envoie la facture à la caisse ; le client paie au caissier, qui ne voit que les factures à encaisser. Les PC sont reliés au serveur central.'}
+              </small>
+            </label>
+          ))}
+        </div>
+        <p className="muted">Modifiable ensuite par l’administrateur dans Administration › Paramètres › Écran de caisse.</p>
         <Field label="Métier" hint="Rayons, familles et réglages de départ, modifiables ensuite">
           <div className="row">
             <select value={template} onChange={(e) => setTemplate(e.target.value)}>

@@ -30,6 +30,7 @@ import { ArticleForm } from './Articles';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
 import { BookSaleDialog, CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, ScannedTicketDialog, SellVoucherDialog, WhatsappTicketDialog } from './PosDialogs';
 import { MissedSaleDialog } from './Floor';
+import { CounterMineDialog } from './CounterDesk';
 import { tx } from '../tax';
 
 type Article = Result<'catalogue.get'>;
@@ -106,7 +107,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
+type Dialog = null | 'counter' | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
 type PrintChoice = 'none' | 'ticket' | 'listing';
@@ -148,8 +149,10 @@ const tileColor = (name: string) => {
  * Plusieurs fiches peuvent être ouvertes en même temps (Caisse 1, Caisse 2).
  */
 
-export function Pos({ edit = null, user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onTreasury, mode = 'cash', layout = 'modern' }: {
+export function Pos({ edit = null, user, hasRegister, registerId = null, canChooseRegister = false, onRegisterChosen, vatEnabled = true, ignoreStock = false, active, title, onClose, onSwitchMode, onTreasury, mode = 'cash', layout = 'modern', counterPost = null }: {
   mode?: 'cash' | 'credit';
+  /** Vendeur et caissier séparés : le vendeur facture et envoie à la caisse (ni billets, ni règlement, ni tiroir). */
+  counterPost?: 'seller' | null;
   layout?: PosLayout;
   /** Facture à recharger pour la modifier (demandée depuis le registre ou Mes factures). */
   edit?: { sale: Result<'sales.editable'> & { id: string }; nonce: number } | null;
@@ -173,6 +176,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   onTreasury: () => void;
 }) {
   const toast = useToast();
+  const sellerPost = counterPost === 'seller';
   const session = useLoad(() => call('pos.session'), []);
   // Vente du carnet à souches (panne) : la prochaine vente porte le numéro de la souche et l'heure écrite.
   const [book, setBook] = useState<{ number: string; at: string } | null>(null);
@@ -222,6 +226,18 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const [order, setOrder] = useState<{ id: string; number: string } | null>(null);
   /** Vendeur du panier préparé au rayon : la vente compte pour lui. */
   const [seller, setSeller] = useState<{ id: string | null; name: string } | null>(null);
+  /** Facture déjà envoyée à la caisse, rouverte par le vendeur : elle repartira avec le même numéro. */
+  const [counterEdit, setCounterEdit] = useState<{ id: string; number: number; version: number } | null>(null);
+  /** Code du gérant demandé à l'envoi (remise du vendeur sans ce droit). */
+  const [counterPin, setCounterPin] = useState<{ message: string; print: boolean } | null>(null);
+  /** Factures que ce vendeur a envoyées et qui ont changé (rendues, encaissées) : pastille du bouton. */
+  const mine = useLoad(() => (sellerPost ? call('counter.mine') : Promise.resolve([])), [sellerPost]);
+  useEffect(() => {
+    if (!sellerPost || !active) return;
+    const t = setInterval(() => mine.reload(), 15_000);
+    return () => clearInterval(t);
+  }, [sellerPost, active]);
+  const returnedCount = (mine.data ?? []).filter((m) => m.status === 'returned').length;
   /** Tarif et dépôt choisis pour cette fiche (null : ceux du client et du magasin). */
   const [levelChoice, setLevelChoice] = useState<PriceLevel | null>(null);
   const [warehouseChoice, setWarehouseChoice] = useState<string | null>(null);
@@ -448,6 +464,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     setQuote(null);
     setOrder(null);
     setSeller(null);
+    setCounterEdit(null);
     setReplacing(null);
     setClientName('');
     setLines([]);
@@ -564,6 +581,70 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     }
   };
 
+  /**
+   * Vendeur et caissier séparés : la fiche part à la caisse ; le bon « à payer
+   * en caisse » s'imprime pour le client (F2, F7 : toujours ; F4 : si l'impression
+   * automatique est réglée). Rien ne sort du stock avant l'encaissement.
+   */
+  const sendToCounter = async (print: boolean, supervisorPin?: string) => {
+    if (!lines.length) return;
+    try {
+      const sent = await call('counter.send', {
+        id: counterEdit?.id ?? null,
+        baseVersion: counterEdit?.version ?? null,
+        lines: saleInput(),
+        customerId: customer?.id ?? null,
+        clientName: customer ? null : clientName.trim() || null,
+        priceLevel: levelChoice,
+        warehouseId: warehouseChoice,
+        optionsPin,
+        supervisorPin,
+      });
+      clear();
+      setCustomer(null);
+      setCounterPin(null);
+      mine.reload();
+      call('counter.printSlip', sent.id, print).catch((err) => toast.error(err));
+      toast.ok(`Facture n° ${sent.number}${sent.version > 1 ? ' (modifiée)' : ''} envoyée à la caisse : ${fcfa(sent.total)}. Dites au client « passez à la caisse, facture n° ${sent.number} ».`);
+    } catch (err) {
+      const code = (err as ApiError).code;
+      if (code === 'SUPERVISOR_REQUIRED' && !supervisorPin) setCounterPin({ message: 'La facture comporte une remise.', print });
+      else toast.error(err);
+    }
+  };
+  /** Le vendeur rouvre une facture envoyée : elle est bloquée à la caisse pendant la modification. */
+  const editCounter = async (id: string) => {
+    if (lines.length) return toast.error('Envoyez ou videz d’abord la fiche en cours');
+    try {
+      const r = await call('counter.edit', id);
+      const p = r.payload;
+      setLines(await reload(p.lines));
+      setCustomer(p.customerId ? await call('customers.get', p.customerId) : null);
+      setClientName(p.customerId ? '' : (p.clientName ?? ''));
+      setLevelChoice(p.priceLevel);
+      setWarehouseChoice(p.warehouseId);
+      setCounterEdit({ id: r.id, number: r.number, version: r.version });
+      setDialog(null);
+      setPane('lines');
+      mine.reload();
+      toast.ok(`Facture n° ${r.number} rouverte : la caisse ne peut pas l'encaisser tant que vous ne l'avez pas renvoyée`);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  /** Modification abandonnée : la facture repart à la caisse telle qu'elle était. */
+  const abandonEdit = async () => {
+    if (!counterEdit) return;
+    try {
+      await call('counter.unedit', counterEdit.id);
+    } catch (err) {
+      toast.error(err);
+    }
+    clear();
+    setCustomer(null);
+    mine.reload();
+  };
+
   const printA4 = () => {
     if (lastSale) call('pos.printInvoice', lastSale.id).catch(toast.error);
     else toast.error('Aucune facture à imprimer');
@@ -576,6 +657,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    */
   const validate = async (print: PrintChoice = 'none') => {
     if (!lines.length) return;
+    if (sellerPost) return sendToCounter(print !== 'none');
     printRef.current = print;
     if (credit) {
       if (!customer) {
@@ -602,7 +684,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   };
 
   const hold = async () => {
-    if (!lines.length || !can('sale_hold')) return;
+    if (!lines.length || !can('sale_hold') || sellerPost) return;
     const label = `Ticket de ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} (${fcfa(totals.totalTtc)})`;
     try {
       await call('pos.hold', label, saleInput());
@@ -742,12 +824,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         F2: () => (lines.length ? void validate('ticket') : reprint()),
         F3: () => void hold(),
         F4: () => void validate('none'),
-        F5: openDrawer,
+        F5: () => !sellerPost && openDrawer(),
         F6: () => selected !== null && setDialog('discount'),
         F7: () => (lines.length ? void validate('listing') : reprintListing()),
         F8: () => setDialog('customer'),
         F9: printA4,
-        F10: () => can('sale_resume') && setDialog('held'),
+        F10: () => (sellerPost ? setDialog('counter') : can('sale_resume') && setDialog('held')),
       };
       // Ctrl+F4 ferme une fenêtre ailleurs : à la caisse il ne valide pas la fiche.
       if (fn[e.key] && !e.ctrlKey) {
@@ -773,7 +855,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (!hasRegister)
+  if (!hasRegister && !sellerPost)
     return canChooseRegister ? (
       <div className="center-page">
         <div className="card closed-register">
@@ -785,8 +867,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     ) : (
       <Empty>Aucune caisse ne vous est attribuée. Demandez à l'administrateur de vous en attribuer une dans Administration › Utilisateurs.</Empty>
     );
-  if (!session.data) return session.data === null ? <ClosedRegister canOpen={has(user, 'treasury')} onTreasury={onTreasury} onReload={session.reload} /> : null;
-  const stale = localDay(session.data.opened_at) !== localDay(now.toISOString());
+  // Le vendeur d'un magasin « vendeur et caissier séparés » n'ouvre pas de caisse : il envoie à la caisse.
+  if (!session.data && !sellerPost) return session.data === null ? <ClosedRegister canOpen={has(user, 'treasury')} onTreasury={onTreasury} onReload={session.reload} /> : null;
+  const day = session.data ?? null;
+  const stale = Boolean(day) && localDay(day!.opened_at) !== localDay(now.toISOString());
 
   const sel = lines.find((l) => l.key === selected);
   const salesWarehouse = (warehouses.data ?? []).find((w) => w.is_sales_default) ?? warehouses.data?.[0];
@@ -894,15 +978,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           </tr>
           <tr>
             <th>Caisse ouverte par</th>
-            <td>{session.data.user_name}</td>
+            <td>{day?.user_name ?? '—'}</td>
           </tr>
           <tr>
             <th>Ouverture</th>
-            <td>{new Date(session.data.opened_at).toLocaleString('fr-FR')}</td>
+            <td>{day ? new Date(day.opened_at).toLocaleString('fr-FR') : '—'}</td>
           </tr>
           <tr>
             <th>Fond de caisse</th>
-            <td>{fcfa(session.data.opening_float)}</td>
+            <td>{day ? fcfa(day.opening_float) : '—'}</td>
           </tr>
           <tr>
             <th>Vendeur</th>
@@ -962,21 +1046,39 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     <option value="" disabled>
       ⋯ Actions
     </option>
-    <option value="cashIn">Apport espèces</option>
-    <option value="cashOut">Prélèvement</option>
-    <option value="cancel">Annuler un ticket</option>
-    <option value="return">Retour client</option>
-    <option value="custPay">Règlement client (crédit)</option>
-    <option value="quote">Facturer un devis / proforma</option>
-    <option value="order">Charger une commande client</option>
-    <option value="expense">Dépense payée en caisse</option>
-    {can('containers_counter') && <option value="containers">Consignes (emballages)</option>}
-    <option value="close">Clôture de caisse (Trésorerie)</option>
+    {sellerPost ? (
+      <>
+        <option value="counter">Mes factures envoyées à la caisse</option>
+        <option value="quote">Facturer un devis / proforma</option>
+        <option value="order">Charger une commande client</option>
+      </>
+    ) : (
+      <>
+        <option value="cashIn">Apport espèces</option>
+        <option value="cashOut">Prélèvement</option>
+        <option value="cancel">Annuler un ticket</option>
+        <option value="return">Retour client</option>
+        <option value="custPay">Règlement client (crédit)</option>
+        <option value="quote">Facturer un devis / proforma</option>
+        <option value="order">Charger une commande client</option>
+        <option value="expense">Dépense payée en caisse</option>
+        {can('containers_counter') && <option value="containers">Consignes (emballages)</option>}
+        <option value="close">Clôture de caisse (Trésorerie)</option>
+      </>
+    )}
   </select>
   );
 
   const dialogs = (
     <>
+    {dialog === 'counter' && <CounterMineDialog user={user} onClose={() => (setDialog(null), mine.reload())} onEdit={(id) => void editCounter(id)} />}
+    {counterPin && (
+      <SupervisorPrompt
+        action={`${counterPin.message} Code du gérant pour l'accepter.`}
+        onCancel={() => setCounterPin(null)}
+        onConfirm={(pin) => void sendToCounter(counterPin.print, pin)}
+      />
+    )}
     {consigne && <ContainerCounterDialog {...consigne} onClose={() => setConsigne(null)} />}
     {waSale && <WhatsappTicketDialog saleId={waSale.id} number={waSale.number} onClose={() => setWaSale(null)} />}
       {dialog === 'pay' && (
@@ -1169,11 +1271,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <Statement customer={customer} />
       </Modal>
     )}
-    {dialog === 'cancel' && <CancelDialog sessionId={session.data.id} onClose={() => setDialog(null)} />}
+    {dialog === 'cancel' && day && <CancelDialog sessionId={day.id} onClose={() => setDialog(null)} />}
     {dialog === 'return' && <ReturnDialog initialSale={returnOf} onClose={() => (setDialog(null), setReturnOf(null))} />}
     {dialog === 'missed' && <MissedSaleDialog onClose={() => (setDialog(null), focusScan())} />}
     {dialog === 'book' && <BookSaleDialog current={book} onClose={() => (setDialog(null), focusScan())} onSet={(b) => (setBook(b), setDialog(null), focusScan())} />}
-    {dialog === 'voucher' && <SellVoucherDialog sessionId={session.data.id} onClose={() => (setDialog(null), drawer.reload(), focusScan())} />}
+    {dialog === 'voucher' && day && <SellVoucherDialog sessionId={day.id} onClose={() => (setDialog(null), drawer.reload(), focusScan())} />}
     {dialog === 'ticket' && scanned && (
       <ScannedTicketDialog
         sale={scanned}
@@ -1197,13 +1299,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
 
   // --- Actions communes aux trois présentations ---------------------------------
   const openPay = () => {
+    if (sellerPost) return void sendToCounter(false);
     printRef.current = 'none';
     setDialog('pay');
   };
   // Vider sans « Êtes-vous sûr ? » : la fiche revient avec « Annuler » (10 s) ou Ctrl+Z.
   // Une fiche reprise (devis, commande, modification) garde la confirmation.
   const askClear = async () => {
-    if (quote || order || replacing) {
+    if (counterEdit) {
+      if (await askConfirm(`Abandonner la modification ? La facture n° ${counterEdit.number} repart à la caisse telle qu'elle était.`)) await abandonEdit();
+    } else if (quote || order || replacing) {
       if (await askConfirm('Vider la fiche en cours ?')) clear();
     } else {
       const kept = { lines, clientName, seller };
@@ -1229,7 +1334,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   };
   const setLineQty = (key: number, q: number) => setLines((ls) => ls.map((x) => (x.key === key ? { ...x, qty: q } : x)));
   const heldCount = (held.data?.length ?? 0) + (carts.data?.length ?? 0);
-  const ficheNumber = replacing
+  const ficheNumber = counterEdit
+    ? `Modif. n° ${counterEdit.number}`
+    : replacing
     ? `Modif. ${replacing.number}`
     : quote && lines.length
       ? `Devis ${quote.number}`
@@ -1259,9 +1366,24 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     ) : null;
   const staleNote = (
     <>
+      {(sellerPost || counterEdit) && (
+        <div className="tre-warning counter-band">
+          {counterEdit
+            ? `Modification de la facture n° ${counterEdit.number} : la caisse ne peut pas l'encaisser tant que vous ne l'avez pas renvoyée (F4). Vider abandonne la modification.`
+            : 'Poste de vente : F4 envoie la facture à la caisse et imprime le bon du client ; le client paie au caissier.'}
+          {returnedCount > 0 && (
+            <>
+              {' '}
+              <button className="link" onClick={() => setDialog('counter')}>
+                {returnedCount} facture{returnedCount > 1 ? 's' : ''} rendue{returnedCount > 1 ? 's' : ''} par la caisse
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {stale && (
         <div className="tre-warning">
-          Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
+          Cette caisse est ouverte depuis le {new Date(day!.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
           <button className="link" onClick={onTreasury}>
             Trésorerie
           </button>{' '}
@@ -1288,7 +1410,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       )}
     </>
   );
-  const bandText = replacing
+  const bandText = counterEdit
+    ? `Modification de la facture n° ${counterEdit.number} : bloquée à la caisse jusqu'au renvoi (F4) · Vider abandonne la modification`
+    : sellerPost
+    ? `Poste de vente : la facture part à la caisse (F4), le client paie au caissier${returnedCount ? ` · ${returnedCount} facture(s) rendue(s) par la caisse (F10)` : ''}`
+    : replacing
     ? `Modification de la facture ${replacing.number} · déjà réglé ${amount(replacing.paid)} · ${
         totals.totalTtc >= replacing.paid ? `reste à encaisser ${amount(totals.totalTtc - replacing.paid)}` : `à rendre ${amount(replacing.paid - totals.totalTtc)}`
       } FCFA`
@@ -1363,7 +1489,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   // --- Présentation Classique : la fiche de facturation d'avant la 0.41 -------------
   if (layout === 'classic')
     return (
-      <div className={`pc ${credit ? 'credit' : ''}`}>
+      <div className={`pc ${credit ? 'credit' : ''} ${sellerPost ? 'counter-seller' : ''}`}>
         <div className="pc-band">
           <h2>{title}</h2>
           <div className="pc-mode">{credit ? 'Vente à crédit' : 'Vente au comptant'}</div>
@@ -1563,6 +1689,22 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             </div>
           </div>
           <aside className="pc-actions">
+            {sellerPost ? (
+              <>
+                <button className="main" disabled={!lines.length} onClick={() => void validate('ticket')} title="Envoie la facture à la caisse et imprime le bon du client">
+                  Envoyer à la caisse <kbd>F4</kbd>
+                </button>
+                <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon">
+                  <span>
+                    Mes factures envoyées
+                    {returnedCount > 0 && <b className="held-count">{returnedCount}</b>}
+                  </span>
+                  <kbd>F10</kbd>
+                </button>
+                <hr />
+              </>
+            ) : (
+              <>
             <button className="main" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la vente sans imprimer">
               Valider / Nouv. <kbd>F4</kbd>
             </button>
@@ -1595,6 +1737,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
               Tiroir <kbd>F5</kbd>
             </button>
+              </>
+            )}
             {can('missed_sale') && (
               <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre">
                 Le client voulait… <kbd>Ctrl+M</kbd>
@@ -1636,7 +1780,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   // --- Présentation Conventionnel : grand total en haut, ligne de saisie, cadre Règlement ---
   if (layout === 'conventional')
     return (
-      <div className={`pv ${credit ? 'credit' : ''}`}>
+      <div className={`pv ${credit ? 'credit' : ''} ${sellerPost ? 'counter-seller' : ''}`}>
         <div className="pv-tool">
           <button onClick={() => void askClear()} disabled={!lines.length} title="Vider la fiche et en commencer une nouvelle">
             <i>＋</i>Nouveau
@@ -1873,6 +2017,17 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           </div>
         </div>
         <div className="pv-actions">
+          {sellerPost ? (
+            <>
+              <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon">
+                Mes factures envoyées {returnedCount > 0 && <b className="held-count">{returnedCount}</b>} <kbd>F10</kbd>
+              </button>
+              <button className="g" disabled={!lines.length} onClick={() => void validate('ticket')} title="Envoie la facture à la caisse et imprime le bon du client">
+                Envoyer à la caisse <kbd>F4</kbd>
+              </button>
+            </>
+          ) : (
+            <>
           <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket' : 'Réimprimer le dernier ticket'}>
             Ticket <kbd>F2</kbd>
           </button>
@@ -1891,6 +2046,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           <button className="g" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la vente sans imprimer">
             Valider <kbd>F4</kbd>
           </button>
+            </>
+          )}
           <span className="pv-spacer" />
           <button onClick={closeFiche}>Fermer</button>
         </div>
@@ -1900,10 +2057,25 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     );
 
   return (
-    <div className={`pos-screen ${credit ? 'credit' : ''}`}>
+    <div className={`pos-screen ${credit ? 'credit' : ''} ${sellerPost ? 'counter-seller' : ''}`}>
+      {(sellerPost || counterEdit) && (
+        <div className="tre-warning counter-band">
+          {counterEdit
+            ? `Modification de la facture n° ${counterEdit.number} : la caisse ne peut pas l'encaisser tant que vous ne l'avez pas renvoyée. « Vider » abandonne la modification.`
+            : 'Poste de vente : ENVOYER À LA CAISSE imprime le bon du client ; le client paie au caissier.'}
+          {returnedCount > 0 && (
+            <>
+              {' '}
+              <button className="link" onClick={() => setDialog('counter')}>
+                {returnedCount} facture{returnedCount > 1 ? 's' : ''} rendue{returnedCount > 1 ? 's' : ''} par la caisse
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {stale && (
         <div className="tre-warning">
-          Cette caisse est ouverte depuis le {new Date(session.data.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
+          Cette caisse est ouverte depuis le {new Date(day!.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
           <button className="link" onClick={onTreasury}>
             Trésorerie
           </button>{' '}
@@ -2218,6 +2390,17 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       </div>
 
       <div className="pos-actions">
+        {sellerPost ? (
+          <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon" style={{ '--c': '#e0a800' } as React.CSSProperties}>
+            <i aria-hidden>↺</i>
+            <span>
+              Mes factures
+              {returnedCount > 0 && <b className="held-count">{returnedCount}</b>}
+            </span>
+            <kbd>F10</kbd>
+          </button>
+        ) : (
+          <>
         <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()} style={{ '--c': '#e0a800' } as React.CSSProperties}>
           <i aria-hidden>⏸</i>En attente <kbd>F3</kbd>
         </button>
@@ -2232,11 +2415,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)" style={{ '--c': '#0891b2' } as React.CSSProperties}>
           <i aria-hidden>🗃</i>Tiroir <kbd>F5</kbd>
         </button>
+          </>
+        )}
         {can('missed_sale') && (
           <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre" style={{ '--c': '#0d9488' } as React.CSSProperties}>
             <i aria-hidden>🙋</i>Le client voulait… <kbd>Ctrl+M</kbd>
           </button>
         )}
+        {!sellerPost && (
+          <>
         <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket de caisse' : 'Réimprimer le dernier ticket'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>🧾</i>Ticket <kbd>F2</kbd>
         </button>
@@ -2249,12 +2436,24 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
         </button>
+          </>
+        )}
         <button disabled={!lines.length} onClick={() => void askClear()} style={{ '--c': '#dc2626' } as React.CSSProperties}>
           <i aria-hidden>🗑</i>Vider
         </button>
         <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>
           <i aria-hidden>✕</i>Fermer
         </button>
+        {sellerPost ? (
+          <button className="go" disabled={!lines.length} onClick={() => void validate('ticket')} title="Envoie la facture à la caisse et imprime le bon du client">
+            <i aria-hidden>➜</i>
+            <span>
+              ENVOYER
+              <small>{counterEdit ? `n° ${counterEdit.number} modifiée` : 'à la caisse'} · F4</small>
+            </span>
+          </button>
+        ) : (
+          <>
         <button className="pay" disabled={!lines.length} onClick={openPay} title="Mobile Money, carte, bon d'achat, paiements mixtes">
           <i aria-hidden>💳</i>Encaisser <kbd>Ctrl+E</kbd>
         </button>
@@ -2265,6 +2464,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <small>sans imprimer · F4</small>
           </span>
         </button>
+          </>
+        )}
       </div>
 
       {dialogs}
@@ -2413,7 +2614,7 @@ export function RegisterChooser({ current, onChosen }: { current: string | null;
 }
 
 /** Caisse fermée : aucune vente avant l'ouverture dans Trésorerie. */
-function ClosedRegister({ canOpen, onTreasury, onReload }: { canOpen: boolean; onTreasury: () => void; onReload: () => void }) {
+export function ClosedRegister({ canOpen, onTreasury, onReload }: { canOpen: boolean; onTreasury: () => void; onReload: () => void }) {
   return (
     <div className="center-page">
       <div className="card closed-register">

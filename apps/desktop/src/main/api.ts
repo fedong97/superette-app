@@ -28,6 +28,7 @@ import {
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
+  type SaleFlow,
   type Milli,
   type MovementType,
   type Payment,
@@ -243,7 +244,7 @@ export interface Printer {
   /** Bon d'achat, d'avoir ou de monnaie, avec son code-barres. */
   giftVoucher(voucherId: string): Promise<void>;
   /** Bon « facture à payer en caisse » remis au client par le vendeur. */
-  counterSlip(slip: Parameters<Services['receipts']['counterSlip']>[0]): Promise<void>;
+  counterSlip(slip: Parameters<Services['receipts']['counterSlip']>[0], force?: boolean): Promise<void>;
   /** Affiches promo A4 ou A5 (deux par page A4 à l'italienne) : la fenêtre d'impression s'ouvre. Renvoie false si annulé. */
   posters(html: string, size: 'a4' | 'a5'): Promise<boolean>;
   /** Rapport de clôture A4 : Z, mouvements d'espèces et liste des ventes de la journée. */
@@ -628,6 +629,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
 
   // ——— Vendeur et caissier séparés ————————————————————————————————————————
+  /** Vendeur et caissier séparés : le vendeur n'encaisse pas, le caissier ne facture pas. */
+  const splitPost = (u: User): 'seller' | 'cashier' | null => {
+    const station = s.admin.station();
+    if (!station || s.admin.storeSettings(station.store.id).saleFlow !== 'split') return null;
+    return u.role === 'seller' ? 'seller' : u.role === 'cashier' ? 'cashier' : null;
+  };
+  const requireTill = (u: User) => {
+    if (splitPost(u) === 'seller') throw new AppError("Vendeur et caissier séparés : le vendeur n'encaisse pas, il envoie la facture à la caisse", 'FORBIDDEN');
+  };
   /** Le vendeur qui a fait la facture la modifie ou l'annule ; le gérant aussi. */
   const ownCounter = (u: User, inv: CounterInvoice) => {
     if (inv.sellerId !== u.id && !isSupervisor(u)) throw new AppError(`La facture n° ${inv.number} est celle de ${inv.sellerName} : lui seul (ou le gérant) peut la changer`, 'FORBIDDEN');
@@ -726,12 +736,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Langue de l'utilisateur connecté : celle de ses bons de caisse et rapports imprimés. */
     'prefs.lang': (): DocLang => (user && s.admin.prefs(user.id).lang === 'en' ? 'en' : 'fr'),
     /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */
-    'setup.bootstrap': (input: BootstrapInput & { template?: string | null }) => {
-      const { template, ...rest } = input;
+    'setup.bootstrap': (input: BootstrapInput & { template?: string | null; saleFlow?: SaleFlow | null }) => {
+      const { template, saleFlow, ...rest } = input;
       const t = template ? findTemplate(template) : null;
       const result = s.admin.bootstrap(rest);
       user = result.admin;
       if (t) s.templates.apply(result.admin.id, result.store.id, t);
+      // Organisation de la vente choisie à l'installation (vendeur et caissier séparés).
+      if (saleFlow && saleFlow !== 'combined') s.admin.saveStoreSettings(result.admin.id, result.store.id, { saleFlow });
       return result;
     },
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
@@ -1644,6 +1656,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       book?: { number: string; at: string } | null;
     }) => {
       const c = ctx(POS);
+      requireTill(user!);
       if (input.book) requireUser(['sale_book']);
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
@@ -1854,6 +1867,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     }) => {
       const c = ctx(POS);
       const u = user!;
+      if (splitPost(u) === 'cashier') throw new AppError('Vendeur et caissier séparés : le caissier encaisse les factures des vendeurs, il ne facture pas', 'FORBIDDEN');
       const previous = input.id && input.baseVersion ? await counterGet(s, input.id) : null;
       if (previous) ownCounter(u, previous);
       const old = previous?.payload ?? null;
@@ -1952,11 +1966,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const { payload: _, ...rest } = inv;
       return rest;
     },
-    /** Réimprime le bon « à payer en caisse » remis au client. */
-    'counter.printSlip': async (id: string) => {
+    /** Bon « à payer en caisse » remis au client (`force` : même si l'impression automatique est coupée). */
+    'counter.printSlip': async (id: string, force = true) => {
       requireUser(POS);
       const r = counterRecap(await counterGet(s, id));
-      await printer.counterSlip({ number: r.number, version: r.version, sellerName: r.sellerName, customerName: r.customerName, at: r.updatedAt, total: r.total, lines: r.lines.map((l) => ({ label: l.label, qty: l.qty, amount: l.total })) });
+      await printer.counterSlip({ number: r.number, version: r.version, sellerName: r.sellerName, customerName: r.customerName, at: r.updatedAt, total: r.total, lines: r.lines.map((l) => ({ label: l.label, qty: l.qty, amount: l.total })) }, force);
     },
     /**
      * Liste de la caisse : factures du magasin encore ouvertes et paniers des
@@ -2000,6 +2014,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'counter.take': async (id: string) => {
       const c = ctx(POS);
       const u = user!;
+      requireTill(u);
       if (id.startsWith('cart:')) {
         const cart = await takeShelfCart(s, id.slice(5));
         const known = (articleId: string) => {
@@ -2063,6 +2078,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'counter.pay': async (input: { ids: string[]; payments: Payment[]; supervisorPin?: string; creditPin?: string; keepChange?: Fcfa | null }) => {
       const c = ctx(POS);
       const u = user!;
+      requireTill(u);
       s.license.assertCanSell();
       const ids = [...new Set(input.ids ?? [])];
       if (!ids.length) throw new AppError('Aucune facture à encaisser', 'EMPTY');

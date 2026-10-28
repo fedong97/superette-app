@@ -19,6 +19,8 @@ import {
   ticketMessage,
   purchaseOrderMessage,
   PAYMENT_METHODS,
+  computeTotals,
+  lineTotal,
   formatQty,
   arrivalMessage,
   promoPostersHtml,
@@ -26,6 +28,7 @@ import {
   labelsHtml,
   xlsxWorkbook,
   type Fcfa,
+  type SaleFlow,
   type Milli,
   type MovementType,
   type Payment,
@@ -70,6 +73,14 @@ import {
   approvalStatus,
   requestApproval,
   shelfCarts,
+  type CounterInvoice,
+  type CounterPayload,
+  counterAction,
+  counterGet,
+  counterList,
+  counterSend,
+  flushCounterPaid,
+  newCounterId,
   mobileReceptions,
   takeMobileReception,
   pushStationStatus,
@@ -232,6 +243,8 @@ export interface Printer {
   emoneyVoucher(movementId: string): Promise<void>;
   /** Bon d'achat, d'avoir ou de monnaie, avec son code-barres. */
   giftVoucher(voucherId: string): Promise<void>;
+  /** Bon « facture à payer en caisse » remis au client par le vendeur. */
+  counterSlip(slip: Parameters<Services['receipts']['counterSlip']>[0], force?: boolean): Promise<void>;
   /** Affiches promo A4 ou A5 (deux par page A4 à l'italienne) : la fenêtre d'impression s'ouvre. Renvoie false si annulé. */
   posters(html: string, size: 'a4' | 'a5'): Promise<boolean>;
   /** Rapport de clôture A4 : Z, mouvements d'espèces et liste des ventes de la journée. */
@@ -614,6 +627,52 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     };
   };
 
+
+  // ——— Vendeur et caissier séparés ————————————————————————————————————————
+  /** Vendeur et caissier séparés : le vendeur n'encaisse pas, le caissier ne facture pas. */
+  const splitPost = (u: User): 'seller' | 'cashier' | null => {
+    const station = s.admin.station();
+    if (!station || s.admin.storeSettings(station.store.id).saleFlow !== 'split') return null;
+    return u.role === 'seller' ? 'seller' : u.role === 'cashier' ? 'cashier' : null;
+  };
+  const requireTill = (u: User) => {
+    if (splitPost(u) === 'seller') throw new AppError("Vendeur et caissier séparés : le vendeur n'encaisse pas, il envoie la facture à la caisse", 'FORBIDDEN');
+  };
+  /** Le vendeur qui a fait la facture la modifie ou l'annule ; le gérant aussi. */
+  const ownCounter = (u: User, inv: CounterInvoice) => {
+    if (inv.sellerId !== u.id && !isSupervisor(u)) throw new AppError(`La facture n° ${inv.number} est celle de ${inv.sellerName} : lui seul (ou le gérant) peut la changer`, 'FORBIDDEN');
+  };
+  /** Ce que la caisse affiche : les lignes au prix du magasin, le total, le client. */
+  const counterRecap = (inv: CounterInvoice) => {
+    const p = inv.payload!;
+    const storeId = ctx().storeId;
+    const customer = p.customerId ? s.customers.getCustomer(p.customerId) : null;
+    const level = p.priceLevel ?? customer?.price_level ?? 'retail';
+    const priced = s.pos.priceLines(storeId, p.lines, level, customer?.id ?? null);
+    const totals = computeTotals(priced);
+    const { payload: _, ...rest } = inv;
+    return {
+      ...rest,
+      customerId: customer?.id ?? null,
+      customerName: customer?.name ?? p.clientName ?? null,
+      customerPhone: customer?.phone ?? null,
+      level,
+      lines: priced.map((l) => {
+        const unit = s.catalogue.getArticle(l.articleId, storeId).unit;
+        return {
+          label: l.label,
+          qty: l.packUnits && l.packName ? `${l.qty / l.packUnits} ${l.packName}` : formatQty(l.qty, unit),
+          unitPrice: l.packUnits ? (l.packPrice ?? l.unitPrice) : l.unitPrice,
+          discount: l.discount + (l.promo ?? 0),
+          total: lineTotal(l),
+        };
+      }),
+      total: totals.totalTtc,
+      discount: totals.totalDiscount + totals.totalPromo,
+      items: totals.itemCount,
+      payload: p,
+    };
+  };
   return {
     // --- Application et connexion -------------------------------------------
     'app.state': () => ({
@@ -677,12 +736,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Langue de l'utilisateur connecté : celle de ses bons de caisse et rapports imprimés. */
     'prefs.lang': (): DocLang => (user && s.admin.prefs(user.id).lang === 'en' ? 'en' : 'fr'),
     /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */
-    'setup.bootstrap': (input: BootstrapInput & { template?: string | null }) => {
-      const { template, ...rest } = input;
+    'setup.bootstrap': (input: BootstrapInput & { template?: string | null; saleFlow?: SaleFlow | null }) => {
+      const { template, saleFlow, ...rest } = input;
       const t = template ? findTemplate(template) : null;
       const result = s.admin.bootstrap(rest);
       user = result.admin;
       if (t) s.templates.apply(result.admin.id, result.store.id, t);
+      // Organisation de la vente choisie à l'installation (vendeur et caissier séparés).
+      if (saleFlow && saleFlow !== 'combined') s.admin.saveStoreSettings(result.admin.id, result.store.id, { saleFlow });
       return result;
     },
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
@@ -1595,6 +1656,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       book?: { number: string; at: string } | null;
     }) => {
       const c = ctx(POS);
+      requireTill(user!);
       if (input.book) requireUser(['sale_book']);
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
@@ -1773,6 +1835,270 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         sellerId = null;
       }
       return { lines, sellerId, sellerName: cart.sellerName, label: cart.label, number: cart.number, missing: cart.lines.length - lines.length };
+    },
+
+    // ——— Vendeur et caissier séparés ——————————————————————————————————————
+    /** Organisation de la vente du magasin, et ce que fait l'utilisateur connecté. */
+    'counter.mode': () => {
+      const u = requireUser();
+      const split = settings().saleFlow === 'split';
+      return {
+        split,
+        /** Le vendeur facture et envoie à la caisse ; le caissier encaisse ; le gérant fait les deux. */
+        post: !split ? ('both' as const) : u.role === 'seller' ? ('seller' as const) : u.role === 'cashier' ? ('cashier' as const) : ('both' as const),
+        connected: Boolean(s.sync.credentials()),
+      };
+    },
+    /**
+     * Le vendeur envoie sa facture à la caisse. Ses remises, prix et tarif sont
+     * validés ici (son droit, ou le code du gérant) : la caisse n'a plus qu'à encaisser.
+     * `id` et `baseVersion` : facture rouverte puis renvoyée, avec le même numéro.
+     */
+    'counter.send': async (input: {
+      id?: string | null;
+      baseVersion?: number | null;
+      lines: SaleLineInput[];
+      customerId?: string | null;
+      clientName?: string | null;
+      priceLevel?: PriceLevel | null;
+      warehouseId?: string | null;
+      supervisorPin?: string;
+      optionsPin?: string;
+    }) => {
+      const c = ctx(POS);
+      const u = user!;
+      if (splitPost(u) === 'cashier') throw new AppError('Vendeur et caissier séparés : le caissier encaisse les factures des vendeurs, il ne facture pas', 'FORBIDDEN');
+      const previous = input.id && input.baseVersion ? await counterGet(s, input.id) : null;
+      if (previous) ownCounter(u, previous);
+      const old = previous?.payload ?? null;
+      const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
+      const level = input.priceLevel && input.priceLevel !== usual ? input.priceLevel : null;
+      const warehouseId = input.warehouseId ? s.pos.saleWarehouse(c.storeId, input.warehouseId).id : null;
+      const otherWarehouse =
+        Boolean(warehouseId) && s.pos.saleWarehouse(c.storeId, warehouseId).is_sales_default !== 1 && !s.admin.saleWarehousesFor(c.storeId, u.id).some((w) => w.id === warehouseId);
+      // Tarif ou dépôt : le droit du vendeur, le code du gérant, ou l'accord déjà donné sur cette facture.
+      let optionsBy: string | null = null;
+      if ((level && !can(u, ['sale_tariff'])) || otherWarehouse) {
+        const kept = old?.optionsBy && (old.priceLevel ?? null) === level && (old.warehouseId ?? null) === warehouseId;
+        if (kept) optionsBy = old!.optionsBy;
+        else if (input.optionsPin) optionsBy = supervisor(input.optionsPin).id;
+        else throw new AppError('Tarif ou dépôt soumis à validation du gérant', 'OPTIONS_SUPERVISOR');
+      } else if (level || warehouseId) optionsBy = u.id;
+      // Prix saisis : le droit du vendeur, ou les mêmes prix que la version déjà validée.
+      const priced = input.lines.filter((l) => l.price != null);
+      let priceBy: string | null = null;
+      if (priced.length) {
+        const same = (l: SaleLineInput) => old?.lines.some((o) => o.articleId === l.articleId && (o.packId ?? null) === (l.packId ?? null) && o.price === l.price);
+        if (can(u, ['price'])) priceBy = u.id;
+        else if (old?.priceBy && priced.every(same)) priceBy = old.priceBy;
+        else throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
+      }
+      const payload: CounterPayload = {
+        lines: input.lines,
+        customerId: input.customerId ?? null,
+        clientName: input.clientName ?? null,
+        priceLevel: level,
+        warehouseId,
+        discountBy: null,
+        priceBy,
+        optionsBy,
+      };
+      const ready = s.counter.prepare(c.storeId, payload);
+      // Remise : le droit du vendeur, le code du gérant, sous le maximum des paramètres, ou pas plus que la version validée.
+      const p = ready.payload;
+      const lines = s.pos.priceLines(c.storeId, p.lines, p.priceLevel ?? usual, p.customerId);
+      const totals = computeTotals(lines);
+      if (totals.totalDiscount > 0) {
+        const set = settings();
+        const underMax = set.maxDiscountPct > 0 && totals.totalDiscount * 100 <= set.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
+        let oldDiscount = 0;
+        if (old?.discountBy) {
+          try {
+            oldDiscount = computeTotals(s.pos.priceLines(c.storeId, old.lines, old.priceLevel ?? usual, old.customerId)).totalDiscount;
+          } catch {
+            oldDiscount = 0;
+          }
+        }
+        if (input.supervisorPin) p.discountBy = supervisor(input.supervisorPin).id;
+        else if (can(u, ['discount'])) p.discountBy = u.id;
+        else if (old?.discountBy && totals.totalDiscount <= oldDiscount) p.discountBy = old.discountBy;
+        else if (!underMax) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
+      }
+      const sent = await counterSend(s, {
+        id: previous?.id ?? input.id ?? newCounterId(),
+        baseVersion: previous ? previous.version : null,
+        sellerId: u.id,
+        sellerName: u.name,
+        payload: p,
+        total: ready.total,
+        lines: ready.lines,
+        customerName: ready.customerName,
+      });
+      s.counter.log(u.id, previous ? 'counter.resend' : 'counter.send', 'counter_invoice', sent.id, { number: sent.number, version: sent.version, total: sent.total });
+      const { payload: _, ...rest } = sent;
+      return rest;
+    },
+    /** Factures envoyées par ce vendeur depuis hier (toutes celles du magasin pour le gérant). */
+    'counter.mine': async () => {
+      const u = requireUser(POS);
+      const list = await counterList(s, isSupervisor(u) ? '*' : u.id);
+      return list;
+    },
+    /** Le vendeur rouvre sa facture : elle est bloquée à la caisse le temps de la modification. */
+    'counter.edit': async (id: string) => {
+      const u = requireUser(POS);
+      ownCounter(u, await counterGet(s, id));
+      const inv = await counterAction(s, id, 'edit', { by: u.name });
+      s.counter.log(u.id, 'counter.edit', 'counter_invoice', id, { number: inv.number });
+      return counterRecap(inv);
+    },
+    /** Modification abandonnée : la facture repart à la caisse telle qu'elle était. */
+    'counter.unedit': async (id: string) => {
+      requireUser(POS);
+      const { payload: _, ...rest } = await counterAction(s, id, 'unedit');
+      return rest;
+    },
+    'counter.cancel': async (id: string, reason?: string | null) => {
+      const u = requireUser(POS);
+      ownCounter(u, await counterGet(s, id));
+      const inv = await counterAction(s, id, 'cancel', { by: u.name, note: reason ?? null });
+      s.counter.log(u.id, 'counter.cancel', 'counter_invoice', id, { number: inv.number, reason: reason ?? null });
+      const { payload: _, ...rest } = inv;
+      return rest;
+    },
+    /** Bon « à payer en caisse » remis au client (`force` : même si l'impression automatique est coupée). */
+    'counter.printSlip': async (id: string, force = true) => {
+      requireUser(POS);
+      const r = counterRecap(await counterGet(s, id));
+      await printer.counterSlip({ number: r.number, version: r.version, sellerName: r.sellerName, customerName: r.customerName, at: r.updatedAt, total: r.total, lines: r.lines.map((l) => ({ label: l.label, qty: l.qty, amount: l.total })) }, force);
+    },
+    /**
+     * Liste de la caisse : factures du magasin encore ouvertes et paniers des
+     * téléphones. Les avis « encaissée » restés sur ce PC repartent d'abord.
+     */
+    'counter.queue': async () => {
+      const c = ctx(POS);
+      await flushCounterPaid(s).catch(() => undefined);
+      const invoices = (await counterList(s)).map((i) => ({ ...i, cart: false }));
+      const carts = s.fiches.current() ? [] : await shelfCarts(s).catch(() => []);
+      const fromPhones = carts.map((k) => {
+        let total = 0;
+        try {
+          total = computeTotals(s.pos.priceLines(c.storeId, k.lines.map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null })))).totalTtc;
+        } catch {
+          total = 0;
+        }
+        return {
+          id: `cart:${k.id}`,
+          number: k.number,
+          sellerId: k.sellerId,
+          sellerName: k.sellerName,
+          status: 'waiting' as const,
+          version: 1,
+          total,
+          lines: k.lines.length,
+          customerName: k.label,
+          note: null,
+          lockName: null,
+          lockedHere: false,
+          saleNumber: null,
+          doneBy: null,
+          at: k.at,
+          updatedAt: k.at,
+          cart: true,
+        };
+      });
+      return [...invoices, ...fromPhones].sort((a, b) => a.number - b.number);
+    },
+    /** Le caissier ouvre une facture pour l'encaisser (un panier du téléphone devient facture). */
+    'counter.take': async (id: string) => {
+      const c = ctx(POS);
+      const u = user!;
+      requireTill(u);
+      if (id.startsWith('cart:')) {
+        const cart = await takeShelfCart(s, id.slice(5));
+        const known = (articleId: string) => {
+          try {
+            s.catalogue.getArticle(articleId, c.storeId);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const lines = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null }));
+        const ready = s.counter.prepare(c.storeId, { lines, customerId: null, clientName: cart.label, priceLevel: null, warehouseId: null, discountBy: null, priceBy: null, optionsBy: null, cartNumber: cart.number });
+        const inv = await counterSend(s, {
+          id: `fc-panier-${cart.id}`.slice(0, 64),
+          baseVersion: null,
+          sellerId: cart.sellerId,
+          sellerName: cart.sellerName,
+          payload: ready.payload,
+          total: ready.total,
+          lines: ready.lines,
+          customerName: ready.customerName,
+          forMe: u.name,
+        });
+        return counterRecap(inv);
+      }
+      const done = s.counter.paidHere(id);
+      if (done) {
+        await flushCounterPaid(s).catch(() => undefined);
+        throw new AppError(`Cette facture est déjà encaissée sur cette caisse (${done.sale_number})`, 'INVALID');
+      }
+      return counterRecap(await counterAction(s, id, 'take', { by: u.name }));
+    },
+    /** Le caissier la laisse : elle revient dans la liste. */
+    'counter.release': async (id: string) => {
+      requireUser(POS);
+      const { payload: _, ...rest } = await counterAction(s, id, 'release');
+      return rest;
+    },
+    /** Rendue au vendeur avec le motif (article en trop, client sans assez d'argent…). */
+    'counter.giveBack': async (id: string, note: string) => {
+      const u = requireUser(POS);
+      const inv = await counterAction(s, id, 'return', { by: u.name, note });
+      s.counter.log(u.id, 'counter.return', 'counter_invoice', id, { number: inv.number, note });
+      const { payload: _, ...rest } = inv;
+      return rest;
+    },
+    /** Le gérant libère une facture restée bloquée (PC éteint pendant l'encaissement ou la modification). */
+    'counter.unlock': async (id: string) => {
+      const u = requireUser();
+      if (!isSupervisor(u)) throw new AppError('Réservé au gérant', 'FORBIDDEN');
+      const inv = await counterAction(s, id, 'unlock');
+      s.counter.log(u.id, 'counter.unlock', 'counter_invoice', id, { number: inv.number });
+      const { payload: _, ...rest } = inv;
+      return rest;
+    },
+    /**
+     * Encaissement d'une ou plusieurs factures ouvertes sur cette caisse : les
+     * lignes, le client et les accords viennent des factures (rien n'est
+     * changé à la caisse) ; la vente compte pour le vendeur.
+     */
+    'counter.pay': async (input: { ids: string[]; payments: Payment[]; supervisorPin?: string; creditPin?: string; keepChange?: Fcfa | null }) => {
+      const c = ctx(POS);
+      const u = user!;
+      requireTill(u);
+      s.license.assertCanSell();
+      const ids = [...new Set(input.ids ?? [])];
+      if (!ids.length) throw new AppError('Aucune facture à encaisser', 'EMPTY');
+      const invoices = await Promise.all(ids.map((id) => counterGet(s, id)));
+      for (const inv of invoices) {
+        if (s.counter.paidHere(inv.id)) throw new AppError(`La facture n° ${inv.number} est déjà encaissée sur cette caisse`, 'INVALID');
+        if (inv.status !== 'paying' || !inv.lockedHere) throw new AppError(`La facture n° ${inv.number} n'est pas ouverte sur cette caisse : rouvrez-la`, 'INVALID');
+      }
+      const base = s.counter.saleInput(invoices);
+      const sale = s.pos.completeSale(c, {
+        ...base,
+        payments: input.payments,
+        discountAuthorizedBy: input.supervisorPin ? supervisor(input.supervisorPin).id : base.discountAuthorizedBy,
+        creditAuthorizedBy: input.creditPin ? supervisor(input.creditPin).id : null,
+        keepChange: input.keepChange ?? null,
+      });
+      s.counter.recordPaid(ids, sale, u.name);
+      s.counter.log(u.id, 'counter.pay', 'sale', sale.id, { number: sale.number, invoices: invoices.map((i) => i.number) });
+      await flushCounterPaid(s).catch(() => undefined);
+      return sale;
     },
     'pos.zReport': (sessionId: string) => (requireAmounts(), requireUser(['cash_z']), s.pos.zReport(sessionId)),
     'pos.sessions': () => (requireAmounts(), s.pos.listSessions(ctx(['cash_history']).storeId)),

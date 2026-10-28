@@ -895,7 +895,8 @@ export class PosService extends Base {
       const user = this.admin.getUser(ctx.userId);
       const authorizer = input.discountAuthorizedBy ? this.admin.getUser(input.discountAuthorizedBy) : null;
       // Droit « remise sans code » du vendeur, code d'un gérant, ou remise sous le maximum fixé dans les paramètres.
-      const supervisor = authorizer !== null && (authorizer.role === 'admin' || authorizer.role === 'manager');
+      // Facture envoyée par un vendeur (vendeur et caissier séparés) : son droit de remise vaut accord.
+      const supervisor = authorizer !== null && (authorizer.role === 'admin' || authorizer.role === 'manager' || this.admin.hasRight(authorizer, 'discount'));
       const underMax = set.maxDiscountPct > 0 && granted * 100 <= set.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
       if (!this.admin.hasRight(user, 'discount') && !supervisor && !underMax) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
       if (underMax && !supervisor) discountBy ??= ctx.userId;

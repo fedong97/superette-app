@@ -3,6 +3,7 @@ import { DEFAULT_STORE_SETTINGS, type MascotMood, type Permission } from '@super
 import { type Result, call } from './api';
 import logo from './assets/logo.png';
 import { MAX_QUICK_TABS, type QuickTab, type WinKind } from './nav';
+import { CounterDesk } from './screens/CounterDesk';
 import { applyBrand } from './theme';
 import { Ico, MenuIcon } from './icons';
 import { Accounting, type AccountingTab } from './screens/Accounting';
@@ -69,6 +70,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   cash1: { label: 'Fiche de facturation 1', perm: ['cash'] },
   cash2: { label: 'Fiche de facturation 2', perm: ['cash'] },
   credit: { label: 'Vente à crédit', perm: ['credit'] },
+  counter: { label: 'Factures à encaisser', perm: ['cash'] },
   sales: { label: 'Mes factures', perm: ['sales', 'cash_z', 'cash_operations', 'sales_alerts', 'sale_edit_approve', 'vouchers'] },
   articles: { label: 'Produits', perm: ['articles', 'article_create'] },
   stock: {
@@ -149,7 +151,8 @@ interface MenuItem {
   open?: [WinKind, string?];
   action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
   /** Option du magasin (Administration › Paramètres) dont dépend l'écran : il suffit d'une seule. */
-  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint' | 'exitCheck')[];
+  /** `splitSale` : magasin où vendeur et caissier sont séparés. */
+  setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint' | 'exitCheck' | 'splitSale')[];
   /** Trait de séparation entre deux groupes. */
   sep?: boolean;
   /** Avec sep : petit titre qui regroupe les écrans qui le suivent. */
@@ -260,6 +263,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Vente au comptant 1', words: 'nouvelle vente facture caisse ticket facturation', open: ['cash1'] },
       { label: 'Vente au comptant 2', words: 'nouvelle vente facture caisse ticket facturation', open: ['cash2'] },
       { label: 'Vente à crédit', words: 'facture à crédit client en compte', open: ['credit'] },
+      { label: 'Factures à encaisser (envoyées par les vendeurs)', words: 'caisse vendeur encaisser facture envoyée poste caissier', open: ['counter'], setting: ['splitSale'] },
       H('Préparer'),
       { label: 'Devis et factures proforma', open: ['quotes'] },
       { label: 'Commandes clients (téléphone, WhatsApp)', open: ['orders'], perm: 'customer_orders' },
@@ -688,7 +692,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const toast = useToast();
   const can = (perm: Permission) => user.rights.includes(perm);
   // Sans tout le registre, le caissier garde « Mes factures » pour ses trois dernières.
-  const canWin = (kind: WinKind) => WINDOWS[kind].perm.some(can) || (kind === 'sales' && (can('cash') || can('credit')));
+  // Vendeur et caissier séparés : le vendeur envoie à la caisse, le caissier n'a que l'écran d'encaissement.
+  const splitSale = state.storeSettings?.saleFlow === 'split';
+  const counterPost = !splitSale ? null : user.role === 'seller' ? ('seller' as const) : user.role === 'cashier' ? ('cashier' as const) : null;
+  const counterHidden = (kind: WinKind) =>
+    kind === 'counter' ? !splitSale || counterPost === 'seller' : counterPost === 'cashier' && (kind === 'cash2' || kind === 'credit');
+  const canWin = (kind: WinKind) => !counterHidden(kind) && (WINDOWS[kind].perm.some(can) || (kind === 'sales' && (can('cash') || can('credit'))));
   const first: WinKind = (['cash1', 'stock', 'sales', 'articles', 'purchases', 'accounting', 'customers'] as WinKind[]).find(canWin) ?? 'sales';
   // Rôles cochés dans Paramètres › Écran de caisse : leur fiche de vente s'ouvre en mode « Caisse seule ».
   const fullRole = (state.storeSettings?.posFullRoles ?? '').split(',').includes(user.role);
@@ -1025,7 +1034,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       // Magasin sans TVA : pas de déclaration de TVA.
       .filter((i) => hasVat() || i.open?.[1] !== 'vat')
       // Options du personnel que le magasin n'a pas choisies : leurs écrans ne s'affichent pas.
-      .filter((i) => !i.setting || i.setting.some((k) => Boolean(state.storeSettings?.[k])))
+      .filter((i) => !i.setting || i.setting.some((k) => (k === 'splitSale' ? state.storeSettings?.saleFlow === 'split' : Boolean(state.storeSettings?.[k]))))
       .filter((i) => i.open?.[0] !== 'sales' || can('sales') || Boolean(i.perm) || i.open[1] === 'tickets')
       // Un petit titre sans écran sous lui disparaît ; un trait ni en tête, ni en fin, ni à côté d'un titre.
       .filter((i, n, all) => !i.head || (n < all.length - 1 && !all[n + 1]!.sep))
@@ -1475,8 +1484,20 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           >
             <SingleViewCtx.Provider value={{ onView: (label) => retitle(w.id, label) }}>
             <RefreshCtx.Provider value={w.rev ?? 0}>
-            {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && (
+            {(w.kind === 'counter' || ((w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && counterPost === 'cashier')) && (
+              <CounterDesk
+                user={user}
+                hasRegister={Boolean(state.register)}
+                canChooseRegister={state.canChooseRegister}
+                onRegisterChosen={refresh}
+                active={w.id === active && !w.min}
+                title="Factures à encaisser"
+                onTreasury={() => open('treasury', 'day', 'Trésorerie › Opérations de trésorerie')}
+              />
+            )}
+            {(w.kind === 'cash1' || w.kind === 'cash2' || w.kind === 'credit') && counterPost !== 'cashier' && (
               <Pos
+                counterPost={counterPost === 'seller' ? 'seller' : null}
                 user={user}
                 mode={w.kind === 'credit' ? 'credit' : 'cash'}
                 hasRegister={Boolean(state.register)}

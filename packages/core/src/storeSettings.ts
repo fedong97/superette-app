@@ -86,6 +86,12 @@ export interface StoreSettings {
   emoneyMode: 'central' | 'independent';
   /** Caisse électronique centrale du magasin (Mobile Money du magasin) ; vide : pas encore choisie. */
   emoneyCentralRegisterId: string;
+  /**
+   * Organisation de la vente : « combined », le vendeur facture et encaisse sur
+   * son poste ; « split », le vendeur facture et envoie la facture à une caisse,
+   * où le caissier encaisse (postes reliés au serveur central).
+   */
+  saleFlow: SaleFlow;
 
   /** Préfixes ajoutés devant les numéros des pièces. */
   prefixSale: string;
@@ -217,6 +223,12 @@ export type BarcodeKind = 'ean8' | 'ean13';
 /** Présentations de l'écran de caisse : mêmes fonctions et mêmes touches, disposition différente. */
 export type PosLayout = 'modern' | 'classic' | 'conventional';
 export const POS_LAYOUTS: Record<PosLayout, string> = { modern: 'Moderne', classic: 'Classique', conventional: 'Conventionnel' };
+/** Organisation de la vente choisie à l'installation (Administration › Paramètres ensuite). */
+export type SaleFlow = 'combined' | 'split';
+export const SALE_FLOWS: Record<SaleFlow, string> = {
+  combined: 'Vendeur-caissier : la même personne facture et encaisse sur son poste',
+  split: 'Vendeur et caissier séparés : le vendeur facture et envoie à la caisse, le caissier encaisse',
+};
 /** Rôles qui vendent et peuvent passer en mode « Caisse seule » dès la connexion. */
 export const POS_FULL_ROLES = ['cashier', 'seller', 'manager', 'admin'] as const;
 
@@ -252,6 +264,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   pinMinLength: 4,
   maxLoginAttempts: 0,
   emoneyMode: 'central',
+  saleFlow: 'combined',
   emoneyCentralRegisterId: '',
   prefixSale: '',
   prefixReturn: '',
@@ -422,6 +435,7 @@ export function mergeStoreSettings(current: Partial<StoreSettings> | null, patch
       }
       if (k === 'alertWhatsapp') s = s.replace(/[^\d+ ]/g, '').trim();
       if (k === 'emoneyMode' && s !== 'central' && s !== 'independent') throw new Error('Mode des caisses électroniques : centrale ou indépendantes');
+      if (k === 'saleFlow' && !(s in SALE_FLOWS)) throw new Error('Organisation de la vente : vendeur-caissier ou vendeur et caissier séparés');
       const max = TEXT_MAX[k];
       if (max && s.length > max) throw new Error(k === 'logo' ? 'Logo trop lourd : choisissez une image plus petite' : `Texte trop long (${max} caractères au plus)`);
       (next as unknown as Record<string, unknown>)[k] = s;

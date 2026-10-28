@@ -721,6 +721,10 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
       await printReceipt(s.receipts.giftVoucher(s.vouchers.get(voucherId)), false, true);
     },
 
+    async counterSlip(slip, force = true) {
+      await printReceipt(s.receipts.counterSlip(slip), false, force);
+    },
+
     async posters(html, size) {
       const win = renderWindow();
       try {

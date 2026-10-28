@@ -3,6 +3,7 @@ export type WinKind =
   | 'cash1'
   | 'cash2'
   | 'credit'
+  | 'counter'
   | 'sales'
   | 'articles'
   | 'stock'

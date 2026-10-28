@@ -4,6 +4,7 @@ import { AdminService } from './admin.service';
 import { AlertsService } from './alerts.service';
 import { ApprovalsService } from './approvals.service';
 import { BackupService } from './backup.service';
+import { CounterService } from './counter.service';
 import { ManagerService } from './manager.service';
 import { MobileController } from './mobile.controller';
 import { MobileService } from './mobile.service';
@@ -40,6 +41,7 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
         MobileService,
         AlertsService,
         ApprovalsService,
+        CounterService,
         ShopService,
         StationBackupService,
       ],

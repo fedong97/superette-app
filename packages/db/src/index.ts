@@ -75,6 +75,7 @@ import { ExitCheckService } from './exitChecks';
 import { PriceScheduleService } from './priceSchedules';
 import { RecurringOrderService } from './recurringOrders';
 import { StoreTransferService } from './storeTransfers';
+import { CounterService } from './counter';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -155,6 +156,7 @@ export * from './exitChecks';
 export * from './priceSchedules';
 export * from './recurringOrders';
 export * from './storeTransfers';
+export * from './counter';
 export { AppError, type Clock, type Context, type ErrorFix } from './util';
 
 export interface Services {
@@ -235,6 +237,7 @@ export interface Services {
   priceSchedules: PriceScheduleService;
   recurringOrders: RecurringOrderService;
   storeTransfers: StoreTransferService;
+  counter: CounterService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -314,7 +317,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const priceSchedules = new PriceScheduleService(db, clock, catalogue, labels);
   const recurringOrders = new RecurringOrderService(db, clock, catalogue, orders);
   const storeTransfers = new StoreTransferService(db, clock, stock);
-  return { db, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const counter = new CounterService(db, clock, admin, pos, customers);
+  return { db, counter, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

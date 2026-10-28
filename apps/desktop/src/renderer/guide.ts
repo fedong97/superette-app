@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.95.0',
+    items: [
+      "Vendeur et caissier séparés (au choix à l'installation ou dans Paramètres › Écran de caisse) : le vendeur facture sur son PC et envoie à la caisse, le caissier encaisse dans « Factures à encaisser ».",
+      "Une facture envoyée peut être modifiée par le vendeur (même numéro, nouvelle version) ou rendue au vendeur par la caisse avec un motif ; plusieurs factures d'un même client s'encaissent en un seul ticket.",
+    ],
+  },
+  {
     version: '0.94.0',
     items: [
       "Interface plus colorée : barre latérale teintée, icônes des menus en couleur, tableaux avec en-tête coloré et lignes alternées, fonds de page moins blancs.",

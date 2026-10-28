@@ -111,8 +111,41 @@ const POS: PageHelp = {
   keys: POS_KEYS,
 };
 
+/** Vendeur et caissier séparés (Administration › Paramètres › Organisation de la vente). */
+const COUNTER: PageHelp = {
+  title: 'Factures à encaisser',
+  intro: 'Poste du caissier quand vendeur et caissier sont séparés : les vendeurs facturent sur leur PC et envoient à la caisse ; ici, on encaisse.',
+  sections: [
+    {
+      title: 'Encaisser une facture',
+      steps: [
+        'Les factures envoyées par les vendeurs (et les paniers des téléphones 📱) arrivent dans la liste toutes seules, avec leur numéro.',
+        'Touchez la facture du client, ou scannez le bon qu’il présente (ou tapez son numéro puis Entrée). Le récapitulatif s’affiche : articles, remises accordées par le vendeur, montant à payer.',
+        'Espèces : tapez le reçu ou touchez les billets, puis F4 (ou F2 pour le ticket). Mobile Money, carte, bon, compte du client : « Autre paiement » (Ctrl+E).',
+        'La vente compte pour le vendeur (objectifs, commissions) ; l’argent entre dans votre caisse.',
+      ],
+    },
+    {
+      title: 'Le client change d’avis',
+      steps: [
+        'Il ajoute un article : le vendeur fait une deuxième facture ; tapez son numéro pendant que la première est ouverte, les deux sont encaissées en un seul ticket.',
+        'Il retire un article ou n’a pas assez : « Rendre au vendeur » avec le motif. Le vendeur corrige et renvoie la facture avec le même numéro.',
+        '« Laisser » remet la facture dans la liste pour un autre client.',
+        'Une facture « en modification » est rouverte par le vendeur : elle revient quand il la renvoie.',
+      ],
+    },
+  ],
+  keys: [
+    ['Entrée', 'Ouvrir la facture dont le numéro est tapé ; sur une saisie vide, encaisser'],
+    ['F4', 'Encaisser en espèces'],
+    ['F2', 'Encaisser et imprimer le ticket (sans facture ouverte : réimprimer le dernier)'],
+    ['Ctrl+E', 'Autre paiement : Mobile Money, carte, bon, compte du client, mixte'],
+  ],
+};
+
 export const HELP: Record<WinKind, PageHelp> = {
   cash1: POS,
+  counter: COUNTER,
   cash2: { ...POS, intro: `${POS.intro} La fiche 2 permet de servir un deuxième client sans fermer la première.` },
   credit: {
     title: 'Vente à crédit',

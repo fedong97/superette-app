@@ -31,6 +31,7 @@ const POS_KEYS: [string, string][] = [
   ['F9', 'Facture A4 du ticket'],
   ['+ / −', 'Quantité de la ligne choisie'],
   ['Suppr', 'Enlever la ligne choisie'],
+  ['Ctrl+Suppr', 'Vider la fiche en cours (récupérable 10 s avec Ctrl+Z)'],
   ['3*code', 'Ajouter 3 fois le produit scanné ou tapé'],
   ['Ctrl+M', 'Le client voulait… : noter un produit demandé qu’on n’a pas pu vendre'],
   ['Scanner un ticket', 'Retrouver la vente : retour (code du gérant), réimpression, facture A4'],

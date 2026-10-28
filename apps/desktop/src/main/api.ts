@@ -1566,7 +1566,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'purchases.previewOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => (
       requireUser(), { ...printer.previewPurchaseOrder(id, opts), doc: 'purchaseOrder' as const, variant: 'order' as DocVariant }
     ),
-    'purchases.receptions': (opts?: { supplierId?: string; uninvoiced?: boolean }) => s.purchases.listReceptions(ctx().storeId, opts),
+    'purchases.receptions': (opts?: { supplierId?: string; uninvoiced?: boolean; limit?: number }) => s.purchases.listReceptions(ctx().storeId, opts),
     'purchases.reception': (id: string) => (requireUser(), s.purchases.getReception(id)),
     'purchases.invoicePreview': (receptionIds: string[]) => (requireUser(), s.purchases.invoicePreview(receptionIds)),
     'purchases.createInvoice': (input: Parameters<Services['purchases']['createInvoice']>[1]) => s.purchases.createInvoice(ctx(['purchase_invoices']), input),

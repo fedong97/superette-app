@@ -3,6 +3,8 @@
  * Les textes qui portent un nombre ou un nom passent par EN_PATTERNS.
  */
 export const EN: Record<string, string> = {
+  "Vendeur et caissier séparés (au choix à l'installation ou dans Paramètres › Écran de caisse) : le vendeur facture sur son PC et envoie à la caisse, le caissier encaisse dans « Factures à encaisser ».": "Separate seller and cashier (chosen at installation or in Settings › Till screen): the seller invoices on their PC and sends to the till, the cashier collects in “Invoices to collect”.",
+  "Une facture envoyée peut être modifiée par le vendeur (même numéro, nouvelle version) ou rendue au vendeur par la caisse avec un motif ; plusieurs factures d'un même client s'encaissent en un seul ticket.": "A sent invoice can be edited by the seller (same number, new version) or returned to the seller by the till with a reason; several invoices for the same customer are collected in one receipt.",
   "à la caisse": "to the till",
   "Factures à encaisser": "Invoices to collect",
   "Factures à encaisser (envoyées par les vendeurs)": "Invoices to collect (sent by sellers)",

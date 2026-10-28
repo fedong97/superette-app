@@ -1,0 +1,160 @@
+
+<!-- ======================= PARTIE 1 ======================= -->
+<section class="partie">
+  <div class="p-num">Partie 1</div>
+  <h1>Démarrer</h1>
+  <p>Installer ONIX 360, créer votre magasin et apprendre à vous déplacer dans l'écran.</p>
+</section>
+
+<!-- ======================= 1 ======================= -->
+<section class="chapitre" id="ch1">
+  <div class="chap-tete"><div class="chap-num">Chapitre 1</div><h1>Bienvenue dans ONIX 360</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Tout le monde</span></div>
+  <p class="intro">ONIX 360 est le logiciel de gestion de votre commerce : la caisse, le stock, les clients, les fournisseurs, les dépenses, le personnel et la comptabilité au plan SYSCOHADA, en FCFA. Il a été conçu pour les superettes, boutiques, quincailleries, pharmacies et boulangeries du Cameroun.</p>
+
+  <h2 id="s1-1">Ce que fait le logiciel</h2>
+  <table class="t">
+    <tr><th style="width:28%">Domaine</th><th>Ce que vous y faites</th></tr>
+    <tr><td><b>Vente</b></td><td>Encaisser au comptant ou à crédit, en espèces, MTN Mobile Money, Orange Money, carte ou chèque ; devis, commandes clients, livraisons.</td></tr>
+    <tr><td><b>Trésorerie</b></td><td>Ouvrir et clôturer la caisse chaque jour, compter le tiroir, suivre les écarts, la caisse centrale et les comptes Mobile Money.</td></tr>
+    <tr><td><b>Stock et articles</b></td><td>Fiches produits avec cartons et pièces, codes-barres, étiquettes, réceptions, pertes, transferts entre dépôts, inventaires, péremptions.</td></tr>
+    <tr><td><b>Achats et fournisseurs</b></td><td>Propositions et bons de commande, réceptions, factures fournisseurs, échéancier, retours.</td></tr>
+    <tr><td><b>Clients</b></td><td>Comptes clients, plafonds de crédit, règlements, relevés, relances WhatsApp, fidélité.</td></tr>
+    <tr><td><b>Dépenses et personnel</b></td><td>Loyer, ENEO, transport… ; fiches du personnel, pointage, salaires, congés.</td></tr>
+    <tr><td><b>Suivi et comptabilité</b></td><td>Tableau de bord, rapports de ventes, résumé du jour ; journaux, grand livre, balance, TVA, bilan et DSF passés tout seuls.</td></tr>
+  </table>
+
+  <h2 id="s1-2">Comment le logiciel est organisé</h2>
+  <p>Quelques mots reviennent partout dans ce manuel :</p>
+  <ul>
+    <li><b>Magasin</b> (ou boutique) : votre point de vente, avec un code court comme <code>DLA1</code>. Une entreprise peut avoir plusieurs magasins.</li>
+    <li><b>Dépôt</b> : un endroit où l'on garde la marchandise. Au départ : <b>Surface de vente</b> (le rayon) et <b>Réserve</b> (le magasin arrière).</li>
+    <li><b>Caisse</b> : là où va l'argent. Une caisse <b>Espèces</b> par poste (le tiroir), et si vous voulez une caisse <b>Électronique</b> (MoMo, OM, carte) et une caisse <b>Banque</b> (virement, chèque). La <b>caisse centrale</b> est le coffre du bureau où l'on verse la recette.</li>
+    <li><b>Journée de caisse</b> : elle commence à l'ouverture de la caisse le matin et finit à la clôture le soir. Elle donne le <b>rapport Z</b>.</li>
+    <li><b>Poste</b> (ou PC) : un ordinateur où ONIX 360 est installé. Chaque poste garde ses données et continue de vendre sans Internet.</li>
+    <li><b>Serveur central</b> : quand il y a plusieurs PC ou plusieurs magasins, il les relie entre eux (chapitre 20).</li>
+  </ul>
+
+  <h2 id="s1-3">Les rôles</h2>
+  <p>Chaque personne a son propre compte avec un <b>identifiant</b> et un <b>code secret</b>. Son <b>rôle</b> décide de ce qu'elle voit : un caissier ne voit pas la comptabilité, un magasinier ne voit pas la caisse.</p>
+  <table class="t">
+    <tr><th style="width:26%">Rôle</th><th>Ce qu'il fait</th></tr>
+    <tr><td><span class="role admin">Administrateur</span></td><td>Tous les droits : paramètres, caisses, utilisateurs, licence, sauvegardes. À réserver au propriétaire.</td></tr>
+    <tr><td><span class="role gerant">Gérant</span></td><td>Suit la journée, contrôle les clôtures, justifie les écarts, gère le stock, les clients et les commandes. Son code autorise les remises, retours et annulations des caissiers.</td></tr>
+    <tr><td><span class="role caissier">Caissier</span></td><td>Ouvre sa caisse, vend, encaisse, fait les ventes à crédit et clôture sa caisse.</td></tr>
+    <tr><td><span class="role caissier">Vendeur</span></td><td>Facture les clients ; selon l'organisation choisie, il encaisse lui-même ou envoie la facture au caissier (chapitre 9).</td></tr>
+    <tr><td><span class="role gerant">Magasinier</span></td><td>Réceptions, transferts, inventaires, pertes et réassort du rayon.</td></tr>
+    <tr><td><span class="role gerant">Responsable d'achat</span></td><td>Fournisseurs, propositions et bons de commande, factures d'achat.</td></tr>
+    <tr><td><span class="role gerant">Comptable</span></td><td>Journaux, grand livre, TVA, états financiers.</td></tr>
+  </table>
+  <p>Les droits de chaque rôle se règlent en détail (chapitre 5).</p>
+</section>
+
+<!-- ======================= 2 ======================= -->
+<section class="chapitre" id="ch2">
+  <div class="chap-tete"><div class="chap-num">Chapitre 2</div><h1>Installer ONIX 360 et créer le magasin</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span></div>
+  <p class="intro">ONIX 360 s'installe sur un PC Windows. Ses données restent sur le PC : la caisse vend même sans Internet. Le plus souvent, votre technicien FEDONG fait cette installation avec vous ; ce chapitre vous permet de la suivre ou de la refaire.</p>
+
+  <h2 id="s2-1">Ce qu'il faut</h2>
+  <table class="t">
+    <tr><th style="width:30%">Matériel</th><th>Conseil</th></tr>
+    <tr><td><b>Un PC</b></td><td>Windows 10 ou 11, 64 bits, 4 Go de mémoire au moins. Gardez la date et l'heure de Windows justes : une date fausse bloque la caisse.</td></tr>
+    <tr><td><b>Le fichier d'installation</b></td><td><code>Onix360-Setup-<span data-version>0.95.0</span>.exe</code>, remis par FEDONG (clé USB, WhatsApp ou lien de téléchargement).</td></tr>
+    <tr><td><b>Imprimante de tickets</b></td><td>Thermique 80 mm ou 58 mm, USB ou réseau. Une imprimante A4 sert aux factures, relevés et rapports.</td></tr>
+    <tr><td><b>Tiroir-caisse</b></td><td>Branché sur l'imprimante de tickets : il s'ouvre tout seul à chaque vente en espèces.</td></tr>
+    <tr><td><b>Douchette</b></td><td>Lecteur de codes-barres USB. Elle « tape » le code comme un clavier : rien à installer.</td></tr>
+    <tr><td><b>Clé USB</b></td><td>Pour la copie de sécurité des données (chapitre 18).</td></tr>
+    <tr><td>En option</td><td>Balance à étiquettes, afficheur client, lecteur d'empreintes pour le pointage, téléphones Android pour l'inventaire.</td></tr>
+  </table>
+
+  <h2 id="s2-2">Installer le logiciel</h2>
+  <ol class="etapes">
+    <li>Double-cliquez sur le fichier <code>Onix360-Setup-…exe</code>. Si Windows demande l'autorisation de modifier l'ordinateur, cliquez sur <span class="btn">Oui</span>.</li>
+    <li>Lisez le contrat de licence et acceptez-le. Il reste lisible plus tard dans <span class="chemin">Réglages › Licence</span>.</li>
+    <li>Gardez le dossier d'installation proposé et cliquez sur <span class="btn">Installer</span>.</li>
+    <li>À la fin, l'icône <b>ONIX 360</b> apparaît sur le bureau. Double-cliquez dessus.</li>
+  </ol>
+  <div class="encadre attention"><span class="t">« Windows a protégé votre ordinateur »</span>
+    <p>Ce message bleu apparaît parfois pour un logiciel nouveau. Cliquez sur <b>Informations complémentaires</b> puis <b>Exécuter quand même</b>, seulement si le fichier vient bien de FEDONG.</p>
+  </div>
+
+  <h2 id="s2-3">Créer le magasin (première ouverture)</h2>
+  <p>À la toute première ouverture, ONIX 360 affiche <b>Bienvenue dans ONIX 360</b> : on y crée le magasin et le compte de l'administrateur.</p>
+  <figure class="moyen"><img src="images/01-creation-magasin.png"><figcaption>L'écran de bienvenue, à la première ouverture.</figcaption></figure>
+  <ol class="etapes">
+    <li><b>Magasin</b> : tapez le <b>Code magasin</b> (2 à 6 caractères, par exemple <code>DLA1</code>) et le <b>Nom du magasin</b>. L'adresse, le téléphone et le NIU s'impriment sur les tickets et les factures.</li>
+    <li><b>Magasin assujetti à la TVA</b> : laissez la case décochée si vous êtes au régime simplifié (les tickets portent « TVA non applicable ») ; cochez-la si vous êtes au régime du réel (TVA 19,25 %). Elle se change plus tard.</li>
+    <li><b>Organisation de la vente</b> : choisissez <b>Vendeur-caissier</b> si la même personne facture et encaisse (le cas habituel), ou <b>Vendeur et caissier séparés</b> si les vendeurs facturent sur leur PC et que le client paie à une caisse (chapitre 9).</li>
+    <li><b>Métier</b> : choisissez votre activité (Superette, Quincaillerie, Pharmacie, Boulangerie, Habillement…). ONIX 360 crée les rayons, les familles et des réglages de départ adaptés, modifiables ensuite. Choisissez <b>Aucun</b> pour tout créer vous-même.</li>
+    <li><b>Administrateur</b> : votre nom, un <b>identifiant</b> (par exemple <code>admin</code> ou votre prénom) et un <b>code secret</b> de 4 à 8 chiffres, deux fois.</li>
+    <li>Cliquez sur <span class="btn">Créer le magasin</span>.</li>
+  </ol>
+  <figure class="moyen"><img src="images/01b-creation-magasin-rempli.png"><figcaption>Le formulaire rempli : TVA, organisation de la vente, métier et administrateur.</figcaption></figure>
+  <div class="encadre important"><span class="t">Notez le code de l'administrateur</span>
+    <p>Écrivez l'identifiant et le code secret de l'administrateur et rangez-les en lieu sûr. C'est le seul compte qui peut tout faire : créer les utilisateurs, activer la licence, restaurer une sauvegarde.</p>
+  </div>
+  <p>Les liens du haut de l'écran servent dans des cas particuliers : <b>Rejoindre un magasin existant</b> pour un deuxième PC du même magasin (chapitre 20), <b>Installer une boutique préparée</b> quand le technicien a tout paramétré au bureau sur une clé USB, <b>Ouvrir une boutique</b> pour la fiche apportée par le technicien ou le comptable.</p>
+
+  <h2 id="s2-4">Le guide de démarrage</h2>
+  <p>Juste après la création, le <b>Guide de démarrage</b> liste les premières choses à faire. Chaque bouton <span class="btn">Ouvrir</span> mène au bon écran. Elles sont expliquées dans la partie 2 de ce manuel.</p>
+  <figure class="moyen"><img src="images/02-guide-demarrage.png"><figcaption>Le guide de démarrage de l'administrateur.</figcaption></figure>
+  <p>Cliquez sur <span class="btn">Compris</span> pour le fermer. Il se rouvre à tout moment par <span class="chemin">Aide › Guide de démarrage</span>. Chaque rôle a son propre guide : le caissier voit comment ouvrir sa caisse et vendre, le magasinier comment recevoir et compter.</p>
+
+  <h2 id="s2-5">Se connecter</h2>
+  <p>À chaque ouverture du logiciel, et quand on change de personne, chacun se connecte avec <b>son</b> identifiant et <b>son</b> code. Ainsi chaque vente, chaque remise et chaque clôture porte le nom de la personne qui l'a faite.</p>
+  <figure class="petit"><img src="images/08-connexion.png"><figcaption>L'écran de connexion. Tapez l'identifiant (ou scannez votre badge), le code secret, puis <kbd>Entrée</kbd>.</figcaption></figure>
+  <ul>
+    <li>Pour passer la main sans fermer le logiciel : <b>Changer d'utilisateur</b>, en bas à droite de l'écran.</li>
+    <li>Après plusieurs codes faux, le compte est bloqué : l'administrateur le débloque (chapitre 5).</li>
+    <li><b>Je pars</b>, en bas à droite, note votre départ pour le pointage et vous déconnecte.</li>
+  </ul>
+
+  <h2 id="s2-6">L'essai de 15 jours</h2>
+  <p>Sans licence, ONIX 360 fonctionne <b>15 jours</b> avec toutes ses fonctions. La barre du bas affiche <b>Version d'essai (N j)</b>, le nombre de jours qui restent. Avant la fin, activez votre licence (chapitre 19). Rien n'est perdu à l'activation : les ventes et réglages de l'essai sont gardés.</p>
+</section>
+
+<!-- ======================= 3 ======================= -->
+<section class="chapitre" id="ch3">
+  <div class="chap-tete"><div class="chap-num">Chapitre 3</div><h1>Se repérer dans l'écran</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Tout le monde</span></div>
+  <p class="intro">L'écran d'ONIX 360 est toujours rangé de la même façon. Une fois ces quatre zones connues, on retrouve tout.</p>
+
+  <h2 id="s3-1">La page d'accueil</h2>
+  <figure><img src="images/03-accueil.png"><figcaption>La page d'accueil de l'administrateur, en fin de matinée.</figcaption></figure>
+  <ul>
+    <li><b>À gauche, la barre verte</b> : les menus (Vente, Trésorerie, Stock, Articles, Achats, Fournisseurs, Clients, Dépenses, Personnel, Suivi, Comptabilité, Fiscalité), puis <b>Rechercher</b>, <b>Tous les menus</b>, <b>Personnaliser</b>, <b>Réglages</b> et <b>Aide</b>. Chacun ne voit que les menus permis par son rôle.</li>
+    <li><b>En haut, les onglets rapides</b> : les écrans du jour selon le rôle (V. cash 1, Tableau de bord, Journées de caisse…). Un clic ouvre l'écran. Le <b>+</b> en ajoute un ; on en garde 12 au plus.</li>
+    <li><b>Au centre</b> : la page d'accueil avec <b>Ma journée</b> (ventes, tickets, panier moyen), les <b>Tâches du jour</b> et les <b>Accès rapides</b> en grosses tuiles. Le bouton <span class="btn">Nouvelle vente</span> (<kbd>F2</kbd>) ouvre la caisse.</li>
+    <li><b>En bas, la barre d'état</b> : version, magasin, caisse, utilisateur, état du serveur, de la sauvegarde et de la licence, langue, <b>Changer d'utilisateur</b> et <b>Je pars</b>. Un mot en rouge demande une action (par exemple <b>Sauvegarde en retard</b>).</li>
+  </ul>
+  <p>La cloche, en haut à droite, compte les alertes : un clic les affiche.</p>
+
+  <h2 id="s3-2">Les menus</h2>
+  <p>Un clic sur un menu de la barre verte ouvre sa liste d'écrans, rangés par petits titres (Encaisser, Préparer, Factures…).</p>
+  <div class="deux">
+    <figure><img src="images/04-menu-vente.png"><figcaption>Le menu Vente ouvert.</figcaption></figure>
+    <figure><img src="images/05-tous-les-menus.png"><figcaption>Tous les menus sur une seule page.</figcaption></figure>
+  </div>
+  <p><b>Tous les menus</b> montre d'un coup tous les écrans permis, avec une case de recherche. Chaque écran s'ouvre dans une <b>fenêtre</b> : son titre rappelle le chemin (par exemple <b>Vente › Vente au comptant 1</b>). Les boutons à droite du titre actualisent (<kbd>F5</kbd>), réduisent, agrandissent ou ferment la fenêtre (<kbd>Échap</kbd>). Plusieurs fenêtres peuvent être ouvertes : <kbd>Ctrl</kbd>+<kbd>Tab</kbd> passe de l'une à l'autre.</p>
+
+  <h2 id="s3-3">Rechercher un écran (Ctrl+K)</h2>
+  <p>Vous ne savez pas dans quel menu se trouve un écran ? Appuyez sur <kbd>Ctrl</kbd>+<kbd>K</kbd> (ou cliquez sur la loupe en haut) et tapez quelques lettres : « clôt » trouve la clôture de caisse, « inv » les inventaires. Les flèches choisissent, <kbd>Entrée</kbd> ouvre. Les accents ne comptent pas.</p>
+  <figure class="moyen"><img src="images/06-recherche-ctrl-k.png"><figcaption>La recherche d'écran : « clôt » propose les opérations de trésorerie et le registre des Z.</figcaption></figure>
+
+  <h2 id="s3-4">L'aide de chaque page (F1)</h2>
+  <p>Le bouton rond <b>?</b> en haut à droite, ou la touche <kbd>F1</kbd>, ouvre l'aide de la page affichée : ce qu'elle sert à faire et les étapes, section par section. À la caisse, <kbd>F1</kbd> cherche un produit : utilisez alors le bouton <b>?</b>.</p>
+  <figure class="moyen"><img src="images/07-aide-de-la-page.png"><figcaption>L'aide de la liste des produits.</figcaption></figure>
+  <p>Dans le menu <b>Aide</b> se trouvent aussi le <b>Guide de démarrage</b>, <b>Quoi de neuf</b> (les nouveautés après une mise à jour) et les <b>Raccourcis clavier</b> (<kbd>Ctrl</kbd>+<kbd>/</kbd>), résumés à l'annexe A.</p>
+
+  <h2 id="s3-5">Adapter l'écran à chacun</h2>
+  <p>Cliquez sur votre nom, en bas de la barre verte :</p>
+  <ul>
+    <li><b>Personnaliser les onglets rapides</b> : choisissez les écrans en haut. Un clic droit sur un onglet l'épingle ou le retire.</li>
+    <li><b>Personnaliser la barre latérale</b> : choisissez et rangez les menus de la barre verte.</li>
+    <li><b>Thème</b> : clair, sombre ou contraste fort (utile en plein soleil ou pour mieux lire).</li>
+    <li><b>Réduire</b>, tout en bas : la barre verte ne montre plus que les icônes, pour un écran plus large.</li>
+    <li><b>English</b>, dans la barre du bas : l'écran passe en anglais pour cette personne.</li>
+  </ul>
+  <div class="encadre astuce"><span class="t">Annuler une erreur</span><p>Juste après une action (supprimer une ligne, enregistrer…), <kbd>Ctrl</kbd>+<kbd>Z</kbd> l'annule pendant 10 secondes, quand le message en bas à droite le propose.</p></div>
+</section>

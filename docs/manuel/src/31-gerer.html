@@ -1,0 +1,176 @@
+
+<!-- ======================= 11 ======================= -->
+<section class="chapitre" id="ch11">
+  <div class="chap-tete"><div class="chap-num">Chapitre 11</div><h1>Clients, crédit, devis et commandes</h1></div>
+  <div class="pourqui">Pour qui : <span class="role caissier">Caissier</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Un client enregistré peut acheter à crédit dans la limite de son plafond, recevoir ses prix de gros, un relevé de compte et des relances. Les devis et les commandes préparent une vente avant le passage en caisse.</p>
+
+  <h2 id="s11-1">Créer un client</h2>
+  <ol class="etapes">
+    <li><span class="chemin">Clients › Liste des clients</span>, <span class="btn">Nouveau client</span> (ou depuis la caisse, <kbd>F8</kbd> puis <span class="btn">Nouveau client</span>).</li>
+    <li>Nom, téléphone (il sert aux relances WhatsApp), adresse, NIU pour une entreprise.</li>
+    <li>Le <b>tarif</b> (détail, gros, super gros), le <b>plafond de crédit</b> et le <b>délai de paiement</b> en jours. Seul un gérant peut fixer le plafond.</li>
+    <li><span class="btn">Enregistrer</span>.</li>
+  </ol>
+  <figure><img src="images/60-clients.png"><figcaption>La liste des clients, avec leur plafond et ce qu'ils doivent.</figcaption></figure>
+  <p>Cliquez un client pour sa fiche : onglets <b>Compte</b> (ce qu'il doit, en retard, plafond, encore disponible, ventes à crédit restant dues), <b>Relevé</b>, <b>Achats</b> et <b>Fiche</b>. Les boutons du bas impriment le relevé, le relancent par WhatsApp ou encaissent un règlement.</p>
+  <figure class="dialogue"><img src="images/60b-fiche-client.png"><figcaption>La fiche d'un client : son compte.</figcaption></figure>
+
+  <h2 id="s11-2">Vendre à crédit</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="chemin">Vente › Vente à crédit</span> (onglet <b>V. crédit</b>), ou passez de <b>Comptant</b> à <b>Crédit</b> en haut du ticket.</li>
+    <li>Choisissez le client (<kbd>F8</kbd>) : c'est obligatoire. Son solde s'affiche en couleur : rouge s'il doit, vert s'il a un avoir.</li>
+    <li>Ajoutez les produits comme d'habitude.</li>
+    <li>Saisissez l'acompte éventuel, puis validez : le reste va sur son compte, avec son échéance. <kbd>F9</kbd> imprime la facture A4 à lui remettre.</li>
+  </ol>
+  <figure><img src="images/16-vente-credit.png"><figcaption>La vente à crédit : le client est obligatoire.</figcaption></figure>
+  <div class="encadre attention"><span class="t">Plafond dépassé</span><p>Au-delà du plafond, ou si le client a des factures en retard, le code d'un gérant est demandé.</p></div>
+
+  <h2 id="s11-3">Encaisser un règlement</h2>
+  <ul>
+    <li><b>À la caisse</b> : <b>Actions › Règlement client (crédit)</b>. Les espèces entrent dans le tiroir et comptent dans la journée.</li>
+    <li><b>Au bureau</b> : fiche du client, <span class="btn">Encaisser un règlement</span>.</li>
+  </ul>
+  <p>Choisissez le moyen (espèces, MoMo, OM, virement, chèque) et le montant. Cochez les factures que le client règle : elles sont soldées d'abord ; sinon le règlement va aux plus anciennes. Un reçu s'imprime. <span class="chemin">Trésorerie › Règlements clients reçus</span> les liste tous.</p>
+
+  <h2 id="s11-4">Suivre et relancer</h2>
+  <ul>
+    <li><span class="chemin">Clients › Situation et échéances</span> (balance âgée) : ce que doit chaque client, par ancienneté du retard, avec la date de sa dernière relance. <b>Relancer</b> ouvre un message rempli, modifiable ; <b>Ouvrir WhatsApp</b> l'envoie, avec le relevé en PDF si vous voulez.</li>
+    <li><span class="chemin">Clients › Extrait de compte client</span> : les ventes à crédit et règlements d'une période, à imprimer pour le client.</li>
+    <li><span class="chemin">Clients › Factures récapitulatives</span> : une seule facture par mois pour un client pro, avec le détail de chaque ticket.</li>
+  </ul>
+  <figure><img src="images/61-situation-clients.png"><figcaption>La situation des clients et le bouton Relancer.</figcaption></figure>
+
+  <h2 id="s11-5">Carte de fidélité</h2>
+  <p>Activez-la dans <span class="chemin">Réglages › Paramètres</span>, section <b>Carte de fidélité</b>. Chaque achat d'un client enregistré lui donne des points. Imprimez sa carte depuis l'onglet <b>Fidélité</b> de sa fiche ; à la caisse, scannez la carte ou tapez son téléphone ; il paie avec <b>Points fidélité</b> à l'encaissement.</p>
+
+  <h2 id="s11-6">Devis et factures proforma</h2>
+  <ol class="etapes">
+    <li><span class="chemin">Vente › Devis et factures proforma</span>, <span class="btn">Nouveau devis</span>. Choisissez <b>Devis</b> ou <b>Facture proforma</b>.</li>
+    <li>Le client (ou simplement son nom), les produits, les remises et la durée de validité (15 jours par défaut).</li>
+    <li>Imprimez : le montant est écrit en lettres, avec la mention « Bon pour accord ».</li>
+    <li>Quand le client revient : à la caisse, <b>Actions › Facturer un devis / proforma</b>. Les prix du devis sont garantis jusqu'à sa date de validité.</li>
+  </ol>
+  <figure><img src="images/64-devis.png"><figcaption>La liste des devis en cours.</figcaption></figure>
+
+  <h2 id="s11-7">Commandes clients et livraisons</h2>
+  <ul>
+    <li><span class="chemin">Vente › Commandes clients</span> : une commande prise par téléphone ou WhatsApp. <span class="btn">Nouvelle commande</span> : origine, client, adresse, jour et créneau, articles. <b>Préparée</b> réserve la marchandise ; à la caisse, <b>Actions › Charger une commande client</b> l'encaisse.</li>
+    <li><span class="chemin">Vente › Livraisons du jour</span> : les ventes à porter chez le client (onglet <b>Livraison</b> du ticket, case <b>À livrer</b>). <b>Partir</b> quand le livreur s'en va, <b>Livrée</b> à son retour ; <b>Feuille de route</b> imprime sa tournée ; <b>Retour du livreur</b> enregistre l'argent qu'il rapporte.</li>
+  </ul>
+</section>
+
+<!-- ======================= 12 ======================= -->
+<section class="chapitre" id="ch12">
+  <div class="chap-tete"><div class="chap-num">Chapitre 12</div><h1>Achats et fournisseurs</h1></div>
+  <div class="pourqui">Pour qui : <span class="role gerant">Gérant</span> <span class="role gerant">Responsable d'achat</span> <span class="role gerant">Magasinier</span></div>
+  <p class="intro">Le circuit d'achat : on commande au fournisseur, on reçoit la marchandise (le stock augmente), on saisit sa facture, puis on la paie. Chaque étape peut aussi se faire seule quand le fournisseur livre sans commande.</p>
+
+  <h2 id="s12-1">Les fournisseurs</h2>
+  <p><span class="chemin">Fournisseurs › Liste des fournisseurs</span>, <span class="btn">Nouveau fournisseur</span> : nom, contact, téléphone, NIU, délai de paiement et délai de livraison. La colonne <b>Solde dû</b> montre ce que vous lui devez. Dans sa fiche, les <b>articles référencés</b> avec le prix négocié et les bonus (« 12 achetés, 10 payés ») sont repris sur les bons de commande.</p>
+  <figure><img src="images/55-fournisseurs.png"><figcaption>La liste des fournisseurs.</figcaption></figure>
+
+  <h2 id="s12-2">La proposition de commande</h2>
+  <p><span class="chemin">Achats › Proposition de commande</span> calcule ce qu'il faut commander d'après les ventes des dernières semaines, le stock d'alerte de chaque fiche et le délai de livraison du fournisseur. Réglez le nombre de jours de vente à couvrir et une <b>majoration</b> pour un événement (fêtes, rentrée). Cochez les articles et créez en un clic un bon par fournisseur.</p>
+  <figure><img src="images/50-proposition-commande.png"><figcaption>La proposition de commande : les articles sous leur seuil.</figcaption></figure>
+
+  <h2 id="s12-3">Passer une commande</h2>
+  <ol class="etapes">
+    <li><span class="chemin">Achats › Nouveau bon de commande</span> : choisissez le fournisseur, le dépôt de livraison et la date souhaitée.</li>
+    <li>Scannez ou cherchez chaque article dans le panneau de gauche : quantité (en cartons), bonus, remise, prix. <kbd>Entrée</kbd> fait descendre la ligne dans la liste.</li>
+    <li><span class="btn">Enregistrer et envoyer</span> ; imprimez le bon ou envoyez-le par WhatsApp.</li>
+  </ol>
+  <figure><img src="images/51-nouveau-bon-commande.png"><figcaption>Le nouveau bon de commande.</figcaption></figure>
+
+  <h2 id="s12-4">Recevoir la marchandise</h2>
+  <ol class="etapes">
+    <li>À la livraison, ouvrez <span class="chemin">Achats › Bons de commande</span>, le bon du fournisseur, puis <span class="btn">Réceptionner</span>.</li>
+    <li>Pour chaque ligne, tapez la quantité <b>vraiment reçue</b>, et pour un produit périssable le <b>lot</b> et la <b>date limite</b>.</li>
+    <li>Validez : le stock entre au coût net (remises et bonus compris). Une livraison partielle laisse un <b>reliquat</b> attendu.</li>
+    <li>Le logiciel propose d'imprimer les étiquettes des articles reçus.</li>
+  </ol>
+  <figure><img src="images/52-bons-commande.png"><figcaption>Les bons de commande en cours.</figcaption></figure>
+  <p>Sans commande : <span class="chemin">Achats › Réception sans commande</span>, même saisie, avec le fournisseur et le n° de bon de livraison. Le <b>Registre des réceptions</b> les garde toutes.</p>
+
+  <h2 id="s12-5">La facture du fournisseur</h2>
+  <ul>
+    <li><span class="chemin">Achats › Factures fournisseurs</span> : saisissez la facture à partir des bons de réception ; un écart de prix ou de quantité s'affiche.</li>
+    <li><span class="chemin">Achats › Facture directe</span> : le fournisseur livre et facture en même temps. Fournisseur, n° de sa facture, date, articles : le stock entre, la réception et la facture sont créées d'un coup. Cochez <b>Réglée tout de suite</b> si vous payez à la livraison.</li>
+  </ul>
+  <figure><img src="images/53-facture-directe.png"><figcaption>La facture directe, sans bon de commande.</figcaption></figure>
+
+  <h2 id="s12-6">Payer les fournisseurs</h2>
+  <p><span class="chemin">Achats › Échéancier fournisseurs</span> montre ce qui reste à payer, les retards en rouge et ce qui tombe dans les 7 jours. Ouvrez une facture et <b>Payer</b> : caisse centrale, MoMo/OM, virement ou chèque. À la caisse, <b>Décaisser › Règlement fournisseur</b> fait de même avec les espèces du tiroir.</p>
+  <figure><img src="images/54-echeancier.png"><figcaption>L'échéancier des fournisseurs.</figcaption></figure>
+  <p><b>Retours fournisseur</b> : <span class="chemin">Achats › Retours fournisseur et avoirs attendus</span> sort du stock la marchandise rendue (casse, périmés, erreur de livraison) et suit l'avoir que le fournisseur vous doit.</p>
+</section>
+
+<!-- ======================= 13 ======================= -->
+<section class="chapitre" id="ch13">
+  <div class="chap-tete"><div class="chap-num">Chapitre 13</div><h1>Le stock</h1></div>
+  <div class="pourqui">Pour qui : <span class="role gerant">Magasinier</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Le stock bouge tout seul : il baisse à chaque vente et monte à chaque réception. Le magasinier enregistre le reste : transferts entre dépôts, pertes et casse, inventaires.</p>
+
+  <h2 id="s13-1">État du stock</h2>
+  <p><span class="chemin">Stock › État du stock</span> donne, pour chaque article, la quantité par dépôt (en cartons et en pièces), le coût moyen (CMUP), la valeur et la prochaine date limite. Le <b>niveau</b> est en couleur : <b>Rupture</b> en rouge, <b>Alerte</b> en orange, <b>Normal</b> en vert. Filtrez par dépôt ou par niveau ; exportez vers Excel.</p>
+  <figure><img src="images/40-etat-stock.png"><figcaption>L'état du stock : le jus est en rupture, le lait et le savon en alerte.</figcaption></figure>
+  <p><span class="chemin">Stock › Mouvements de stock</span> retrace chaque entrée et sortie d'un article (réception, vente, perte, transfert) avec la date, le dépôt et la personne.</p>
+
+  <h2 id="s13-2">Les tâches du jour</h2>
+  <p><span class="chemin">Stock › Tâches du jour</span> (aussi sur l'accueil) liste ce qui attend le magasinier aujourd'hui : livraisons prévues, transferts à recevoir, rayon à remplir, inventaire tournant, péremptions proches. <b>Ouvrir</b> mène à l'écran qui la traite ; cochez la tâche faite.</p>
+
+  <h2 id="s13-3">Transférer de la réserve au rayon</h2>
+  <ol class="etapes">
+    <li><span class="chemin">Stock › Nouveau transfert</span> : le dépôt de <b>départ</b> (Réserve) et de <b>destination</b> (Surface de vente).</li>
+    <li>Scannez les produits et tapez les quantités.</li>
+    <li><span class="btn">Expédier</span> : le bon de route s'imprime. À l'arrivée, <b>Réceptionner</b> en notant la quantité reçue ; un écart reste visible.</li>
+  </ol>
+  <figure><img src="images/45-transfert.png"><figcaption>Un nouveau transfert entre dépôts.</figcaption></figure>
+  <p><span class="chemin">Stock › Réassort du rayon</span> prépare la liste de ce qu'il faut monter en rayon, et fait les transferts d'un coup.</p>
+
+  <h2 id="s13-4">Pertes et casse</h2>
+  <p><span class="chemin">Stock › Pertes et casse</span> : le dépôt, le produit, le <b>type de sortie</b> (casse, vol, péremption, consommation interne), la quantité et le motif, puis <span class="btn">Enregistrer la sortie</span>. Le stock baisse et la perte est comptée dans la démarque.</p>
+  <figure class="moyen"><img src="images/42-pertes.png"><figcaption>La sortie d'une perte ou d'une casse.</figcaption></figure>
+
+  <h2 id="s13-5">Faire un inventaire</h2>
+  <ol class="etapes">
+    <li>Le gérant ouvre <span class="chemin">Stock › Inventaires</span>, puis <span class="btn">Nouvel inventaire global</span> (tous les produits) ou <span class="btn">Nouvel inventaire partiel</span> (des rayons ou des produits choisis).</li>
+    <li>Imprimez la fiche de comptage si vous comptez sur papier.</li>
+    <li>Tapez les quantités comptées ; <kbd>Entrée</kbd> passe à la ligne suivante. Les ventes faites pendant le comptage sont déduites : pas besoin de fermer le magasin.</li>
+    <li>Le gérant <b>clôture</b> : le stock est corrigé et la fiche d'écarts s'imprime.</li>
+  </ol>
+  <figure><img src="images/43-inventaires.png"><figcaption>Les inventaires.</figcaption></figure>
+  <div class="encadre astuce"><span class="t">Compter avec un téléphone</span><p>Les compteurs installent l'application <b>ONIX 360 Inventaire</b> (Android). Le gérant affiche le QR code de l'inventaire, le téléphone le scanne, et les quantités comptées arrivent toutes seules dans l'inventaire (PC relié au serveur central).</p></div>
+  <p><b>Inventaire tournant</b> : chaque semaine, <span class="chemin">Stock › Inventaire tournant de la semaine</span> propose une courte liste de produits à compter (valeur élevée, écarts passés, jamais comptés). En un an, tout le magasin est compté sans jamais fermer.</p>
+
+  <h2 id="s13-6">Les dates de péremption</h2>
+  <p>Pour les articles <b>périssables</b>, chaque réception note le lot et la date limite. <span class="chemin">Stock › Péremptions</span> montre les lots qui périment bientôt ou déjà périmés ; sortez-les en perte. <span class="chemin">Stock › Déstockage avant péremption</span> propose une remise par palier (10 % à 14 jours, 20 % à 7 jours…) et crée les promotions d'un clic.</p>
+</section>
+
+<!-- ======================= 14 ======================= -->
+<section class="chapitre" id="ch14">
+  <div class="chap-tete"><div class="chap-num">Chapitre 14</div><h1>Les dépenses</h1></div>
+  <div class="pourqui">Pour qui : <span class="role gerant">Gérant</span> <span class="role caissier">Caissier</span></div>
+  <p class="intro">Loyer, ENEO, CAMWATER, transport, sachets, gardiennage : chaque dépense se saisit avec sa catégorie, ce qui la passe au bon compte comptable et la fait apparaître dans le résultat.</p>
+
+  <h2 id="s14-1">Saisir une dépense</h2>
+  <ol class="etapes">
+    <li><span class="chemin">Dépenses › Nouvelle dépense</span>.</li>
+    <li>La <b>catégorie</b> (Électricité et eau, Transport, Loyer…), l'<b>objet</b> (« Facture ENEO octobre »), le <b>bénéficiaire</b>, la date et le <b>montant payé</b>.</li>
+    <li>Le moyen de paiement : Espèces, MTN MoMo, Orange Money, Virement, Chèque ou Carte, avec la référence hors espèces.</li>
+    <li><b>Payée avec</b> : la <b>Caisse centrale</b> (le bureau) ou <b>Ma caisse (tiroir)</b>.</li>
+    <li><span class="btn">Enregistrer la dépense</span>.</li>
+  </ol>
+  <figure class="moyen"><img src="images/70-nouvelle-depense.png"><figcaption>Une nouvelle dépense.</figcaption></figure>
+  <p>Un caissier qui paie une dépense avec les espèces de son tiroir le fait depuis la caisse (<b>Actions › Dépense payée en caisse</b>) : elle sort de sa journée et un <b>bon de sortie de caisse</b> s'imprime ; le code du gérant peut être demandé.</p>
+
+  <h2 id="s14-2">Suivre les dépenses</h2>
+  <ul>
+    <li><span class="chemin">Dépenses › Historique des dépenses</span> : toutes les dépenses d'une période, par catégorie ; cliquez une ligne pour la voir, la réimprimer ou l'annuler avec un motif.</li>
+    <li><span class="chemin">Dépenses › Dépenses par catégorie</span> : le total, le plus gros poste, la répartition par catégorie, par moyen de paiement et par mois.</li>
+  </ul>
+  <figure><img src="images/73-depenses-categorie.png"><figcaption>Les dépenses par catégorie.</figcaption></figure>
+
+  <h2 id="s14-3">Les charges fixes</h2>
+  <p><span class="chemin">Dépenses › Définition des charges fixes</span>, <span class="btn">Nouvelle charge fixe</span> : déclarez une fois le loyer, les salaires, l'abonnement internet, avec leur montant et leur jour. Chaque mois, <b>Constats de charges</b> rappelle celles à constater ; une charge en retard s'affiche dans les points d'attention.</p>
+</section>

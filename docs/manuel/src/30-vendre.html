@@ -1,0 +1,208 @@
+
+<!-- ======================= PARTIE 3 ======================= -->
+<section class="partie">
+  <div class="p-num">Partie 3</div>
+  <h1>Au quotidien</h1>
+  <p>La journée d'un magasin, dans l'ordre : ouvrir la caisse, vendre, encaisser, fermer la caisse ; puis les clients, les achats, le stock, les dépenses, le personnel et le suivi de l'activité.</p>
+</section>
+
+<!-- ======================= 8 ======================= -->
+<section class="chapitre" id="ch8">
+  <div class="chap-tete"><div class="chap-num">Chapitre 8</div><h1>Ouvrir la caisse et vendre</h1></div>
+  <div class="pourqui">Pour qui : <span class="role caissier">Caissier</span> <span class="role caissier">Vendeur</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">La caisse doit être ouverte avant la première vente du jour. Ensuite, une vente se fait en trois gestes : ajouter les produits, encaisser, valider.</p>
+
+  <h2 id="s8-1">Ouvrir la caisse le matin</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="chemin">Trésorerie › Opérations de trésorerie</span> (onglet rapide <b>Ma caisse</b> pour un caissier).</li>
+    <li>Cliquez sur <span class="btn">Ouvrir la caisse…</span>.</li>
+    <li>Le <b>fond de caisse</b> laissé la veille est proposé. Vérifiez les espèces présentes dans le tiroir ; <b>Compter par coupures</b> aide à les compter billet par billet.</li>
+    <li>Cliquez sur <span class="btn">Ouvrir la caisse</span>. Vos caisses électronique et banque s'ouvrent en même temps.</li>
+  </ol>
+  <figure class="petit"><img src="images/19-ouvrir-la-caisse.png"><figcaption>L'ouverture de la caisse avec son fond.</figcaption></figure>
+  <p>Seul un fond plus élevé que celui de la veille (pris dans la caisse centrale) demande le code du gérant.</p>
+
+  <h2 id="s8-2">L'écran de vente</h2>
+  <p>Ouvrez <span class="chemin">Vente › Vente au comptant 1</span>, l'onglet rapide <b>V. cash 1</b>, ou appuyez sur <kbd>F2</kbd> depuis l'accueil. Le caissier y arrive directement à sa connexion.</p>
+  <figure><img src="images/10-caisse-vide.png"><figcaption>La fiche de vente (présentation Moderne), prête pour un client.</figcaption></figure>
+  <ul>
+    <li><b>En haut à gauche</b> : la zone de saisie <b>Nom du produit ou code-barres</b>. Elle est toujours prête à recevoir un scan.</li>
+    <li><b>Au milieu</b> : les rayons et les <b>touches rapides</b> (tuiles des produits les plus vendus, avec leur prix).</li>
+    <li><b>À droite</b> : le ticket du client, le <b>TOTAL</b>, puis <b>REÇU</b> et <b>À RENDRE</b>.</li>
+    <li><b>En bas</b> : les billets (1 000, 2 000, 5 000, 10 000, Exact), puis les boutons En attente, Rappeler, Tiroir, Le client voulait…, Ticket, Facture A4, WhatsApp, Listing, Vider, Fermer, et enfin <span class="btn">Encaisser</span> et <span class="btn">VALIDER</span>.</li>
+  </ul>
+  <p><b>Vente au comptant 2</b> (<b>V. cash 2</b>) est une deuxième fiche identique : elle permet de servir un autre client sans perdre la première.</p>
+
+  <h2 id="s8-3">Ajouter les produits</h2>
+  <ol class="etapes">
+    <li><b>Scannez</b> le code-barres avec la douchette : la ligne s'ajoute au ticket. Un deuxième scan du même produit augmente la quantité.</li>
+    <li>Sans code-barres : tapez les <b>deux premières lettres</b> du nom. Les produits trouvés s'affichent en tuiles avec leur prix et leur stock ; touchez la bonne, ou choisissez avec les flèches et <kbd>Entrée</kbd>. Les touches rapides marchent aussi.</li>
+    <li>Plusieurs pièces d'un coup : tapez <code>3*</code> avant le code ou le nom (« 3*coca »).</li>
+    <li>Touchez une ligne du ticket pour ses boutons : <b>−</b> et <b>+</b> (quantité), <b>Varier</b> (changer de conditionnement ou de prix), <b>% Remise</b> et <b>Enlever</b>. Au clavier : <kbd>+</kbd>, <kbd>−</kbd>, <kbd>F6</kbd> et <kbd>Suppr</kbd>.</li>
+  </ol>
+  <div class="deux">
+    <figure><img src="images/12-caisse-recherche.png"><figcaption>« hu » trouve l'huile, en carton et à la pièce.</figcaption></figure>
+    <figure><img src="images/11-caisse-ticket.png"><figcaption>Le ticket : une ligne choisie montre ses boutons.</figcaption></figure>
+  </div>
+  <div class="encadre attention"><span class="t">Produit épuisé, prix sous le revient</span><p>Un produit dont le stock est à zéro est signalé <b>Épuisé</b> ; selon les réglages, la vente est bloquée ou demande le code du gérant. Un prix modifié à la main ne peut jamais descendre sous le prix de revient.</p></div>
+
+  <h2 id="s8-4">Encaisser en espèces</h2>
+  <ol class="etapes">
+    <li>Touchez les billets reçus (1 000, 2 000…) ou <b>Exact</b>, ou tapez le montant reçu. <b>REÇU</b> et <b>À RENDRE</b> s'affichent sous le total.</li>
+    <li>Pour finir :
+      <ul>
+        <li><kbd>F2</kbd> : valider et imprimer le <b>ticket de caisse</b> ;</li>
+        <li><kbd>F7</kbd> : valider et imprimer la <b>facture listing</b> ;</li>
+        <li><span class="btn">VALIDER</span>, <kbd>F4</kbd> ou <kbd>Entrée</kbd> sur la zone de saisie vide : enregistrer sans imprimer.</li>
+      </ul>
+    </li>
+    <li>Le tiroir s'ouvre tout seul. Rendez la monnaie affichée.</li>
+  </ol>
+  <p>Fiche vide, <kbd>F2</kbd> réimprime le dernier ticket.</p>
+
+  <h2 id="s8-5">Mobile Money, carte, chèque, paiement mixte</h2>
+  <ol class="etapes">
+    <li>Cliquez sur <span class="btn">Encaisser</span> (<kbd>Ctrl</kbd>+<kbd>E</kbd>).</li>
+    <li>Choisissez le moyen : <b>Espèces</b>, <b>MTN Mobile Money</b>, <b>Orange Money</b>, <b>Carte bancaire</b>, <b>Bon d'achat</b>, et selon les réglages chèque, virement, points fidélité.</li>
+    <li>Tapez le montant et, pour un paiement mobile, la <b>référence</b> du SMS reçu par le client. <span class="btn">Ajouter le paiement</span>.</li>
+    <li>Un paiement peut être <b>mixte</b> : une partie en espèces, le reste en MoMo. Ajoutez chaque paiement, puis <span class="btn">Valider le ticket</span> quand le reste à payer est à zéro.</li>
+  </ol>
+  <figure class="dialogue"><img src="images/13-encaisser.png"><figcaption>La fenêtre d'encaissement.</figcaption></figure>
+  <p>Avec le paiement mobile réglé sur le PC (chapitre 4), tapez le téléphone du client et <b>Demander le paiement</b> : il confirme sur son téléphone et le paiement s'ajoute avec sa référence.</p>
+  <p><b>Pas de monnaie</b> ? Cochez-le à l'encaissement : le montant va sur le compte du client choisi, ou devient un <b>bon de monnaie</b> imprimé pour un client de passage, valable à son prochain achat.</p>
+
+  <h2 id="s8-6">Choisir le client, tarif gros</h2>
+  <p>Touchez <b>Client comptoir</b> en haut du ticket (<kbd>F8</kbd>) pour choisir un client enregistré : ses prix (gros, super gros, prix négociés) s'appliquent et son solde s'affiche. <span class="btn">Nouveau client</span> le crée sur place. Pour un client de passage, tapez simplement son nom sous le bouton : il s'imprime sur le ticket.</p>
+  <figure class="dialogue"><img src="images/14-choisir-client.png"><figcaption>Le choix du client, avec son plafond et ce qu'il doit.</figcaption></figure>
+  <p>Les boutons <b>Tarif</b> (Détail, Gros, Super gros) et <b>Dépôt</b> (Surface de vente, Réserve) changent le tarif ou le dépôt pour cette fiche seulement.</p>
+
+  <h2 id="s8-7">Mettre un ticket en attente</h2>
+  <p>Le client a oublié quelque chose au rayon ? <b>En attente</b> (<kbd>F3</kbd>) met la fiche de côté ; servez le client suivant. Au retour, <b>Rappeler</b> (<kbd>F10</kbd>) la reprend. <b>Rappeler</b> montre aussi les paniers préparés au rayon par les vendeurs sur leur téléphone.</p>
+
+  <h2 id="s8-8">Remise</h2>
+  <p>Choisissez la ligne, puis <b>% Remise</b> (<kbd>F6</kbd>) : en pourcentage ou en montant. Au-delà de la remise permise par les paramètres, le code d'un gérant est demandé. Les remises sont visibles dans les rapports et le contrôle des caissiers.</p>
+
+  <h2 id="s8-9">Le menu Actions</h2>
+  <p>La liste <b>Actions</b>, sous la zone de saisie, regroupe les opérations moins fréquentes :</p>
+  <div class="deux">
+    <figure><img src="images/15-caisse-actions.png"><figcaption>Le menu Actions de la caisse.</figcaption></figure>
+    <div style="flex:1">
+      <ul>
+        <li><b>Apport espèces</b> et <b>Prélèvement</b> : mettre de la monnaie dans le tiroir, ou en retirer vers la caisse centrale.</li>
+        <li><b>Annuler un ticket</b> : avec le motif et le code du gérant.</li>
+        <li><b>Retour client</b> : scannez le ticket, choisissez les articles rapportés ; le client est remboursé ou reçoit un bon d'avoir.</li>
+        <li><b>Règlement client (crédit)</b> : un client vient payer sa dette.</li>
+        <li><b>Facturer un devis / proforma</b>, <b>Charger une commande client</b>.</li>
+        <li><b>Dépense payée en caisse</b> : un taxi, un achat de sachets payé avec les espèces du tiroir ; un bon de sortie s'imprime.</li>
+        <li><b>Consignes (emballages)</b> : casiers et bouteilles consignés.</li>
+        <li><b>Clôture de caisse</b>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="s8-10">Retrouver et réimprimer une facture</h2>
+  <ul>
+    <li><span class="chemin">Vente › Mes factures</span> : vos dernières factures ; cliquez pour la voir, réimprimer le ticket ou la facture A4, ou l'envoyer par WhatsApp. Sans le droit « Voir tout le registre », seules vos trois dernières sont visibles.</li>
+    <li>Scanner le code-barres d'un ticket dans la zone de saisie retrouve la vente : réimpression, facture A4, retour.</li>
+    <li><b>Facture A4</b> (<kbd>F9</kbd>) imprime la facture du ticket avec le client et la TVA. <b>WhatsApp</b> envoie le ticket au téléphone du client.</li>
+  </ul>
+  <figure class="moyen"><img src="images/27-mes-factures.png"><figcaption>Mes factures : les tickets du jour.</figcaption></figure>
+
+  <h2 id="s8-11">Ce que le client voulait</h2>
+  <p>Un client demande un produit en rupture ou que vous ne vendez pas ? <b>Le client voulait…</b> (<kbd>Ctrl</kbd>+<kbd>M</kbd>) le note, avec son téléphone si vous voulez le prévenir. Ces ventes manquées alimentent les propositions de commande, et l'écran <b>Clients à prévenir</b> prépare le message WhatsApp quand le produit arrive.</p>
+
+  <h2 id="s8-12">Panne de courant : le carnet à souches</h2>
+  <p>Pendant une coupure, écrivez les ventes sur le carnet à souches. Quand le PC repart, bouton <b>Carnet</b> : tapez le numéro de la souche et l'heure notée, puis saisissez la vente. Le Z montre ces ventes à part.</p>
+</section>
+
+<!-- ======================= 9 ======================= -->
+<section class="chapitre" id="ch9">
+  <div class="chap-tete"><div class="chap-num">Chapitre 9</div><h1>Vendeur et caissier séparés</h1></div>
+  <div class="pourqui">Pour qui : <span class="role caissier">Vendeur</span> <span class="role caissier">Caissier</span> <span class="role admin">Administrateur</span></div>
+  <p class="intro">Dans une quincaillerie, une boutique de pièces ou une grande surface, le vendeur conseille et facture le client sur son PC ; le client va payer à une caisse centrale. Le vendeur ne touche jamais l'argent ; le caissier ne voit que les factures à encaisser.</p>
+
+  <h2 id="s9-1">Mettre en place</h2>
+  <ol class="etapes">
+    <li>À la création du magasin, choisissez <b>Vendeur et caissier séparés</b> ; plus tard : <span class="chemin">Réglages › Paramètres</span>, section <b>Écran de caisse</b>, <b>Organisation de la vente</b>.</li>
+    <li>Les PC des vendeurs et celui de la caisse doivent être reliés au <b>serveur central</b> (chapitre 20) : c'est par lui que les factures passent d'un PC à l'autre.</li>
+    <li>Créez les vendeurs avec le rôle <b>Vendeur</b>, sans caisse ; le caissier avec le rôle <b>Caissier</b> et sa caisse.</li>
+  </ol>
+  <figure class="moyen"><img src="images-vc/13-parametres-organisation-de-la-vente.png"><figcaption>Le réglage Organisation de la vente.</figcaption></figure>
+
+  <h2 id="s9-2">Le vendeur facture et envoie à la caisse</h2>
+  <ol class="etapes">
+    <li>Le vendeur fait la fiche comme une vente normale : produits, quantités, remises permises, nom du client.</li>
+    <li>Il clique sur <span class="btn">ENVOYER à la caisse</span> (<kbd>F4</kbd>). Un bon s'imprime avec le numéro de la facture ; il dit au client : « passez à la caisse, facture n° 1 ».</li>
+    <li><b>Mes factures</b> montre ses factures envoyées et leur état : à encaisser, encaissée, rendue par la caisse.</li>
+  </ol>
+  <div class="deux">
+    <figure><img src="images-vc/02-vendeur-fiche-de-vente.png"><figcaption>Le poste du vendeur : le bouton ENVOYER remplace l'encaissement.</figcaption></figure>
+    <figure><img src="images-vc/08-vendeur-mes-factures-envoyees.png"><figcaption>Les factures envoyées par le vendeur.</figcaption></figure>
+  </div>
+
+  <h2 id="s9-3">Le caissier encaisse</h2>
+  <ol class="etapes">
+    <li>Sur le poste de caisse, <span class="chemin">Vente › Factures à encaisser</span> : les factures envoyées arrivent toutes seules dans la liste.</li>
+    <li>Touchez la facture du client, ou scannez le bon qu'il présente, ou tapez son numéro puis <kbd>Entrée</kbd>. Le récapitulatif s'affiche : articles, remises, montant à payer.</li>
+    <li>Espèces : touchez les billets ou tapez le reçu, puis <span class="btn">Encaisser</span> (<kbd>F4</kbd>) ou <span class="btn">Encaisser + ticket</span> (<kbd>F2</kbd>). Mobile Money, carte, bon ou compte client : <b>Autre paiement</b> (<kbd>Ctrl</kbd>+<kbd>E</kbd>).</li>
+  </ol>
+  <div class="deux">
+    <figure><img src="images-vc/04-caissiere-factures-a-encaisser.png"><figcaption>Les factures qui attendent à la caisse.</figcaption></figure>
+    <figure><img src="images-vc/06-caissiere-recu-et-rendu.png"><figcaption>Le récapitulatif, le reçu et la monnaie à rendre.</figcaption></figure>
+  </div>
+  <p>La vente compte pour le vendeur (objectifs, commissions) ; l'argent entre dans la caisse du caissier.</p>
+
+  <h2 id="s9-4">Le client change d'avis</h2>
+  <ul>
+    <li><b>Il ajoute un article</b> : le vendeur fait une deuxième facture ; le caissier tape son numéro pendant que la première est ouverte, et les deux s'encaissent en un seul ticket.</li>
+    <li><b>Il retire un article</b> : <span class="btn">Rendre au vendeur</span> avec le motif. Le vendeur corrige (<b>Modifier</b>) et renvoie la facture avec le même numéro. Pendant ce temps, la caisse la voit « en modification ».</li>
+    <li><b>Il part sans payer</b> : <span class="btn">Laisser</span> remet la facture dans la liste ; le vendeur peut l'<b>Annuler</b>.</li>
+  </ul>
+  <figure class="moyen"><img src="images-vc/11-caissiere-rend-au-vendeur.png"><figcaption>La caisse rend une facture au vendeur avec le motif.</figcaption></figure>
+</section>
+
+<!-- ======================= 10 ======================= -->
+<section class="chapitre" id="ch10">
+  <div class="chap-tete"><div class="chap-num">Chapitre 10</div><h1>Fermer la caisse et suivre la trésorerie</h1></div>
+  <div class="pourqui">Pour qui : <span class="role caissier">Caissier</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Le soir, chaque caisse se compte et se clôture. Le logiciel compare ce qui a été compté à ce qui aurait dû être là : la différence est l'<b>écart de caisse</b>. La recette est versée à la caisse centrale.</p>
+
+  <h2 id="s10-1">La journée de caisse</h2>
+  <p><span class="chemin">Trésorerie › Opérations de trésorerie</span> montre la journée de la caisse choisie : l'ouverture, les <b>Entrées</b> (ventes, règlements, apports) à gauche, les <b>Sorties</b> (dépenses, prélèvements) à droite, avec leurs totaux.</p>
+  <figure><img src="images/20-tresorerie-journee.png"><figcaption>La journée de la caisse 1 : entrées et sorties.</figcaption></figure>
+  <ul>
+    <li><span class="btn">Encaisser</span> (volet Entrées) : un client qui règle, un fournisseur qui rembourse, un employé qui rend une avance, une autre recette. Un reçu s'imprime.</li>
+    <li><span class="btn">Décaisser</span> (volet Sorties) : un reversement à la caisse centrale, une facture fournisseur, une charge, une avance ou un salaire. Le code du gérant est demandé et un bon s'imprime.</li>
+    <li><span class="btn">Relève d'équipe…</span> : un caissier en remplace un autre sans fermer la caisse. Celui qui part compte le tiroir ; celui qui arrive se connecte ; un bon de passation est signé par les deux.</li>
+  </ul>
+
+  <h2 id="s10-2">Clôturer la caisse le soir</h2>
+  <ol class="etapes">
+    <li>Avant de compter, vérifiez qu'aucun ticket n'est en attente et qu'aucun paiement Mobile Money n'est à confirmer : la fenêtre de clôture le rappelle.</li>
+    <li>Dans <span class="chemin">Trésorerie › Opérations de trésorerie</span>, cliquez sur <span class="btn">Fermer la caisse…</span>.</li>
+    <li>Comptez les billets et les pièces du tiroir et tapez le <b>nombre</b> de chaque coupure (10 000, 5 000, 2 000… jusqu'à 1 FCFA). Le total se calcule.</li>
+    <li>Cliquez sur <span class="btn">Valider le comptage</span>.</li>
+    <li>Indiquez le <b>fond</b> laissé dans le tiroir pour demain. Le reste est <b>versé à la caisse centrale</b> : un bon de versement s'imprime, à signer et à remettre avec l'argent.</li>
+    <li>Le rapport <b>Z</b> de la journée est prêt : <span class="btn">Imprimer le Z</span> le sort sur le ticket, <span class="btn">Rapport de clôture (A4)</span> sur une page A4.</li>
+  </ol>
+  <figure class="moyen"><img src="images/29-fermer-la-caisse.png"><figcaption>La clôture : on compte chaque coupure ; l'attendu s'affiche après le comptage.</figcaption></figure>
+  <div class="encadre important"><span class="t">Le comptage à l'aveugle</span><p>Le caissier ne voit pas l'attendu avant de compter : il compte ce qui est vraiment dans le tiroir. S'il y a un écart au-delà du seuil réglé, le logiciel lui demande d'<b>appeler le gérant</b>. Le gérant voit l'écart, recompte si besoin, et saisit le motif.</p></div>
+  <p><b>Caisse électronique</b> : <span class="btn">Clôturer…</span> affiche les sorties du jour par ce compte ; tapez le solde lu sur chaque téléphone. Avec une caisse électronique centrale, transférez la recette vers le numéro du magasin et notez la référence de chaque transfert avant <b>Clôturer et verser</b>.</p>
+
+  <h2 id="s10-3">Écarts et rapports Z (gérant)</h2>
+  <ul>
+    <li><span class="chemin">Trésorerie › Registre de caisse (Z)</span> : chaque journée clôturée avec son numéro de Z, l'attendu, le compté et l'écart. Cliquez pour revoir ou réimprimer le Z.</li>
+    <li><span class="chemin">Trésorerie › Historique des journées de caisse</span> : toutes les journées, par caisse et par type ; un écart non justifié est signalé. <span class="btn">Justifier l'écart…</span> enregistre le motif après en avoir parlé avec le caissier.</li>
+  </ul>
+  <figure><img src="images/22-historique-journees.png"><figcaption>L'historique des journées de caisse.</figcaption></figure>
+
+  <h2 id="s10-4">La caisse centrale</h2>
+  <p><span class="chemin">Trésorerie › Caisse centrale</span> est le coffre du bureau : elle reçoit les versements des caissiers. <b>Entrée en caisse centrale…</b> enregistre un apport (de l'exploitant, de la banque) ; <b>Sortie (dépôt en banque…)</b> un dépôt à la banque ou un paiement. Chaque mouvement imprime son bon, et le livre donne le solde.</p>
+  <figure><img src="images/23-caisse-centrale.png"><figcaption>La caisse centrale et son livre.</figcaption></figure>
+  <p><span class="chemin">Trésorerie › Caisses électroniques</span> fait de même pour les comptes MoMo et OM : solde de chaque caisse électronique, versements reçus, transferts, dépôts à la banque.</p>
+
+  <h2 id="s10-5">Où est l'argent ?</h2>
+  <p><span class="chemin">Trésorerie › Positions</span> donne, à une date, l'argent dans chaque endroit : caisse (tiroirs), caisse centrale, banques, chèques à encaisser, Mobile Money, et le total de la trésorerie.</p>
+  <figure><img src="images/25-positions.png"><figcaption>Les positions de trésorerie.</figcaption></figure>
+  <p><span class="chemin">Trésorerie › Listing des opérations de caisse</span> détaille les fonds de caisse, apports, prélèvements, dépenses et règlements de la période.</p>
+</section>

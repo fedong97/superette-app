@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ONIX 360 : manuel d'utilisation</title>
+<style>
+/*CSS*/
+  /* ---------- Ajouts du manuel 0.95 ---------- */
+  .partie { break-before: page; page-break-before: always; padding-top: 70mm; text-align: left; }
+  .partie .p-num { font-size: 12pt; font-weight: 800; color: var(--or); letter-spacing: 2pt; text-transform: uppercase; }
+  .partie h1 { font-size: 30pt; margin: 2mm 0 6mm; }
+  .partie p { font-size: 12pt; color: var(--gris); max-width: 140mm; }
+  .partie ul { font-size: 11pt; color: var(--texte); }
+  figure img { width: 94%; }
+  figure.moyen img { width: 76%; }
+  figure.petit img { width: 58%; }
+  figure.dialogue img { width: 66%; box-shadow: none; }
+  figure.tel img { width: 34%; }
+  .deux { display: flex; gap: 4mm; align-items: flex-start; }
+  .deux > figure { flex: 1; margin-top: 1mm; }
+  .chemin { display: inline-block; font-weight: 700; color: var(--vert-fonce); background: var(--vert-clair); padding: 0 1.8mm; border-radius: 1.2mm; white-space: nowrap; }
+  .toc > li.toc-partie { margin: 4mm 0 1.6mm; font-weight: 800; color: var(--or); text-transform: uppercase; letter-spacing: 1pt; font-size: 9pt; }
+  .toc ul { columns: 2; column-gap: 8mm; font-size: 8.6pt; }
+  .toc > li { margin: 0 0 1mm; }
+  .toc ul li { break-inside: avoid; }
+  .checklist { list-style: none; padding: 0; }
+  .checklist li { padding-left: 8mm; position: relative; margin-bottom: 2mm; break-inside: avoid; }
+  .checklist li::before { content: ""; position: absolute; left: 0; top: 0.8mm; width: 4mm; height: 4mm; border: 0.4mm solid var(--vert); border-radius: 0.8mm; }
+</style>
+</head>
+<body>
+
+<!--COVER-->
+
+<main>
+
+<section class="sommaire">
+  <h1>Sommaire</h1>
+  <ol class="toc" id="toc"></ol>
+</section>
+
+<section class="lecture-page" style="break-before: page;">
+  <h1 style="margin-bottom:5mm">Comment lire ce manuel</h1>
+  <p>Ce manuel accompagne ONIX 360 de la première installation jusqu'au travail de tous les jours. Il est écrit pour des personnes qui ne sont pas informaticiennes : chaque tâche est expliquée pas à pas, avec des images de l'écran prises dans le logiciel lui-même (version <span data-version>0.95.0</span>), sur une superette d'exemple.</p>
+  <p>Il se lit dans l'ordre la première fois, puis se consulte au besoin :</p>
+  <ul>
+    <li><b>Partie 1, Démarrer</b> : installer le logiciel, créer le magasin, se repérer dans l'écran.</li>
+    <li><b>Partie 2, Paramétrer</b> : régler le magasin, créer les caisses, les utilisateurs, les articles et reprendre le stock de départ. On le fait une fois, au début.</li>
+    <li><b>Partie 3, Au quotidien</b> : vendre, encaisser, clôturer la caisse, gérer les clients, les achats, le stock, les dépenses, le personnel et suivre l'activité.</li>
+    <li><b>Partie 4, Entretenir</b> : sauvegardes, licence, mises à jour, plusieurs PC, et les réponses aux questions fréquentes.</li>
+  </ul>
+
+  <h2>Les conventions</h2>
+  <table class="t">
+    <tr><th style="width:38%">Écrit comme ceci</th><th>Veut dire</th></tr>
+    <tr><td><span class="chemin">Vente › Vente à crédit</span></td><td>Cliquez sur le menu <b>Vente</b> dans la barre verte à gauche, puis sur <b>Vente à crédit</b> dans la liste qui s'ouvre.</td></tr>
+    <tr><td><span class="btn">Enregistrer</span></td><td>Un bouton de l'écran, à cliquer.</td></tr>
+    <tr><td><kbd>F4</kbd> <kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Une touche du clavier ; « Ctrl+E » : gardez <kbd>Ctrl</kbd> enfoncée et appuyez sur <kbd>E</kbd>.</td></tr>
+    <tr><td><b>Gras</b> dans une étape</td><td>Le nom exact d'une case, d'un onglet ou d'un message à l'écran.</td></tr>
+  </table>
+
+  <div class="encadre astuce"><span class="t">Astuce</span><p>Un conseil qui fait gagner du temps.</p></div>
+  <div class="encadre attention"><span class="t">Attention</span><p>Un point à vérifier pour éviter une erreur.</p></div>
+  <div class="encadre important"><span class="t">Important</span><p>Une règle à ne jamais oublier (argent, données, licence).</p></div>
+
+  <h2>Qui lit quoi</h2>
+  <table class="t">
+    <tr><th style="width:32%">Vous êtes</th><th>Lisez en priorité</th></tr>
+    <tr><td><span class="role admin">Propriétaire (administrateur)</span></td><td>Tout le manuel, surtout les parties 1, 2 et 4.</td></tr>
+    <tr><td><span class="role gerant">Gérant</span></td><td>Chapitres 3, 5, 6, puis toute la partie 3 et les chapitres 18 et 21.</td></tr>
+    <tr><td><span class="role caissier">Caissier ou vendeur</span></td><td>Chapitre 3 (se repérer), chapitres 8, 9 et 10 (vendre, encaisser, clôturer), et le chapitre 11 pour les ventes à crédit.</td></tr>
+    <tr><td><span class="role gerant">Magasinier, acheteur, comptable</span></td><td>Chapitre 3, puis respectivement les chapitres 13, 12 ou 17.</td></tr>
+  </table>
+
+  <div class="encadre astuce"><span class="t">L'aide est aussi dans le logiciel</span>
+    <p>Sur chaque écran, le bouton rond <b>?</b> en haut à droite (ou la touche <kbd>F1</kbd>) explique la page affichée, avec les mêmes mots que ce manuel. Voir le chapitre 3.</p>
+  </div>
+</section>

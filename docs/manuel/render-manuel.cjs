@@ -1,22 +1,38 @@
-// Rend docs/manuel/manuel-fedo-gestion.html en PDF A4 (couverture + corps numéroté, sommaire avec pages).
-// Usage : node docs/manuel/render-manuel.cjs <dossier temporaire> (Playwright installé globalement, pdftotext et pypdf disponibles).
+// Rend docs/manuel/manuel-onix-360.html en PDF A4 (couverture + corps numéroté, sommaire avec pages).
+// Usage : python3 -I docs/manuel/src/assembler.py && node docs/manuel/render-manuel.cjs <dossier temporaire>
+// (pdftotext, pdfinfo et pypdf disponibles ; CHROMIUM = chemin d'un Chromium si celui de Playwright manque).
 const { execSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require(execSync('npm root -g').toString().trim() + '/playwright');
+const { chromium } = require('@playwright/test');
 
 const REPO = path.resolve(__dirname, '../..');
 const DIR = path.join(REPO, 'docs/manuel');
-const HTML = path.join(DIR, 'manuel-fedo-gestion.html');
-const OUT = path.join(DIR, 'Manuel-FEDO-Gestion.pdf');
+const HTML = path.join(DIR, 'manuel-onix-360.html');
+const OUT = path.join(DIR, `Manuel-ONIX-360-${JSON.parse(fs.readFileSync(path.join(REPO, 'apps/desktop/package.json'), 'utf8')).version}.pdf`);
 const TMP = process.argv[2];
 const version = JSON.parse(fs.readFileSync(path.join(REPO, 'apps/desktop/package.json'), 'utf8')).version;
 const norm = (s) => s.normalize('NFC').replace(/[\s  ]+/g, '').replace(/[’']/g, "'").toLowerCase();
 
 (async () => {
-  const browser = await chromium.launch({ env: { ...process.env, LANG: 'fr_FR.UTF-8' } });
+  const browser = await chromium.launch({ env: { ...process.env, LANG: 'fr_FR.UTF-8' }, ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {}) });
   const page = await browser.newPage();
   await page.goto('file://' + HTML, { waitUntil: 'load' });
+  // Captures en JPEG pour un PDF plus léger (les PNG restent les sources).
+  execSync(`python3 -I - "${DIR}" "${path.join(TMP, 'img')}" <<'EOF'
+import os, sys
+from PIL import Image
+src, dst = sys.argv[1], sys.argv[2]
+for d in ('images', 'images-vc'):
+    os.makedirs(os.path.join(dst, d), exist_ok=True)
+    for f in os.listdir(os.path.join(src, d)):
+        if f.endswith('.png'):
+            Image.open(os.path.join(src, d, f)).convert('RGB').save(os.path.join(dst, d, f[:-4] + '.jpg'), quality=85, optimize=True)
+EOF`);
+  await page.evaluate((dir) => {
+    document.querySelectorAll('img[src^="images"]').forEach((i) => (i.src = 'file://' + dir + '/' + i.getAttribute('src').replace(/\.png$/, '.jpg')));
+  }, path.join(TMP, 'img'));
+  await page.waitForFunction(() => [...document.images].every((i) => i.complete && i.naturalWidth > 0));
   await page.emulateMedia({ media: 'print' });
   await page.evaluate((v) => document.querySelectorAll('[data-version]').forEach((e) => (e.textContent = v)), version);
   // Sommaire : chapitres et sections, numéros de page à remplir.
@@ -49,7 +65,9 @@ const norm = (s) => s.normalize('NFC').replace(/[\s  ]+/g, '').replace(/[’'
   };
   const locate = (pages) => {
     const found = {};
-    let from = 1; // la page 1 est le sommaire
+    // Le sommaire tient plusieurs pages : on cherche après « Comment lire ce manuel ».
+    let from = pages.findIndex((p) => p.includes(norm('Comment lire ce manuel')));
+    if (from < 0) from = 1;
     for (const e of entries) {
       const k = norm(e.search);
       let p = -1;

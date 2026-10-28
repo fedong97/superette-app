@@ -1,0 +1,225 @@
+
+<!-- ======================= PARTIE 4 ======================= -->
+<section class="partie">
+  <div class="p-num">Partie 4</div>
+  <h1>Entretenir</h1>
+  <p>Protéger vos données, garder la licence et le logiciel à jour, relier plusieurs PC, et résoudre les petits problèmes.</p>
+</section>
+
+<!-- ======================= 18 ======================= -->
+<section class="chapitre" id="ch18">
+  <div class="chap-tete"><div class="chap-num">Chapitre 18</div><h1>Les sauvegardes</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Toutes vos ventes, votre stock et votre comptabilité sont sur le PC. Si le PC est volé, brûle ou tombe en panne, seule une sauvegarde vous les rend. Prenez cinq minutes pour la régler, le premier jour.</p>
+
+  <h2 id="s18-1">Ce que fait le logiciel tout seul</h2>
+  <ul>
+    <li>Une copie de la base chaque jour (ou plus souvent, selon la fréquence choisie), sans arrêter la caisse. Chaque copie est vérifiée : <b>Vérifiée</b> en vert dans la liste.</li>
+    <li>Les 14 copies les plus récentes sont gardées (nombre réglable). Les sauvegardes manuelles ne sont jamais effacées.</li>
+    <li>Après 2 jours sans sauvegarde réussie, la barre du bas affiche <b>Sauvegarde en retard</b> en rouge.</li>
+  </ul>
+
+  <h2 id="s18-2">Régler une copie hors du PC</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="chemin">Réglages › Sauvegardes</span>.</li>
+    <li>En face de <b>Copie de chaque sauvegarde vers</b>, cliquez sur <span class="btn">Choisir</span> et choisissez une clé USB, un autre disque, ou un dossier OneDrive ou Google Drive.</li>
+    <li>Cliquez sur <span class="btn">Sauvegarder maintenant</span> et vérifiez que la sauvegarde apparaît dans la liste, avec l'état <b>Vérifiée</b>.</li>
+  </ol>
+  <figure><img src="images/120-sauvegardes.png"><figcaption>L'écran des sauvegardes après une sauvegarde réussie.</figcaption></figure>
+  <ul>
+    <li><span class="btn">Copier sur une clé USB…</span> fait une copie à la demande.</li>
+    <li><b>Sauvegarde en ligne</b> (PC relié au serveur central) : choisissez une <b>phrase secrète</b> d'au moins 8 caractères, notez-la en lieu sûr, puis activez. Après chaque sauvegarde, une copie chiffrée part sur le serveur. Sans la phrase secrète, personne ne peut la lire, pas même FEDONG.</li>
+  </ul>
+  <div class="encadre important"><span class="t">Le bon réflexe</span><p>Une fois par semaine au moins, copiez la sauvegarde sur une clé USB et rangez la clé <b>hors du magasin</b>. Une sauvegarde gardée sur le même PC disparaît avec lui.</p></div>
+
+  <h2 id="s18-3">Restaurer une sauvegarde</h2>
+  <p>La restauration remplace <b>toutes</b> les données du PC par celles de la sauvegarde. Elle est réservée à l'administrateur. En cas de doute, appelez FEDONG avant.</p>
+  <ol class="etapes">
+    <li>Dans <span class="chemin">Réglages › Sauvegardes</span>, cliquez sur <span class="btn">Restaurer</span> en face d'une sauvegarde de la liste, ou sur <span class="btn">Restaurer depuis un fichier…</span> pour une copie sur clé USB.</li>
+    <li>Le logiciel contrôle le fichier, puis demande de taper <code>RESTAURER</code> pour confirmer.</li>
+    <li>Une copie « Avant restauration » de la base actuelle est faite d'abord, puis le logiciel redémarre.</li>
+  </ol>
+  <p>Sur un nouveau PC, avec la sauvegarde en ligne : <b>Voir les copies en ligne</b>, <b>Récupérer</b> avec la phrase secrète, puis restaurez-la comme les autres.</p>
+</section>
+
+<!-- ======================= 19 ======================= -->
+<section class="chapitre" id="ch19">
+  <div class="chap-tete"><div class="chap-num">Chapitre 19</div><h1>Licence et mises à jour</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span></div>
+  <p class="intro">ONIX 360 s'utilise avec une licence liée au PC. Elle est mensuelle, annuelle ou à vie selon la formule achetée, et fixe le nombre de PC et de magasins.</p>
+
+  <h2 id="s19-1">Activer la licence</h2>
+  <ol class="etapes">
+    <li>Connectez-vous en administrateur et ouvrez <span class="chemin">Réglages › Licence</span>.</li>
+    <li>Le <b>code machine</b> de ce PC s'affiche (4 groupes de lettres et de chiffres). Cliquez sur <span class="btn">Copier</span> ou sur <b>Envoyer par WhatsApp</b> et envoyez-le à FEDONG.</li>
+    <li>FEDONG vous renvoie une <b>clé de licence</b>. Elle commence par <code>SG1</code>.</li>
+    <li>Collez la clé entière dans la zone <b>Clé de licence</b>, puis <span class="btn">Activer la licence</span>. La date de fin s'affiche.</li>
+  </ol>
+  <figure><img src="images/121-licence.png"><figcaption>L'écran Licence pendant l'essai, avec le code machine du PC.</figcaption></figure>
+  <p>Avec plusieurs PC reliés au serveur central, activez la licence sur un seul PC : les autres la reçoivent tout seuls, dans la limite du nombre de PC prévu. PC changé ou en panne : demandez à FEDONG de transférer la licence (il faudra le code machine du nouveau PC).</p>
+
+  <h2 id="s19-2">Fin de licence et renouvellement</h2>
+  <table class="t">
+    <tr><th style="width:42%">La barre du bas affiche</th><th>Ce que cela veut dire</th></tr>
+    <tr><td><b>Version d'essai (N j)</b></td><td>Essai de 15 jours en cours. Activez une licence.</td></tr>
+    <tr><td><b>Licence à renouveler (N j)</b></td><td>La licence finit bientôt. Contactez FEDONG.</td></tr>
+    <tr><td><b>Licence expirée : ventes arrêtées dans N j</b></td><td>La licence est finie. Vous avez 15 jours de grâce pour la renouveler.</td></tr>
+    <tr><td><b>Licence : ventes bloquées</b></td><td>La caisse ne vend plus. La consultation, la clôture de caisse et les sauvegardes restent possibles.</td></tr>
+  </table>
+  <div class="encadre attention"><span class="t">Date et heure du PC</span><p>Une date de Windows reculée bloque aussi la vente. Gardez la date et l'heure du PC à jour (réglage automatique de Windows).</p></div>
+
+  <h2 id="s19-3">Les mises à jour</h2>
+  <ul>
+    <li>Le PC cherche une nouvelle version au démarrage puis toutes les 4 heures, sur le serveur central. La version téléchargée s'installe à la fermeture du logiciel, ou tout de suite avec <b>Installer maintenant</b> dans <span class="chemin">Réglages › Mises à jour</span>.</li>
+    <li>Sans serveur central : FEDONG vous remet le nouveau fichier <code>Onix360-Setup-…exe</code> ; installez-le par-dessus, comme au chapitre 2.</li>
+    <li>Vos données, vos réglages et votre licence sont gardés. Faites quand même une sauvegarde avant.</li>
+    <li>Après une mise à jour, la fenêtre <b>Quoi de neuf</b> présente les nouveautés.</li>
+  </ul>
+</section>
+
+<!-- ======================= 20 ======================= -->
+<section class="chapitre" id="ch20">
+  <div class="chap-tete"><div class="chap-num">Chapitre 20</div><h1>Plusieurs PC, serveur central et téléphones</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Propriétaire</span></div>
+  <p class="intro">Avec deux caisses ou plus, un poste vendeur et un poste caisse, ou plusieurs magasins, les PC sont reliés par un <b>serveur central</b>. Il sert aussi à la page du gérant sur son téléphone, à l'inventaire au téléphone, aux mises à jour et aux sauvegardes en ligne.</p>
+
+  <h2 id="s20-1">Comment ça marche</h2>
+  <ul>
+    <li>Chaque PC garde sa propre base et <b>continue de vendre sans réseau</b>.</li>
+    <li>Dès que la connexion revient, les opérations partent au serveur toutes les 20 secondes environ. Les autres PC du magasin reçoivent le catalogue, les prix, les utilisateurs, les ventes et le stock.</li>
+    <li>Un autre magasin reçoit le catalogue commun, mais garde ses propres ventes, son stock et sa caisse.</li>
+    <li>La barre du bas montre <b>Serveur : connecté</b>, <b>hors ligne</b> ou <b>non relié</b>, et le nombre d'opérations en attente. <b>Synchroniser maintenant</b> (menu de votre nom) force l'envoi.</li>
+  </ul>
+
+  <h2 id="s20-2">Installer ONIX 360 Serveur</h2>
+  <p>Le serveur s'installe sur un PC du magasin <b>qui reste allumé</b> (souvent le PC du bureau), ou sur un serveur loué sur Internet pour relier plusieurs magasins (votre technicien s'en occupe).</p>
+  <ol class="etapes">
+    <li>Sur ce PC, lancez <code>Onix360-Serveur-Setup-<span data-version>0.95.0</span>.exe</code> et installez-le comme ONIX 360. Il démarre tout seul avec Windows et reste en marche près de l'horloge.</li>
+    <li>À la première ouverture, choisissez le <b>mot de passe de l'interface</b> du serveur (6 caractères au moins), deux fois. Notez-le.</li>
+    <li>L'onglet <b>Réglages</b> du serveur affiche, sous <b>Relier un PC</b>, l'<b>adresse</b> à saisir dans ONIX 360 (par exemple <code>http://192.168.1.20:3000</code> pour les autres PC du réseau) et la <b>clé d'enrôlement</b> qui relie le premier PC d'un magasin (<b>Copier la clé</b>).</li>
+  </ol>
+  <figure><img src="images/S4-serveur-reglages.png"><figcaption>L'onglet Réglages du serveur : l'adresse et la clé d'enrôlement.</figcaption></figure>
+  <p>L'<b>Accueil</b> du serveur résume ensuite les postes reliés, les ventes du jour de chaque magasin et la dernière sauvegarde.</p>
+  <figure><img src="images/S1-serveur-accueil.png"><figcaption>L'accueil d'ONIX 360 Serveur.</figcaption></figure>
+
+  <h2 id="s20-3">Relier le premier PC</h2>
+  <ol class="etapes">
+    <li>Sur le PC principal du magasin, en administrateur : <span class="chemin">Réglages › Serveur central</span>.</li>
+    <li>Tapez l'<b>adresse du serveur</b> et la <b>clé d'enrôlement</b>, puis <span class="btn">Relier ce PC au serveur</span>. L'état passe à <b>connecté</b> et les données du magasin partent au serveur.</li>
+  </ol>
+  <figure><img src="images/122b-serveur-relie.png"><figcaption>Le PC principal relié au serveur central.</figcaption></figure>
+
+  <h2 id="s20-4">Ajouter un PC au magasin</h2>
+  <ol class="etapes">
+    <li>Sur le PC principal, <span class="chemin">Réglages › Caisses</span> : créez une caisse espèces pour le nouveau poste et notez son <b>code d'activation</b> (6 chiffres).</li>
+    <li>Installez ONIX 360 sur le nouveau PC. À la première ouverture, cliquez sur <b>Rejoindre un magasin existant</b>.</li>
+    <li>Tapez l'adresse du serveur central et le code d'activation, puis <span class="btn">Rejoindre</span>.</li>
+    <li>Le PC récupère le catalogue, les utilisateurs et le stock du magasin. Chacun s'y connecte avec son identifiant habituel.</li>
+  </ol>
+  <figure><img src="images/111b-caisse-code-activation.png"><figcaption>La caisse 2 et son code d'activation, pour le nouveau PC.</figcaption></figure>
+  <p><span class="chemin">Réglages › État des PC du magasin</span> montre chaque poste : dernière synchronisation, version, dernière sauvegarde, imprimante, licence. Une ligne rouge demande d'aller voir ce PC.</p>
+
+  <h2 id="s20-5">Le téléphone du gérant</h2>
+  <p>Sur votre téléphone, ouvrez l'adresse du serveur suivie de <code>/gerant</code> (par exemple <code>http://192.168.1.20:3000/gerant</code>), connectez-vous avec le mot de passe d'ONIX 360 Serveur, puis <b>Ajouter à l'écran d'accueil</b>. Vous y voyez les ventes du jour, les caisses, les écarts, les ruptures et les alertes de chaque magasin, et vous y acceptez les demandes de code du gérant envoyées par les caisses.</p>
+  <figure class="tel"><img src="images/S5-telephone-gerant.png"><figcaption>La page du gérant sur téléphone.</figcaption></figure>
+  <div class="encadre astuce"><span class="t">Hors du magasin</span><p>Avec un serveur sur le réseau du magasin, la page du gérant ne marche qu'en Wi-Fi au magasin. Pour la voir de partout, le serveur doit être sur Internet : demandez-le à votre technicien.</p></div>
+
+  <h2 id="s20-6">Les autres services du serveur</h2>
+  <ul>
+    <li><b>Postes</b> : les PC reliés ; <b>Délier</b> un PC volé ou remplacé.</li>
+    <li><b>Sauvegardes</b> : la base du serveur sauvegardée chaque jour, dans le dossier choisi.</li>
+    <li><b>Mises à jour des PC</b> : déposez le nouveau <code>Onix360-Setup-…exe</code> ; les PC le prennent tout seuls.</li>
+    <li>L'application Android <b>ONIX 360 Inventaire</b> et les paniers des vendeurs au rayon passent aussi par le serveur.</li>
+  </ul>
+  <figure><img src="images/S2-serveur-postes.png"><figcaption>Les postes reliés au serveur.</figcaption></figure>
+</section>
+
+<!-- ======================= 21 ======================= -->
+<section class="chapitre" id="ch21">
+  <div class="chap-tete"><div class="chap-num">Chapitre 21</div><h1>Questions fréquentes et dépannage</h1></div>
+
+  <h2 id="s21-1">À la caisse</h2>
+  <div class="q"><h3>La fiche de vente dit « La caisse est fermée ».</h3><p>Ouvrez la caisse : <span class="chemin">Trésorerie › Opérations de trésorerie</span>, <span class="btn">Ouvrir la caisse…</span> (chapitre 8). Si un caissier n'a pas de caisse attribuée, l'administrateur doit lui en donner une (chapitre 5).</p></div>
+  <div class="q"><h3>« Vous n'avez pas les droits pour ouvrir cette fenêtre ».</h3><p>Votre rôle ne permet pas cette action. Demandez au gérant de la faire, ou à l'administrateur de vous donner le droit (<span class="chemin">Réglages › Privilèges par utilisateur</span>).</p></div>
+  <div class="q"><h3>Un produit scanné n'est pas trouvé.</h3><p>Son code-barres n'est sur aucune fiche. Cherchez le produit par son nom, vendez-le, puis ajoutez le code-barres sur sa fiche (chapitre 6).</p></div>
+  <div class="q"><h3>Un produit est marqué « Épuisé » alors qu'il est en rayon.</h3><p>La réception n'a pas été saisie, ou la marchandise est encore dans la réserve. Saisissez la réception ou le transfert (chapitres 12 et 13).</p></div>
+  <div class="q"><h3>Le ticket ne s'imprime pas.</h3><p>Vérifiez que l'imprimante est allumée, a du papier et est branchée. Dans <span class="chemin">Réglages › Paramètres</span>, section <b>Imprimantes et tiroir-caisse (ce PC)</b>, cliquez sur <span class="btn">Imprimer une page de test</span>. Le ticket se réimprime ensuite avec <kbd>F2</kbd> sur une fiche vide. Si les accents sortent mal, changez la table de caractères.</p></div>
+  <div class="q"><h3>Je me suis trompé de ticket.</h3><p>Ne refaites pas la vente par-dessus : <b>Actions › Annuler un ticket</b> avec le motif et le code du gérant, puis refaites-la. Pour quelques articles rapportés, utilisez <b>Retour client</b>.</p></div>
+  <div class="q"><h3>Il y a un écart à la clôture.</h3><p>Recomptez avant de valider. Un écart au-delà du seuil reste « à justifier » : le gérant en parle avec le caissier puis saisit le motif (chapitre 10).</p></div>
+
+  <h2 id="s21-2">Comptes et accès</h2>
+  <div class="q"><h3>J'ai oublié mon code, ou mon compte est bloqué.</h3><p>L'administrateur ouvre <span class="chemin">Réglages › Utilisateurs</span>, clique sur votre nom et tape un nouveau code, ou clique sur <span class="btn">Débloquer</span>. Si c'est le code de l'administrateur qui est perdu, appelez FEDONG.</p></div>
+  <div class="q"><h3>La barre du bas affiche « Sauvegarde en retard ».</h3><p>Ouvrez <span class="chemin">Réglages › Sauvegardes</span> et cliquez sur <span class="btn">Sauvegarder maintenant</span>. Si cela échoue, vérifiez la clé USB ou le dossier choisi (chapitre 18).</p></div>
+  <div class="q"><h3>La caisse ne vend plus à cause de la licence.</h3><p>Lisez le message de la barre du bas et le chapitre 19. Vérifiez la date du PC, puis contactez FEDONG avec le code machine affiché dans <span class="chemin">Réglages › Licence</span>.</p></div>
+
+  <h2 id="s21-3">Réseau et données</h2>
+  <div class="q"><h3>Internet est coupé : puis-je continuer à vendre ?</h3><p>Oui. Chaque PC vend sans réseau. Les opérations partent au serveur central dès que la connexion revient ; la barre du bas montre combien sont en attente.</p></div>
+  <div class="q"><h3>Le serveur est « hors ligne ».</h3><p>Vérifiez que le PC du serveur est allumé et qu'ONIX 360 Serveur tourne (icône près de l'horloge), puis que les deux PC sont sur le même réseau. Rien n'est perdu pendant ce temps.</p></div>
+  <div class="q"><h3>Où sont mes données ?</h3><p>Dans le dossier <code>%APPDATA%\Superette Gestion</code> du PC (ancien nom du logiciel, gardé pour vos données). Ne le déplacez pas et ne le supprimez pas : utilisez les sauvegardes (chapitre 18).</p></div>
+  <div class="q"><h3>Je change de PC.</h3><p>Faites une sauvegarde sur clé USB, installez ONIX 360 sur le nouveau PC, restaurez la sauvegarde (chapitre 18), puis demandez à FEDONG de transférer la licence avec le nouveau code machine.</p></div>
+
+  <div class="encadre astuce"><span class="t">Besoin d'aide ?</span>
+    <p>Contactez votre technicien FEDONG : ses coordonnées sont sur la couverture de ce manuel. Ayez sous la main le nom du magasin, la version (en bas à gauche de l'écran, <b>ONIX 360 v<span data-version>0.95.0</span></b>), une photo de l'écran et, pour la licence, le code machine.</p>
+  </div>
+</section>
+
+<!-- ======================= ANNEXES ======================= -->
+<section class="chapitre" id="ch22">
+  <div class="chap-tete"><div class="chap-num">Annexe A</div><h1>Les raccourcis clavier</h1></div>
+  <p class="intro"><kbd>Ctrl</kbd>+<kbd>/</kbd> affiche dans le logiciel les raccourcis de la page ouverte.</p>
+  <h2 id="sA-1">Partout</h2>
+  <table class="t">
+    <tr><th style="width:30%">Touche</th><th>Effet</th></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Rechercher un écran par son nom</td></tr>
+    <tr><td><kbd>F1</kbd></td><td>Aide sur la page (à la caisse : rechercher un produit)</td></tr>
+    <tr><td><kbd>F2</kbd></td><td>Nouvelle vente</td></tr>
+    <tr><td><kbd>F5</kbd></td><td>Actualiser la page (à la caisse : ouvrir le tiroir)</td></tr>
+    <tr><td><kbd>Entrée</kbd></td><td>Valider le champ ou le formulaire</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Entrée</kbd></td><td>Valider la fenêtre ouverte (bouton principal)</td></tr>
+    <tr><td><kbd>Échap</kbd></td><td>Fermer la fenêtre ouverte</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Annuler la dernière action (pendant 10 secondes)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Nouveau (article, client, fournisseur…)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>Passer à la fenêtre suivante</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F4</kbd></td><td>Fermer la fenêtre de devant (sauf à la caisse)</td></tr>
+  </table>
+  <h2 id="sA-2">À la caisse</h2>
+  <table class="t">
+    <tr><th style="width:30%">Touche</th><th>Effet</th></tr>
+    <tr><td><kbd>F1</kbd></td><td>Rechercher un produit</td></tr>
+    <tr><td><kbd>F2</kbd></td><td>Valider et imprimer le ticket (fiche vide : réimprimer le dernier)</td></tr>
+    <tr><td><kbd>F7</kbd></td><td>Valider et imprimer la facture listing</td></tr>
+    <tr><td><kbd>F4</kbd> ou <kbd>Entrée</kbd> sur saisie vide</td><td>Enregistrer la vente sans imprimer</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Encaisser : Mobile Money, carte, chèque, paiement mixte</td></tr>
+    <tr><td><kbd>F3</kbd> / <kbd>F10</kbd></td><td>Mettre en attente / rappeler un ticket</td></tr>
+    <tr><td><kbd>F5</kbd></td><td>Ouvrir le tiroir</td></tr>
+    <tr><td><kbd>F6</kbd></td><td>Remise sur la ligne choisie</td></tr>
+    <tr><td><kbd>F8</kbd></td><td>Choisir le client</td></tr>
+    <tr><td><kbd>F9</kbd></td><td>Facture A4 du ticket</td></tr>
+    <tr><td><kbd>+</kbd> / <kbd>−</kbd></td><td>Quantité de la ligne choisie</td></tr>
+    <tr><td><kbd>Suppr</kbd></td><td>Enlever la ligne choisie</td></tr>
+    <tr><td><code>3*code</code></td><td>Ajouter 3 fois le produit scanné ou tapé</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>Le client voulait… : noter un produit qu'on n'a pas pu vendre</td></tr>
+  </table>
+</section>
+
+<section class="chapitre" id="ch23">
+  <div class="chap-tete"><div class="chap-num">Annexe B</div><h1>Petit glossaire</h1></div>
+  <table class="t">
+    <tr><th style="width:28%">Mot</th><th>Sens dans ONIX 360</th></tr>
+    <tr><td><b>Attendu</b></td><td>Ce qui devrait être dans la caisse d'après les opérations enregistrées.</td></tr>
+    <tr><td><b>Balance âgée</b></td><td>Ce que doivent les clients, rangé par ancienneté du retard.</td></tr>
+    <tr><td><b>CMUP</b></td><td>Coût moyen unitaire pondéré : le coût moyen d'un article après les réceptions successives. Il sert à la valeur du stock et à la marge.</td></tr>
+    <tr><td><b>Conditionnement</b></td><td>Une façon de vendre ou d'acheter un article : carton de 12, pack de 6, pièce.</td></tr>
+    <tr><td><b>Démarque</b></td><td>Les pertes de stock : casse, vols, périmés, écarts d'inventaire.</td></tr>
+    <tr><td><b>Écart de caisse</b></td><td>Différence entre le compté et l'attendu à la clôture.</td></tr>
+    <tr><td><b>Fond de caisse</b></td><td>La monnaie laissée dans le tiroir pour commencer la journée.</td></tr>
+    <tr><td><b>Lot, DLC</b></td><td>Une livraison d'un produit périssable et sa date limite de consommation.</td></tr>
+    <tr><td><b>Proforma</b></td><td>Facture provisoire remise avant la vente, souvent pour un paiement par une administration ou une entreprise.</td></tr>
+    <tr><td><b>Reliquat</b></td><td>Ce qui reste à livrer sur une commande fournisseur reçue en partie.</td></tr>
+    <tr><td><b>Synchronisation</b></td><td>L'échange des données entre un PC et le serveur central.</td></tr>
+    <tr><td><b>SYSCOHADA</b></td><td>Le plan comptable des pays de l'OHADA, dont le Cameroun.</td></tr>
+    <tr><td><b>Z (rapport Z)</b></td><td>Le rapport de clôture d'une journée de caisse, avec son numéro.</td></tr>
+  </table>
+</section>
+
+</main>

@@ -1,0 +1,45 @@
+
+<script>
+  // Numéros des figures (« Figure 8.3 ») et sommaire construits à partir des titres ; le rendu PDF ajoute les numéros de page.
+  (function () {
+    document.querySelectorAll('section.chapitre').forEach(function (ch) {
+      var num = ch.querySelector('.chap-num').textContent.replace('Chapitre ', '').replace('Annexe ', '');
+      ch.querySelectorAll('figcaption').forEach(function (c, i) {
+        var b = document.createElement('b');
+        b.textContent = 'Figure ' + num + '.' + (i + 1) + ' ';
+        c.insertBefore(b, c.firstChild);
+      });
+    });
+    var toc = document.getElementById('toc');
+    document.querySelectorAll('section.partie, section.chapitre').forEach(function (s) {
+      var li = document.createElement('li');
+      if (s.classList.contains('partie')) {
+        li.className = 'toc-partie';
+        li.textContent = s.querySelector('.p-num').textContent + ' · ' + s.querySelector('h1').textContent;
+        toc.appendChild(li);
+        return;
+      }
+      var a = document.createElement('a');
+      a.className = 'l';
+      a.href = '#' + s.id;
+      a.innerHTML = '<span class="n"></span><span class="titre"></span><span class="pts"></span><span class="pg"></span>';
+      var n = s.querySelector('.chap-num').textContent;
+      a.querySelector('.n').textContent = n.replace('Chapitre ', '').replace('Annexe ', '');
+      a.querySelector('.titre').textContent = s.querySelector('h1').textContent;
+      a.querySelector('.pg').setAttribute('data-for', s.id);
+      li.appendChild(a);
+      var ul = document.createElement('ul');
+      s.querySelectorAll('h2[id]').forEach(function (h) {
+        var sub = document.createElement('li');
+        sub.innerHTML = '<a class="l" href="#' + h.id + '"><span class="titre"></span><span class="pts"></span><span class="pg"></span></a>';
+        sub.querySelector('.titre').textContent = h.textContent;
+        sub.querySelector('.pg').setAttribute('data-for', h.id);
+        ul.appendChild(sub);
+      });
+      if (ul.children.length) li.appendChild(ul);
+      toc.appendChild(li);
+    });
+  })();
+</script>
+</body>
+</html>

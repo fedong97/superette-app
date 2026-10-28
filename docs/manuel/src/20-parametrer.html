@@ -1,0 +1,213 @@
+
+<!-- ======================= PARTIE 2 ======================= -->
+<section class="partie">
+  <div class="p-num">Partie 2</div>
+  <h1>Paramétrer</h1>
+  <p>Ce que l'on règle une fois, avant la première vente : le magasin, l'imprimante, les caisses, les utilisateurs, les articles et le stock de départ. Comptez une demi-journée pour une superette de 500 articles, plus si le catalogue est saisi à la main.</p>
+</section>
+
+<!-- ======================= 4 ======================= -->
+<section class="chapitre" id="ch4">
+  <div class="chap-tete"><div class="chap-num">Chapitre 4</div><h1>Les paramètres du magasin</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Administrateur</span></div>
+  <p class="intro">Tous les réglages du magasin sont dans <span class="chemin">Réglages › Paramètres</span>. Ils sont rangés par sections ; la case <b>Chercher</b> en haut retrouve un réglage par un mot (« arrondi », « logo », « crédit »). N'oubliez pas <span class="btn">Enregistrer</span> en haut à droite.</p>
+
+  <figure><img src="images/110-parametres.png"><figcaption>Les paramètres, section Identité du magasin.</figcaption></figure>
+
+  <h2 id="s4-1">Les sections à régler au début</h2>
+  <table class="t">
+    <tr><th style="width:32%">Section</th><th>Ce qu'on y règle</th></tr>
+    <tr><td><b>Identité du magasin</b></td><td>Nom commercial, adresse, téléphone, NIU, RCCM, message d'en-tête du ticket (« Ouvert 7j/7 de 7 h à 22 h ») et <b>logo</b> (<span class="btn">Choisir une image…</span>, de préférence en noir sur fond blanc).</td></tr>
+    <tr><td><b>TVA, stock et écart de caisse</b></td><td>Régime de TVA, vente autorisée ou non quand le stock est à zéro, seuil au-delà duquel un écart de caisse doit être justifié.</td></tr>
+    <tr><td><b>Ventes et caisse</b></td><td>Remise maximale sans le code du gérant, arrondi, retours, plafond d'espèces dans le tiroir.</td></tr>
+    <tr><td><b>Écran de caisse</b></td><td>Présentation de la caisse (Moderne, Classique ou Conventionnel), organisation de la vente (vendeur-caissier ou séparés), modèle utilisé pour chaque impression.</td></tr>
+    <tr><td><b>Caisses électroniques</b></td><td>Une caisse électronique centrale (le numéro MoMo/OM du magasin) ou des caisses indépendantes par caissier.</td></tr>
+    <tr><td><b>Crédit clients</b></td><td>Plafond et délai de paiement proposés pour un nouveau client ; 0 = pas de crédit sans l'accord du gérant.</td></tr>
+    <tr><td><b>Carte de fidélité</b></td><td>Activer la fidélité : points par achat, valeur d'un point, minimum à atteindre.</td></tr>
+    <tr><td><b>Stock, Achats</b></td><td>Alerte de péremption, délai de paiement des nouveaux fournisseurs, paliers de déstockage.</td></tr>
+    <tr><td><b>Pointage du personnel, Paie</b></td><td>Heure d'embauche, tolérance de retard, paie d'après le pointage, retenues légales (chapitre 16).</td></tr>
+    <tr><td><b>Sécurité</b></td><td>Déconnexion automatique après quelques minutes sans activité.</td></tr>
+    <tr><td><b>Numérotation des pièces</b></td><td>Préfixes des factures, bons, devis…</td></tr>
+    <tr><td><b>Imprimantes et tiroir-caisse (ce PC)</b></td><td>L'imprimante de tickets de ce poste, sa largeur, l'ouverture du tiroir, la page de test.</td></tr>
+    <tr><td><b>Afficheur client, Étiquettes balance (ce PC)</b></td><td>Le deuxième écran tourné vers le client ; les codes des étiquettes de la balance.</td></tr>
+  </table>
+  <div class="encadre attention"><span class="t">« (ce PC) »</span><p>Les sections marquées <b>(ce PC)</b> ne valent que pour le poste où vous êtes : réglez l'imprimante sur chaque PC de caisse. Les autres sections valent pour tout le magasin.</p></div>
+
+  <h2 id="s4-2">Régler l'imprimante de tickets</h2>
+  <ol class="etapes">
+    <li>Installez d'abord l'imprimante dans Windows avec le pilote du fabricant, et vérifiez qu'elle imprime une page de test Windows.</li>
+    <li>Dans <span class="chemin">Réglages › Paramètres</span>, tapez « imprim » dans la recherche.</li>
+    <li>Dans <b>Imprimantes et tiroir-caisse (ce PC)</b>, choisissez l'imprimante de tickets, la largeur du papier (80 ou 58 mm) et l'imprimante A4.</li>
+    <li>Cliquez sur <span class="btn">Imprimer une page de test</span>. Le tiroir doit s'ouvrir et les accents s'imprimer correctement ; sinon, essayez une autre <b>table de caractères</b>.</li>
+    <li><span class="btn">Enregistrer</span>.</li>
+  </ol>
+  <figure><img src="images/110b-parametres-imprimante.png"><figcaption>Les réglages de l'imprimante et du tiroir-caisse de ce PC.</figcaption></figure>
+
+  <h2 id="s4-3">Choisir la présentation de la caisse</h2>
+  <p>Dans la section <b>Écran de caisse</b>, trois présentations sont proposées : <b>Moderne</b> (tuiles des produits et gros boutons, idéal pour un écran tactile), <b>Classique</b> et <b>Conventionnel</b> (tableau des lignes, proche des anciens logiciels). Les fonctions et les touches sont les mêmes. C'est aussi là que l'on passe de « vendeur-caissier » à « vendeur et caissier séparés », et que l'on choisit les rôles qui arrivent en <b>Caisse seule</b> : la fiche de vente couvre alors tout l'écran, sans menus ni onglets.</p>
+  <figure><img src="images/110c-parametres-ecran-caisse.png"><figcaption>La section Écran de caisse.</figcaption></figure>
+
+  <h2 id="s4-4">Couleurs, badges et modèles d'impression</h2>
+  <ul>
+    <li><span class="chemin">Réglages › Couleurs et badges</span> : la couleur principale et secondaire de votre entreprise (ou une palette toute prête). Tout l'écran, les badges du personnel, les cartes de fidélité et les documents A4 les prennent. Le modèle de badge (Bandeau, Arcs, Angles), sa taille et ce qu'il montre (photo, rôle, matricule, code-barres) se règlent en dessous.</li>
+    <li><span class="chemin">Réglages › Modèles d'impression</span> : pour chaque document (ticket, facture A4, facture listing, devis, bon de livraison, bon de commande), le modèle utilisé par défaut. <span class="btn">Modifier</span> ouvre l'éditeur (marges, police, colonnes, mentions) avec l'aperçu à droite ; <span class="btn">Copier</span> crée une variante ; <b>Rétablir l'original</b> remet le modèle livré.</li>
+  </ul>
+  <div class="deux">
+    <figure><img src="images/116-couleurs-badges.png"><figcaption>Couleurs de l'entreprise et badge du personnel.</figcaption></figure>
+    <figure><img src="images/117-modeles-impression.png"><figcaption>Les modèles d'impression.</figcaption></figure>
+  </div>
+
+  <h2 id="s4-5">Paiement mobile MTN et Orange</h2>
+  <p>Sans réglage, la caisse enregistre un paiement MoMo ou OM avec la référence du SMS reçu par le client. Avec un compte marchand, la caisse peut aussi <b>demander</b> le paiement sur le téléphone du client : il confirme avec son code secret et le paiement s'ajoute tout seul. Réglez-le dans <span class="chemin">Réglages › Paiement mobile (MTN, Orange)</span>, sur chaque PC qui encaisse : mode <b>Simulation</b> pour essayer, <b>Test</b> ou <b>Réel</b> avec les clés de votre compte marchand.</p>
+</section>
+
+<!-- ======================= 5 ======================= -->
+<section class="chapitre" id="ch5">
+  <div class="chap-tete"><div class="chap-num">Chapitre 5</div><h1>Caisses, utilisateurs et droits</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Administrateur</span></div>
+  <p class="intro">Avant de vendre, chaque poste a besoin d'une caisse, et chaque personne d'un compte. Un caissier sans caisse attribuée ne peut pas vendre.</p>
+
+  <h2 id="s5-1">Les trois types de caisse</h2>
+  <table class="t">
+    <tr><th style="width:24%">Type</th><th>Ce qu'elle reçoit</th></tr>
+    <tr><td><b>Espèces</b></td><td>Les billets et pièces du tiroir. Une par poste de vente. On la compte à chaque clôture.</td></tr>
+    <tr><td><b>Électronique</b></td><td>MTN Mobile Money, Orange Money et carte. Par exemple une caisse pour MTN et une pour Orange, ou une seule pour tout.</td></tr>
+    <tr><td><b>Banque</b></td><td>Virements et chèques.</td></tr>
+  </table>
+  <p>À la vente, chaque paiement va tout seul dans la caisse de son type : les espèces au tiroir, le MoMo à la caisse électronique du caissier, le chèque à sa caisse banque.</p>
+
+  <h2 id="s5-2">Créer une caisse</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="chemin">Réglages › Caisses</span>. La caisse 1 existe déjà.</li>
+    <li>En bas de la liste, choisissez le type (<b>Espèces</b>, <b>Électronique</b> ou <b>Banque</b>), tapez un nom si vous voulez (« Caisse boissons », « MTN Akwa »), puis <span class="btn">Ajouter une caisse</span>.</li>
+    <li>Pour une caisse électronique, <span class="btn">Modifier</span> permet de choisir les moyens qu'elle reçoit (MTN, Orange, carte).</li>
+  </ol>
+  <figure><img src="images/111-caisses.png"><figcaption>La liste des caisses, avec la personne à qui chacune est attribuée et son code d'activation.</figcaption></figure>
+  <p>Le <b>code d'activation</b> (6 chiffres) d'une caisse espèces sert à rattacher un nouveau PC à cette caisse (chapitre 20).</p>
+
+  <h2 id="s5-3">Ajouter un employé</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="chemin">Réglages › Utilisateurs</span> et cliquez sur <span class="btn">Ajouter un employé</span>.</li>
+    <li>Tapez le <b>nom complet</b>, l'<b>identifiant</b> (ce qu'il tapera pour se connecter : lettres, chiffres, point ou tiret) et un <b>code secret</b> en chiffres.</li>
+    <li>Choisissez le <b>rôle</b> et le magasin.</li>
+    <li>Pour un caissier ou un vendeur qui encaisse : cochez sa <b>caisse espèces</b>, et sa caisse électronique et banque si vous en avez.</li>
+    <li>En une fois, remplissez sa fiche de collaborateur (poste, téléphone, salaire) et créez son <b>badge</b> : c'est facultatif mais utile pour la paie et le pointage (chapitre 16).</li>
+    <li>Cliquez sur <span class="btn">Enregistrer</span>.</li>
+  </ol>
+  <div class="deux">
+    <figure><img src="images/112-utilisateurs.png"><figcaption>Les utilisateurs, leur rôle et leur caisse.</figcaption></figure>
+    <figure><img src="images/112b-nouvel-employe.png"><figcaption>La fiche Nouvel employé.</figcaption></figure>
+  </div>
+  <ul>
+    <li><b>Badge</b> : dans la fiche, <span class="btn">Créer son badge</span> donne un code-barres imprimé sur une carte. À la connexion, la douchette remplit l'identifiant ; il reste à taper le code. <b>Refaire</b> rend l'ancien badge inutilisable (badge perdu).</li>
+    <li><b>Code oublié</b> : ouvrez la fiche de la personne et tapez un nouveau code. <span class="btn">Débloquer</span> rouvre un compte bloqué après trop de codes faux.</li>
+    <li><b>Départ d'un employé</b> : <b>Supprimer l'utilisateur</b>. S'il a déjà fait des opérations, son nom reste sur ses tickets, mais il ne peut plus se connecter.</li>
+  </ul>
+
+  <h2 id="s5-4">Les droits par rôle</h2>
+  <p>Dans <span class="chemin">Réglages › Droits par rôle</span>, chaque rôle a une colonne et chaque droit une ligne, rangés par groupes à gauche (Facturation, Trésorerie, Gestion des stocks…). Le type indique si le droit ouvre un <b>Menu</b>, permet un <b>Bouton</b> (une action) ou une <b>Fonction</b> (une règle). Ce qui n'est pas coché disparaît des menus et des boutons. L'administrateur a toujours tout.</p>
+  <figure><img src="images/113-droits.png"><figcaption>Les droits par rôle, groupe Facturation.</figcaption></figure>
+  <h3>Un droit en plus ou en moins pour une seule personne</h3>
+  <p>Dans <span class="chemin">Réglages › Privilèges par utilisateur</span>, choisissez la personne : la colonne <b>Via son rôle</b> montre ce que son rôle lui donne. Cochez <b>Attribué</b> pour lui donner un droit en plus, ou <b>Retiré</b> pour le lui enlever, sans toucher aux autres personnes du même rôle.</p>
+  <div class="encadre astuce"><span class="t">Le code du gérant</span><p>Quand un caissier n'a pas le droit de faire une action (grosse remise, retour, annulation), le logiciel ne refuse pas : il demande le <b>code d'un gérant</b>. Le gérant tape son code sur le poste, ou accepte la demande depuis son téléphone (chapitre 20).</p></div>
+</section>
+
+<!-- ======================= 6 ======================= -->
+<section class="chapitre" id="ch6">
+  <div class="chap-tete"><div class="chap-num">Chapitre 6</div><h1>Les articles et les prix</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Administrateur</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Chaque produit vendu a sa fiche : son nom, son rayon, ses prix d'achat et de vente, ses codes-barres et ses conditionnements (carton, pack, pièce). C'est la base de tout le reste : bien la remplir évite les erreurs de caisse et de stock.</p>
+
+  <h2 id="s6-1">Rayons et familles</h2>
+  <p>Les produits sont rangés par <b>rayon</b> (Épicerie, Boissons…) et <b>famille</b> (Huiles, Bières…). Le métier choisi à la création du magasin les a déjà créés. Pour les adapter : <span class="chemin">Articles › Rayonnage</span>, puis <span class="btn">Nouveau rayon</span>, <span class="btn">Nouvelle famille</span>, <b>Renommer</b> ou <b>Supprimer</b>. Le tableau donne pour chaque famille le nombre d'articles et la valeur du stock.</p>
+  <figure><img src="images/32-rayonnage.png"><figcaption>Le rayonnage : rayons, familles et valeur du stock.</figcaption></figure>
+
+  <h2 id="s6-2">Créer une fiche article</h2>
+  <ol class="etapes">
+    <li>Ouvrez <span class="chemin">Articles › Ajouter / paramétrer une marchandise</span> (ou <span class="btn">Nouvel article</span> dans la liste, <kbd>Ctrl</kbd>+<kbd>J</kbd>).</li>
+    <li>Tapez la <b>désignation</b> telle qu'elle doit s'imprimer sur le ticket (« HUILE DIAMAOR 1 L »). Laissez le <b>code article</b> vide : il est donné tout seul.</li>
+    <li>Choisissez le <b>rayon / famille</b> et l'<b>unité de vente</b> (pièce, ou kg / litre pour un produit vendu au poids).</li>
+    <li>Dans <b>Conditionnements et prix</b>, ligne 1 : le conditionnement d'achat (CARTON DE 12, SAC DE 5, CASIER DE 12) avec son nombre de pièces, son prix d'achat, son prix de revient et son prix de vente. Lignes suivantes : les conditionnements de vente plus petits (pack, pièce). Les prix d'achat par pièce se calculent tout seuls ; la <b>marge</b> s'affiche en bout de ligne.</li>
+    <li>Ajoutez les <b>codes-barres</b> : scannez le code de la pièce, et celui du carton s'il en a un. Sans code fabricant, un code interne est créé à l'enregistrement.</li>
+    <li>En dessous : les prix <b>Gros</b> et <b>Super gros</b> si vous vendez aux revendeurs, les quantités <b>minimum</b>, <b>d'alerte</b> et <b>maximum</b> du stock, la case <b>Périssable</b> (suivi des lots et dates limites) et <b>Touche rapide en caisse</b> pour les produits les plus vendus.</li>
+    <li>Une photo : <span class="btn">Choisir une image…</span>. Elle s'affiche dans la liste et dans la recherche de la caisse.</li>
+    <li>Cliquez sur <span class="btn">Enregistrer</span>.</li>
+  </ol>
+  <figure><img src="images/31b-fiche-article.png"><figcaption>La fiche du riz : le sac de 5 à l'achat, la pièce à la vente, la marge de chaque ligne.</figcaption></figure>
+  <div class="encadre attention"><span class="t">Prix d'achat juste, marge juste</span><p>La marge des rapports et le coût du stock viennent du prix d'achat. Après chaque réception, le coût moyen (CMUP) est recalculé tout seul ; le tableau <span class="chemin">Suivi › Prix à revoir</span> signale les produits dont le prix d'achat a monté sans que le prix de vente bouge.</p></div>
+
+  <h2 id="s6-3">La liste des produits</h2>
+  <p><span class="chemin">Articles › Liste des produits</span> montre tous les produits avec leur code, rayon, code-barres, prix d'achat, prix de vente et marge. Tapez une partie du nom, de la marque ou du code pour filtrer ; cliquez une ligne pour ouvrir la fiche. Les boutons du haut importent, exportent vers Excel ou mettent à jour les prix en masse.</p>
+  <figure><img src="images/30-liste-produits.png"><figcaption>La liste des produits.</figcaption></figure>
+  <ul>
+    <li><b>Mise à jour des prix…</b> : choisissez les produits (rayon, famille, fournisseur), la méthode (pourcentage, montant ou coefficient sur l'achat) et l'arrondi. L'aperçu montre l'ancien et le nouveau prix ; <span class="btn">Appliquer</span> change tout d'un coup, ou <b>À une date</b> les programme.</li>
+    <li><b>Produit en sommeil</b> : décochez <b>Actif</b> sur la fiche. Il reste dans l'historique mais ne se vend plus.</li>
+    <li><b>Prix par quantité</b> : sur la fiche, « à partir de 10 pièces, 1 450 FCFA » ; la caisse l'applique toute seule.</li>
+  </ul>
+
+  <h2 id="s6-4">Importer le catalogue depuis Excel</h2>
+  <p>Pour un catalogue de plusieurs centaines d'articles, l'import est bien plus rapide que la saisie.</p>
+  <ol class="etapes">
+    <li>Dans la liste des produits, cliquez sur <span class="btn">Importer (Excel, CSV)</span>, puis <b>Télécharger le modèle</b>.</li>
+    <li>Remplissez le modèle dans Excel : une ligne par produit, avec la désignation, la famille, les prix d'achat et de vente, le code-barres, et si besoin jusqu'à 3 conditionnements. Vous pouvez aussi partir d'un export de votre ancien logiciel en gardant les mêmes titres de colonnes.</li>
+    <li>Revenez dans <b>Importer</b>, choisissez le fichier et le mode (<b>créer et mettre à jour</b>, <b>créer seulement</b> ou <b>mettre à jour seulement</b>).</li>
+    <li>Cliquez sur <span class="btn">Vérifier</span> : la liste montre ce qui sera créé, mis à jour ou refusé, ligne par ligne, sans rien enregistrer. Corrigez le fichier si besoin.</li>
+    <li>Cliquez sur <span class="btn">Importer</span>.</li>
+  </ol>
+
+  <h2 id="s6-5">Produits vendus au poids</h2>
+  <p>Pour la viande, le poisson, les fruits ou le riz en vrac, choisissez l'unité <b>kg</b> sur la fiche. À la caisse, la quantité se tape en kilos (« 1,25 »). Avec une balance qui imprime des étiquettes à code-barres, donnez à l'article son <b>code balance (PLU)</b> ; la caisse lit le poids ou le prix dans le code de l'étiquette (préfixes réglés dans <b>Étiquettes balance (ce PC)</b>).</p>
+
+  <h2 id="s6-6">Étiquettes de rayon et codes-barres</h2>
+  <p><span class="chemin">Articles › Étiquettes et codes-barres</span> :</p>
+  <ul>
+    <li>Onglet <b>Étiquettes de rayon</b> : la liste <b>À refaire</b> montre les produits jamais étiquetés et ceux dont le prix a changé. Choisissez la planche (24, 40 ou 65 étiquettes par page A4) ou le rouleau, vérifiez l'aperçu à droite et imprimez.</li>
+    <li>Onglet <b>Codes-barres produit</b> : pour les articles sans code fabricant. Cochez les articles et le nombre d'étiquettes, puis imprimez sur rouleau ou planche A4, à coller sur les produits.</li>
+  </ul>
+  <figure><img src="images/33-etiquettes.png"><figcaption>Les étiquettes de rayon à refaire, avec l'aperçu de la planche.</figcaption></figure>
+
+  <h2 id="s6-7">Promotions</h2>
+  <p><span class="chemin">Articles › Promotions</span>, <span class="btn">Nouvelle promotion</span> : le produit, le type (prix promotionnel, « 3 achetés, 2 payés », lot à prix fixe), la période et les magasins. La caisse applique toute seule la meilleure promotion de chaque article, sans code du gérant. <b>Affiches promo</b> imprime les affiches A4 ou A5 avec l'ancien prix barré. <b>Arrêter</b> met fin à une promotion tout de suite.</p>
+</section>
+
+<!-- ======================= 7 ======================= -->
+<section class="chapitre" id="ch7">
+  <div class="chap-tete"><div class="chap-num">Chapitre 7</div><h1>Le stock de départ et la reprise des données</h1></div>
+  <div class="pourqui">Pour qui : <span class="role admin">Administrateur</span> <span class="role gerant">Gérant</span></div>
+  <p class="intro">Le logiciel doit connaître ce que vous avez déjà en stock, ce que vos clients vous doivent et ce que vous devez à vos fournisseurs. On le saisit une fois, le jour du démarrage.</p>
+
+  <h2 id="s7-1">Les dépôts</h2>
+  <p><span class="chemin">Réglages › Dépôts</span> montre la <b>Surface de vente</b> et la <b>Réserve</b>. Ajoutez une chambre froide, un deuxième magasin de stockage ou un dépôt « Avaries » pour la marchandise abîmée (elle ne se vend jamais). <b>Dépôt des ventes</b> choisit d'où sort la marchandise vendue en caisse.</p>
+  <figure class="moyen"><img src="images/115-depots.png"><figcaption>Les dépôts du magasin.</figcaption></figure>
+
+  <h2 id="s7-2">Reprendre clients, fournisseurs et stock depuis Excel</h2>
+  <p>Si vous passez d'un autre logiciel ou d'un cahier, <span class="chemin">Réglages › Reprise des données</span> importe en une fois :</p>
+  <ul>
+    <li>les <b>clients</b> avec ce qu'ils vous doivent ;</li>
+    <li>les <b>fournisseurs</b> avec ce que vous leur devez ;</li>
+    <li>le <b>stock de départ</b> de chaque article, avec son coût.</li>
+  </ul>
+  <ol class="etapes">
+    <li>Choisissez le fichier à reprendre et téléchargez son modèle Excel.</li>
+    <li>Remplissez-le, puis <span class="btn">Choisir le fichier rempli</span> : l'aperçu montre ce qui sera fait et les lignes à corriger.</li>
+    <li><span class="btn">Importer</span> enregistre tout d'un bloc et passe les écritures d'à-nouveaux en comptabilité. S'il reste une erreur, rien n'est importé : corrigez et recommencez.</li>
+  </ol>
+  <figure class="moyen"><img src="images/118-reprise-donnees.png"><figcaption>La reprise des données d'un magasin qui passe à ONIX 360.</figcaption></figure>
+
+  <h2 id="s7-3">Ou bien : compter le stock de départ</h2>
+  <p>Si les quantités ne sont pas encore connues, faites un <b>inventaire global</b> le jour du démarrage (chapitre 13) : les quantités comptées deviennent le stock de départ. Pour quelques articles seulement, une <b>réception sans commande</b> suffit.</p>
+
+  <h2 id="s7-4">Avant la première vente : la liste à cocher</h2>
+  <ul class="checklist">
+    <li>Paramètres du magasin enregistrés : identité, logo, TVA (chapitre 4).</li>
+    <li>Imprimante de tickets réglée et page de test imprimée sur chaque PC de caisse.</li>
+    <li>Une caisse par poste, et les caisses électroniques ou banque si besoin (chapitre 5).</li>
+    <li>Un compte pour chaque personne, avec son rôle et sa caisse ; codes remis en main propre.</li>
+    <li>Articles créés ou importés, avec codes-barres et prix vérifiés sur quelques produits (chapitre 6).</li>
+    <li>Stock de départ saisi ; clients à crédit et dettes fournisseurs repris.</li>
+    <li>Dossier de sauvegarde choisi, avec une copie sur clé USB (chapitre 18).</li>
+    <li>Licence activée, ou date de fin de l'essai notée (chapitre 19).</li>
+    <li>Une vente d'essai faite, annulée, puis la caisse clôturée pour que chacun voie le circuit.</li>
+  </ul>
+  <div class="encadre astuce"><span class="t">Le mode formation</span><p>Pour former un nouveau caissier sans toucher aux vrais chiffres : cliquez sur votre nom en bas de la barre verte, puis <b>Mode formation (caisse d'entraînement)</b>. Les ventes faites dans ce mode ne comptent pas.</p></div>
+</section>

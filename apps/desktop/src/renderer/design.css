@@ -435,3 +435,72 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
   .statusbar > :nth-child(n + 4) { display: none; }
   button, input, select { min-height: 40px; }
 }
+
+/* --- 0.94.0 : plus de couleur, moins de blanc --- */
+:root {
+  /* --bg est aussi posé par les couleurs du magasin : on le teinte davantage ici. */
+  --bg: color-mix(in srgb, var(--brand) 14%, #eef2f0) !important;
+  --surface-2: color-mix(in srgb, var(--brand) 7%, white);
+  --row: color-mix(in srgb, var(--brand) 3%, white);
+  --row-alt: color-mix(in srgb, var(--brand) 10%, white);
+  --head-bg: color-mix(in srgb, var(--brand) 32%, white);
+  --side-bg: linear-gradient(180deg, color-mix(in srgb, var(--brand) 70%, black) 0%, color-mix(in srgb, var(--brand) 55%, black) 100%);
+}
+/* Barre latérale teintée de la couleur du magasin ; chaque menu a sa pastille de couleur. */
+.rail { background: var(--side-bg); border-right: 1px solid color-mix(in srgb, var(--brand) 25%, white); }
+.side-head { border-bottom-color: color-mix(in srgb, var(--brand) 22%, white); }
+:is(.rail-item, .rail-link) i {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: #fff;
+  color: var(--c, var(--brand)) !important;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c, var(--brand)) 45%, white);
+}
+:is(.rail-item, .rail-link):hover:not(:disabled) { background: rgba(255, 255, 255, 0.65) !important; }
+:is(.rail-item, .rail-link):hover:not(:disabled) i, :is(.rail-item, .rail-link).open i { background: var(--c, var(--brand)); color: #fff !important; }
+:is(.rail-item, .rail-link).open, :is(.rail-item, .rail-link).on { background: #fff !important; box-shadow: var(--shadow-sm); }
+:is(.rail-item, .rail-link).open::before, :is(.rail-item, .rail-link).on::before { background: var(--c, var(--accent)); }
+.side-search { background: rgba(255, 255, 255, 0.7) !important; border-color: color-mix(in srgb, var(--brand) 22%, white) !important; }
+.side-user-wrap { border-top-color: color-mix(in srgb, var(--brand) 22%, white); }
+.side-user:hover, .side-toggle:hover { background: rgba(255, 255, 255, 0.65) !important; }
+.side-user b { background: var(--brand); color: var(--brand-ink, #fff); }
+/* Barre foncée : texte blanc, pastilles d'icônes blanches pour garder la couleur de chaque menu. */
+.rail { border-right-color: rgba(0, 0, 0, 0.25); }
+.side-head, .side-user-wrap { border-color: rgba(255, 255, 255, 0.16) !important; }
+.side-brand b, .side-brand small { color: #fff; }
+.side-brand small { opacity: 0.8; }
+.rail :is(.rail-item, .rail-link), .rail .side-user, .rail .side-toggle { color: #fff !important; }
+.rail .rail-chev { color: rgba(255, 255, 255, 0.75); }
+.rail :is(.rail-item, .rail-link):hover:not(:disabled), .rail .side-user:hover, .rail .side-toggle:hover { background: rgba(255, 255, 255, 0.14) !important; color: #fff !important; }
+.rail :is(.rail-item, .rail-link).open, .rail :is(.rail-item, .rail-link).on { background: #fff !important; color: var(--ink) !important; }
+.rail :is(.rail-item, .rail-link).open .rail-chev, .rail :is(.rail-item, .rail-link).on .rail-chev { color: var(--muted); }
+.rail :is(.rail-item, .rail-link).open::before, .rail :is(.rail-item, .rail-link).on::before { background: #fff; }
+.rail .side-search { background: rgba(255, 255, 255, 0.12) !important; border-color: rgba(255, 255, 255, 0.22) !important; }
+.rail .rail-kbd { background: rgba(255, 255, 255, 0.15); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
+.rail .side-user .rail-label, .rail .side-user small { color: #fff; }
+.rail .side-user b { background: #fff; color: var(--brand); }
+
+/* Barre du haut et barre d'état légèrement teintées */
+.topbar { background: color-mix(in srgb, var(--brand) 5%, white); border-bottom-color: color-mix(in srgb, var(--brand) 18%, white); }
+.statusbar { background: color-mix(in srgb, var(--brand) 10%, white); border-top-color: color-mix(in srgb, var(--brand) 18%, white); }
+
+/* Tableaux : en-tête coloré, lignes alternées, survol marqué */
+table.list { border-color: color-mix(in srgb, var(--brand) 18%, white); }
+table.list thead th, table.list th { background: var(--head-bg); color: var(--ink); font-weight: 650; border-bottom: 1px solid color-mix(in srgb, var(--brand) 25%, white); }
+/* :where() garde ces fonds plus faibles que ceux des lignes marquées (sélection, alerte…). */
+:where(table.list) > tbody > tr { background: var(--row); }
+:where(table.list) > tbody > tr:nth-child(even) { background: var(--row-alt); }
+table.list tbody tr:hover { background: color-mix(in srgb, var(--brand) 16%, white); }
+table.list tr.total td { background: var(--head-bg); }
+
+/* Cartes et fenêtres : un liseré de couleur en haut, fond des pages teinté */
+.card, section.card { border-color: color-mix(in srgb, var(--brand) 14%, white); border-top: 3px solid color-mix(in srgb, var(--brand) 55%, white); }
+.mdi > .window { background: var(--bg); }
+.tabs { border-bottom-color: color-mix(in srgb, var(--brand) 20%, white); }
+
+/* Accueil : cartes teintées, pastilles des accès rapides en couleur */
+.home .myday { background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 22%, white), color-mix(in srgb, var(--brand) 6%, white)); border-color: color-mix(in srgb, var(--brand) 28%, white); }
+.home .day-tasks, .home .home-drafts { border-top: 3px solid var(--warn); }
+.role-tiles button { background: color-mix(in srgb, var(--brand) 7%, white); border-color: color-mix(in srgb, var(--brand) 18%, white); }
+.role-tiles button:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 10%, white); }
+.role-tiles .tile-icon { background: color-mix(in srgb, var(--brand) 18%, white); }
+html.theme-contrast { --bg: #ffffff !important; }

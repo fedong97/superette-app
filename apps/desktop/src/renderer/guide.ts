@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.94.0',
+    items: [
+      "Interface plus colorée : barre latérale teintée, icônes des menus en couleur, tableaux avec en-tête coloré et lignes alternées, fonds de page moins blancs.",
+    ],
+  },
+  {
     version: '0.93.0',
     items: [
       "Barre latérale plus étroite : plus de place pour les fenêtres.",

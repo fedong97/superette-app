@@ -1,7 +1,11 @@
-"""Fait la voix off du guide vidéo : un .wav par texte, avec Piper (voix française hors ligne).
+"""Fait la voix off du guide vidéo : un .wav par texte, avec Kokoro (voix française « ff_siwis »,
+hors ligne, licence Apache 2.0).
 
-    pip install piper-tts
-    python3 -I docs/guide-video/voix.py BRUT/chapitres.json VOIX MODELE.onnx
+    pip install kokoro-onnx soundfile
+    python3 -I docs/guide-video/voix.py BRUT/chapitres.json VOIX DOSSIER_DU_MODELE
+
+DOSSIER_DU_MODELE contient kokoro-v1.0.onnx et voices-v1.0.bin
+(https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0).
 
 VOIX reçoit les .wav (nommés comme les attend monter.py) et durees.json ; refilmer avec
 VOIX=... cale chaque étape sur la durée de sa voix.
@@ -9,9 +13,16 @@ VOIX=... cale chaque étape sur la durée de sa voix.
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import wave
+
+import numpy as np
+import soundfile as sf
+from kokoro_onnx import Kokoro
+
+VOIX_KOKORO = 'ff_siwis'
+VITESSE = 1.0
+SILENCE = 0.25  # entre deux phrases d'un même texte
 
 
 def nom_voix(texte):
@@ -27,8 +38,18 @@ def a_dire(texte):
     return texte
 
 
+def parler(kokoro, texte):
+    """Phrase par phrase, avec un court silence entre elles : le débit reste posé."""
+    morceaux, sr = [], 24000
+    for phrase in [p.strip() for p in texte.replace('?', '?|').replace('!', '!|').replace('. ', '.|').split('|') if p.strip()]:
+        s, sr = kokoro.create(phrase, voice=VOIX_KOKORO, speed=VITESSE, lang='fr-fr')
+        morceaux += [s, np.zeros(int(sr * SILENCE), dtype=s.dtype)]
+    return np.concatenate(morceaux[:-1]), sr
+
+
 def main():
     chapitres, sortie, modele = sys.argv[1], sys.argv[2], sys.argv[3]
+    kokoro = Kokoro(os.path.join(modele, 'kokoro-v1.0.onnx'), os.path.join(modele, 'voices-v1.0.bin'))
     os.makedirs(sortie, exist_ok=True)
     d = json.load(open(chapitres, encoding='utf-8'))
     durees = {}
@@ -36,8 +57,8 @@ def main():
         for t in c['textes']:
             f = os.path.join(sortie, nom_voix(t['texte']))
             if not os.path.exists(f):
-                subprocess.run([sys.executable, '-m', 'piper', '-m', modele, '-f', f, '--sentence-silence', '0.25'],
-                               input=a_dire(t['texte']).encode('utf-8'), check=True, capture_output=True)
+                son, sr = parler(kokoro, a_dire(t['texte']))
+                sf.write(f, son, sr, subtype='PCM_16')
             with wave.open(f) as w:
                 durees[t['texte']] = round(w.getnframes() / w.getframerate(), 2)
     json.dump(durees, open(os.path.join(sortie, 'durees.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)

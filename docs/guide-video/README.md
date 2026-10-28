@@ -25,10 +25,11 @@ Les scénarios et les textes sont dans `apps/desktop/e2e/video.spec.ts`.
 cd apps/desktop
 VIDEO=1 VIDEOS=$BRUT NODE_OPTIONS= xvfb-run -a npx playwright test video
 
-# 2. La voix : Piper, voix française « siwis » (hors ligne)
-#    pip install piper-tts
-#    modèle : https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-fr-siwis-medium.tar.gz
-python3 -I docs/guide-video/voix.py $BRUT/chapitres.json $VOIX fr-siwis-medium.onnx
+# 2. La voix : Kokoro, voix française « ff_siwis » (hors ligne, licence Apache 2.0)
+#    pip install kokoro-onnx soundfile
+#    modèle (dans $MODELE) : kokoro-v1.0.onnx et voices-v1.0.bin de
+#    https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0
+python3 -I docs/guide-video/voix.py $BRUT/chapitres.json $VOIX $MODELE
 
 # 3. Refilmer en calant chaque étape sur la durée de sa voix, puis monter
 VIDEO=1 VOIX=$VOIX VIDEOS=$BRUT NODE_OPTIONS= xvfb-run -a npx playwright test video

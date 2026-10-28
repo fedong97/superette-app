@@ -1211,6 +1211,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             <div key={name} className="menu">
               <button
                 className={`rail-item ${menu === name ? 'open' : ''}`}
+                style={{ '--c': MENU_COLORS[name] } as React.CSSProperties}
                 title={name}
                 data-tip={RAIL_LABELS[name] ?? name}
                 aria-haspopup="menu"
@@ -1266,6 +1267,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           <div key={name} className="menu">
             <button
               className={`rail-item ${menu === name ? 'open' : ''}`}
+              style={{ '--c': MENU_COLORS[name] } as React.CSSProperties}
               data-tip={RAIL_LABELS[name] ?? name}
               aria-haspopup="menu"
               aria-expanded={menu === name}

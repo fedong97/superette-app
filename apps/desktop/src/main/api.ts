@@ -2497,7 +2497,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ...desk,
         needsPin: !can(user!, ['cashout']),
         canEdit: can(user!, ['cash_desk_edit']),
-        customers: s.customers.listCustomers(c.storeId, { withBalance: true }).map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
+        // Tous les clients : un dépôt d'avance se fait aussi pour un client qui ne doit rien.
+        customers: s.customers.listCustomers(c.storeId).map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
         invoices: s.purchases
           .listInvoices(c.storeId, { unpaid: true })
           .map((i) => ({ id: i.id, kind: i.kind, supplier_name: i.supplier_name, supplier_number: i.supplier_number, number: i.number, balance: i.balance })),

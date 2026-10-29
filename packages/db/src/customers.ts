@@ -551,7 +551,7 @@ export class CustomerService extends Base {
             : r.kind === 'rebate'
               ? 'Ristourne accordée en avoir'
               : r.kind === 'refund'
-                ? 'Avoir remboursé au client'
+                ? 'Avance ou avoir rendu au client'
                 : r.kind === 'rejected'
                   ? 'Chèque revenu impayé (frais compris)'
                 : r.kind === 'offset'

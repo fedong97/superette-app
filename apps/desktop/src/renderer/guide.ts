@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.99.2',
+    items: [
+      "Trésorerie › Opérations de trésorerie : « Encaisser » › Client propose « Dépôt d'avance » (tous les clients), avec le reçu de dépôt imprimé.",
+      "« Décaisser » › « Rendre l'avance d'un client » : on lui rend tout ou partie de son avance, sans dépasser ce qui reste. La sortie compte dans le tiroir, le Z, son relevé et la comptabilité.",
+      "Entrées et sorties de caisse : seulement « Encaisser » ou « Décaisser » et « Plus ▾ ». Imprimer, Décharge, Modifier et Supprimer sont dans « Plus ».",
+    ],
+  },
+  {
     version: '0.99.1',
     items: [
       "Dépôt d'avance du client : son reçu s'affiche maintenant à l'écran après l'encaissement (et s'imprime d'un clic), même sans imprimante de tickets. Clients › Règlements › « Reçu » le montre à nouveau.",

@@ -41,11 +41,12 @@ const OUT_TYPES = [
   ['transfer', 'Reversement / Virement'],
   ['supplier', 'Règlement'],
   ['expense', 'Charge'],
-  ['loan', 'Remboursement / Prêt'],
+  ['refund', "Rendre l'avance d'un client"],
+  ['loan', 'Personnel (avance, salaire)'],
   ['other', 'Autre'],
 ] as const;
 type OutType = (typeof OUT_TYPES)[number][0];
-type LoanType = 'staff_advance' | 'staff_salary' | 'customer_refund';
+type LoanType = 'staff_advance' | 'staff_salary';
 
 const nowLabel = () => new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
 const periodFr = (p: string) => new Date(`${p}-15T12:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -135,10 +136,12 @@ export function CashInDialog({ sessionId, onClose, onDone }: { sessionId: string
   const [party, setParty] = useState('');
   const [target, setTarget] = useState('');
   const [print, setPrint] = useState(true);
+  /** Client : règlement de ce qu'il doit, ou dépôt d'avance sur son compte. */
+  const [advance, setAdvance] = useState(false);
   useEffect(() => {
     if (o) setMethod(o.methods[0] as Method);
   }, [o?.register.id]);
-  useEffect(() => setTarget(type === 'other' ? '4711' : ''), [type]);
+  useEffect(() => setTarget(type === 'other' ? '4711' : ''), [type, advance]);
   if (!o) return null;
   const value = parseAmount(amount) ?? 0;
   const owed = o.customers.filter((c) => c.balance > 0);
@@ -159,7 +162,7 @@ export function CashInDialog({ sessionId, onClose, onDone }: { sessionId: string
             const base = { amount: value, method, reference: reference || null, piece: piece || null, label: label || null };
             const input =
               type === 'customer'
-                ? { ...base, type, customerId: target }
+                ? { ...base, type, customerId: target, advance }
                 : type === 'supplier'
                   ? { ...base, type, invoiceId: target }
                   : type === 'staff'
@@ -183,6 +186,29 @@ export function CashInDialog({ sessionId, onClose, onDone }: { sessionId: string
           ))}
         </div>
         {type === 'customer' && (
+          <div className="desk-types sub">
+            <label>
+              <input type="radio" name="in-customer" checked={!advance} onChange={() => setAdvance(false)} /> Règlement de ce qu'il doit
+            </label>
+            <label>
+              <input type="radio" name="in-customer" checked={advance} onChange={() => setAdvance(true)} /> Dépôt d'avance
+            </label>
+          </div>
+        )}
+        {type === 'customer' && advance && (
+          <Field label="Client qui dépose une avance" hint="Ses achats sur son compte (« Compte client » à la caisse) seront payés par cette avance.">
+            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">Choisir…</option>
+              {o.customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.balance > 0 ? ` · doit ${fcfa(c.balance)}` : c.balance < 0 ? ` · avance ${fcfa(-c.balance)}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {type === 'customer' && !advance && (
           <Field label="Client qui règle" hint={owed.length ? undefined : 'Aucun client ne doit d’argent en ce moment.'}>
             <select value={target} onChange={(e) => choose(e.target.value, owed.find((c) => c.id === e.target.value)?.balance)}>
               <option value="">Choisir…</option>
@@ -314,11 +340,11 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
                     ? { ...base, type, categoryId: target, beneficiary: party || null }
                     : type === 'other'
                       ? { ...base, type, accountId: target, party: party || null }
-                      : loan === 'staff_advance'
-                        ? { ...base, type: loan, staffId: target }
-                        : loan === 'staff_salary'
-                          ? { ...base, type: loan, salaryId: target }
-                          : { ...base, type: loan, customerId: target };
+                      : type === 'refund'
+                        ? { ...base, type: 'customer_refund' as const, customerId: target }
+                        : loan === 'staff_advance'
+                          ? { ...base, type: loan, staffId: target }
+                          : { ...base, type: loan, salaryId: target };
             const r = await call('cashdesk.out', sessionId, input, o.needsPin || overCeiling ? pin : undefined);
             toast.ok('Sortie enregistrée');
             if (print) {
@@ -394,7 +420,6 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
                 [
                   ['staff_advance', 'Avance ou prêt à un collaborateur'],
                   ['staff_salary', "Salaire d'un collaborateur"],
-                  ['customer_refund', 'Avoir remboursé à un client'],
                 ] as const
               ).map(([k, l]) => (
                 <label key={k}>
@@ -428,19 +453,19 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
                 </select>
               </Field>
             )}
-            {loan === 'customer_refund' && (
-              <Field label="Client à rembourser" hint={credits.length ? undefined : 'Aucun client n’a d’avoir sur son compte.'}>
-                <select value={target} onChange={(e) => choose(e.target.value, -(credits.find((c) => c.id === e.target.value)?.balance ?? 0))}>
-                  <option value="">Choisir…</option>
-                  {credits.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} · avoir {fcfa(-c.balance)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
           </>
+        )}
+        {type === 'refund' && (
+          <Field label="Client à qui rendre son avance" hint={credits.length ? 'On ne rend pas plus que ce qui reste sur son compte.' : 'Aucun client n’a d’avance (ni d’avoir) sur son compte.'}>
+            <select value={target} onChange={(e) => choose(e.target.value, -(credits.find((c) => c.id === e.target.value)?.balance ?? 0))}>
+              <option value="">Choisir…</option>
+              {credits.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} · avance {fcfa(-c.balance)}
+                </option>
+              ))}
+            </select>
+          </Field>
         )}
         {type === 'other' && (
           <div className="desk-head two">
@@ -480,9 +505,10 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
 type ActionDialog = null | 'edit' | 'backdate' | 'delete' | 'unprint' | 'to-supplier' | 'to-customer';
 
 /**
- * Boutons d'un volet sur la ligne choisie. Entrées : imprimer le reçu,
- * modifier, supprimer. Sorties : décharge, impression du bon, modifier,
- * supprimer. Le reste (A4, antidater, convertir…) est dans « Plus ▾ ».
+ * « Plus ▾ » d'un volet, sur la ligne choisie : à côté d'« Encaisser » ou de
+ * « Décaisser », c'est le seul autre bouton. Entrées : imprimer le reçu,
+ * modifier, supprimer, puis A4 et antidater. Sorties : imprimer, décharge,
+ * modifier, supprimer, puis A4, antidater et convertir.
  */
 export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT'; row: DeskRow | null; desk: DeskProps }) {
   const toast = useToast();
@@ -512,22 +538,23 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
   const print = (format: 'ticket' | 'a4') => run(() => call('cashdesk.print', desk.sessionId, row!.source, row!.id, format));
   return (
     <span className="desk-action-buttons">
-      {direction === 'IN' ? (
-        item('Imprimer le reçu', Boolean(row), () => print('ticket'))
-      ) : (
-        <>
-          {item('Décharge', Boolean(row && !row.closing), () => run(() => call('cashdesk.discharge', desk.sessionId, row!.source, row!.id)))}
-          {item('Imprimer', Boolean(row && !row.closing), () => print('ticket'))}
-        </>
-      )}
-      {item('Modifier', editable, () => setDialog('edit'), why ?? onlyDesk)}
-      {item('Supprimer', editable, () => setDialog('delete'), why ?? onlyDesk)}
       <div className="menu desk-action" ref={ref}>
-        <button type="button" onClick={() => setOpen(!open)}>
+        <button type="button" onClick={() => setOpen(!open)} title={row ? undefined : 'Choisissez d’abord une ligne, puis « Plus »'}>
           Plus ▾
         </button>
         {open && (
           <div className="menu-drop right">
+            {direction === 'IN' ? (
+              item('Imprimer le reçu', Boolean(row), () => print('ticket'))
+            ) : (
+              <>
+                {item('Imprimer le bon de sortie', Boolean(row && !row.closing), () => print('ticket'))}
+                {item('Décharge', Boolean(row && !row.closing), () => run(() => call('cashdesk.discharge', desk.sessionId, row!.source, row!.id)))}
+              </>
+            )}
+            {item('Modifier', editable, () => (setOpen(false), setDialog('edit')), why ?? onlyDesk)}
+            {item('Supprimer', editable, () => (setOpen(false), setDialog('delete')), why ?? onlyDesk)}
+            <hr />
             {direction === 'IN' ? (
               <>
                 {item('Reçu en page A4', Boolean(row), () => print('a4'))}

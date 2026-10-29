@@ -192,7 +192,7 @@ describe('Encaisser et Décaisser', () => {
   it('remboursement client : seulement l’avoir qu’il a sur son compte', () => {
     const c = s.customers.saveCustomer(adminId, { name: 'Boutique Bonamoussadi', creditLimit: 100_000 });
     const day = open();
-    expect(() => s.cashdesk.cashOut(ctx, day.cash, { type: 'customer_refund', customerId: c.id, amount: 1_000, method: 'CASH' }, adminId)).toThrow(/pas d'avoir/);
+    expect(() => s.cashdesk.cashOut(ctx, day.cash, { type: 'customer_refund', customerId: c.id, amount: 1_000, method: 'CASH' }, adminId)).toThrow(/ni avance ni avoir/);
     // Il paie d'avance 7 000 sur un achat à crédit de 5 000 : avoir de 2 000.
     s.pos.completeSale(ctx, { lines: [{ articleId: riz, qty: 1_000 }], payments: [{ method: 'CUSTOMER_CREDIT', amount: 5_000 }], customerId: c.id, creditAuthorizedBy: adminId });
     s.customers.receivePayment(ctx, { customerId: c.id, method: 'CASH', amount: 5_000, sessionId: day.cash });
@@ -203,5 +203,22 @@ describe('Encaisser et Décaisser', () => {
     s.cashdesk.cashOut(ctx, day.cash, { type: 'customer_refund', customerId: c.id, amount: 5_000, method: 'CASH' }, adminId);
     expect(s.customers.account(storeId, c.id).balance).toBe(0);
     expect(s.customers.statement(storeId, c.id).lines.at(-1)).toMatchObject({ kind: 'refund', debit: 5_000 });
+  });
+
+  it("dépôt d'avance encaissé en trésorerie, puis rendu au client par « Décaisser »", () => {
+    const c = s.customers.saveCustomer(adminId, { name: 'Hôtel La Falaise' });
+    const day = open();
+    const dep = s.cashdesk.cashIn(ctx, day.cash, { type: 'customer', customerId: c.id, advance: true, amount: 20_000, method: 'CASH' });
+    expect(dep.source).toBe('customer_payment');
+    expect(s.customers.getPayment(dep.id).advance).toBe(1);
+    expect(s.customers.account(storeId, c.id).balance).toBe(-20_000);
+    // Sans « dépôt d'avance », on n'encaisse pas plus que ce qu'il doit.
+    expect(() => s.cashdesk.cashIn(ctx, day.cash, { type: 'customer', customerId: c.id, amount: 1_000, method: 'CASH' })).toThrow(/dépasse/);
+    later(1);
+    expect(() => s.cashdesk.cashOut(ctx, day.cash, { type: 'customer_refund', customerId: c.id, amount: 25_000, method: 'CASH' }, adminId)).toThrow(/20000 FCFA d'avance/);
+    const out = s.cashdesk.cashOut(ctx, day.cash, { type: 'customer_refund', customerId: c.id, amount: 15_000, method: 'CASH' }, adminId);
+    expect(s.cashdesk.row(day.cash, out.source, out.id).row).toMatchObject({ amount: 15_000, label: expect.stringContaining('Avance rendue à Hôtel La Falaise') });
+    expect(s.customers.account(storeId, c.id).balance).toBe(-5_000);
+    expect(s.customers.statement(storeId, c.id).lines.at(-1)).toMatchObject({ kind: 'refund', label: 'Avance ou avoir rendu au client', debit: 15_000 });
   });
 });

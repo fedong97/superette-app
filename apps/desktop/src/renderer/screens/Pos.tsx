@@ -22,7 +22,7 @@ import {
 } from '@superette/core';
 import { type ApiError, type Result, call } from '../api';
 import { askConfirm, Empty, Field, Mascot, Modal, SupervisorPrompt, fcfa, parseAmount, parseQty, qty, useLoad, useStoreSettings, useToast, has } from '../ui';
-import { type Customer, CustomerPaymentDialog, CustomerPickDialog } from './customerDialogs';
+import { type Customer, CustomerPaymentDialog, CustomerPickDialog, CustomerReceiptDialog } from './customerDialogs';
 import { ExpenseDialog } from './Expenses';
 import { Statement } from './Customers';
 import { OrderPickDialog } from './Orders';
@@ -109,7 +109,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'promo' | 'outage' | 'reason' | 'counter' | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
+type Dialog = null | 'promo' | 'outage' | 'reason' | 'counter' | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'custAdvance' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
 type PrintChoice = 'none' | 'ticket' | 'listing';
@@ -196,6 +196,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const [selected, setSelected] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
+  /** Reçu de règlement client à montrer à l'écran (imprimante des tickets désactivée). */
+  const [paidReceipt, setPaidReceipt] = useState<string | null>(null);
   const [scanned, setScanned] = useState<Result<'pos.sale'> | null>(null);
   const [returnOf, setReturnOf] = useState<Result<'pos.sale'> | null>(null);
   const [pane, setPane] = useState<Pane>('lines');
@@ -1100,6 +1102,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <option value="cancel">Annuler un ticket</option>
         <option value="return">Retour client</option>
         <option value="custPay">Règlement client (crédit)</option>
+        <option value="custAdvance">Dépôt d'avance client</option>
         <option value="quote">Facturer un devis / proforma</option>
         <option value="order">Charger une commande client</option>
         <option value="expense">Dépense payée en caisse</option>
@@ -1164,16 +1167,22 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         }
       />
     )}
-    {dialog === 'custPay' && (
+    {(dialog === 'custPay' || dialog === 'custAdvance') && (
       <CustomerPaymentDialog
         atRegister
+        // Dépôt d'avance : pour le client déjà choisi sur le ticket, sinon on le choisit dans la fenêtre.
+        advance={dialog === 'custAdvance'}
+        customer={dialog === 'custAdvance' ? customer : null}
         onClose={() => setDialog(null)}
         onPaid={(id) => {
           setDialog(null);
-          call('customers.printReceipt', id).catch(toast.error);
+          // Sans imprimante de tickets, le reçu s'affiche à l'écran pour ne pas laisser le client sans preuve.
+          account.reload();
+          call('customers.printReceipt', id).then((printed) => !printed && setPaidReceipt(id), toast.error);
         }}
       />
     )}
+    {paidReceipt && <CustomerReceiptDialog paymentId={paidReceipt} onClose={() => setPaidReceipt(null)} />}
     {dialog === 'order' && <OrderPickDialog onClose={() => setDialog(null)} onPick={(id) => void loadOrder(id)} />}
     {dialog === 'quote' && <QuotePickDialog onClose={() => setDialog(null)} onPick={(id) => void loadQuote(id)} />}
     {dialog === 'expense' && (

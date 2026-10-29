@@ -943,7 +943,13 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
 
     async customerReceipt(paymentId) {
       lang = customerLang(s.customers.getPayment(paymentId).customer_id);
-      await printReceipt(s.receipts.customerReceipt(paymentId), false);
+      return printReceipt(s.receipts.customerReceipt(paymentId), false);
+    },
+
+    customerReceiptHtml(paymentId) {
+      lang = customerLang(s.customers.getPayment(paymentId).customer_id);
+      const body = receiptToHtml(translateReceipt(s.receipts.customerReceipt(paymentId), lang));
+      return `<!doctype html><html><head><meta charset="utf-8"><style>${STYLE}</style></head><body>${body}</body></html>`;
     },
 
     async expenseVoucher(expenseId) {

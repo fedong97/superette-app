@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.99.1',
+    items: [
+      "Dépôt d'avance du client : son reçu s'affiche maintenant à l'écran après l'encaissement (et s'imprime d'un clic), même sans imprimante de tickets. Clients › Règlements › « Reçu » le montre à nouveau.",
+      "À la caisse, Actions › « Dépôt d'avance client » encaisse l'avance du client choisi sur le ticket (ou d'un autre client), sans quitter l'écran de saisie.",
+    ],
+  },
+  {
     version: '0.99.0',
     items: [
       "Nouveau PC après une panne ou un vol : l'écran de bienvenue propose « Restaurer une sauvegarde (clé USB, OneDrive…) », sans créer de magasin provisoire. Connectez-vous ensuite avec vos identifiants habituels.",

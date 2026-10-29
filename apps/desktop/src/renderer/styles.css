@@ -1171,6 +1171,7 @@ p.substitute { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; b
 .badge-parts label { font-weight: 600; }
 .badge-preview { display: flex; flex-direction: column; gap: 8px; }
 .badge-frame { width: 100%; height: 520px; border: 1px solid var(--line); border-radius: 10px; background: #e9ecef; }
+.receipt-frame { display: block; width: 330px; max-width: 100%; height: 420px; margin: 0 auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .user-photo { display: flex; align-items: center; gap: 12px; }
 .user-photo-box { width: 72px; height: 96px; border-radius: 8px; border: 1px solid var(--line); background: var(--brand-pale); display: grid; place-items: center; overflow: hidden; font-size: 11px; text-align: center; }
 .user-photo-box img { width: 100%; height: 100%; object-fit: cover; }

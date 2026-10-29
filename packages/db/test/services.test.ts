@@ -221,7 +221,7 @@ describe('caisse', () => {
     s.pos.openSession(cashierCtx, 0);
     const input = { lines: [{ articleId: riz.id, qty: 1000, discount: 500 }], payments: [{ method: 'CASH' as const, amount: 4000 }] };
     expect(() => s.pos.completeSale(cashierCtx, input)).toThrow('validation du gérant');
-    expect(s.pos.completeSale(cashierCtx, { ...input, discountAuthorizedBy: managerId }).total_ttc).toBe(4000);
+    expect(s.pos.completeSale(cashierCtx, { ...input, discountAuthorizedBy: managerId, discountReason: 'Geste commercial' }).total_ttc).toBe(4000);
   });
 
   it('annule sous code superviseur et remet en stock', () => {

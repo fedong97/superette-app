@@ -27,6 +27,10 @@ export interface CounterPayload {
   optionsBy: string | null;
   /** Panier préparé au rayon sur le téléphone, devenu facture à la caisse. */
   cartNumber?: number | null;
+  /** Motif des remises choisi par le vendeur. */
+  discountReason?: string | null;
+  /** Commercial de terrain de la vente. */
+  fieldRepId?: string | null;
 }
 
 export type CounterStatus = 'waiting' | 'editing' | 'returned' | 'paying' | 'paid' | 'cancelled';
@@ -128,6 +132,8 @@ export class CounterService extends Base {
       warehouseId: p0.warehouseId,
       // Chaque facture a fait valider ses remises chez le vendeur.
       discountAuthorizedBy: invoices.map((i) => i.payload!.discountBy).find(Boolean) ?? null,
+      discountReason: invoices.map((i) => i.payload!.discountReason).find(Boolean) ?? null,
+      fieldRepId: invoices.map((i) => i.payload!.fieldRepId).find(Boolean) ?? null,
       sellerId: seller,
     };
   }

@@ -24,6 +24,9 @@ export interface SyncState {
   conflicts: number;
   lastSyncAt: string | null;
   lastError: string | null;
+  /** Dernier état de la synchronisation : tout concordait (true), des écarts (false), jamais vérifié (null). */
+  checkOk: boolean | null;
+  checkAt: string | null;
 }
 
 /** Entités stockées telles quelles dans une table (clé `id`). */
@@ -101,6 +104,12 @@ const TABLES: Record<string, string> = {
   price_schedule: 'price_schedules',
   recurring_order: 'recurring_orders',
   store_transfer_request: 'store_transfer_requests',
+  expense_attachment: 'expense_attachments',
+  field_rep: 'field_reps',
+  report_preset: 'report_presets',
+  outage: 'outages',
+  promo_code: 'promo_codes',
+  stock_anomaly_decision: 'stock_anomaly_decisions',
 };
 
 /** Entités qui ne changent plus une fois créées : un doublon reçu est ignoré. */
@@ -132,6 +141,10 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   // Deux PC qui appliquent les mêmes prix programmés : « appliqué » ne redevient pas « à venir ».
   price_schedules: { pending: 0, applied: 1, cancelled: 1 },
   store_transfer_requests: { requested: 0, shipped: 1, refused: 2, cancelled: 2, received: 3 },
+  // Une coupure clôturée ou annulée ne se rouvre pas.
+  outages: { open: 0, closed: 1, cancelled: 1 },
+  // Un justificatif retiré ne revient pas.
+  expense_attachments: { active: 0, deleted: 1 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
@@ -170,12 +183,65 @@ const RESEND: { entity: string; ids: string; store?: boolean }[] = [
   { entity: 'customer', ids: 'SELECT id FROM customers' },
   { entity: 'account', ids: 'SELECT id FROM accounts' },
   { entity: 'expense_category', ids: 'SELECT id FROM expense_categories' },
+  { entity: 'field_rep', ids: 'SELECT id FROM field_reps' },
+  { entity: 'promo_code', ids: 'SELECT id FROM promo_codes' },
   { entity: 'promotion', ids: 'SELECT id FROM promotions' },
   { entity: 'rebate_rules', ids: "SELECT DISTINCT COALESCE(customer_id, 'base') FROM rebate_rules" },
   { entity: 'recipe', ids: 'SELECT id FROM recipes' },
   { entity: 'stock_level', ids: "SELECT s.warehouse_id || ':' || s.article_id FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ?", store: true },
   { entity: 'inventory', ids: 'SELECT id FROM inventories WHERE store_id = ?', store: true },
 ];
+
+/**
+ * Ce que l'état de la synchronisation compare entre le PC et le serveur : les
+ * données de référence et les principaux documents du magasin.
+ */
+const CHECK: { entity: string; label: string; ids: string; store?: boolean }[] = [
+  { entity: 'store', label: 'Magasins', ids: 'SELECT id FROM stores' },
+  { entity: 'warehouse', label: 'Dépôts', ids: 'SELECT id FROM warehouses' },
+  { entity: 'register', label: 'Caisses', ids: 'SELECT id FROM registers' },
+  { entity: 'user', label: 'Utilisateurs', ids: 'SELECT id FROM users' },
+  { entity: 'department', label: 'Rayons', ids: 'SELECT id FROM departments' },
+  { entity: 'family', label: 'Familles', ids: 'SELECT id FROM families' },
+  { entity: 'article', label: 'Articles', ids: 'SELECT id FROM articles' },
+  { entity: 'supplier', label: 'Fournisseurs', ids: 'SELECT id FROM suppliers' },
+  { entity: 'customer', label: 'Clients', ids: 'SELECT id FROM customers' },
+  { entity: 'expense_category', label: 'Catégories de dépenses', ids: 'SELECT id FROM expense_categories' },
+  { entity: 'promotion', label: 'Promotions', ids: 'SELECT id FROM promotions' },
+  { entity: 'promo_code', label: 'Codes de réduction', ids: 'SELECT id FROM promo_codes' },
+  { entity: 'field_rep', label: 'Commerciaux de terrain', ids: 'SELECT id FROM field_reps' },
+  { entity: 'sale', label: 'Ventes et retours', ids: 'SELECT id FROM sales WHERE store_id = ?', store: true },
+  { entity: 'cash_session', label: 'Journées de caisse', ids: 'SELECT id FROM cash_sessions WHERE store_id = ?', store: true },
+  { entity: 'expense', label: 'Dépenses', ids: 'SELECT id FROM expenses WHERE store_id = ?', store: true },
+  { entity: 'reception', label: 'Réceptions', ids: 'SELECT id FROM receptions WHERE store_id = ?', store: true },
+  { entity: 'inventory', label: 'Inventaires', ids: 'SELECT id FROM inventories WHERE store_id = ?', store: true },
+  { entity: 'outage', label: 'Coupures', ids: 'SELECT id FROM outages WHERE store_id = ?', store: true },
+];
+
+/** Une ligne de l'état de la synchronisation : une sorte de données sur le PC et sur le serveur. */
+export interface SyncCheckRow {
+  entity: string;
+  label: string;
+  local: number;
+  server: number;
+  /** Ici, pas sur le serveur (et pas en attente d'envoi) : à renvoyer. */
+  missing_on_server: number;
+  /** Sur le serveur, pas ici : supprimé sur ce PC, ou pas encore reçu. */
+  only_on_server: number;
+  /** En attente d'envoi dans la file. */
+  pending: number;
+}
+
+export interface SyncCheck {
+  at: string;
+  /** Tout concorde : rien ne manque d'un côté ni de l'autre, rien n'attend. */
+  ok: boolean;
+  rows: SyncCheckRow[];
+  pending: number;
+  conflicts: number;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
 
 /**
  * Synchronisation avec le serveur central, côté poste.
@@ -219,6 +285,8 @@ export class SyncService extends Base {
       conflicts: this.db.prepare('SELECT COUNT(*) FROM sync_conflicts').pluck().get() as number,
       lastSyncAt: this.get('sync.lastSyncAt'),
       lastError: this.get('sync.lastError'),
+      checkOk: this.lastCheck()?.ok ?? null,
+      checkAt: this.lastCheck()?.at ?? null,
     };
   }
 
@@ -317,6 +385,36 @@ export class SyncService extends Base {
       // Le stock part comme celui de `publishStock` : visible de tous les magasins.
       storeId: r.entity === 'inventory' ? storeId : null,
     }));
+  }
+
+  /** Identifiants à comparer avec le serveur pour l'état de la synchronisation. */
+  checkTargets(storeId: string | null): { entity: string; label: string; ids: string[]; storeId: string | null }[] {
+    return CHECK.filter((r) => !r.store || storeId).map((r) => ({
+      entity: r.entity,
+      label: r.label,
+      ids: (r.store ? this.db.prepare(r.ids).pluck().all(storeId) : this.db.prepare(r.ids).pluck().all()) as string[],
+      storeId: r.store ? storeId : null,
+    }));
+  }
+
+  /** Données d'une sorte qui attendent dans la file d'envoi. */
+  pendingIds(entity: string): Set<string> {
+    return new Set(this.db.prepare('SELECT entity_id FROM outbox WHERE sent_at IS NULL AND entity = ?').pluck().all(entity) as string[]);
+  }
+
+  /** Dernier état de la synchronisation calculé (voyant de la barre d'état). */
+  lastCheck(): SyncCheck | null {
+    const raw = this.get('sync.lastCheck');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as SyncCheck;
+    } catch {
+      return null;
+    }
+  }
+
+  saveCheck(check: SyncCheck | null): void {
+    this.set('sync.lastCheck', check ? JSON.stringify(check) : null);
   }
 
   /** Remet des données dans la file d'envoi (sauf celles qui y attendent déjà). */
@@ -667,9 +765,13 @@ export class SyncService extends Base {
     switch (event.entity) {
       case 'expense': {
         // Une annulation est définitive : une version plus ancienne ne la défait pas.
-        const local = this.db.prepare('SELECT status FROM expenses WHERE id = ?').pluck().get(event.entityId);
-        if (local === 'cancelled') return;
-        this.upsert('expenses', p);
+        const local = this.db.prepare('SELECT status, approval, approved_by, approved_at, approval_note FROM expenses WHERE id = ?').get(event.entityId) as
+          | { status: string; approval: string; approved_by: string | null; approved_at: string | null; approval_note: string | null }
+          | undefined;
+        if (local?.status === 'cancelled') return;
+        // La décision du gérant (approuvée, refusée) ne repasse pas « à approuver » avec une version plus ancienne.
+        const keep = local && local.approval !== 'pending' && (p['approval'] ?? 'pending') === 'pending';
+        this.upsert('expenses', keep ? { ...p, approval: local.approval, approved_by: local.approved_by, approved_at: local.approved_at, approval_note: local.approval_note } : p);
         return;
       }
       case 'bank_line': {

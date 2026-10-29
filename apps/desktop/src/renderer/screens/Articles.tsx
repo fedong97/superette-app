@@ -227,6 +227,7 @@ export function ArticleForm({
     // Nouveau produit : stock d'alerte proposé par les paramètres du magasin.
     alertQty: article ? milli(article.alert_qty) : settings.defaultAlertQty ? String(settings.defaultAlertQty) : '',
     maxQty: milli(article?.max_qty),
+    maxDiscountPct: article?.max_discount_pct == null ? '' : String(article.max_discount_pct),
     active: article ? article.active === 1 : true,
   });
   const [printing, setPrinting] = useState(false);
@@ -353,6 +354,7 @@ export function ArticleForm({
           minQty: opt(f.minQty),
           alertQty: opt(f.alertQty),
           maxQty: opt(f.maxQty),
+          maxDiscountPct: f.maxDiscountPct.trim() === '' ? null : Math.round(Number(f.maxDiscountPct.replace(',', '.'))),
           active: f.active,
           barcodes: barcodes.filter((b) => b.code.trim()).map((b) => ({ code: b.code, packQty: parseQty(b.pack) ?? 1000 })),
           unitName: lv.unitName,
@@ -533,6 +535,9 @@ export function ArticleForm({
           </Field>
           <Field label="Stock maximum">
             <input inputMode="decimal" value={f.maxQty} onChange={set('maxQty')} />
+          </Field>
+          <Field label="Remise maxi (%)" hint="Vide = règle du magasin. Au-delà, le code du gérant est demandé à la caisse">
+            <input inputMode="numeric" value={f.maxDiscountPct} onChange={set('maxDiscountPct')} placeholder="Règle du magasin" />
           </Field>
           <Field label="Article de remplacement" hint="Proposé en caisse quand celui-ci est épuisé">
             <SubstituteInput value={substitute} exclude={article?.id ?? null} onChange={setSubstitute} />

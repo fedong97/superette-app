@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
+import { FieldReps } from './FieldReps';
 import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, useLoad, useStoreSettings, useToast, useFind } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
@@ -11,7 +12,7 @@ import { InvoicePreview } from './docPreview';
 import { SummaryInvoices } from './SummaryInvoices';
 
 type User = NonNullable<Result<'app.state'>['user']>;
-export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | 'summary' | 'offsets' | 'consignment' | `rebates-${RebatesTab}`;
+export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | 'summary' | 'offsets' | 'consignment' | 'field-reps' | `rebates-${RebatesTab}`;
 
 /** Clients : fiches, comptes à crédit, balance âgée et règlements reçus. */
 export function Customers({ user, initialTab = 'list' }: { user: User; initialTab?: CustomersTab }) {
@@ -33,6 +34,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
     ...(has(user, 'rebates') ? ([['rebates', 'Ristournes']] as [CustomersTab, string][]) : []),
     ...(has(user, 'account_offsets') ? ([['offsets', 'Compensations']] as [CustomersTab, string][]) : []),
     ...(has(user, 'consignment') ? ([['consignment', 'Dépôt-vente']] as [CustomersTab, string][]) : []),
+    ...(has(user, 'field_reps') ? ([['field-reps', 'Commerciaux de terrain']] as [CustomersTab, string][]) : []),
   ];
   return (
     <div className="page">
@@ -50,6 +52,7 @@ export function Customers({ user, initialTab = 'list' }: { user: User; initialTa
       {tab === 'rebates' && has(user, 'rebates') && <Rebates user={user} initialTab={rebateTab} />}
       {tab === 'offsets' && has(user, 'account_offsets') && <Offsets />}
       {tab === 'consignment' && has(user, 'consignment') && <Consignment />}
+      {tab === 'field-reps' && has(user, 'field_reps') && <FieldReps />}
     </div>
   );
 }

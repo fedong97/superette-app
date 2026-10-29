@@ -91,6 +91,7 @@ export const PERMISSIONS = {
   voucher_sell: { label: "Vendre un bon d'achat ou une carte cadeau en caisse", group: 'Facturation', type: 'Bouton', roles: POS },
   vouchers: { label: "Bons d'achat : liste, soldes et annulation", group: 'Facturation', type: 'Menu', roles: MANAGE },
   sale_book: { label: 'Saisir les ventes notées sur le carnet pendant une panne', group: 'Facturation', type: 'Bouton', roles: POS },
+  outage_close: { label: 'Clôturer une coupure dont les ventes saisies ne font pas le total noté', group: 'Facturation', type: 'Bouton', roles: MANAGE },
   exit_check: { label: 'Contrôle des tickets à la sortie du magasin (vigile)', group: 'Facturation', type: 'Menu', roles: ['manager', 'cashier', 'seller', 'stock'] },
   exit_report: { label: 'Contrôles de sortie : historique et anomalies', group: 'Facturation', type: 'Menu', roles: MANAGE },
   recurring_orders: { label: 'Commandes répétées des clients pros (chaque semaine)', group: 'Facturation', type: 'Menu', parent: 'customer_orders' },
@@ -131,6 +132,7 @@ export const PERMISSIONS = {
   consignment: { label: 'Dépôt-vente chez les revendeurs : envoyer, contrôler, facturer le vendu', group: 'Fichier des clients', type: 'Menu', roles: MANAGE },
   loyalty_adjust: { label: 'Corriger les points de fidélité d’un client (avec motif)', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
   rebates: { label: 'Ristournes et bonus clients : réglages, constater, accorder et régulariser', group: 'Fichier des clients', type: 'Fonction', roles: MANAGE },
+  field_reps: { label: 'Commerciaux de terrain : fiches, zones et villes', group: 'Fichier des clients', type: 'Menu', roles: MANAGE },
 
   // --- Fichier des fournisseurs -----------------------------------------------
   suppliers: { label: 'Liste et fiches des fournisseurs', group: 'Fichier des fournisseurs', type: 'Menu', roles: BUYING },
@@ -185,6 +187,7 @@ export const PERMISSIONS = {
   stock_adjust: { label: 'Corriger directement le stock (sans demande)', group: 'Gestion des stocks', type: 'Fonction', parent: 'inventory' },
   stock_request: { label: 'Demander une correction de stock', group: 'Gestion des stocks', type: 'Fonction', parent: 'inventory_count' },
   stock_decide: { label: 'Valider ou refuser les demandes de correction de stock', group: 'Gestion des stocks', type: 'Bouton', parent: 'inventory' },
+  stock_anomalies: { label: 'Anomalies de stock à vérifier : voir les cas et décider de la correction', group: 'Gestion des stocks', type: 'Menu', roles: MANAGE },
   ignore_stock: { label: 'Activer « Ignorer la gestion des stocks » (vente sans stock)', group: 'Gestion des stocks', type: 'Fonction', roles: MANAGE },
 
   // --- Transferts de marchandises ----------------------------------------------
@@ -219,6 +222,7 @@ export const PERMISSIONS = {
   promotions: { label: 'Consulter les articles en promotion', group: 'Promotions sur les articles', type: 'Menu', roles: MANAGE },
   promotion_save: { label: 'Ajouter ou modifier une promotion', group: 'Promotions sur les articles', type: 'Fonction', parent: 'promotions' },
   promotion_stop: { label: 'Mettre fin à une promotion ou la réactiver', group: 'Promotions sur les articles', type: 'Fonction', parent: 'promotions' },
+  promo_codes: { label: 'Codes de réduction : créer, arrêter, suivre leur utilisation', group: 'Promotions sur les articles', type: 'Menu', roles: MANAGE },
 
   // --- Suivi des charges -------------------------------------------------------
   expenses: { label: 'Consulter toutes les dépenses', group: 'Suivi des charges', type: 'Menu', roles: ACCOUNTING },
@@ -226,6 +230,7 @@ export const PERMISSIONS = {
   expense_cancel: { label: 'Modifier ou annuler une dépense (avec le code du gérant)', group: 'Suivi des charges', type: 'Bouton', roles: COUNTER },
   expense_categories: { label: 'Fixer les types de charge', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
   charge_plans: { label: 'Définir les charges fixes et constater les charges', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
+  expense_approve: { label: 'Approuver ou refuser les dépenses saisies par les autres', group: 'Suivi des charges', type: 'Fonction', roles: MANAGE },
 
   // --- Personnel ---------------------------------------------------------------
   staff: { label: 'Collaborateurs : fiches et extraits de compte', group: 'Personnel', type: 'Menu', roles: ACCOUNTING },

@@ -29,6 +29,7 @@ const WIPED = [
   'day_task_checks',
   'emoney_movements',
   'exit_checks',
+  'expense_attachments',
   'expenses',
   'gift_vouchers',
   'held_tickets',
@@ -42,6 +43,7 @@ const WIPED = [
   'manual_entries',
   'manual_entry_lines',
   'missed_sales',
+  'outages',
   'mobile_payments',
   'payment_allocations',
   'production_orders',
@@ -61,6 +63,7 @@ const WIPED = [
   'staff_leaves',
   'staff_salaries',
   'staff_warnings',
+  'stock_anomaly_decisions',
   'stock_movements',
   'stock_requests',
   'store_transfer_requests',
@@ -87,7 +90,7 @@ const KEPT_ENTITIES = new Set([
   'vat_rate', 'company', 'store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'department', 'family', 'article', 'store_price',
   'supplier', 'supplier_article', 'customer', 'account', 'expense_category', 'promotion', 'rebate_rules', 'recipe', 'staff', 'staff_agency', 'staff_team',
   'staff_schedule', 'staff_document', 'entrance', 'fingerprint_device', 'charge_plan', 'budget', 'sales_target', 'container', 'agent_account',
-  'price_schedule', 'recurring_order', 'fixed_asset', 'tax_year', 'dsf_disclosure', 'fiscal_year', 'opening_balance',
+  'price_schedule', 'recurring_order', 'field_rep', 'promo_code', 'report_preset', 'fixed_asset', 'tax_year', 'dsf_disclosure', 'fiscal_year', 'opening_balance',
 ]);
 
 /** Compteurs gardés : codes des fiches (articles, clients, fournisseurs, personnel) et codes-barres internes. */

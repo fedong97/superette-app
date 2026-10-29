@@ -71,7 +71,7 @@ describe('téléphone du gérant : accord à distance et alertes', () => {
     const savon = pc.catalogue.saveArticle(admin.id, { name: 'Savon Azur', unit: 'piece', vatRateId: tva, purchasePrice: 250, salePrice: 1_000 }).id;
     pc.stock.receive(ctx, { warehouseId: pc.admin.salesWarehouse(store.id).id, lines: [{ articleId: savon, qty: 3_000, unitCost: 250 }] });
     pc.pos.openSession(ctx, 0);
-    pc.pos.completeSale(ctx, { lines: [{ articleId: savon, qty: 1_000, discount: 400 }], payments: [{ method: 'CASH', amount: 600 }], discountAuthorizedBy: admin.id });
+    pc.pos.completeSale(ctx, { lines: [{ articleId: savon, qty: 1_000, discount: 400 }], payments: [{ method: 'CASH', amount: 600 }], discountAuthorizedBy: admin.id, discountReason: 'Geste commercial' });
     const sale = pc.pos.completeSale(ctx, { lines: [{ articleId: savon, qty: 1_000 }], payments: [{ method: 'CASH', amount: 1_000 }] });
     pc.pos.cancelSale(ctx, sale.id, admin.id, 'erreur');
     pc.pos.completeSale(ctx, { lines: [{ articleId: savon, qty: 2_000 }], payments: [{ method: 'CASH', amount: 2_000 }] });

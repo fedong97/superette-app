@@ -44,6 +44,8 @@ export interface Customer {
   zone: string | null;
   /** Fiche fournisseur du même tiers : ses dettes et créances se compensent. */
   supplier_id: string | null;
+  /** Commercial de terrain qui suit ce client : ses ventes lui sont attribuées. */
+  field_rep_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +72,8 @@ export interface CustomerInput {
   zone?: string | null;
   /** Fournisseur du même tiers ; absent = inchangé. */
   supplierId?: string | null;
+  /** Commercial de terrain qui suit le client ; absent = inchangé. */
+  fieldRepId?: string | null;
 }
 
 export const CUSTOMER_PAYMENT_METHODS = {
@@ -255,8 +259,10 @@ export class CustomerService extends Base {
       article_prices: input.articlePrices === undefined ? (id ? this.getCustomer(id).article_prices : null) : this.pricesJson(input.articlePrices),
       zone: input.zone === undefined ? (id ? this.getCustomer(id).zone : null) : input.zone?.trim().replace(/\s+/g, ' ').toUpperCase() || null,
       supplier_id: input.supplierId === undefined ? (id ? this.getCustomer(id).supplier_id : null) : input.supplierId || null,
+      field_rep_id: input.fieldRepId === undefined ? (id ? this.getCustomer(id).field_rep_id : null) : input.fieldRepId || null,
       updated_at: now,
     };
+    if (values.field_rep_id && !this.db.prepare('SELECT 1 FROM field_reps WHERE id = ?').get(values.field_rep_id)) throw new AppError('Commercial introuvable', 'INVALID');
     if (values.supplier_id && !this.db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(values.supplier_id)) throw new AppError('Fournisseur introuvable', 'INVALID');
     if (values.zone && values.zone.length > 40) throw new AppError('Nom de zone trop long (40 caractères au plus)', 'INVALID');
     if (!(values.price_level in PRICE_LEVELS)) throw new AppError('Tarif inconnu', 'INVALID');
@@ -270,7 +276,7 @@ export class CustomerService extends Base {
             `UPDATE customers SET name = @name, contact = @contact, phone = @phone, email = @email, address = @address,
                taxpayer_number = @taxpayer_number, credit_limit = @credit_limit, payment_terms_days = @payment_terms_days,
                notes = @notes, active = @active, price_level = @price_level, language = @language, family_discounts = @family_discounts,
-               no_cheque = @no_cheque, article_prices = @article_prices, zone = @zone, supplier_id = @supplier_id, updated_at = @updated_at WHERE id = @id`,
+               no_cheque = @no_cheque, article_prices = @article_prices, zone = @zone, supplier_id = @supplier_id, field_rep_id = @field_rep_id, updated_at = @updated_at WHERE id = @id`,
           )
           .run({ ...values, id: customerId });
         if (before.credit_limit !== limit) this.audit(userId, 'customer.credit_limit', 'customer', customerId, { from: before.credit_limit, to: limit });
@@ -285,9 +291,9 @@ export class CustomerService extends Base {
         this.db
           .prepare(
             `INSERT INTO customers (id, code, name, contact, phone, email, address, taxpayer_number, credit_limit, payment_terms_days,
-               notes, active, price_level, language, family_discounts, no_cheque, article_prices, zone, supplier_id, created_at, updated_at)
+               notes, active, price_level, language, family_discounts, no_cheque, article_prices, zone, supplier_id, field_rep_id, created_at, updated_at)
              VALUES (@id, @code, @name, @contact, @phone, @email, @address, @taxpayer_number, @credit_limit, @payment_terms_days,
-               @notes, @active, @price_level, @language, @family_discounts, @no_cheque, @article_prices, @zone, @supplier_id, @created_at, @updated_at)`,
+               @notes, @active, @price_level, @language, @family_discounts, @no_cheque, @article_prices, @zone, @supplier_id, @field_rep_id, @created_at, @updated_at)`,
           )
           .run({ ...values, id: customerId, code: this.number('CLI', 'customer.code'), created_at: now });
       }

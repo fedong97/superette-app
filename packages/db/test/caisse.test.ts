@@ -98,7 +98,7 @@ describe('droits par rôle', () => {
     const { s, ctx, mutzig } = setup();
     const caissier = s.admin.createUser(ctx.userId, { name: 'Awa', login: 'awa', pin: '5678', role: 'cashier', storeId: ctx.storeId });
     const c = { ...ctx, userId: caissier.id };
-    const sell = () => s.pos.completeSale(c, { lines: [{ articleId: mutzig.id, qty: 1000, discount: 100 }], payments: [{ method: 'CASH', amount: 900 }] });
+    const sell = () => s.pos.completeSale(c, { lines: [{ articleId: mutzig.id, qty: 1000, discount: 100 }], discountReason: 'Client fidèle', payments: [{ method: 'CASH', amount: 900 }] });
     expect(sell).toThrow(/validation du gérant/);
     s.admin.saveRights(ctx.userId, 'cashier', ['cash', 'discount']);
     expect(sell().total_ttc).toBe(900);

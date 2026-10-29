@@ -3,6 +3,8 @@
  * Les textes qui portent un nombre ou un nom passent par EN_PATTERNS.
  */
 export const EN: Record<string, string> = {
+  "Trésorerie › Opérations de trésorerie : le menu « Plus ▾ » des entrées et des sorties s'ouvrait hors de la fenêtre et paraissait vide. Il s'ouvre maintenant sous son bouton ; cliquez d'abord sur une ligne du tableau.": "Treasury › Cash operations: the « More ▾ » menu of cash in and cash out opened outside the window and looked empty. It now opens under its button; first click a line in the table.",
+  "Cliquez d'abord sur une ligne du tableau": "First click a line in the table",
   "Trésorerie › Opérations de trésorerie : « Encaisser » › Client propose « Dépôt d'avance » (tous les clients), avec le reçu de dépôt imprimé.": "Treasury › Cash operations: « Take in » › Customer offers « Advance deposit » (all customers), with the deposit receipt printed.",
   "« Décaisser » › « Rendre l'avance d'un client » : on lui rend tout ou partie de son avance, sans dépasser ce qui reste. La sortie compte dans le tiroir, le Z, son relevé et la comptabilité.": "« Pay out » › « Return a customer's advance »: give back all or part of their advance, never more than what is left. The payout counts in the drawer, the Z report, their statement and the accounts.",
   "Entrées et sorties de caisse : seulement « Encaisser » ou « Décaisser » et « Plus ▾ ». Imprimer, Décharge, Modifier et Supprimer sont dans « Plus ».": "Cash in and cash out: only « Take in » or « Pay out » and « More ▾ ». Print, Discharge, Edit and Delete are in « More ».",

@@ -571,6 +571,8 @@ html.large-text { zoom: 1.15; }
 .desk-buttons button { padding: 4px 12px; font-size: 13px; }
 .desk-action-buttons { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .desk-buttons { flex-wrap: wrap; justify-content: flex-end; }
+.desk-action { position: relative; }
+.menu-drop .menu-hint { padding: 6px 10px; }
 .desk-action > button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font-weight: 700; color: var(--text, #14213d); }
 form.desk-form { min-width: 640px; }
 .desk-head { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 10px; }

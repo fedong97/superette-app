@@ -549,7 +549,7 @@ function OfficePayDialog({
           }
         }}
       >
-        <p className="muted">À la caisse, on passe par Opérations de trésorerie › Décaisser › Remboursement / Prêt.</p>
+        <p className="muted">À la caisse, on passe par Opérations de trésorerie › Décaisser › Personnel (avance, salaire).</p>
         <Field label="Montant (FCFA)" hint={salary ? `Reste à payer : ${fcfa(salary.rest)}` : undefined}>
           <input autoFocus inputMode="numeric" className="r" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </Field>

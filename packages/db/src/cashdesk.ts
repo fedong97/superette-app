@@ -95,7 +95,8 @@ interface DeskBase {
 /** « Encaisser » : client, fournisseur (avoir remboursé), personnel (avance remboursée) ou autre. */
 export type CashInInput = DeskBase &
   (
-    | { type: 'customer'; customerId: string }
+    /** `advance` : dépôt d'avance, accepté même si le client ne doit rien. */
+    | { type: 'customer'; customerId: string; advance?: boolean }
     | { type: 'supplier'; invoiceId: string }
     | { type: 'staff'; staffId: string }
     | { type: 'other'; accountId: string; party?: string | null }
@@ -280,9 +281,9 @@ export class CashDeskService extends Base {
     } else if (kind === 'customer_refund') {
       const acc = this.customers.account(ctx.storeId, input.customerId ?? '');
       const credit = Math.max(0, -acc.balance);
-      if (input.amount > credit) throw new AppError(credit ? `Le client n'a que ${credit} FCFA d'avoir` : "Ce client n'a pas d'avoir à rembourser", 'INVALID');
+      if (input.amount > credit) throw new AppError(credit ? `Le client n'a que ${credit} FCFA d'avance ou d'avoir` : "Ce client n'a ni avance ni avoir à rendre", 'INVALID');
       customerId = acc.customer.id;
-      label ||= `Avoir remboursé à ${acc.customer.name}`;
+      label ||= `Avance rendue à ${acc.customer.name}`;
     } else if (kind === 'container_deposit' || kind === 'container_refund') {
       // Consigne d'emballages : dette envers les clients (4194), pas une vente.
       if (method !== 'CASH') throw new AppError('La consigne se paie en espèces', 'INVALID');
@@ -376,6 +377,7 @@ export class CashDeskService extends Base {
         reference: input.reference ?? (input.method === 'CASH' ? piece : null),
         notes: [piece && input.method !== 'CASH' ? `Pièce ${piece}` : null, input.label?.trim() || null].filter(Boolean).join(' · ') || null,
         sessionId: this.emoney.openSession(c.storeId, sessionId, input.method).sessionId,
+        advance: input.advance,
       });
       return { source: 'customer_payment', id: p.id };
     }

@@ -4,7 +4,7 @@ import { FieldReps } from './FieldReps';
 import { Empty, Field, Modal, Tabs, dateFr, has, dateTime, fcfa, today, useCan, useLoad, useStoreSettings, useToast, useFind } from '../ui';
 import { CreditControl, RecentAccounts } from './Controls';
 import { Rebates, type RebatesTab } from './Rebates';
-import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, canLinkSupplier, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
+import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDialog, CustomerReceiptDialog, canLinkSupplier, canSetCredit, canSetLevel, draftOf, inputOf } from './customerDialogs';
 import { OffsetDialog, Offsets } from './Offsets';
 import { Consignment } from './Consignment';
 import { tx } from '../tax';
@@ -318,6 +318,7 @@ function Account({ customer }: { customer: Customer }) {
   const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
   const [paying, setPaying] = useState<false | 'payment' | 'advance'>(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
   const [offsetting, setOffsetting] = useState(false);
   const [reminding, setReminding] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
@@ -421,14 +422,18 @@ function Account({ customer }: { customer: Customer }) {
           atRegister={false}
           advance={paying === 'advance'}
           onClose={() => setPaying(false)}
-          onPaid={(id) => {
-            // Le reçu du dépôt d'avance est remis au client.
-            if (paying === 'advance') call('customers.printReceipt', id).catch(toast.error);
+          onPaid={(id, advance) => {
             setPaying(false);
             acc.reload();
+            // Le reçu du dépôt d'avance est imprimé et montré à l'écran, pour le remettre au client.
+            if (advance) {
+              setReceipt(id);
+              call('customers.printReceipt', id).catch(toast.error);
+            }
           }}
         />
       )}
+      {receipt && <CustomerReceiptDialog paymentId={receipt} onClose={() => setReceipt(null)} />}
       {offsetting && (
         <OffsetDialog
           customerId={customer.id}
@@ -813,10 +818,11 @@ function Receivables({ user }: { user: User }) {
 }
 
 function Payments() {
-  const toast = useToast();
+  const [receipt, setReceipt] = useState<string | null>(null);
   const list = useLoad(() => call('customers.payments', { limit: 200 }), []);
   if (list.data?.length === 0) return <Empty>Aucun règlement client enregistré. Encaissez un règlement depuis le compte du client, ou à la caisse par Action › Règlement client.</Empty>;
   return (
+    <>
     <table className="list">
       <thead>
         <tr>
@@ -837,6 +843,7 @@ function Payments() {
             <td>{dateTime(p.paid_at)}</td>
             <td>{p.customer_name}</td>
             <td>
+              {p.advance ? "Dépôt d'avance · " : ''}
               {CUSTOMER_PAY_METHODS[p.method]}
               {p.session_id ? ' (caisse)' : ''}
             </td>
@@ -844,7 +851,7 @@ function Payments() {
             <td>{p.user_name}</td>
             <td className="r">{fcfa(p.amount)}</td>
             <td>
-              <button className="ghost" onClick={() => call('customers.printReceipt', p.id).catch(toast.error)}>
+              <button className="ghost" onClick={() => setReceipt(p.id)}>
                 Reçu
               </button>
             </td>
@@ -852,5 +859,7 @@ function Payments() {
         ))}
       </tbody>
     </table>
+    {receipt && <CustomerReceiptDialog paymentId={receipt} onClose={() => setReceipt(null)} />}
+    </>
   );
 }

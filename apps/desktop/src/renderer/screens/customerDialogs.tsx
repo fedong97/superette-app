@@ -412,7 +412,8 @@ export function CustomerPaymentDialog({
   /** Ouvre directement sur le dépôt d'avance. */
   advance?: boolean;
   onClose: () => void;
-  onPaid: (paymentId: string) => void;
+  /** `advance` : c'était un dépôt d'avance (son reçu est à remettre au client). */
+  onPaid: (paymentId: string, advance: boolean) => void;
 }) {
   const [advance, setAdvance] = useState(advanceFirst);
   const toast = useToast();
@@ -457,7 +458,7 @@ export function CustomerPaymentDialog({
               advance,
             });
             toast.ok(`${advance ? "Dépôt d'avance" : 'Règlement'} ${p.number} enregistré`);
-            onPaid(p.id);
+            onPaid(p.id, Boolean(p.advance));
           } catch (err) {
             toast.error(err);
           }
@@ -559,5 +560,30 @@ function CustomerRepField({ value, onChange }: { value: string; onChange: (v: st
         ))}
       </select>
     </Field>
+  );
+}
+
+/**
+ * Reçu d'un règlement ou d'un dépôt d'avance, affiché à l'écran : il existe même
+ * sans imprimante de tickets, et s'imprime ou se réimprime d'ici.
+ */
+export function CustomerReceiptDialog({ paymentId, onClose }: { paymentId: string; onClose: () => void }) {
+  const toast = useToast();
+  const html = useLoad(() => call('customers.receiptHtml', paymentId), [paymentId]);
+  const print = () =>
+    call('customers.printReceipt', paymentId).then(
+      (printed) => (printed ? toast.ok('Reçu imprimé') : toast.error("Impression des tickets désactivée sur ce PC (paramètre « Impression automatique du ticket »)")),
+      toast.error,
+    );
+  return (
+    <Modal title="Reçu" onClose={onClose}>
+      {html.data ? <iframe className="receipt-frame" title="Reçu" sandbox="" srcDoc={html.data} /> : <p className="muted">Chargement…</p>}
+      <div className="actions">
+        <button onClick={onClose}>Fermer</button>
+        <button className="primary" onClick={() => void print()}>
+          Imprimer le reçu
+        </button>
+      </div>
+    </Modal>
   );
 }

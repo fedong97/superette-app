@@ -268,7 +268,10 @@ export interface Printer {
   previewInvoice(saleId: string, opts?: InvoicePrintOptions): { templateId: string; html: string };
   /** Relevé de compte A4, imprimé ou enregistré en PDF (false : enregistrement annulé). */
   statement(storeId: string, customerId: string, from?: string | null, to?: string | null, output?: 'print' | 'pdf'): Promise<boolean>;
-  customerReceipt(paymentId: string): Promise<void>;
+  /** Reçu de règlement ou de dépôt d'avance sur l'imprimante des tickets (false : imprimante désactivée sur ce PC). */
+  customerReceipt(paymentId: string): Promise<boolean>;
+  /** Le même reçu en page HTML, pour le voir à l'écran. */
+  customerReceiptHtml(paymentId: string): string;
   vatReturn(storeId: string, month: string): Promise<void>;
   trialBalance(storeId: string, from?: string | null, to?: string | null): Promise<void>;
   /** Registre des immobilisations à une date, puis le plan d'amortissement de chaque bien. */
@@ -2519,7 +2522,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Reçu (entrée) ou bon (sortie) d'une ligne de la journée : ticket ou A4. Le reçu réimprimé porte « DUPLICATA ». */
     'cashdesk.print': async (sessionId: string, source: string, id: string, format: 'ticket' | 'a4' = 'ticket') => {
       requireUser(TREASURY);
-      if (source === 'customer_payment' && format === 'ticket') return printer.customerReceipt(id);
+      if (source === 'customer_payment' && format === 'ticket') return void (await printer.customerReceipt(id));
       if (source === 'expense' && format === 'ticket') return printer.expenseVoucher(id);
       const entry = source === 'entry' ? s.cashdesk.get(id) : null;
       const duplicate = entry ? entry.printed > 0 : false;
@@ -2926,6 +2929,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return saved;
     },
     'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
+    'customers.receiptHtml': (paymentId: string) => (requireUser(), printer.customerReceiptHtml(paymentId)),
 
     // --- Ristournes des clients spécifiques ------------------------------------
     'rebates.rules': (customerId?: string | null) => (requireUser(CUSTOMERS), s.rebates.rules({ customerId: customerId ?? null })),

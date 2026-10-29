@@ -544,6 +544,7 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
         </button>
         {open && (
           <div className="menu-drop right">
+            {!row && <small className="menu-hint">Cliquez d'abord sur une ligne du tableau</small>}
             {direction === 'IN' ? (
               item('Imprimer le reçu', Boolean(row), () => print('ticket'))
             ) : (

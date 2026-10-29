@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.99.3',
+    items: [
+      "Trésorerie › Opérations de trésorerie : le menu « Plus ▾ » des entrées et des sorties s'ouvrait hors de la fenêtre et paraissait vide. Il s'ouvre maintenant sous son bouton ; cliquez d'abord sur une ligne du tableau.",
+    ],
+  },
+  {
     version: '0.99.2',
     items: [
       "Trésorerie › Opérations de trésorerie : « Encaisser » › Client propose « Dépôt d'avance » (tous les clients), avec le reçu de dépôt imprimé.",

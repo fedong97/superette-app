@@ -2797,4 +2797,14 @@ CREATE TABLE stock_anomaly_decisions (
 CREATE INDEX stock_anomaly_decisions_key ON stock_anomaly_decisions(store_id, case_key);
 `,
   },
+  {
+    version: 64,
+    name: "dépôt d'avance des clients",
+    sql: `
+-- Dépôt d'avance : le client verse sur son compte sans rien devoir ; ses achats à crédit viennent en déduction.
+ALTER TABLE customer_payments ADD COLUMN advance INTEGER NOT NULL DEFAULT 0;
+-- Part d'une vente sur le compte du client payée par son avance (le reste est un vrai crédit).
+ALTER TABLE sales ADD COLUMN advance_used INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

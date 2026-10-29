@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -60,6 +60,39 @@ describe('sauvegardes', () => {
     await s.backups.runAutomatic(true);
     expect(s.backups.status().last_error).toMatch(/clé USB débranchée/);
     expect(s.backups.status().overdue).toBe(false);
+  });
+
+  it('recopie sur la clé rebranchée les sauvegardes manquées, relues sur la clé', async () => {
+    const { root, s, ctx, sell, setNow } = setup();
+    const usb = join(root, 'usb');
+    // Clé débranchée : un fichier à la place du dossier rend la copie impossible.
+    writeFileSync(usb, '');
+    s.backups.configure(ctx.userId, { copyDir: usb });
+    for (const day of ['10', '11', '12']) {
+      setNow(`2026-10-${day}T20:00:00`);
+      sell();
+      await s.backups.runAutomatic();
+    }
+    expect(s.backups.status()).toMatchObject({ copy_pending: true, overdue: false });
+    expect(s.backups.status().last_error).toMatch(/clé USB débranchée/);
+    expect(await s.backups.runAutomatic()).toBeNull();
+    expect(s.backups.status().copy_pending).toBe(true);
+
+    // Clé rebranchée : à la minute suivante, sans nouvelle sauvegarde, les trois y sont copiées.
+    rmSync(usb);
+    setNow('2026-10-12T20:01:00');
+    expect(await s.backups.runAutomatic()).toBeNull();
+    expect(s.backups.status()).toMatchObject({ copy_pending: false, last_error: null });
+    expect(readdirSync(usb).sort()).toEqual(readdirSync(join(root, 'sauvegardes')).sort());
+    expect(readdirSync(usb)).toHaveLength(3);
+    expect(readdirSync(usb).every((f) => inspectBackup(join(usb, f)).ok)).toBe(true);
+
+    // Nouveau second dossier : il reçoit aussi les sauvegardes déjà faites, quelques-unes par minute.
+    const drive = join(root, 'onedrive');
+    s.backups.configure(ctx.userId, { copyDir: drive });
+    expect(s.backups.copyPending()).toBe(3);
+    expect(readdirSync(drive)).toHaveLength(3);
+    expect(s.backups.copyPending()).toBe(0);
   });
 
   it('refuse un fichier qui n’est pas une sauvegarde et restaure une bonne sauvegarde', async () => {

@@ -396,23 +396,28 @@ export function CustomerPickDialog({ user, onClose, onPick }: { user: User; onCl
 }
 
 /**
- * Règlement d'un client sur son compte. À la caisse (atRegister), il entre dans
- * la session ouverte et les espèces comptent dans le tiroir.
+ * Règlement d'un client sur son compte, ou dépôt d'avance (il verse sans rien
+ * devoir, ses achats à crédit viennent ensuite en déduction). À la caisse
+ * (atRegister), il entre dans la session ouverte et les espèces comptent dans le tiroir.
  */
 export function CustomerPaymentDialog({
   customer,
   atRegister,
+  advance: advanceFirst = false,
   onClose,
   onPaid,
 }: {
   customer?: Customer | null;
   atRegister: boolean;
+  /** Ouvre directement sur le dépôt d'avance. */
+  advance?: boolean;
   onClose: () => void;
   onPaid: (paymentId: string) => void;
 }) {
+  const [advance, setAdvance] = useState(advanceFirst);
   const toast = useToast();
   const [chosen, setChosen] = useState<string>(customer?.id ?? '');
-  const customers = useLoad(() => (customer ? Promise.resolve([]) : call('customers.list', { withBalance: true })), []);
+  const customers = useLoad(() => (customer ? Promise.resolve([]) : call('customers.list', advance ? {} : { withBalance: true })), [advance]);
   const account = useLoad(() => (chosen ? call('customers.account', chosen) : Promise.resolve(null)), [chosen]);
   const [method, setMethod] = useState<keyof typeof CUSTOMER_PAY_METHODS>('CASH');
   const [amount, setAmount] = useState('');
@@ -422,7 +427,7 @@ export function CustomerPaymentDialog({
   const [picked, setPicked] = useState<string[]>([]);
   const balance = account.data?.balance ?? 0;
   const items = account.data?.openItems ?? [];
-  const lettering = can('customer_lettering') && items.length > 1;
+  const lettering = !advance && can('customer_lettering') && items.length > 1;
   const allocate = (total: number) => {
     let left = total;
     return picked.flatMap((id) => {
@@ -434,16 +439,24 @@ export function CustomerPaymentDialog({
   };
 
   return (
-    <Modal title={customer ? `Règlement de ${customer.name}` : 'Règlement client'} onClose={onClose}>
+    <Modal title={`${advance ? "Dépôt d'avance" : 'Règlement'}${customer ? ` de ${customer.name}` : ' client'}`} onClose={onClose}>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
-          const v = parseAmount(amount || String(balance));
+          const v = parseAmount(amount || (advance ? '' : String(balance)));
           if (!chosen) return toast.error('Choisissez le client');
           if (!v) return toast.error('Montant invalide');
           try {
-            const p = await call('customers.pay', { customerId: chosen, method, amount: v, reference: reference || null, atRegister, allocations: picked.length ? allocate(v) : null });
-            toast.ok(`Règlement ${p.number} enregistré`);
+            const p = await call('customers.pay', {
+              customerId: chosen,
+              method,
+              amount: v,
+              reference: reference || null,
+              atRegister,
+              allocations: !advance && picked.length ? allocate(v) : null,
+              advance,
+            });
+            toast.ok(`${advance ? "Dépôt d'avance" : 'Règlement'} ${p.number} enregistré`);
             onPaid(p.id);
           } catch (err) {
             toast.error(err);
@@ -456,16 +469,35 @@ export function CustomerPaymentDialog({
               <option value="">Choisir…</option>
               {(customers.data ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} · doit {fcfa(c.balance)}
+                  {c.name}
+                  {c.balance > 0 ? ` · doit ${fcfa(c.balance)}` : c.balance < 0 ? ` · avance ${fcfa(-c.balance)}` : ''}
                 </option>
               ))}
             </select>
           </Field>
         )}
-        {account.data && (
-          <p>
-            Doit <strong>{fcfa(balance)}</strong>
-            {account.data.overdue > 0 && <span className="neg"> dont {fcfa(account.data.overdue)} en retard</span>}
+        <div className="methods">
+          <button type="button" className={!advance ? 'active' : ''} onClick={() => setAdvance(false)}>
+            Règlement de ce qu'il doit
+          </button>
+          <button type="button" className={advance ? 'active' : ''} onClick={() => setAdvance(true)}>
+            Dépôt d'avance
+          </button>
+        </div>
+        {account.data &&
+          (balance < 0 ? (
+            <p>
+              Avance disponible <strong>{fcfa(-balance)}</strong>
+            </p>
+          ) : (
+            <p>
+              Doit <strong>{fcfa(balance)}</strong>
+              {account.data.overdue > 0 && <span className="neg"> dont {fcfa(account.data.overdue)} en retard</span>}
+            </p>
+          ))}
+        {advance && (
+          <p className="muted">
+            Le client verse sur son compte. Ses achats à crédit (« Compte client » à la caisse) seront payés par cette avance{balance > 0 ? ` ; elle solde d'abord ce qu'il doit (${fcfa(balance)})` : ''}.
           </p>
         )}
         <div className="methods">
@@ -475,8 +507,8 @@ export function CustomerPaymentDialog({
             </button>
           ))}
         </div>
-        <Field label="Montant (FCFA)" hint={balance ? `Vide = tout le solde (${fcfa(balance)})` : undefined}>
-          <input autoFocus inputMode="numeric" value={amount} placeholder={balance ? String(balance) : ''} onChange={(e) => setAmount(e.target.value)} />
+        <Field label="Montant (FCFA)" hint={!advance && balance > 0 ? `Vide = tout le solde (${fcfa(balance)})` : undefined}>
+          <input autoFocus inputMode="numeric" value={amount} placeholder={!advance && balance > 0 ? String(balance) : ''} onChange={(e) => setAmount(e.target.value)} required={advance} />
         </Field>
         {method !== 'CASH' && (
           <Field label={method === 'CHEQUE' ? 'N° de chèque' : 'Référence de la transaction'}>
@@ -502,8 +534,8 @@ export function CustomerPaymentDialog({
         )}
         {atRegister && method === 'CASH' && <p className="muted">Les espèces entrent dans le tiroir et apparaissent sur le Z.</p>}
         <div className="actions">
-          <button type="submit" className="primary" disabled={!chosen || !balance}>
-            Valider le règlement
+          <button type="submit" className="primary" disabled={!chosen || (!advance && balance <= 0)}>
+            {advance ? "Valider le dépôt d'avance" : 'Valider le règlement'}
           </button>
         </div>
       </form>

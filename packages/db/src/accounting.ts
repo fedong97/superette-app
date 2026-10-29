@@ -411,14 +411,15 @@ export class AccountingService extends Base {
   private customerPaymentEntries(storeId: string, r: Record<AccountRole, string>, opts: { from?: string; to?: string }): Entry[] {
     const rows = this.db
       .prepare(
-        `SELECT p.number, p.method, p.amount, p.reference, p.from_central, p.clearing, date(p.paid_at, 'localtime') AS d, c.code, c.name
+        `SELECT p.number, p.method, p.amount, p.reference, p.from_central, p.clearing, p.advance, date(p.paid_at, 'localtime') AS d, c.code, c.name
          FROM customer_payments p JOIN customers c ON c.id = p.customer_id WHERE p.store_id = ?`,
       )
-      .all(storeId) as { number: string; method: string; amount: number; reference: string | null; from_central: number; clearing: number; d: string; code: string; name: string }[];
+      .all(storeId) as { number: string; method: string; amount: number; reference: string | null; from_central: number; clearing: number; advance: number; d: string; code: string; name: string }[];
     return rows
       .filter((p) => inRange(p.d, opts.from, opts.to))
       .map((p) => {
-        const label = `Règlement ${p.name}${p.reference ? ` (${p.reference})` : ''}`;
+        // Dépôt d'avance : au crédit du compte du client (411), comme la monnaie laissée sur son compte.
+        const label = `${p.advance ? "Dépôt d'avance" : 'Règlement'} ${p.name}${p.reference ? ` (${p.reference})` : ''}`;
         return {
           journal: METHOD_JOURNAL(p.method),
           date: p.d,

@@ -396,6 +396,11 @@ export interface DocData {
   totals: { ht: number; tva: number; ttc: number; discount: number; promo: number; rounding: number; change: number; remaining: number };
 }
 
+/** Solde du compte du client : ce qu'il doit, ou ce qui reste de son dépôt d'avance (solde négatif). */
+export function balanceRow(balance: number): { label: string; amount: number } {
+  return balance < 0 ? { label: 'Reste sur votre avance', amount: -balance } : { label: 'Solde de votre compte', amount: balance };
+}
+
 export interface DocLine {
   code: string | null;
   barcode: string | null;
@@ -945,7 +950,7 @@ export function renderDocTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.totals.payments) for (const p of d.payments) r.push({ t: 'row', left: p.label, right: money(p.amount) });
   if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change), bold: true });
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
-  if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
+  if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: balanceRow(c.balance).label, right: money(balanceRow(c.balance).amount) });
   if (t.customer.show && d.loyalty) {
     if (d.loyalty.redeemed) r.push({ t: 'row', left: 'Points utilisés', right: `-${d.loyalty.redeemed}` });
     if (d.loyalty.earned) r.push({ t: 'row', left: 'Points gagnés', right: `${d.loyalty.earned > 0 ? '+' : ''}${d.loyalty.earned}` });
@@ -1106,7 +1111,7 @@ export function renderDocHtml(t: DocTemplate, d: DocData): string {
           ? `<b>${esc(c.name)}</b><br>${[cu.address ? c.address : null, cu.phone ? c.phone : null, cu.niu && c.niu ? `NIU ${c.niu}` : null, cu.code && c.code ? `Compte ${c.code}` : null]
               .filter(Boolean)
               .map((v) => esc(v!))
-              .join('<br>')}${cu.balance && c.balance != null ? `<br>Solde du compte : <b>${money(c.balance)} FCFA</b>` : ''}`
+              .join('<br>')}${cu.balance && c.balance != null ? `<br>${balanceRow(c.balance).label} : <b>${money(balanceRow(c.balance).amount)} FCFA</b>` : ''}`
           : c
             ? `<b>${esc(c.name)}</b><br>Client comptoir`
             : '<b>Client comptoir</b>'
@@ -1328,7 +1333,7 @@ function framedBody(t: DocTemplate, d: DocData): string {
     t.totals.payments ? d.payments.map((p) => `${esc(p.label)} : ${money(p.amount)}`).join(' · ') : '',
     t.totals.change && tot.change ? `Rendu monnaie : ${money(tot.change)}` : '',
     t.totals.remaining && tot.remaining ? `<b>Reste à payer : ${money(tot.remaining)}</b>` : '',
-    cu.show && cu.balance && c?.balance != null ? `Solde de votre compte : <b>${money(c.balance)}</b>` : '',
+    cu.show && cu.balance && c?.balance != null ? `${balanceRow(c.balance).label} : <b>${money(balanceRow(c.balance).amount)}</b>` : '',
   ].filter(Boolean);
   const ids = [h.niu && d.store.niu ? `N° CONTR. : ${esc(d.store.niu)}` : '', h.rccm && d.store.rccm ? `RCCM : ${esc(d.store.rccm)}` : ''];
   const titleHtml = `<h2>${esc(title.toUpperCase())}${t.info.number ? ` N° ${esc(d.doc.number)}` : ''}${d.doc.cancelled ? ' (ANNULÉE)' : ''}${
@@ -1493,7 +1498,7 @@ function styledTicketHtml(t: DocTemplate, d: DocData): string {
     t.totals.payments ? d.payments.map((p) => `<div class="row"><span>${esc(p.label)}</span><span>${money(p.amount)}</span></div>`).join('') : '',
     t.totals.change && tot.change ? `<div class="row"><span>Rendu monnaie</span><span>${money(tot.change)}</span></div>` : '',
     t.totals.remaining && tot.remaining ? `<div class="row b"><span>Reste à payer</span><span>${money(tot.remaining)}</span></div>` : '',
-    t.customer.show && t.customer.balance && c?.balance != null ? `<div class="row"><span>Solde de votre compte</span><span>${money(c.balance)}</span></div>` : '',
+    t.customer.show && t.customer.balance && c?.balance != null ? `<div class="row"><span>${balanceRow(c.balance).label}</span><span>${money(balanceRow(c.balance).amount)}</span></div>` : '',
     t.totals.words && tot.ttc >= 0 ? `<div class="words"${sa(lineAlign(t, 'payments', 'words', 'center'))}>${esc(cap(numberToWordsFr(tot.ttc)))}</div>` : '',
   ].join('');
   const foot = [
@@ -1572,7 +1577,7 @@ function styledTicket(t: DocTemplate, d: DocData): Receipt {
   if (t.totals.payments) for (const p of d.payments) r.push({ t: 'row', left: p.label, right: money(p.amount) });
   if (t.totals.change && tot.change) r.push({ t: 'row', left: 'Rendu monnaie', right: money(tot.change) });
   if (t.totals.remaining && tot.remaining) r.push({ t: 'row', left: 'Reste à payer', right: money(tot.remaining), bold: true });
-  if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: 'Solde de votre compte', right: money(c.balance) });
+  if (t.customer.show && t.customer.balance && c?.balance != null) r.push({ t: 'row', left: balanceRow(c.balance).label, right: money(balanceRow(c.balance).amount) });
   if (t.totals.words && tot.ttc >= 0) r.push({ t: 'text', text: cap(numberToWordsFr(tot.ttc)), align: lineAlign(t, 'payments', 'words', 'center') });
   (parts.payments = r), (r = []);
   if (d.doc.notes) for (const x of d.doc.notes.split('\n').filter(Boolean)) r.push({ t: 'text', text: x });

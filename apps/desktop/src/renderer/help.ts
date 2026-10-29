@@ -545,6 +545,14 @@ export const HELP: Record<WinKind, PageHelp> = {
           'À la caisse, scannez la carte ou tapez le téléphone du client ; il paie avec « Points fidélité » dans l’encaissement.',
         ],
       },
+      {
+        tab: 'list',
+        title: 'Dépôt d’avance',
+        steps: [
+          "Le client verse sur son compte sans rien acheter : « Dépôt d’avance… » sur l’onglet Compte de sa fiche, ou à la caisse par Action › Règlement client. Un reçu lui est remis.",
+          "À la caisse, choisissez le client et payez en « Compte client » : l’achat est déduit de son avance et le ticket indique ce qu’il reste. Au-delà de l’avance, le reste est un crédit (plafond ou code du gérant).",
+        ],
+      },
       { tab: 'statement', title: 'Extrait de compte', steps: ['Ventes à crédit et règlements d’un client sur une période ; imprimez le relevé pour le lui remettre.'] },
       { tab: 'payments', title: 'Règlements', steps: ['Liste des règlements reçus. Pour encaisser : « Encaisser un règlement » sur le compte du client, ou à la caisse par Action.'] },
       {
@@ -1053,6 +1061,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Sauvegardes',
         steps: [
           'Choisissez un dossier (clé USB, autre disque) ; une sauvegarde se fait chaque jour. « Restaurer » reprend une sauvegarde.',
+          "Nouveau PC après une panne : installez ONIX 360, branchez la clé et choisissez « Restaurer une sauvegarde » sur l’écran de bienvenue, sans créer de magasin. Connectez-vous ensuite avec vos identifiants habituels.",
           'Sauvegarde en ligne (PC relié au serveur) : choisissez une phrase secrète de 8 caractères au moins et notez-la en lieu sûr, puis activez. Après chaque sauvegarde, une copie chiffrée part sur le serveur.',
           'Sans la phrase secrète, les copies en ligne ne peuvent pas être lues : l’éditeur ne la connaît pas.',
           'Sur un nouveau PC : « Voir les copies en ligne », « Récupérer » avec la phrase secrète ; la sauvegarde arrive dans la liste et se restaure comme les autres.',

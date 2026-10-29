@@ -124,7 +124,9 @@ function CustomerList({ user }: { user: User }) {
                 <td>{c.zone ?? ''}</td>
                 <td className="r">{c.payment_terms_days} j</td>
                 <td className="r">{c.credit_limit ? fcfa(c.credit_limit) : '—'}</td>
-                <td className={`r ${c.balance > c.credit_limit ? 'neg' : ''}`}>{c.balance ? fcfa(c.balance) : ''}</td>
+                <td className={`r ${c.balance > c.credit_limit ? 'neg' : ''}`} title={c.balance < 0 ? "Avance déposée par le client" : undefined}>
+                  {c.balance < 0 ? `avance ${fcfa(-c.balance)}` : c.balance ? fcfa(c.balance) : ''}
+                </td>
                 <td className="r neg">{c.overdue ? fcfa(c.overdue) : ''}</td>
                 {loyaltyOn && <td className="r">{points.data?.[c.id] || ''}</td>}
                 <td>{c.last_sale ? dateTime(c.last_sale) : ''}</td>
@@ -315,7 +317,7 @@ function Account({ customer }: { customer: Customer }) {
   const toast = useToast();
   const can = useCan();
   const acc = useLoad(() => call('customers.account', customer.id), [customer.id]);
-  const [paying, setPaying] = useState(false);
+  const [paying, setPaying] = useState<false | 'payment' | 'advance'>(false);
   const [offsetting, setOffsetting] = useState(false);
   const [reminding, setReminding] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
@@ -329,10 +331,17 @@ function Account({ customer }: { customer: Customer }) {
         </p>
       )}
       <div className="kpis">
-        <div>
-          <small>Doit</small>
-          <strong>{fcfa(a.balance)}</strong>
-        </div>
+        {a.balance < 0 ? (
+          <div className="pos">
+            <small>Avance disponible</small>
+            <strong>{fcfa(-a.balance)}</strong>
+          </div>
+        ) : (
+          <div>
+            <small>Doit</small>
+            <strong>{fcfa(a.balance)}</strong>
+          </div>
+        )}
         <div className={a.overdue ? 'neg' : ''}>
           <small>Dont en retard</small>
           <strong>{fcfa(a.overdue)}</strong>
@@ -396,7 +405,12 @@ function Account({ customer }: { customer: Customer }) {
           </button>
         )}
         {can('customer_payment') && (
-          <button className="primary" disabled={!a.balance} onClick={() => setPaying(true)}>
+          <button title="Le client verse sur son compte ; ses achats à crédit viennent ensuite en déduction" onClick={() => setPaying('advance')}>
+            Dépôt d'avance…
+          </button>
+        )}
+        {can('customer_payment') && (
+          <button className="primary" disabled={a.balance <= 0} onClick={() => setPaying('payment')}>
             Encaisser un règlement
           </button>
         )}
@@ -405,8 +419,11 @@ function Account({ customer }: { customer: Customer }) {
         <CustomerPaymentDialog
           customer={customer}
           atRegister={false}
+          advance={paying === 'advance'}
           onClose={() => setPaying(false)}
-          onPaid={() => {
+          onPaid={(id) => {
+            // Le reçu du dépôt d'avance est remis au client.
+            if (paying === 'advance') call('customers.printReceipt', id).catch(toast.error);
             setPaying(false);
             acc.reload();
           }}

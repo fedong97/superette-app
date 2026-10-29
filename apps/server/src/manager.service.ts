@@ -121,6 +121,15 @@ export class ManagerService {
         const total = salesOnly.reduce((t, s) => t + num(s.payload['total_ttc']), 0);
         const yesterday = mine.filter((s) => !dayOf(s) && s.payload['kind'] !== 'return').reduce((t, s) => t + num(s.payload['total_ttc']), 0);
 
+        // Ventes par vendeur : le vendeur du panier ou de la facture, sinon le caissier.
+        const bySeller = new Map<string, { id: string; name: string; tickets: number; total: number }>();
+        for (const s of salesOnly) {
+          const id = String(s.payload['seller_id'] ?? s.payload['user_id'] ?? '');
+          const cur = bySeller.get(id) ?? { id, name: users.get(id) ?? 'Inconnu', tickets: 0, total: 0 };
+          cur.tickets++;
+          cur.total += num(s.payload['total_ttc']);
+          bySeller.set(id, cur);
+        }
         const byMethod = new Map<string, number>();
         const byHour = new Array<number>(24).fill(0);
         const byArticle = new Map<string, { label: string; qty: number; total: number }>();
@@ -212,6 +221,7 @@ export class ManagerService {
           byMethod: [...byMethod.entries()].filter(([, v]) => v).map(([method, amount]) => ({ method, label: METHODS[method] ?? method, amount })).sort((a, b) => b.amount - a.amount),
           byHour,
           top: [...byArticle.values()].sort((a, b) => b.total - a.total).slice(0, 10),
+          sellers: [...bySeller.values()].sort((a, b) => b.total - a.total),
           registers: regs,
           gaps,
           outOfStock: outs.slice(0, 100),
@@ -236,5 +246,52 @@ export class ManagerService {
       stores: result,
       alerts: alerts.sort((a, b) => (a.level === b.level ? 0 : a.level === 'erreur' ? -1 : 1)),
     };
+  }
+
+  /**
+   * Chiffre d'affaires du magasin par jour, du début du mois dernier à
+   * aujourd'hui : la semaine, le mois en cours et le même nombre de jours
+   * du mois dernier, pour le gérant sur son téléphone.
+   */
+  async periods(storeId: string) {
+    const now = new Date();
+    const today = localDay(now);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const { rows } = await this.pg.query<{ created_at: string; total: string | null; kind: string | null }>(
+      `SELECT payload->>'created_at' AS created_at, payload->>'total_ttc' AS total, payload->>'kind' AS kind FROM (
+         SELECT DISTINCT ON (entity_id) payload FROM events
+         WHERE entity = 'sale' AND payload IS NOT NULL AND COALESCE(store_id, payload->>'store_id') = $1 AND payload->>'created_at' >= $2
+         ORDER BY entity_id, seq DESC) s
+       WHERE payload->>'status' <> 'cancelled'`,
+      [storeId, lastMonthStart.toISOString()],
+    );
+    const byDay = new Map<string, { total: number; tickets: number }>();
+    for (const r of rows) {
+      const d = localDay(new Date(r.created_at));
+      const cur = byDay.get(d) ?? { total: 0, tickets: 0 };
+      const amount = num(r.total);
+      cur.total += r.kind === 'return' ? -Math.abs(amount) : amount;
+      if (r.kind !== 'return') cur.tickets++;
+      byDay.set(d, cur);
+    }
+    const week = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6 + i);
+      const day = localDay(d);
+      return { day, ...(byDay.get(day) ?? { total: 0, tickets: 0 }) };
+    });
+    const sum = (from: Date, to: string) => {
+      let total = 0;
+      let tickets = 0;
+      for (const [d, v] of byDay) {
+        if (d < localDay(from) || d > to) continue;
+        total += v.total;
+        tickets += v.tickets;
+      }
+      return { total, tickets };
+    };
+    // Même jour du mois dernier (le 31 devient le dernier jour d'un mois plus court).
+    const sameDay = new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), new Date(now.getFullYear(), now.getMonth(), 0).getDate()));
+    return { today, week, month: sum(monthStart, today), lastMonth: sum(lastMonthStart, localDay(sameDay)) };
   }
 }

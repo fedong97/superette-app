@@ -4,6 +4,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Code renvoyé par le serveur (ex. SUPERVISOR_REQUIRED : le gérant doit taper son code). */
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -48,7 +50,8 @@ export async function request<T>(base: string, path: string, options: { method?:
     }
     if (!res.ok) {
       const msg = (data as { message?: string | string[] } | null)?.message;
-      throw new ApiError((Array.isArray(msg) ? msg.join(', ') : msg) || `Erreur du serveur (${res.status})`, res.status);
+      const code = (data as { code?: unknown } | null)?.code;
+      throw new ApiError((Array.isArray(msg) ? msg.join(', ') : msg) || `Erreur du serveur (${res.status})`, res.status, typeof code === 'string' ? code : undefined);
     }
     return data as T;
   } catch (e) {

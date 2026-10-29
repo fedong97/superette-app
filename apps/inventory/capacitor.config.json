@@ -1,6 +1,6 @@
 {
   "appId": "cm.fedonix.inventaire",
-  "appName": "ONIX Inventaire",
+  "appName": "ONIX 360 Mobile",
   "webDir": "dist",
   "android": {
     "allowMixedContent": true

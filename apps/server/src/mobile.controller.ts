@@ -2,6 +2,8 @@ import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, R
 import type { Request, Response } from 'express';
 import { toString as qrSvg } from 'qrcode';
 import { AdminService } from './admin.service';
+import { ApprovalsService } from './approvals.service';
+import { ManagerService } from './manager.service';
 import { MobileService, type MobileCountInput } from './mobile.service';
 import { INVENTORY_PAGE } from './admin.page';
 
@@ -14,7 +16,7 @@ const cookieOf = (req: Request): string | undefined =>
     .find(([k]) => k === 'fedo_admin')?.[1];
 
 /**
- * Application Android « ONIX 360 Inventaire » (`/api/v1/mobile/…`) et
+ * Application Android « ONIX 360 Mobile » (`/api/v1/mobile/…`) et
  * page du gérant qui relie les téléphones et suit les comptages (`/gerant/inventaire`).
  */
 @Controller()
@@ -22,6 +24,8 @@ export class MobileController {
   constructor(
     @Inject(MobileService) private readonly mobile: MobileService,
     @Inject(AdminService) private readonly admin: AdminService,
+    @Inject(ManagerService) private readonly manager: ManagerService,
+    @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
   ) {}
 
   // ——— Téléphone ———
@@ -52,14 +56,14 @@ export class MobileController {
 
   @Get('api/v1/mobile/catalog')
   async catalog(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('since') since?: string) {
-    await this.mobile.caller(auth, session);
-    return this.mobile.catalog(since);
+    const caller = await this.mobile.caller(auth, session);
+    return this.mobile.catalog(since, caller.device.store_id);
   }
 
   @Get('api/v1/mobile/find')
   async find(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('q') q?: string) {
-    await this.mobile.caller(auth, session);
-    return this.mobile.find(q ?? '');
+    const caller = await this.mobile.caller(auth, session);
+    return this.mobile.find(q ?? '', caller.device.store_id);
   }
 
   @Get('api/v1/mobile/articles/:id/thumb')
@@ -72,6 +76,86 @@ export class MobileController {
   @HttpCode(200)
   async pushCart(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: Parameters<MobileService['pushCart']>[1]) {
     return this.mobile.pushCart(await this.mobile.caller(auth, session), body);
+  }
+
+  @Post('api/v1/mobile/carts/:id/cancel')
+  @HttpCode(200)
+  async cancelCart(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Param('id') id: string) {
+    return this.mobile.cancelCart(await this.mobile.caller(auth, session), id);
+  }
+
+  @Get('api/v1/mobile/customers')
+  async customers(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('q') q?: string) {
+    return this.mobile.customers(await this.mobile.caller(auth, session), q ?? '');
+  }
+
+  // ——— Gérant sur le téléphone ———
+
+  /** Tableau du gérant pour son magasin : journée, semaine, mois, vendeurs, caisses, stock, alertes, magasin en direct. */
+  @Get('api/v1/mobile/manager')
+  async managerHome(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('day') day?: string) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    const storeId = caller.device.store_id;
+    const board = await this.manager.dashboard(day || undefined);
+    const store = board.stores.find((x) => x.id === storeId) ?? null;
+    return {
+      day: board.day,
+      today: board.today,
+      generatedAt: board.generatedAt,
+      store,
+      alerts: board.alerts.filter((a) => !a.store || a.store === store?.name),
+      periods: await this.manager.periods(storeId),
+      floor: await this.mobile.floor(caller),
+      approvals: (await this.approvals.pending(storeId)).length,
+      write: (await this.mobile.rights(caller)).manage === 'full',
+    };
+  }
+
+  @Get('api/v1/mobile/manager/approvals')
+  async managerApprovals(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    return { approvals: await this.approvals.pending(caller.device.store_id) };
+  }
+
+  @Post('api/v1/mobile/manager/approvals/:id')
+  @HttpCode(200)
+  async managerDecide(
+    @Headers('authorization') auth: string | undefined,
+    @Headers(SESSION) session: string | undefined,
+    @Param('id') id: string,
+    @Body() body: { approve: boolean; pin?: string },
+  ) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller, true);
+    return this.approvals.decide(id, body ?? { approve: false }, caller.device.store_id);
+  }
+
+  @Get('api/v1/mobile/manager/orders')
+  async managerOrders(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    return this.mobile.managerOrders(await this.mobile.caller(auth, session));
+  }
+
+  @Get('api/v1/mobile/manager/receivables')
+  async managerReceivables(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    return this.mobile.receivables(await this.mobile.caller(auth, session));
+  }
+
+  @Get('api/v1/mobile/manager/articles/:id')
+  async managerArticle(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Param('id') id: string) {
+    return this.mobile.managerArticle(await this.mobile.caller(auth, session), id);
+  }
+
+  @Post('api/v1/mobile/manager/articles/:id/price')
+  @HttpCode(200)
+  async managerPrice(
+    @Headers('authorization') auth: string | undefined,
+    @Headers(SESSION) session: string | undefined,
+    @Param('id') id: string,
+    @Body() body: { price?: number; pin?: string },
+  ) {
+    return this.mobile.setStorePrice(await this.mobile.caller(auth, session), id, body);
   }
 
   @Post('api/v1/mobile/missed')
@@ -199,7 +283,7 @@ export class MobileController {
 
   @Post('admin/api/mobile/settings')
   @HttpCode(200)
-  settings(@Req() req: Request, @Body() body: { showExpected?: boolean; recount?: boolean }) {
+  settings(@Req() req: Request, @Body() body: { showExpected?: boolean; recount?: boolean; seller?: string; manager?: string }) {
     this.guard(req);
     return this.mobile.saveSettings(body ?? {});
   }

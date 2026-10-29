@@ -715,6 +715,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       const c = await call('pos.takeShelfCart', id);
       setLines(await reload(c.lines));
       setSeller({ id: c.sellerId, name: c.sellerName });
+      // Vendeur au rayon complet : son client et son tarif arrivent avec le panier.
+      const who = c.customerId ? await call('customers.get', c.customerId) : null;
+      setCustomer(who);
+      setClientName(who ? '' : (c.clientName ?? ''));
+      setLevelChoice(c.priceLevel && c.priceLevel !== (who?.price_level ?? 'retail') ? c.priceLevel : null);
       setLastSale(null);
       setDialog(null);
       carts.reload();

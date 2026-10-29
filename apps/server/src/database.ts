@@ -406,6 +406,22 @@ CREATE INDEX counter_invoices_open ON counter_invoices (store_id, created_at) WH
 CREATE INDEX counter_invoices_seller ON counter_invoices (store_id, seller_id, created_at);
 `,
   },
+  {
+    version: 12,
+    sql: `
+-- Vendeur au rayon complet : client, tarif, remises (avec l'accord vérifié au serveur),
+-- panier modifiable ou annulable tant qu'aucune caisse ne l'a pris.
+ALTER TABLE shelf_carts ADD COLUMN customer_id TEXT;
+ALTER TABLE shelf_carts ADD COLUMN customer_name TEXT;
+ALTER TABLE shelf_carts ADD COLUMN price_level TEXT;
+ALTER TABLE shelf_carts ADD COLUMN discount_by TEXT;
+ALTER TABLE shelf_carts ADD COLUMN discount_reason TEXT;
+ALTER TABLE shelf_carts ADD COLUMN options_by TEXT;
+ALTER TABLE shelf_carts ADD COLUMN total BIGINT;
+ALTER TABLE shelf_carts ADD COLUMN updated_at TIMESTAMPTZ;
+ALTER TABLE shelf_carts ADD COLUMN cancelled_at TIMESTAMPTZ;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

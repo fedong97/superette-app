@@ -130,20 +130,20 @@ describe('panier préparé au rayon', () => {
       return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
     };
     const login = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
-    expect(login.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false });
+    expect(login.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false, sell: 'full', discount: false, tariff: false, manage: null });
     const catalog = await (await phone('/catalog', undefined, login.session)).json();
     expect(catalog.articles.find((a: { id: string }) => a.id === riz)).toMatchObject({ price: 1_000 });
 
     const cart = { id: 'panier-0001-paul', label: 'Dame au foulard rouge', lines: [{ articleId: riz, qty: 3_000 }] };
-    expect(await (await phone('/carts', cart, login.session)).json()).toEqual({ id: cart.id, number: 1 });
+    expect(await (await phone('/carts', cart, login.session)).json()).toEqual({ id: cart.id, number: 1, total: 3_000 });
     // Renvoyé après une coupure : pas de doublon.
-    expect(await (await phone('/carts', cart, login.session)).json()).toEqual({ id: cart.id, number: 1 });
+    expect(await (await phone('/carts', cart, login.session)).json()).toEqual({ id: cart.id, number: 1, total: 3_000 });
     expect((await phone('/carts', { id: 'panier-vide-0001', lines: [] }, login.session)).status).toBe(400);
 
     const waiting = await shelfCarts(pc);
     expect(waiting).toEqual([expect.objectContaining({ id: cart.id, number: 1, label: 'Dame au foulard rouge', sellerId: paul.id, sellerName: 'Paul' })]);
     const taken = await takeShelfCart(pc, cart.id);
-    expect(taken.lines).toEqual([{ articleId: riz, qty: 3_000, packId: null }]);
+    expect(taken.lines).toEqual([{ articleId: riz, qty: 3_000, packId: null, discount: 0 }]);
     await expect(takeShelfCart(pc, cart.id)).rejects.toThrow(/déjà été pris/);
     expect(await shelfCarts(pc)).toEqual([]);
     expect((await (await phone('/carts', undefined, login.session)).json()).carts[0]).toMatchObject({ number: 1, lines: 1, takenAt: expect.any(String) });
@@ -207,6 +207,57 @@ describe('panier préparé au rayon', () => {
     await pushStationStatus(pc, { name: 'PC caisse 1', version: '0.81.0', backup: null, printer: null, pendingEvents: 0, license: { canSell: true, label: 'OK' } } as never);
     const all = await stationStatuses(pc);
     expect(all).toEqual([expect.objectContaining({ name: 'PC caisse 1', self: true, status: expect.objectContaining({ version: '0.81.0' }) })]);
+  });
+
+  it('le gérant suit son magasin sur le téléphone : vendeurs, mois, crédits clients, prix changé avec son code', async () => {
+    const tva = pc.admin.listVatRates()[0]!.id;
+    const the = pc.catalogue.saveArticle(admin.id, { name: 'THÉ LIPTON 25', unit: 'piece', vatRateId: tva, purchasePrice: 700, salePrice: 1_000 }).id;
+    await pushStationStatus(pc, {
+      name: 'PC caisse 1',
+      version: '0.98.0',
+      receivables: { total: 25_000, overdue: 10_000, count: 1, customers: [{ id: 'c1', name: 'Mama Ngo', phone: '699001122', balance: 25_000, overdue: 10_000, limit: 50_000 }] },
+      at: new Date().toISOString(),
+    } as never);
+    await syncOnce(pc);
+
+    const p = await (await fetch(`${url}/admin/api/mobile/pairing`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ storeId: store.id }) })).json();
+    const device = (await (await fetch(`${url}/api/v1/mobile/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: p.code, name: 'Téléphone du gérant' }) })).json()).token;
+    const phone = async (path: string, body?: unknown, session = '') => {
+      const headers: Record<string, string> = { authorization: `Bearer ${device}`, 'x-fedonix-session': session, 'content-type': 'application/json' };
+      return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
+    };
+    const steve = await (await phone('/login', { login: 'steve', pin: '1234' })).json();
+    expect(steve.can).toMatchObject({ manage: 'full', sell: 'full', discount: true, tariff: true });
+    const paul = (await (await phone('/login', { login: 'paul', pin: '1111' })).json()).session;
+    expect((await phone('/manager', undefined, paul)).status).toBe(403);
+
+    const home = await (await phone('/manager', undefined, steve.session)).json();
+    expect(home.store).toMatchObject({ id: store.id, name: 'Superette Akwa' });
+    expect(home.store.sellers).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Paul', tickets: 1, total: 3_000 })]));
+    expect(home.periods.month.total).toBeGreaterThanOrEqual(3_000);
+    expect(home.periods.week).toHaveLength(7);
+    expect(home).toMatchObject({ write: true, approvals: 0 });
+    expect(home.floor).toMatchObject({ carts: [], invoices: [] });
+    expect(home.floor.missed).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Couches taille 5', times: 1 })]));
+    expect((await (await phone('/manager/receivables', undefined, steve.session)).json()).receivables).toMatchObject({ total: 25_000, overdue: 10_000 });
+    expect((await (await phone('/manager/orders', undefined, steve.session)).json()).orders).toEqual([expect.objectContaining({ supplier: 'SOSUCAM', partial: false })]);
+
+    // Prix de détail du magasin, confirmé par le code du gérant ; jamais sous le coût d'achat.
+    expect((await phone(`/manager/articles/${the}/price`, { price: 1_200, pin: '0000' }, steve.session)).status).toBe(403);
+    expect((await phone(`/manager/articles/${the}/price`, { price: 500, pin: '1234' }, steve.session)).status).toBe(400);
+    expect(await (await phone(`/manager/articles/${the}/price`, { price: 1_200, pin: '1234' }, steve.session)).json()).toEqual({ price: 1_200 });
+    await syncOnce(pc);
+    expect(pc.catalogue.getArticle(the, store.id).store_price).toBe(1_200);
+    expect(await (await phone(`/manager/articles/${the}`, undefined, steve.session)).json()).toMatchObject({ price: 1_200, basePrice: 1_000, cost: 700, margin: 41.7 });
+    expect((await (await phone('/catalog', undefined, steve.session)).json()).articles.find((a: { id: string }) => a.id === the)).toMatchObject({ price: 1_200 });
+
+    // Téléphone du gérant en consultation seule : il voit, il ne change rien.
+    await fetch(`${url}/admin/api/mobile/settings`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ manager: 'read', seller: 'simple' }) });
+    expect((await phone(`/manager/articles/${the}/price`, { price: 1_300, pin: '1234' }, steve.session)).status).toBe(403);
+    expect((await phone('/manager', undefined, steve.session)).status).toBe(200);
+    // Vendeur simple : ni client ni remise.
+    expect((await (await phone('/login', { login: 'paul', pin: '1111' })).json()).can).toMatchObject({ sell: 'simple', discount: false });
+    await fetch(`${url}/admin/api/mobile/settings`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ manager: 'full', seller: 'full' }) });
   });
 });
 

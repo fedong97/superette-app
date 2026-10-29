@@ -85,6 +85,7 @@ import {
   takeMobileReception,
   pushStationStatus,
   stationStatuses,
+  type Receivables,
   type StationStatus,
   type MissedSaleInput,
   type PriceScheduleInput,
@@ -409,6 +410,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!u.active || u.deleted_at || (u.role !== 'admin' && u.role !== 'manager')) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
     return u;
   };
+  /** Client choisi sur le téléphone : gardé s'il est connu de ce PC (sinon le panier passe en client comptoir). */
+  const cartCustomer = (id: string | null | undefined): string | null => {
+    if (!id) return null;
+    try {
+      return s.customers.getCustomer(id).id;
+    } catch {
+      return null;
+    }
+  };
   /** L'écran agit sur la caisse qu'il affiche : refus si la caisse de travail a changé entre-temps. */
   const sameRegister = (c: Context, registerId?: string): Context => {
     if (registerId && registerId !== c.registerId) throw new AppError("Vous ne travaillez plus sur cette caisse : rouvrez l'écran", 'REGISTER_CHANGED');
@@ -623,8 +633,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       printer: printerName || null,
       printerEnabled: s.admin.getSetting('printer.enabled') !== '0',
       license: { state: lic.state, canSell: lic.canSell, daysLeft: lic.daysLeft, message: lic.message },
+      receivables: station ? receivables(station.store.id) : null,
       at: new Date().toISOString(),
     };
+  };
+  /** Soldes des clients à crédit : les 30 plus gros partent au serveur avec l'état du PC (téléphone du gérant). */
+  const receivables = (storeId: string): Receivables | null => {
+    try {
+      const owing = s.customers.listCustomers(storeId, { withBalance: true }).filter((c) => c.balance > 0);
+      return {
+        total: owing.reduce((t, c) => t + c.balance, 0),
+        overdue: owing.reduce((t, c) => t + c.overdue, 0),
+        count: owing.length,
+        customers: owing
+          .sort((a, b) => b.overdue - a.overdue || b.balance - a.balance)
+          .slice(0, 30)
+          .map((c) => ({ id: c.id, name: c.name.slice(0, 60), phone: c.phone ?? null, balance: c.balance, overdue: c.overdue, limit: c.credit_limit })),
+      };
+    } catch {
+      return null;
+    }
   };
 
 
@@ -1827,14 +1855,26 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           return false;
         }
       };
-      const lines: SaleLineInput[] = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null }));
+      const lines: SaleLineInput[] = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null, discount: l.discount ?? 0 }));
       let sellerId: string | null = null;
       try {
         sellerId = s.admin.getUser(cart.sellerId).id;
       } catch {
         sellerId = null;
       }
-      return { lines, sellerId, sellerName: cart.sellerName, label: cart.label, number: cart.number, missing: cart.lines.length - lines.length };
+      const customerId = cartCustomer(cart.customerId);
+      return {
+        lines,
+        sellerId,
+        sellerName: cart.sellerName,
+        label: cart.label,
+        number: cart.number,
+        missing: cart.lines.length - lines.length,
+        customerId,
+        clientName: customerId ? null : (cart.customerName ?? null),
+        priceLevel: cart.priceLevel ?? null,
+        discountReason: cart.discountReason ?? null,
+      };
     },
 
     // ——— Vendeur et caissier séparés ——————————————————————————————————————
@@ -1984,7 +2024,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const fromPhones = carts.map((k) => {
         let total = 0;
         try {
-          total = computeTotals(s.pos.priceLines(c.storeId, k.lines.map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null })))).totalTtc;
+          const customerId = cartCustomer(k.customerId);
+          const level = k.priceLevel ?? (customerId ? s.customers.getCustomer(customerId).price_level : 'retail');
+          const lines = k.lines.map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null, discount: l.discount ?? 0 }));
+          total = computeTotals(s.pos.priceLines(c.storeId, lines, level, customerId)).totalTtc;
         } catch {
           total = 0;
         }
@@ -1997,7 +2040,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           version: 1,
           total,
           lines: k.lines.length,
-          customerName: k.label,
+          customerName: k.customerName ?? k.label,
           note: null,
           lockName: null,
           lockedHere: false,
@@ -2025,8 +2068,21 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
             return false;
           }
         };
-        const lines = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null }));
-        const ready = s.counter.prepare(c.storeId, { lines, customerId: null, clientName: cart.label, priceLevel: null, warehouseId: null, discountBy: null, priceBy: null, optionsBy: null, cartNumber: cart.number });
+        const lines = cart.lines.filter((l) => known(l.articleId)).map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null, discount: l.discount ?? 0 }));
+        // Client, tarif et remises du vendeur complet : l'accord (son droit ou le code du gérant) a été vérifié par le serveur.
+        const customerId = cartCustomer(cart.customerId);
+        const ready = s.counter.prepare(c.storeId, {
+          lines,
+          customerId,
+          clientName: customerId ? null : (cart.customerName ?? cart.label),
+          priceLevel: cart.priceLevel ?? null,
+          warehouseId: null,
+          discountBy: lines.some((l) => l.discount > 0) ? (cart.discountBy ?? null) : null,
+          discountReason: cart.discountReason ?? null,
+          priceBy: null,
+          optionsBy: cart.priceLevel ? (cart.optionsBy ?? null) : null,
+          cartNumber: cart.number,
+        });
         const inv = await counterSend(s, {
           id: `fc-panier-${cart.id}`.slice(0, 64),
           baseVersion: null,

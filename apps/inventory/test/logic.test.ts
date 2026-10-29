@@ -2,15 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   type Article,
   buildIndex,
+  cartTotals,
   csvRows,
   exportCountFile,
   fileArticle,
   formatQty,
   guestCode,
   levels,
+  lineGross,
+  lineStep,
   lookup,
   normalizeUrl,
   parseCountFile,
+  parseDiscount,
   parsePairing,
   partsToDetail,
   partsToQty,
@@ -18,6 +22,7 @@ import {
   placeKey,
   recapCsv,
   search,
+  tariff,
 } from '../src/logic';
 
 const art = (over: Partial<Article>): Article => ({
@@ -164,5 +169,39 @@ describe('application d’inventaire', () => {
       '20010;Mutzig 50 cl;Réserve;48;2 CARTON (48);51',
       '20011;Riz parfumé 25 kg;Rayon;1,5;1,5 kg;1,5',
     ]);
+  });
+});
+
+describe('panier du vendeur au rayon', () => {
+  const savon = art({ id: 's', price: 700, wholesale: 600, packs: [{ id: 'carton', name: 'Carton', units: 24_000, barcode: null, price: 15_000, wholesale: 14_000 }] });
+  it('prend le prix du tarif, comme la caisse : le super gros retombe sur le gros, puis sur le détail', () => {
+    expect(tariff(savon, 'retail')).toBe(700);
+    expect(tariff(savon, 'wholesale')).toBe(600);
+    expect(tariff(savon, 'super_wholesale')).toBe(600);
+    expect(tariff(art({ price: 500 }), 'super_wholesale')).toBe(500);
+  });
+  it('vend le carton au prix du carton et avance d’un carton', () => {
+    expect(lineGross(savon, { articleId: 's', qty: 3_000 }, 'retail')).toBe(2_100);
+    expect(lineGross(savon, { articleId: 's', qty: 48_000, packId: 'carton' }, 'wholesale')).toBe(28_000);
+    expect(lineStep(savon, { packId: 'carton' })).toBe(24_000);
+    expect(lineStep(art({ unit: 'kg' }), {})).toBe(500);
+  });
+  it('compte les remises sans dépasser le prix de la ligne', () => {
+    const t = cartTotals(
+      [
+        { article: savon, line: { articleId: 's', qty: 2_000, discount: 200 } },
+        { article: savon, line: { articleId: 's', qty: 24_000, packId: 'carton', discount: 99_999 } },
+      ],
+      'retail',
+    );
+    expect(t).toEqual({ gross: 16_400, discount: 15_200, total: 1_200 });
+  });
+  it('lit une remise en FCFA ou en pourcentage', () => {
+    expect(parseDiscount('', 1_000)).toBe(0);
+    expect(parseDiscount('150', 1_000)).toBe(150);
+    expect(parseDiscount('10 %', 1_400)).toBe(140);
+    expect(parseDiscount('2,5%', 1_000)).toBe(25);
+    expect(parseDiscount('1 500', 1_000)).toBeNull();
+    expect(parseDiscount('abc', 1_000)).toBeNull();
   });
 });

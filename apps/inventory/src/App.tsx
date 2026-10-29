@@ -6,8 +6,15 @@ import {
   type Article,
   type Hit,
   type PlaceCount,
+  type PriceLevel,
+  PRICE_LEVELS,
   addDetail,
   buildIndex,
+  cartTotals,
+  lineGross,
+  lineStep,
+  parseDiscount,
+  tariff,
   csvRows,
   exportCountFile,
   formatQty,
@@ -25,6 +32,7 @@ import {
   recapCsv,
   search,
 } from './logic';
+import { Manager } from './Manager';
 import * as S from './state';
 
 const VERSION = __APP_VERSION__;
@@ -75,23 +83,39 @@ export function App() {
     setReceiveMode(on);
     remember('reception', on ? '1' : null);
   };
+  // Espace du gérant : à la place des inventaires.
+  const [manageMode, setManageMode] = useState(() => recall('gerant') === '1');
+  const manageOn = (on: boolean) => {
+    setManageMode(on);
+    remember('gerant', on ? '1' : null);
+  };
   // Contrôle des tickets à la sortie (vigile) : à la place des inventaires.
   const [exitMode, setExitMode] = useState(() => recall('sortie') === '1');
   const exitOn = (on: boolean) => {
     setExitMode(on);
     remember('sortie', on ? '1' : null);
   };
-  if (!s.ready) return <div className="splash">ONIX 360 Inventaire</div>;
+  if (!s.ready) return <div className="splash">ONIX 360 Mobile</div>;
   const connected = Boolean(s.config && s.session);
   const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
   const archive = s.archives.find((a) => a.inventory.id === recapId);
   const recapFile = s.files.find((f) => f.id === recapId);
   const can = s.session?.can;
   const cartOnly = Boolean(connected && can && can.cart && !can.count);
+  const manageOnly = Boolean(connected && can?.manage && !can.count && !can.cart && !can.receive);
   let page: ReactNode;
-  if (connected && can?.exit && exitMode) page = <ExitControl onBack={() => exitOn(false)} />;
+  if (connected && can?.manage && (manageOnly || manageMode)) page = <Manager onBack={manageOnly ? null : () => manageOn(false)} />;
+  else if (connected && can?.exit && exitMode) page = <ExitControl onBack={() => exitOn(false)} />;
   else if (connected && can?.receive && receiveMode) page = <Receive onBack={() => receiveOn(false)} />;
-  else if (connected && can?.cart && (cartOnly || cartMode)) page = <ShelfCart onBack={cartOnly ? null : () => cartOn(false)} onReceive={can.receive ? () => receiveOn(true) : undefined} onExit={can.exit ? () => exitOn(true) : undefined} />;
+  else if (connected && can?.cart && (cartOnly || cartMode))
+    page = (
+      <ShelfCart
+        onBack={cartOnly ? null : () => cartOn(false)}
+        onReceive={can.receive ? () => receiveOn(true) : undefined}
+        onExit={can.exit ? () => exitOn(true) : undefined}
+        onManage={can.manage ? () => manageOn(true) : undefined}
+      />
+    );
   else if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
   else if (recapFile) page = <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
   else if (inventory && recapId === inventory.id) page = <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
@@ -105,6 +129,7 @@ export function App() {
         onCart={connected && can?.cart ? () => cartOn(true) : undefined}
         onReceive={connected && can?.receive ? () => receiveOn(true) : undefined}
         onExit={connected && can?.exit ? () => exitOn(true) : undefined}
+        onManage={connected && can?.manage ? () => manageOn(true) : undefined}
       />
     );
   else if (!s.config) page = <Pairing onFiles={() => files(true)} />;
@@ -238,13 +263,13 @@ function Pairing({ onFiles }: { onFiles: () => void }) {
     },
   );
 
-  if (camera) return <CameraOverlay title="QR code du gérant" hint="Visez le QR code affiché sur la page Inventaire du gérant" onStop={() => setCamera(false)} />;
+  if (camera) return <CameraOverlay title="QR code du gérant" hint="Visez le QR code affiché sur la page Téléphones du gérant" onStop={() => setCamera(false)} />;
   return (
     <div className="page center">
       <img className="logo" src="./icon.png" alt="" />
-      <h1>ONIX 360 Inventaire</h1>
+      <h1>ONIX 360 Mobile</h1>
       <p className="muted">
-        Reliez ce téléphone au magasin : le gérant ouvre ONIX 360 Gérant › Inventaire et affiche le QR code. Vous venez aider sans compte ? Scannez le QR code d’aide que le
+        Reliez ce téléphone au magasin : le gérant ouvre ONIX 360 Gérant › Téléphones et inventaire et affiche le QR code. Vous venez aider sans compte ? Scannez le QR code d’aide que le
         gérant vous montre.
       </p>
       <label className="field">
@@ -445,6 +470,7 @@ function Inventories({
   onCart,
   onReceive,
   onExit,
+  onManage,
 }: {
   onChoose: (id: string) => void;
   onRecap: (id: string) => void;
@@ -452,6 +478,7 @@ function Inventories({
   onCart?: () => void;
   onReceive?: () => void;
   onExit?: () => void;
+  onManage?: () => void;
 }) {
   const s = useStore();
   const [menu, setMenu] = useState(false);
@@ -502,6 +529,11 @@ function Inventories({
         </button>
       </header>
       <main>
+        {onManage ? (
+          <button className="big primary" onClick={onManage}>
+            Espace gérant : ventes, caisses, stock, clients
+          </button>
+        ) : null}
         {onExit ? (
           <button className="big" onClick={onExit}>
             Contrôle des tickets à la sortie
@@ -589,13 +621,39 @@ function Inventories({
 
 const fcfa = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
 
+/** Motifs de remise proposés au vendeur (il peut aussi écrire le sien). */
+const DISCOUNT_REASONS = ['Client fidèle', 'Achat en quantité', 'Produit abîmé', 'Date proche', 'Geste commercial'];
+
+const CART_STATUS: Record<S.CartStatus, { label: string; cls: string }> = {
+  waiting: { label: 'En attente', cls: 'wait' },
+  taken: { label: 'En caisse', cls: 'info' },
+  paid: { label: 'Encaissé', cls: 'ok' },
+  returned: { label: 'Rendu par la caisse', cls: 'ko' },
+  cancelled: { label: 'Annulé', cls: 'off' },
+};
+
+/** Ligne du panier affichée : l'article, son conditionnement et ses prix au tarif du panier. */
+interface ShownLine {
+  line: S.CartLine;
+  article: Article;
+  pack: Article['packs'][number] | undefined;
+  gross: number;
+  discount: number;
+}
+
 /**
  * Le vendeur accompagne le client au rayon, scanne ses produits, puis envoie
  * le panier à la caisse : le caissier le retrouve dans « Tickets en attente »
- * et l'encaisse ; la vente compte pour le vendeur.
+ * (ou « Factures à encaisser » quand vendeur et caissier sont séparés) et
+ * l'encaisse ; la vente compte pour le vendeur.
+ *
+ * Vendeur complet (réglage du gérant) : client, tarif, cartons et remises
+ * comme sur le PC, suivi de chaque panier (en caisse, encaissé, rendu) et
+ * ventes du jour.
  */
-function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null; onReceive?: () => void; onExit?: () => void }) {
+function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => void) | null; onReceive?: () => void; onExit?: () => void; onManage?: () => void }) {
   const s = useStore();
+  const full = s.session?.can?.sell === 'full';
   const [info, setInfo] = useState<Article | null>(null);
   const [missed, setMissed] = useState<{ article: Article | null; label: string } | null>(null);
   const canMissed = Boolean(s.session?.can?.missed);
@@ -603,21 +661,35 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
   const [query, setQuery] = useState('');
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<number | null>(null);
+  const [sent, setSent] = useState<{ number: number; total: number | null; edited: boolean } | null>(null);
+  const [editing, setEditing] = useState<ShownLine | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [pin, setPin] = useState<string | null>(null);
+  const [opened, setOpened] = useState<S.SentCart | null>(null);
   const seen = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => void S.loadSentCarts(), []);
+  useEffect(() => {
+    void S.loadSentCarts();
+    // Les paniers changent d'état à la caisse : la liste se met à jour toute seule.
+    const t = setInterval(() => void S.loadSentCarts(), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const show = (text: string, ok: boolean) => {
     setFlash({ text, ok });
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), 2500);
   };
-  const add = (a: Article, qty: number) => {
-    S.addToCart(a.id, qty);
+  const add = (a: Article, qty: number, packId: string | null = null) => {
+    S.addToCart(a.id, qty, packId);
     setSent(null);
     beepOk();
     show(`${a.name} : +${formatQty(qty, a)}`, true);
+  };
+  /** Code d'un carton : le carton entre au panier comme carton (son prix), s'il est connu de la caisse. */
+  const addHit = (h: Hit) => {
+    const pack = h.article.packs[h.level];
+    add(h.article, h.qty, pack?.id && pack.units === h.qty ? pack.id : null);
   };
   const onCode = (raw: string, fromCamera: boolean) => {
     const code = raw.trim();
@@ -628,12 +700,12 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
     }
     seen.current = { code, at: now };
     const hit = lookup(S.getState().index, code);
-    if (hit) return add(hit.article, hit.qty);
+    if (hit) return addHit(hit);
     void S.findOnServer(code)
       .catch(() => [] as Article[])
       .then(() => {
         const again = lookup(S.getState().index, code);
-        if (again) return add(again.article, again.qty);
+        if (again) return addHit(again);
         beepError();
         show(`Code ${code} inconnu : cherchez le produit par son nom`, false);
       });
@@ -650,17 +722,43 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
   wedge.current = onCode;
   useEffect(() => listenWedge((c) => wedge.current(c, false)), []);
 
+  const level = S.cartLevelOf(s);
   const results = useMemo(() => (query.trim().length >= 2 ? search(s.catalog?.articles ?? [], query, 30) : []), [query, s.catalog]);
-  const lines = s.cart.map((l) => ({ ...l, article: s.articles.get(l.articleId) })).filter((l): l is S.CartLine & { article: Article } => Boolean(l.article));
-  const total = lines.reduce((t, l) => t + Math.round(((l.article.price ?? 0) * l.qty) / 1000), 0);
-  const step = (a: Article) => (a.unit === 'piece' ? 1000 : 500);
+  const lines: ShownLine[] = s.cart
+    .map((line) => {
+      const article = s.articles.get(line.articleId);
+      if (!article) return null;
+      const gross = lineGross(article, line, level);
+      return { line, article, pack: line.packId ? article.packs.find((k) => k.id === line.packId) : undefined, gross, discount: full ? Math.min(gross, line.discount ?? 0) : 0 };
+    })
+    .filter((l): l is ShownLine => Boolean(l));
+  const totals = cartTotals(
+    lines.map((l) => ({ article: l.article, line: full ? l.line : { ...l.line, discount: 0 } })),
+    level,
+  );
+  const needsReason = full && totals.discount > 0;
+  const qtyLabel = (l: ShownLine) => (l.pack ? `${Math.round(l.line.qty / l.pack.units)} ${l.pack.name.toLowerCase()}` : formatQty(l.line.qty, l.article));
+
+  const send = async (supervisorPin?: string) => {
+    if (needsReason && !s.cartReason.trim()) return show('Choisissez le motif de la remise', false);
+    setBusy(true);
+    try {
+      setSent(await S.sendCart(supervisorPin));
+      setPin(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'SUPERVISOR_REQUIRED') setPin(e.message);
+      else show(e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur : le panier reste sur le téléphone, réessayez.' : message(e), false);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (camera) {
     return (
       <CameraOverlay title="Panier" hint="Chaque scan ajoute le produit au panier" onStop={() => setCamera(false)}>
         {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
         <div className="flash ok">
-          {lines.length} produit(s) · {fcfa(total)}
+          {lines.length} produit(s) · {fcfa(totals.total)}
         </div>
       </CameraOverlay>
     );
@@ -675,7 +773,7 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
           </button>
         ) : null}
         <div className="grow">
-          <b>Panier au rayon</b>
+          <b>{s.cartEdit ? `Panier n° ${s.cartEdit.number} (modification)` : 'Panier au rayon'}</b>
           <small>{s.session?.user.name}</small>
         </div>
         <Status />
@@ -689,7 +787,29 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
         <CatalogState />
         {sent !== null ? (
           <div className="notice info">
-            Panier n° {sent} envoyé à la caisse. Dites au client : « passez en caisse, panier n° {sent} de {s.session?.user.name} ».
+            Panier n° {sent.number} {sent.edited ? 'modifié et renvoyé' : 'envoyé'} à la caisse{sent.total ? ` (${fcfa(sent.total)} environ)` : ''}. Dites au client : « passez en caisse, panier n° {sent.number}{' '}
+            de {s.session?.user.name} ».
+          </div>
+        ) : null}
+        {full ? (
+          <div className="card">
+            <button className="who" onClick={() => setPicking(true)}>
+              <span className="grow">
+                <b>{s.cartCustomer ? s.cartCustomer.name : s.cartLabel.trim() || 'Client comptoir'}</b>
+                <small className="muted">
+                  {s.cartCustomer ? `${s.cartCustomer.code ? `${s.cartCustomer.code} · ` : ''}tarif ${PRICE_LEVELS[s.cartCustomer.priceLevel].toLowerCase()}` : 'Touchez pour choisir le client'}
+                </small>
+              </span>
+              <span className="chev">›</span>
+            </button>
+            <div className="segmented" role="radiogroup" aria-label="Tarif">
+              {(Object.keys(PRICE_LEVELS) as PriceLevel[]).map((k) => (
+                <button key={k} className={level === k ? 'on' : ''} onClick={() => S.setCartLevel(k === (s.cartCustomer?.priceLevel ?? 'retail') ? null : k)}>
+                  {PRICE_LEVELS[k]}
+                </button>
+              ))}
+            </div>
+            {level !== (s.cartCustomer?.priceLevel ?? 'retail') && !s.session?.can?.tariff ? <p className="muted small">Tarif hors de l’habituel : le gérant donnera son code à l’envoi.</p> : null}
           </div>
         ) : null}
         <button className="scan" onClick={() => setCamera(true)}>
@@ -714,15 +834,21 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
             Contrôle des tickets à la sortie
           </button>
         ) : null}
+        {onManage ? (
+          <button className="link" onClick={onManage}>
+            Espace gérant
+          </button>
+        ) : null}
         {query.trim().length >= 2 ? (
           <div className="list">
             {results.map((a) => (
-              <div key={a.id} className="row item" onClick={() => (add(a, step(a)), setQuery(''))}>
+              <div key={a.id} className="row item" onClick={() => (add(a, lineStep(a, {})), setQuery(''))}>
                 <div className="grow">
                   {a.name}
                   <small>
                     {a.code}
-                    {a.price ? ` · ${fcfa(a.price)}` : ''}
+                    {a.price ? ` · ${fcfa(tariff(a, level))}` : ''}
+                    {full && a.packs.some((k) => k.id) ? ` · ${a.packs.filter((k) => k.id).map((k) => `${k.name.toLowerCase()} ${fcfa(tariff(k, level))}`).join(' · ')}` : ''}
                   </small>
                 </div>
                 <button className="small-btn" onClick={(e) => (e.stopPropagation(), setInfo(a))} aria-label="Stock ailleurs, livraison, remplaçant">
@@ -742,75 +868,121 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
           <>
             <div className="list">
               {lines.map((l) => (
-                <div key={l.articleId} className="row item">
+                <div key={`${l.line.articleId}:${l.line.packId ?? ''}`} className="row item" onClick={full ? () => setEditing(l) : undefined}>
                   <div className="grow">
                     {l.article.name}
                     <small>
-                      {formatQty(l.qty, l.article)}
-                      {l.article.price ? ` · ${fcfa(Math.round((l.article.price * l.qty) / 1000))}` : ''}
+                      {qtyLabel(l)}
+                      {l.gross ? ` · ${fcfa(l.gross - l.discount)}` : ''}
+                      {l.discount ? <span className="discount"> (remise {fcfa(l.discount)})</span> : null}
                     </small>
                   </div>
-                  <button className="small-btn" onClick={() => setInfo(l.article)} aria-label="Stock ailleurs, livraison, remplaçant">
+                  <button className="small-btn" onClick={(e) => (e.stopPropagation(), setInfo(l.article))} aria-label="Stock ailleurs, livraison, remplaçant">
                     ℹ
                   </button>
-                  <button className="small-btn" onClick={() => S.setCartQty(l.articleId, l.qty - step(l.article))} aria-label="Moins">
+                  <button
+                    className="small-btn"
+                    onClick={(e) => (e.stopPropagation(), S.setCartQty(l.line.articleId, l.line.qty - lineStep(l.article, l.line), l.line.packId ?? null))}
+                    aria-label="Moins"
+                  >
                     −
                   </button>
-                  <button className="small-btn" onClick={() => S.setCartQty(l.articleId, l.qty + step(l.article))} aria-label="Plus">
+                  <button
+                    className="small-btn"
+                    onClick={(e) => (e.stopPropagation(), S.setCartQty(l.line.articleId, l.line.qty + lineStep(l.article, l.line), l.line.packId ?? null))}
+                    aria-label="Plus"
+                  >
                     +
                   </button>
                 </div>
               ))}
               {!lines.length ? <div className="empty">Scannez les produits du client ou cherchez-les par leur nom.</div> : null}
             </div>
+            {full && lines.length ? <p className="muted small">Touchez une ligne pour changer la quantité, vendre au carton ou faire une remise.</p> : null}
             {lines.length ? (
               <div className="card">
-                <label className="field">
-                  Client (facultatif)
-                  <input value={s.cartLabel} onChange={(e) => S.setCartLabel(e.target.value)} placeholder="Nom ou signe pour le reconnaître" />
-                </label>
+                {!full ? (
+                  <label className="field">
+                    Client (facultatif)
+                    <input value={s.cartLabel} onChange={(e) => S.setCartLabel(e.target.value)} placeholder="Nom ou signe pour le reconnaître" />
+                  </label>
+                ) : null}
+                {totals.discount ? (
+                  <>
+                    <div className="row">
+                      <span className="grow">Avant remise</span>
+                      <span>{fcfa(totals.gross)}</span>
+                    </div>
+                    <div className="row discount">
+                      <span className="grow">Remises</span>
+                      <span>− {fcfa(totals.discount)}</span>
+                    </div>
+                    <label className="field">
+                      Motif de la remise
+                      <select value={DISCOUNT_REASONS.includes(s.cartReason) || !s.cartReason ? s.cartReason : '*'} onChange={(e) => S.setCartReason(e.target.value === '*' ? ' ' : e.target.value)}>
+                        <option value="">Choisir…</option>
+                        {DISCOUNT_REASONS.map((r) => (
+                          <option key={r}>{r}</option>
+                        ))}
+                        <option value="*">Autre motif</option>
+                      </select>
+                    </label>
+                    {s.cartReason && !DISCOUNT_REASONS.includes(s.cartReason) ? (
+                      <input value={s.cartReason.trimStart()} onChange={(e) => S.setCartReason(e.target.value || ' ')} placeholder="Écrivez le motif" />
+                    ) : null}
+                    {!s.session?.can?.discount ? <p className="muted small">Remise : le gérant donnera son code à l’envoi.</p> : null}
+                  </>
+                ) : null}
                 <div className="row">
                   <b className="grow">Total indicatif</b>
-                  <b>{fcfa(total)}</b>
+                  <b>{fcfa(totals.total)}</b>
                 </div>
-                <p className="muted small">La caisse refait le prix (promotions, tarif du client).</p>
-                <button
-                  className="big primary"
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true);
-                    try {
-                      setSent(await S.sendCart());
-                    } catch (e) {
-                      show(e instanceof ApiError && e.status === 0 ? 'Pas de connexion au serveur : le panier reste sur le téléphone, réessayez.' : message(e), false);
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                >
-                  {busy ? 'Envoi…' : 'Envoyer à la caisse'}
+                <p className="muted small">La caisse refait le prix exact (promotions, prix convenus du client).</p>
+                <button className="big primary" disabled={busy} onClick={() => void send()}>
+                  {busy ? 'Envoi…' : s.cartEdit ? `Renvoyer le panier n° ${s.cartEdit.number}` : 'Envoyer à la caisse'}
                 </button>
                 <button className="link" onClick={() => S.clearCart()}>
-                  Vider le panier
+                  {s.cartEdit ? 'Abandonner la modification' : 'Vider le panier'}
                 </button>
               </div>
+            ) : null}
+            {full && s.sellerDay ? (
+              <>
+                <h3>Ma journée</h3>
+                <div className="kpis">
+                  <div>
+                    <b>{fcfa(s.sellerDay.net)}</b>
+                    <small>vendus à mon nom</small>
+                  </div>
+                  <div>
+                    <b>{s.sellerDay.tickets}</b>
+                    <small>ticket(s) · {fcfa(s.sellerDay.average)} en moyenne</small>
+                  </div>
+                </div>
+              </>
             ) : null}
             {s.sentCarts.length ? (
               <>
                 <h3>Mes paniers du jour</h3>
                 <div className="list">
-                  {s.sentCarts.map((c) => (
-                    <div key={c.id} className="row item">
-                      <div className="grow">
-                        Panier n° {c.number}
-                        {c.label ? ` · ${c.label}` : ''}
-                        <small>
-                          {heure(c.at)} · {c.lines} ligne(s)
-                        </small>
+                  {s.sentCarts.map((c) => {
+                    const st = CART_STATUS[c.status ?? (c.takenAt ? 'taken' : 'waiting')];
+                    return (
+                      <div key={c.id} className="row item" onClick={full ? () => setOpened(c) : undefined}>
+                        <div className="grow">
+                          Panier n° {c.number}
+                          {c.customerName || c.label ? ` · ${c.customerName ?? c.label}` : ''}
+                          <small>
+                            {heure(c.at)} · {c.lines} ligne(s)
+                            {c.total ? ` · ${fcfa(c.total)}` : ''}
+                            {c.saleNumber ? ` · ticket ${c.saleNumber}` : ''}
+                          </small>
+                          {c.note ? <small className="discount">Motif de la caisse : {c.note}</small> : null}
+                        </div>
+                        <span className={`pill ${st.cls}`}>{c.status === 'taken' || (!c.status && c.takenAt) ? `En caisse ${heure(c.takenAt)}` : st.label}</span>
                       </div>
-                      <span className={`pill ${c.takenAt ? '' : 'wait'}`}>{c.takenAt ? `En caisse ${heure(c.takenAt)}` : 'En attente'}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <button className="link" onClick={() => void S.loadSentCarts()}>
                   Actualiser
@@ -824,11 +996,278 @@ function ShelfCart({ onBack, onReceive, onExit }: { onBack: (() => void) | null;
         <InfoSheet
           article={info}
           onClose={() => setInfo(null)}
-          onAdd={(a) => (add(a, step(a)), setInfo(null))}
+          onAdd={(a) => (add(a, lineStep(a, {})), setInfo(null))}
           onMissed={canMissed ? () => (setMissed({ article: info, label: '' }), setInfo(null)) : undefined}
         />
       ) : null}
       {missed ? <MissedSheet article={missed.article} label={missed.label} onClose={(text) => (setMissed(null), setQuery(''), text && show(text, true))} /> : null}
+      {editing ? <CartLineSheet shown={editing} level={level} onClose={() => setEditing(null)} /> : null}
+      {picking ? <CustomerSheet onClose={() => setPicking(false)} /> : null}
+      {pin !== null ? <SupervisorSheet reason={pin} busy={busy} onCancel={() => setPin(null)} onPin={(p) => void send(p)} /> : null}
+      {opened ? (
+        <SentCartSheet
+          cart={opened}
+          onClose={() => setOpened(null)}
+          onDone={(text) => {
+            setOpened(null);
+            setSent(null);
+            if (text) show(text, true);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Fiche d'une ligne du panier : quantité, unité ou conditionnement, remise (FCFA ou %). */
+function CartLineSheet({ shown, level, onClose }: { shown: ShownLine; level: PriceLevel; onClose: () => void }) {
+  const { article, line } = shown;
+  const sellable = article.packs.filter((k): k is typeof k & { id: string } => Boolean(k.id));
+  const [packId, setPackId] = useState<string | null>(line.packId ?? null);
+  const pack = packId ? sellable.find((k) => k.id === packId) : undefined;
+  const per = pack ? pack.units : 1000;
+  const [count, setCount] = useState(() => String(Math.round((line.qty / per) * 1000) / 1000).replace('.', ','));
+  const [discount, setDiscount] = useState(line.discount ? String(line.discount) : '');
+  const n = parseNumber(count);
+  const qty = n !== null && n > 0 ? Math.round(n * per) : null;
+  const gross = qty ? lineGross(article, { ...line, qty, packId }, level) : 0;
+  const amount = parseDiscount(discount, gross);
+  const unitName = pack ? pack.name : article.unit === 'piece' ? article.unitName || 'Pièce' : article.unit === 'kg' ? 'kg' : 'litres';
+  const save = () => {
+    if (!qty) return;
+    if (amount === null) return;
+    S.updateCartLine(line.articleId, line.packId ?? null, { articleId: line.articleId, qty, packId, discount: amount });
+    onClose();
+  };
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <h2>{article.name}</h2>
+        {sellable.length ? (
+          <div className="segmented">
+            <button
+              className={!packId ? 'on' : ''}
+              onClick={() => {
+                if (qty) setCount(String(qty / 1000).replace('.', ','));
+                setPackId(null);
+              }}
+            >
+              {article.unitName || 'Pièce'}
+            </button>
+            {sellable.map((k) => (
+              <button
+                key={k.id}
+                className={packId === k.id ? 'on' : ''}
+                onClick={() => {
+                  setCount(qty ? String(Math.max(1, Math.round(qty / k.units))) : '1');
+                  setPackId(k.id);
+                }}
+              >
+                {k.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="qty-row">
+          <button className="step" onClick={() => setCount(String(Math.max(0, (n ?? 0) - (pack || article.unit === 'piece' ? 1 : 0.5))).replace('.', ','))}>
+            −
+          </button>
+          <input inputMode="decimal" value={count} onChange={(e) => setCount(e.target.value)} aria-label="Quantité" />
+          <button className="step" onClick={() => setCount(String((n ?? 0) + (pack || article.unit === 'piece' ? 1 : 0.5)).replace('.', ','))}>
+            +
+          </button>
+          <label>{unitName.toLowerCase()}</label>
+        </div>
+        <div className="row">
+          <span className="grow muted">Prix ({PRICE_LEVELS[level].toLowerCase()})</span>
+          <b>{fcfa(gross)}</b>
+        </div>
+        <label className="field">
+          Remise sur la ligne (en FCFA, ou « 10 % »)
+          <input inputMode="text" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" />
+        </label>
+        {amount === null ? <div className="notice erreur">Remise invalide : elle ne peut pas dépasser le prix de la ligne.</div> : null}
+        {amount ? (
+          <div className="total">
+            {fcfa(gross - amount)} après remise de {fcfa(amount)}
+          </div>
+        ) : null}
+        <button className="big primary" disabled={!qty || amount === null} onClick={save}>
+          Valider
+        </button>
+        <button className="link danger" onClick={() => (S.setCartQty(line.articleId, 0, line.packId ?? null), onClose())}>
+          Retirer du panier
+        </button>
+        <button className="link" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Choix du client : fiche du magasin (tarif, crédit à la caisse) ou simple nom pour le reconnaître. */
+function CustomerSheet({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState<S.CartCustomer[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) return setFound(null);
+    let stop = false;
+    const t = setTimeout(() => {
+      S.findCustomers(query).then(
+        (r) => !stop && (setFound(r), setError('')),
+        (e) => !stop && setError(message(e)),
+      );
+    }, 300);
+    return () => {
+      stop = true;
+      clearTimeout(t);
+    };
+  }, [q]);
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <h2>Client du panier</h2>
+        <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nom, code ou téléphone du client" autoFocus />
+        {error ? <div className="notice erreur">{error}</div> : null}
+        {found ? (
+          <div className="list">
+            {found.map((c) => (
+              <div key={c.id} className="row item" onClick={() => (S.setCartCustomer(c), onClose())}>
+                <div className="grow">
+                  {c.name}
+                  <small>
+                    {c.code}
+                    {c.phone ? ` · ${c.phone}` : ''} · tarif {PRICE_LEVELS[c.priceLevel].toLowerCase()}
+                    {c.creditLimit ? ` · crédit jusqu’à ${fcfa(c.creditLimit)}` : ''}
+                  </small>
+                </div>
+                <span className="chev">›</span>
+              </div>
+            ))}
+            {!found.length ? <div className="empty">Aucun client trouvé. Notez son nom ci-dessous : la fiche se crée sur le PC.</div> : null}
+          </div>
+        ) : null}
+        <label className="field">
+          Ou client de passage (nom ou signe pour le reconnaître)
+          <input value={s.cartLabel} onChange={(e) => S.setCartLabel(e.target.value)} placeholder="Dame au foulard rouge" />
+        </label>
+        {s.cartCustomer ? (
+          <button className="link danger" onClick={() => (S.setCartCustomer(null), onClose())}>
+            Retirer le client {s.cartCustomer.name}
+          </button>
+        ) : null}
+        <button className="big" onClick={onClose}>
+          OK
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Le gérant tape son code sur le téléphone du vendeur (remise, tarif) : vérifié par le serveur. */
+function SupervisorSheet({ reason, busy, onPin, onCancel }: { reason: string; busy: boolean; onPin: (pin: string) => void; onCancel: () => void }) {
+  const [pin, setPin] = useState('');
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="sheet">
+        <h2>Accord du gérant</h2>
+        <p>{reason}</p>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+          placeholder="Code du gérant"
+          autoFocus
+          onKeyDown={(e) => e.key === 'Enter' && pin.length >= 4 && onPin(pin)}
+        />
+        <button className="big primary" disabled={busy || pin.length < 4} onClick={() => onPin(pin)}>
+          {busy ? 'Envoi…' : 'Valider et envoyer'}
+        </button>
+        <button className="link" onClick={onCancel}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Panier envoyé : le modifier ou l'annuler tant qu'il attend, le refaire sinon. */
+function SentCartSheet({ cart, onClose, onDone }: { cart: S.SentCart; onClose: () => void; onDone: (text: string | null) => void }) {
+  const s = useStore();
+  const [error, setError] = useState('');
+  const status = cart.status ?? (cart.takenAt ? 'taken' : 'waiting');
+  const items = cart.items ?? [];
+  const busyCart = s.cart.length > 0;
+  const reopen = (keep: boolean) => {
+    if (busyCart && !confirm('Le panier en cours sera remplacé. Continuer ?')) return;
+    S.reopenCart(cart, keep);
+    onDone(keep ? `Panier n° ${cart.number} rouvert : modifiez-le puis renvoyez-le` : 'Produits repris dans un nouveau panier');
+  };
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <h2>
+          Panier n° {cart.number} <span className={`pill ${CART_STATUS[status].cls}`}>{CART_STATUS[status].label}</span>
+        </h2>
+        <p className="muted">
+          {cart.customerName ?? cart.label ?? 'Client comptoir'} · {heure(cart.at)}
+          {cart.total ? ` · ${fcfa(cart.total)}` : ''}
+          {cart.saleNumber ? ` · ticket ${cart.saleNumber}` : ''}
+        </p>
+        {cart.note ? <div className="notice attention">La caisse l’a rendu : {cart.note}</div> : null}
+        <div className="list">
+          {items.map((l) => {
+            const a = s.articles.get(l.articleId);
+            const pack = l.packId ? a?.packs.find((k) => k.id === l.packId) : undefined;
+            return (
+              <div key={`${l.articleId}:${l.packId ?? ''}`} className="row item">
+                <div className="grow">
+                  {a?.name ?? 'Produit inconnu du téléphone'}
+                  <small>
+                    {pack ? `${Math.round(l.qty / pack.units)} ${pack.name.toLowerCase()}` : a ? formatQty(l.qty, a) : l.qty / 1000}
+                    {l.discount ? ` · remise ${fcfa(l.discount)}` : ''}
+                  </small>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        {status === 'waiting' ? (
+          <>
+            <button className="big" onClick={() => reopen(true)}>
+              Modifier ce panier
+            </button>
+            <button
+              className="link danger"
+              onClick={async () => {
+                if (!confirm(`Annuler le panier n° ${cart.number} ? La caisse ne le verra plus.`)) return;
+                try {
+                  await S.cancelSentCart(cart.id);
+                  onDone(`Panier n° ${cart.number} annulé`);
+                } catch (e) {
+                  setError(message(e));
+                }
+              }}
+            >
+              Le client renonce : annuler le panier
+            </button>
+          </>
+        ) : status === 'returned' || status === 'cancelled' ? (
+          <button className="big" onClick={() => reopen(false)}>
+            Refaire un panier avec ces produits
+          </button>
+        ) : null}
+        <button className="link" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
     </div>
   );
 }
@@ -2292,7 +2731,7 @@ function Settings({ onClose }: { onClose: () => void }) {
         >
           Délier ce téléphone
         </button>
-        <p className="muted small">ONIX 360 Inventaire {VERSION}</p>
+        <p className="muted small">ONIX 360 Mobile {VERSION}</p>
         <button className="link" onClick={onClose}>
           Fermer
         </button>

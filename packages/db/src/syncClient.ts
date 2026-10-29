@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Fcfa } from '@superette/core';
+import type { Fcfa, PriceLevel } from '@superette/core';
 import type { CounterAction, CounterInvoice, CounterPayload } from './counter';
 import type { Services } from './index';
 import type { SyncEvent } from './sync';
@@ -187,7 +187,18 @@ export interface ShelfCart {
   label: string | null;
   sellerId: string;
   sellerName: string;
-  lines: { articleId: string; qty: number; packId: string | null }[];
+  /** `discount` : remise de la ligne en FCFA (vendeur au rayon complet). */
+  lines: { articleId: string; qty: number; packId: string | null; discount?: number }[];
+  /** Client choisi sur le téléphone, et tarif s'il n'est pas celui du client. */
+  customerId?: string | null;
+  customerName?: string | null;
+  priceLevel?: PriceLevel | null;
+  /** Qui a permis la remise ou le tarif : le vendeur qui en a le droit, ou le gérant qui a tapé son code (vérifié par le serveur). */
+  discountBy?: string | null;
+  discountReason?: string | null;
+  optionsBy?: string | null;
+  /** Total indicatif calculé par le serveur. */
+  total?: number | null;
   at: string;
 }
 
@@ -276,7 +287,16 @@ export interface StationStatus {
   printer: string | null;
   printerEnabled: boolean;
   license: { state: string; canSell: boolean; daysLeft: number | null; message: string };
+  /** Crédits clients du magasin (les plus gros soldes), pour le gérant sur son téléphone. */
+  receivables?: Receivables | null;
   at: string;
+}
+
+export interface Receivables {
+  total: Fcfa;
+  overdue: Fcfa;
+  count: number;
+  customers: { id: string; name: string; phone: string | null; balance: Fcfa; overdue: Fcfa; limit: Fcfa }[];
 }
 
 /** Ce PC donne son état au serveur (après une synchronisation). */

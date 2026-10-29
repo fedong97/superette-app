@@ -27,6 +27,8 @@ export interface CounterPayload {
   optionsBy: string | null;
   /** Panier préparé au rayon sur le téléphone, devenu facture à la caisse. */
   cartNumber?: number | null;
+  /** Motif de la remise. */
+  discountReason?: string | null;
 }
 
 export type CounterStatus = 'waiting' | 'editing' | 'returned' | 'paying' | 'paid' | 'cancelled';

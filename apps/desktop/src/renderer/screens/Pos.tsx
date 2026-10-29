@@ -1106,6 +1106,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <option value="quote">Facturer un devis / proforma</option>
         <option value="order">Charger une commande client</option>
         <option value="expense">Dépense payée en caisse</option>
+        {can('sale_book') && <option value="outage">Ventes pendant une coupure</option>}
         {can('containers_counter') && <option value="containers">Consignes (emballages)</option>}
         <option value="close">Clôture de caisse (Trésorerie)</option>
       </>

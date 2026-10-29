@@ -1167,6 +1167,40 @@ export class PosService extends Base {
   }
 
   /**
+   * Ventes d'une page du carnet de coupure, relues par le caissier : toutes
+   * enregistrées ensemble, ou aucune si l'une est refusée (le message dit
+   * laquelle). Chaque vente est payée en espèces du montant calculé par ONIX.
+   */
+  completeOutageSales(
+    ctx: Context,
+    outageId: string,
+    sales: { at: string; number?: string | null; lines: SaleLineInput[] }[],
+    opts: { discountAuthorizedBy?: string | null } = {},
+  ): Sale[] {
+    if (sales.length === 0) throw new AppError('Aucune vente à enregistrer', 'EMPTY');
+    if (sales.length > 200) throw new AppError('Deux cents ventes au plus à la fois', 'INVALID');
+    return this.tx(() =>
+      sales.map((sale, i) => {
+        const where = `Vente ${i + 1}${sale.number?.trim() ? ` (souche ${sale.number.trim()})` : ''}`;
+        try {
+          if (sale.lines.length === 0) throw new AppError('Ticket vide', 'EMPTY');
+          const total = computeTotals(this.priceLines(ctx.storeId, sale.lines)).totalTtc;
+          if (total <= 0) throw new AppError('Montant nul', 'INVALID');
+          return this.completeSale(ctx, {
+            lines: sale.lines,
+            payments: [{ method: 'CASH', amount: total }],
+            discountAuthorizedBy: opts.discountAuthorizedBy ?? null,
+            outage: { id: outageId, at: sale.at, number: sale.number ?? null },
+          });
+        } catch (err) {
+          if (err instanceof AppError) throw new AppError(`${where} : ${err.message}`, err.code, err.fixes);
+          throw err;
+        }
+      }),
+    );
+  }
+
+  /**
    * Espèces dans le tiroir maintenant et plafond du magasin. Au-delà, une
    * alerte par palier franchi part au gérant (PC et téléphone) ; la caisse
    * propose un prélèvement vers la caisse centrale.

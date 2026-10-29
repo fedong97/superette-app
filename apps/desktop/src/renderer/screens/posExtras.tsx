@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DISCOUNT_REASONS } from '@superette/core';
 import { type Result, call } from '../api';
 import { Field, Modal, SupervisorPrompt, askConfirm, dateTime, fcfa, parseAmount, useLoad, useToast } from '../ui';
+import { BookReader } from './outageBook';
 
 export type Outage = NonNullable<Result<'outages.current'>>;
 export type PromoApplied = Result<'promoCodes.check'>;
@@ -145,6 +146,7 @@ export function OutageDialog({
   const [note, setNote] = useState('');
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState(false);
+  const [reading, setReading] = useState(false);
 
   const declare = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,6 +183,17 @@ export function OutageDialog({
     }
   };
 
+  if (current && reading)
+    return (
+      <BookReader
+        outage={current}
+        onClose={() => setReading(false)}
+        onDone={() => {
+          setReading(false);
+          onChanged();
+        }}
+      />
+    );
   if (current)
     return (
       <Modal title={`Coupure n° ${current.number}`} onClose={onClose}>
@@ -221,6 +234,9 @@ export function OutageDialog({
           )}
           <button disabled={current.sales === 0} onClick={() => void close()}>
             Clôturer la coupure
+          </button>
+          <button onClick={() => setReading(true)} title="Photo d'une page du carnet ONIX à cases : les ventes sont lues sur ce PC, vous les vérifiez">
+            Lire une page du carnet
           </button>
           <button className="primary" onClick={() => (onEnter(current), onClose())}>
             Saisir les ventes

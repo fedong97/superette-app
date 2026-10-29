@@ -108,6 +108,8 @@ const TABLES: Record<string, string> = {
   field_rep: 'field_reps',
   report_preset: 'report_presets',
   outage: 'outages',
+  outage_page: 'outage_pages',
+  book_code: 'book_codes',
   promo_code: 'promo_codes',
   stock_anomaly_decision: 'stock_anomaly_decisions',
 };
@@ -145,6 +147,7 @@ const STATUS_RANK: Record<string, Record<string, number>> = {
   outages: { open: 0, closed: 1, cancelled: 1 },
   // Un justificatif retiré ne revient pas.
   expense_attachments: { active: 0, deleted: 1 },
+  outage_pages: { active: 0, deleted: 1 },
 };
 
 /** Documents avec lignes : l'en-tête et ses lignes voyagent ensemble. */
@@ -184,6 +187,7 @@ const RESEND: { entity: string; ids: string; store?: boolean }[] = [
   { entity: 'account', ids: 'SELECT id FROM accounts' },
   { entity: 'expense_category', ids: 'SELECT id FROM expense_categories' },
   { entity: 'field_rep', ids: 'SELECT id FROM field_reps' },
+  { entity: 'book_code', ids: 'SELECT id FROM book_codes' },
   { entity: 'promo_code', ids: 'SELECT id FROM promo_codes' },
   { entity: 'promotion', ids: 'SELECT id FROM promotions' },
   { entity: 'rebate_rules', ids: "SELECT DISTINCT COALESCE(customer_id, 'base') FROM rebate_rules" },

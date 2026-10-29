@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.100.0',
+    items: [
+      "Carnet de coupure ONIX : Trésorerie › Ventes pendant une coupure imprime des pages à cases et la liste des codes courts des articles, à garder près de la caisse.",
+      "Après la coupure : « Lire une page du carnet » et la photo de la page. ONIX lit les chiffres écrits à la main sur ce PC, sans internet ni service extérieur, et retrouve les articles, les prix et les heures.",
+      "Chaque ligne lue s'affiche sous son écriture ; ce qui est douteux est en orange et doit être vérifié. Les ventes de la page s'enregistrent ensemble dans la coupure, la photo reste jointe comme preuve.",
+      "À la caisse, « ⋯ Actions » propose aussi « Ventes pendant une coupure ».",
+    ],
+  },
+  {
     version: '0.99.3',
     items: [
       "Trésorerie › Opérations de trésorerie : le menu « Plus ▾ » des entrées et des sorties s'ouvrait hors de la fenêtre et paraissait vide. Il s'ouvre maintenant sous son bouton ; cliquez d'abord sur une ligne du tableau.",

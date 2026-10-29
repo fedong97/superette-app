@@ -14,10 +14,70 @@ export interface Article {
   otherRef: string | null;
   departmentId: string | null;
   barcodes: { code: string; packQty: number }[];
-  packs: { name: string; units: number; barcode: string | null }[];
+  /** Conditionnements ; `id` et les prix servent au panier du vendeur (carton au prix du carton). */
+  packs: { id?: string | null; name: string; units: number; barcode: string | null; price?: number; wholesale?: number | null; superWholesale?: number | null }[];
   thumb: string | null;
   /** Prix de vente indicatif (FCFA) pour le panier ; la caisse refait le prix. */
   price?: number;
+  wholesale?: number | null;
+  superWholesale?: number | null;
+}
+
+export type PriceLevel = 'retail' | 'wholesale' | 'super_wholesale';
+export const PRICE_LEVELS: Record<PriceLevel, string> = { retail: 'Détail', wholesale: 'Gros', super_wholesale: 'Super gros' };
+
+/** Ligne du panier du vendeur : quantité en millièmes, conditionnement vendu, remise en FCFA. */
+export interface SaleLine {
+  articleId: string;
+  qty: number;
+  packId?: string | null;
+  discount?: number;
+}
+
+type Tariff = { price?: number; wholesale?: number | null; superWholesale?: number | null };
+
+/** Prix au tarif choisi, comme la caisse : le gros retombe sur le détail, le super gros sur le gros. */
+export function tariff(t: Tariff, level: PriceLevel): number {
+  const retail = t.price ?? 0;
+  if (level === 'super_wholesale') return t.superWholesale ?? t.wholesale ?? retail;
+  if (level === 'wholesale') return t.wholesale ?? retail;
+  return retail;
+}
+
+/** Prix indicatif d'une ligne avant remise (au prix du carton pour un carton). */
+export function lineGross(a: Article, line: SaleLine, level: PriceLevel): number {
+  const pack = line.packId ? a.packs.find((k) => k.id === line.packId) : undefined;
+  if (pack && pack.units > 0) return Math.round((tariff(pack, level) * line.qty) / pack.units);
+  return Math.round((tariff(a, level) * line.qty) / 1000);
+}
+
+/** Pas d'une ligne : un conditionnement entier, sinon une unité (un demi-kilo au poids). */
+export function lineStep(a: Article, line: Pick<SaleLine, 'packId'>): number {
+  const pack = line.packId ? a.packs.find((k) => k.id === line.packId) : undefined;
+  return pack ? pack.units : a.unit === 'piece' ? 1000 : 500;
+}
+
+/** Totaux indicatifs du panier : brut, remises, net. */
+export function cartTotals(lines: { article: Article; line: SaleLine }[], level: PriceLevel): { gross: number; discount: number; total: number } {
+  let gross = 0;
+  let discount = 0;
+  for (const { article, line } of lines) {
+    const g = lineGross(article, line, level);
+    gross += g;
+    discount += Math.min(g, line.discount ?? 0);
+  }
+  return { gross, discount, total: gross - discount };
+}
+
+/** Remise tapée en FCFA, ou en pourcentage (« 10 % ») du prix de la ligne. */
+export function parseDiscount(input: string, gross: number): number | null {
+  const t = input.trim().replace(/\s/g, '');
+  if (!t) return 0;
+  const pct = /^(\d+(?:[.,]\d+)?)%$/.exec(t);
+  const n = Number((pct ? pct[1]! : t).replace(',', '.'));
+  if (!Number.isFinite(n) || n < 0) return null;
+  const amount = pct ? Math.round((gross * n) / 100) : Math.round(n);
+  return amount > gross ? null : amount;
 }
 
 export interface Catalog {

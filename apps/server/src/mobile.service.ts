@@ -52,10 +52,40 @@ export function verifyPin(pin: string, stored: string): boolean {
   return timingSafeEqual(actual, expected);
 }
 
+/**
+ * Vendeur au rayon sur le téléphone (Paramètres › Téléphones) :
+ * - off : pas de panier sur le téléphone ;
+ * - simple : produits et quantités, la caisse fait le reste ;
+ * - full : comme sur le PC (client, tarif, conditionnement, remise, suivi des paniers).
+ */
+export const SELLER_MODES = ['off', 'simple', 'full'] as const;
+export type SellerMode = (typeof SELLER_MODES)[number];
+/** Espace du gérant sur le téléphone : absent, consultation seule, ou gestion (prix, commandes, validations). */
+export const MANAGER_MODES = ['off', 'read', 'full'] as const;
+export type ManagerMode = (typeof MANAGER_MODES)[number];
+const PRICE_LEVELS = ['retail', 'wholesale', 'super_wholesale'] as const;
+type PriceLevel = (typeof PRICE_LEVELS)[number];
+
 export interface MobileDevice {
   id: string;
   name: string;
   store_id: string;
+}
+
+export interface MobileRights {
+  count: boolean;
+  cart: boolean;
+  missed: boolean;
+  receive: boolean;
+  exit: boolean;
+  /** Panier au rayon : simple (produits et quantités) ou complet (client, tarif, remise). */
+  sell: Exclude<SellerMode, 'off'> | null;
+  /** Remise sans le code du gérant (droit « Accorder une remise sans le code du gérant »). */
+  discount: boolean;
+  /** Tarif gros ou super gros sans le code du gérant. */
+  tariff: boolean;
+  /** Espace du gérant : consultation ou gestion. */
+  manage: Exclude<ManagerMode, 'off'> | null;
 }
 
 export interface MobileCaller {
@@ -63,6 +93,33 @@ export interface MobileCaller {
   user: { id: string; name: string; role: string };
   /** Aide sans compte : un seul inventaire, comptages signés sur les PC au nom de `onBehalfOf`. */
   guest?: { id: string; inventoryId: string; onBehalfOf: string };
+}
+
+interface CartLineInput {
+  articleId: string;
+  qty: number;
+  packId: string | null;
+  /** Remise sur la ligne, en FCFA. */
+  discount: number;
+}
+
+interface CartRow {
+  id: string;
+  number: number;
+  label: string | null;
+  user_id: string;
+  user_name: string;
+  lines: CartLineInput[];
+  customer_id: string | null;
+  customer_name: string | null;
+  price_level: string | null;
+  discount_by: string | null;
+  discount_reason: string | null;
+  options_by: string | null;
+  total: string | null;
+  created_at: Date;
+  taken_at: Date | null;
+  cancelled_at: Date | null;
 }
 
 interface GuestRow {
@@ -110,7 +167,7 @@ interface OpenInventory {
 }
 
 /**
- * Inventaire sur téléphone (ONIX 360 Inventaire, application Android).
+ * Téléphones du magasin (ONIX 360 Mobile, application Android) : inventaire, vendeur au rayon, réception, contrôle à la sortie, gérant.
  * Le téléphone est relié au magasin par un QR code que le gérant affiche,
  * le compteur s'y connecte avec son identifiant et son code, télécharge le
  * catalogue et les inventaires ouverts, compte (hors ligne au besoin) puis
@@ -147,20 +204,28 @@ export class MobileService {
   }
 
   async settings() {
+    const seller = await this.setting('mobile_seller', 'full');
+    const manager = await this.setting('mobile_manager', 'full');
     return {
       showExpected: (await this.setting('mobile_show_expected', '0')) === '1',
       recount: (await this.setting('mobile_recount', '1')) === '1',
+      seller: (SELLER_MODES as readonly string[]).includes(seller) ? (seller as SellerMode) : 'full',
+      manager: (MANAGER_MODES as readonly string[]).includes(manager) ? (manager as ManagerMode) : 'full',
     };
   }
 
-  async saveSettings(input: { showExpected?: boolean; recount?: boolean }) {
+  async saveSettings(input: { showExpected?: boolean; recount?: boolean; seller?: string; manager?: string }) {
+    const put = (key: string, value: string) =>
+      this.pg.query('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value', [key, value]);
     for (const [key, value] of [
       ['mobile_show_expected', input.showExpected],
       ['mobile_recount', input.recount],
     ] as const) {
       if (typeof value !== 'boolean') continue;
-      await this.pg.query('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value', [key, value ? '1' : '0']);
+      await put(key, value ? '1' : '0');
     }
+    if ((SELLER_MODES as readonly string[]).includes(str(input.seller))) await put('mobile_seller', str(input.seller));
+    if ((MANAGER_MODES as readonly string[]).includes(str(input.manager))) await put('mobile_manager', str(input.manager));
     return this.settings();
   }
 
@@ -292,16 +357,34 @@ export class MobileService {
   }
 
   /** Ce que la personne connectée peut faire sur le téléphone. */
-  async rights(caller: MobileCaller): Promise<{ count: boolean; cart: boolean; missed: boolean; receive: boolean; exit: boolean }> {
-    if (caller.guest) return { count: true, cart: false, missed: false, receive: false, exit: false };
+  async rights(caller: MobileCaller): Promise<MobileRights> {
+    if (caller.guest) return { count: true, cart: false, missed: false, receive: false, exit: false, sell: null, discount: false, tariff: false, manage: null };
     const { id, role } = caller.user;
+    const settings = await this.settings();
+    const cart = settings.seller !== 'off' && (await this.canCart(id, role));
+    const full = cart && settings.seller === 'full';
     return {
       count: await this.canCount(id, role),
-      cart: await this.canCart(id, role),
+      cart,
       missed: await this.hasRight(id, role, 'missed_sale', ['manager', 'cashier', 'seller', 'accountant', 'stock']),
       receive: await this.hasChainRight(id, role, ['mobile_reception', 'order_receive', 'purchase_orders'], ['manager', 'stock', 'buyer']),
       exit: (await this.exitCheckOn(caller.device.store_id)) && (await this.hasRight(id, role, 'exit_check', ['manager', 'cashier', 'seller', 'stock'])),
+      sell: cart && settings.seller !== 'off' ? settings.seller : null,
+      // Sans ces droits, le vendeur fait quand même la remise ou change le tarif : le gérant tape son code sur le téléphone.
+      discount: full && (await this.hasRight(id, role, 'discount', ['manager'])),
+      tariff: full && (await this.hasRight(id, role, 'sale_tariff', ['manager'])),
+      manage: settings.manager !== 'off' && (role === 'admin' || role === 'manager') ? settings.manager : null,
     };
+  }
+
+  /** Code d'un gérant du magasin (ou d'un administrateur), vérifié sur les fiches reçues des PC. */
+  private async supervisor(storeId: string, pin: string): Promise<{ id: string; name: string } | null> {
+    if (!/^\d{4,8}$/.test(pin)) return null;
+    const users = await this.latest('user', "AND payload->>'role' IN ('admin', 'manager')");
+    const u = users.find(
+      (x) => x.payload['active'] !== 0 && !x.payload['deleted_at'] && (!x.payload['store_id'] || x.payload['store_id'] === storeId) && verifyPin(pin, str(x.payload['pin_hash'])),
+    );
+    return u ? { id: u.entity_id, name: str(u.payload['name']) } : null;
   }
 
   /** Le contrôle des tickets à la sortie n'existe que dans les magasins qui l'ont activé. */
@@ -480,7 +563,7 @@ export class MobileService {
     if (storeId && storeId !== device.store_id) throw new ForbiddenException('Cet utilisateur appartient à un autre magasin');
     const role = str(user.payload['role']);
     const can = await this.rights({ device, user: { id: user.entity_id, name: str(user.payload['name']), role } });
-    if (!can.count && !can.cart && !can.receive)
+    if (!can.count && !can.cart && !can.receive && !can.manage)
       throw new ForbiddenException('Vous n’avez ni le droit de compter un inventaire, ni celui de préparer un panier, ni celui de réceptionner. Demandez-le au gérant.');
     const session = randomBytes(32).toString('base64url');
     await this.pg.query('INSERT INTO mobile_sessions (token_hash, device_id, user_id, last_seen_at) VALUES ($1, $2, $3, now())', [hashToken(session), device.id, user.entity_id]);
@@ -521,57 +604,248 @@ export class MobileService {
 
   // ——— Panier préparé au rayon ———
 
-  /**
-   * Panier préparé par un vendeur sur le téléphone : il part à la caisse, qui
-   * le charge comme un ticket en attente, au nom du vendeur (commission).
-   * Le même panier renvoyé (réseau coupé) n'est enregistré qu'une fois.
-   */
-  async pushCart(caller: MobileCaller, input: { id: string; label?: string | null; lines: { articleId: string; qty: number; packId?: string | null }[] }) {
-    if (!(await this.rights(caller)).cart) throw new ForbiddenException('Vous n’avez pas le droit de préparer un panier. Demandez-le au gérant.');
-    const id = str(input?.id).trim();
-    if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Panier invalide');
-    const lines = (Array.isArray(input?.lines) ? input.lines : [])
-      .map((l) => ({ articleId: str(l?.articleId), qty: Math.round(Number(l?.qty)), packId: l?.packId ? str(l.packId) : null }))
-      .filter((l) => l.articleId && Number.isSafeInteger(l.qty) && l.qty > 0);
-    if (!lines.length || lines.length > 200) throw new BadRequestException('Le panier est vide (200 lignes au plus)');
-    const label = str(input?.label).trim().slice(0, 60) || null;
-    const { rows } = await this.pg.query<{ number: number }>(
-      `INSERT INTO shelf_carts (id, device_id, store_id, user_id, user_name, label, lines, number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, ${DAY_NUMBER('$3')})
-       ON CONFLICT (id) DO NOTHING RETURNING number`,
-      [id, caller.device.id, caller.device.store_id, caller.user.id, caller.user.name, label, JSON.stringify(lines)],
-    );
-    const number = rows[0]?.number ?? (await this.pg.query<{ number: number }>('SELECT number FROM shelf_carts WHERE id = $1', [id])).rows[0]?.number ?? null;
-    return { id, number };
+  /** Prix indicatif d'un panier, au tarif choisi (la caisse refait le prix exact : promotions, prix convenus). */
+  private async cartTotal(storeId: string, lines: CartLineInput[], level: PriceLevel): Promise<number> {
+    const { families } = await this.departments();
+    const articles = new Map((await this.phoneArticles(families, 'AND entity_id = ANY($2)', [lines.map((l) => l.articleId)], storeId)).map((a) => [a.id, a]));
+    const pick = (t: { price: number; wholesale: number | null; superWholesale: number | null }) =>
+      level === 'super_wholesale' ? (t.superWholesale ?? t.wholesale ?? t.price) : level === 'wholesale' ? (t.wholesale ?? t.price) : t.price;
+    let total = 0;
+    for (const l of lines) {
+      const a = articles.get(l.articleId);
+      if (!a) continue;
+      const pack = l.packId ? a.packs.find((k) => k.id === l.packId) : undefined;
+      const amount = pack && pack.units > 0 ? Math.round((pick(pack) * l.qty) / pack.units) : Math.round((pick(a) * l.qty) / 1000);
+      total += Math.max(0, amount - l.discount);
+    }
+    return total;
   }
 
-  /** Paniers du vendeur aujourd'hui : envoyés, pris en caisse. */
+  /**
+   * Panier préparé par un vendeur sur le téléphone : il part à la caisse, qui
+   * le charge (ticket en attente, ou facture à encaisser quand vendeur et
+   * caissier sont séparés), au nom du vendeur (commission).
+   *
+   * En mode complet, il porte aussi le client, le tarif, les conditionnements
+   * et les remises. Remise et tarif hors de l'habituel demandent le droit du
+   * vendeur ou le code d'un gérant, vérifiés ici : la caisse n'a plus qu'à encaisser.
+   * Le même panier renvoyé (réseau coupé) n'est enregistré qu'une fois ; renvoyé
+   * modifié, il remplace l'ancien tant qu'aucune caisse ne l'a pris.
+   */
+  async pushCart(
+    caller: MobileCaller,
+    input: {
+      id: string;
+      label?: string | null;
+      lines: { articleId: string; qty: number; packId?: string | null; discount?: number | null }[];
+      customerId?: string | null;
+      priceLevel?: string | null;
+      discountReason?: string | null;
+      supervisorPin?: string | null;
+    },
+  ) {
+    const can = await this.rights(caller);
+    if (!can.cart) throw new ForbiddenException('Vous n’avez pas le droit de préparer un panier. Demandez-le au gérant.');
+    const full = can.sell === 'full';
+    const id = str(input?.id).trim();
+    if (!/^[\w-]{8,64}$/.test(id)) throw new BadRequestException('Panier invalide');
+    const lines: CartLineInput[] = (Array.isArray(input?.lines) ? input.lines : [])
+      .map((l) => ({
+        articleId: str(l?.articleId),
+        qty: Math.round(Number(l?.qty)),
+        packId: l?.packId ? str(l.packId) : null,
+        discount: full ? Math.max(0, Math.round(Number(l?.discount ?? 0)) || 0) : 0,
+      }))
+      .filter((l) => l.articleId && Number.isSafeInteger(l.qty) && l.qty > 0 && Number.isSafeInteger(l.discount));
+    if (!lines.length || lines.length > 200) throw new BadRequestException('Le panier est vide (200 lignes au plus)');
+    const label = str(input?.label).trim().slice(0, 60) || null;
+    const storeId = caller.device.store_id;
+    // Déjà pris en caisse (ou annulé) : le même envoi répété est accepté, une modification non.
+    const { rows: old } = await this.pg.query<{ number: number; lines: CartLineInput[]; user_id: string; taken_at: Date | null; cancelled_at: Date | null; total: string | null }>(
+      'SELECT number, lines, user_id, taken_at, cancelled_at, total FROM shelf_carts WHERE id = $1',
+      [id],
+    );
+    const before = old[0];
+    if (before && (before.taken_at || before.cancelled_at || before.user_id !== caller.user.id)) {
+      if (before.user_id === caller.user.id && JSON.stringify(before.lines) === JSON.stringify(lines)) return { id, number: before.number, total: Number(before.total ?? 0) };
+      throw new HttpException(before.taken_at ? 'Ce panier est déjà en caisse : il ne peut plus être modifié' : before.cancelled_at ? 'Ce panier a été annulé' : 'Panier invalide', HttpStatus.CONFLICT);
+    }
+
+    // Client et tarif.
+    const customerId = full && input?.customerId ? str(input.customerId) : null;
+    const customer = customerId ? await this.one('customer', customerId) : null;
+    if (customerId && (!customer || customer['active'] === 0)) throw new BadRequestException('Client introuvable ou désactivé');
+    const usual = (PRICE_LEVELS as readonly string[]).includes(str(customer?.['price_level'])) ? (str(customer!['price_level']) as PriceLevel) : 'retail';
+    const wanted = full && (PRICE_LEVELS as readonly string[]).includes(str(input?.priceLevel)) ? (str(input!.priceLevel) as PriceLevel) : usual;
+    const level = wanted !== usual ? wanted : null;
+
+    // Accords : le droit du vendeur, sinon le code du gérant tapé sur le téléphone.
+    const pin = str(input?.supervisorPin).trim();
+    let boss: { id: string; name: string } | null | undefined;
+    const approve = async (what: string) => {
+      if (boss === undefined && pin) {
+        const key = `pin:${caller.device.id}`;
+        const f = this.failures.get(key);
+        if (f && f.until > Date.now() && f.count >= MAX_FAILURES) throw new HttpException('Trop de codes faux : réessayez dans quelques minutes', HttpStatus.TOO_MANY_REQUESTS);
+        boss = await this.supervisor(storeId, pin);
+        if (!boss) {
+          const cur = f && f.until > Date.now() ? f : { count: 0, until: Date.now() + LOCK_MS };
+          this.failures.set(key, { ...cur, count: cur.count + 1 });
+          throw new ForbiddenException({ message: 'Code du gérant incorrect', code: 'SUPERVISOR_REQUIRED' });
+        }
+        this.failures.delete(key);
+      }
+      if (!boss) throw new ForbiddenException({ message: `${what} : le gérant doit donner son code`, code: 'SUPERVISOR_REQUIRED' });
+      return boss.id;
+    };
+    const discount = lines.reduce((t, l) => t + l.discount, 0);
+    const discountReason = discount > 0 ? str(input?.discountReason).trim().slice(0, 80) || null : null;
+    if (discount > 0 && !discountReason) throw new BadRequestException({ message: 'Dites pourquoi vous faites la remise', code: 'REASON_REQUIRED' });
+    const discountBy = discount > 0 ? (can.discount ? caller.user.id : await approve('Remise')) : null;
+    const optionsBy = level ? (can.tariff ? caller.user.id : await approve(`Tarif ${level === 'wholesale' ? 'gros' : 'super gros'}`)) : null;
+    const total = await this.cartTotal(storeId, lines, level ?? usual);
+
+    const values = [label, JSON.stringify(lines), customerId, customer ? str(customer['name']) : null, level, discountBy, discountReason, optionsBy, total];
+    const { rows } = await this.pg.query<{ number: number }>(
+      `INSERT INTO shelf_carts (id, device_id, store_id, user_id, user_name, label, lines, customer_id, customer_name, price_level, discount_by, discount_reason, options_by, total, number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ${DAY_NUMBER('$3')})
+       ON CONFLICT (id) DO UPDATE SET label = excluded.label, lines = excluded.lines, customer_id = excluded.customer_id, customer_name = excluded.customer_name,
+         price_level = excluded.price_level, discount_by = excluded.discount_by, discount_reason = excluded.discount_reason, options_by = excluded.options_by,
+         total = excluded.total, updated_at = now()
+       WHERE shelf_carts.user_id = excluded.user_id AND shelf_carts.taken_at IS NULL AND shelf_carts.cancelled_at IS NULL
+       RETURNING number`,
+      [id, caller.device.id, storeId, caller.user.id, caller.user.name, ...values],
+    );
+    if (!rows[0]) throw new HttpException('Ce panier vient d’être pris en caisse : il ne peut plus être modifié', HttpStatus.CONFLICT);
+    return { id, number: rows[0].number, total };
+  }
+
+  /** Le vendeur annule son panier (le client a renoncé) tant qu'aucune caisse ne l'a pris. */
+  async cancelCart(caller: MobileCaller, id: string) {
+    const { rows } = await this.pg.query(
+      'UPDATE shelf_carts SET cancelled_at = now(), updated_at = now() WHERE id = $1 AND user_id = $2 AND store_id = $3 AND taken_at IS NULL AND cancelled_at IS NULL RETURNING id',
+      [str(id), caller.user.id, caller.device.store_id],
+    );
+    if (!rows[0]) throw new HttpException('Ce panier est déjà en caisse ou annulé', HttpStatus.CONFLICT);
+    return { ok: true };
+  }
+
+  /**
+   * Paniers du vendeur aujourd'hui, avec où ils en sont : en attente, en caisse,
+   * encaissé (numéro du ticket), rendu par la caisse (motif) ou annulé ; et sa
+   * journée : tickets encaissés à son nom et chiffre d'affaires.
+   */
   async myCarts(caller: MobileCaller) {
-    const { rows } = await this.pg.query<{ id: string; number: number; label: string | null; lines: unknown[]; created_at: Date; taken_at: Date | null }>(
-      "SELECT id, number, label, lines, created_at, taken_at FROM shelf_carts WHERE user_id = $1 AND store_id = $2 AND created_at >= now() - interval '1 day' ORDER BY created_at DESC",
+    const { rows } = await this.pg.query<CartRow & { ci_status: string | null; ci_sale: string | null; ci_note: string | null; ci_total: string | null }>(
+      `SELECT c.*, ci.status AS ci_status, ci.sale_number AS ci_sale, ci.note AS ci_note, ci.total AS ci_total
+       FROM shelf_carts c LEFT JOIN counter_invoices ci ON ci.id = left('fc-panier-' || c.id, 64) AND ci.store_id = c.store_id
+       WHERE c.user_id = $1 AND c.store_id = $2 AND c.created_at >= now() - interval '1 day' ORDER BY c.created_at DESC`,
       [caller.user.id, caller.device.store_id],
     );
-    return { carts: rows.map((r) => ({ id: r.id, number: r.number, label: r.label, lines: r.lines.length, at: new Date(r.created_at).toISOString(), takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null })) };
+    const carts = rows.map((r) => {
+      const status = r.cancelled_at ? 'cancelled' : r.ci_status === 'paid' ? 'paid' : r.ci_status === 'returned' ? 'returned' : r.ci_status === 'cancelled' ? 'cancelled' : r.taken_at ? 'taken' : 'waiting';
+      return {
+        ...this.cartView(r),
+        lines: r.lines.length,
+        items: r.lines,
+        takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null,
+        status,
+        saleNumber: r.ci_sale,
+        note: r.ci_status === 'returned' ? r.ci_note : null,
+        total: r.ci_total !== null ? Number(r.ci_total) : r.total === null ? null : Number(r.total),
+      };
+    });
+    return { carts, day: await this.sellerDay(caller.user.id, caller.device.store_id) };
+  }
+
+  /** Ventes encaissées aujourd'hui au nom du vendeur (tickets reçus des caisses). */
+  private async sellerDay(userId: string, storeId: string) {
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    const { rows } = await this.pg.query<{ kind: string; total: string | null }>(
+      `SELECT payload->>'kind' AS kind, payload->>'total_ttc' AS total FROM (
+         SELECT DISTINCT ON (entity_id) payload FROM events WHERE entity = 'sale' AND payload IS NOT NULL AND COALESCE(store_id, payload->>'store_id') = $2 AND payload->>'created_at' >= $3 ORDER BY entity_id, seq DESC
+       ) s WHERE payload->>'status' <> 'cancelled' AND COALESCE(payload->>'seller_id', payload->>'user_id') = $1`,
+      [userId, storeId, from.toISOString()],
+    );
+    const sales = rows.filter((r) => r.kind !== 'return');
+    const returns = rows.filter((r) => r.kind === 'return').reduce((t, r) => t + Math.abs(Number(r.total ?? 0)), 0);
+    const total = sales.reduce((t, r) => t + Number(r.total ?? 0), 0);
+    return { tickets: sales.length, total, net: total - returns, average: sales.length ? Math.round(total / sales.length) : 0 };
+  }
+
+  private cartView(r: CartRow) {
+    return {
+      id: r.id,
+      number: r.number,
+      label: r.label,
+      sellerId: r.user_id,
+      sellerName: r.user_name,
+      lines: r.lines,
+      customerId: r.customer_id,
+      customerName: r.customer_name,
+      priceLevel: r.price_level,
+      discountBy: r.discount_by,
+      discountReason: r.discount_reason,
+      optionsBy: r.options_by,
+      total: r.total === null ? null : Number(r.total),
+      at: new Date(r.created_at).toISOString(),
+    };
   }
 
   /** Paniers des vendeurs qui attendent une caisse du magasin du PC. */
   async waitingCarts(storeId: string) {
-    const { rows } = await this.pg.query<{ id: string; number: number; label: string | null; user_id: string; user_name: string; lines: unknown; created_at: Date }>(
-      "SELECT id, number, label, user_id, user_name, lines, created_at FROM shelf_carts WHERE store_id = $1 AND taken_at IS NULL AND created_at >= now() - interval '12 hours' ORDER BY created_at",
+    const { rows } = await this.pg.query<CartRow>(
+      "SELECT * FROM shelf_carts WHERE store_id = $1 AND taken_at IS NULL AND cancelled_at IS NULL AND created_at >= now() - interval '12 hours' ORDER BY created_at",
       [storeId],
     );
-    return { carts: rows.map((r) => ({ id: r.id, number: r.number, label: r.label, sellerId: r.user_id, sellerName: r.user_name, lines: r.lines, at: new Date(r.created_at).toISOString() })) };
+    return { carts: rows.map((r) => this.cartView(r)) };
   }
 
   /** La caisse prend le panier : une seule caisse l'obtient. */
   async takeCart(device: { id: string; store_id: string }, id: string) {
-    const { rows } = await this.pg.query<{ id: string; number: number; label: string | null; user_id: string; user_name: string; lines: unknown; created_at: Date }>(
-      'UPDATE shelf_carts SET taken_at = now(), taken_by = $3 WHERE id = $1 AND store_id = $2 AND taken_at IS NULL RETURNING id, number, label, user_id, user_name, lines, created_at',
+    const { rows } = await this.pg.query<CartRow>(
+      'UPDATE shelf_carts SET taken_at = now(), taken_by = $3 WHERE id = $1 AND store_id = $2 AND taken_at IS NULL AND cancelled_at IS NULL RETURNING *',
       [id, device.store_id, device.id],
     );
     const r = rows[0];
-    if (!r) throw new HttpException('Ce panier a déjà été pris par une caisse', HttpStatus.CONFLICT);
-    return { id: r.id, number: r.number, label: r.label, sellerId: r.user_id, sellerName: r.user_name, lines: r.lines, at: new Date(r.created_at).toISOString() };
+    if (!r) {
+      const { rows: gone } = await this.pg.query<{ cancelled_at: Date | null }>('SELECT cancelled_at FROM shelf_carts WHERE id = $1 AND store_id = $2', [id, device.store_id]);
+      throw new HttpException(gone[0]?.cancelled_at ? 'Le vendeur a annulé ce panier' : 'Ce panier a déjà été pris par une caisse', HttpStatus.CONFLICT);
+    }
+    return this.cartView(r);
+  }
+
+  /** Clients du magasin pour le panier du vendeur : nom, code ou téléphone. */
+  async customers(caller: MobileCaller, query: string) {
+    const can = await this.rights(caller);
+    if (can.sell !== 'full' && !can.manage) throw new ForbiddenException('Le choix du client n’est pas activé sur les téléphones');
+    const q = (query ?? '').trim();
+    const fold = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const words = fold(q).split(/\s+/).filter(Boolean);
+    const digits = q.replace(/\D/g, '');
+    const rows = await this.latest('customer');
+    return {
+      customers: rows
+        .filter((r) => r.payload['active'] !== 0)
+        .map((r) => ({
+          id: r.entity_id,
+          code: str(r.payload['code']),
+          name: str(r.payload['name']),
+          phone: (r.payload['phone'] as string | null) ?? null,
+          priceLevel: (PRICE_LEVELS as readonly string[]).includes(str(r.payload['price_level'])) ? str(r.payload['price_level']) : 'retail',
+          creditLimit: Number(r.payload['credit_limit'] ?? 0) || 0,
+        }))
+        .filter(
+          (c) =>
+            !words.length ||
+            words.every((w) => fold(c.name).includes(w)) ||
+            c.code.toLowerCase() === q.toLowerCase() ||
+            (digits.length >= 4 && str(c.phone).replace(/\D/g, '').includes(digits)),
+        )
+        .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+        .slice(0, 40),
+    };
   }
 
   // ——— Le client voulait… ———
@@ -783,6 +1057,132 @@ export class MobileService {
     };
   }
 
+  // ——— Gérant sur le téléphone ———
+
+  /** Espace du gérant : consultation (`write` faux) ou gestion. */
+  async managerGuard(caller: MobileCaller, write = false): Promise<void> {
+    const can = await this.rights(caller);
+    if (!can.manage) throw new ForbiddenException('L’espace du gérant est réservé au gérant (et activé sur la page Téléphones)');
+    if (write && can.manage !== 'full') throw new ForbiddenException('Le téléphone du gérant est réglé en consultation seule');
+  }
+
+  /**
+   * Ce qui se passe dans le magasin en ce moment : paniers des vendeurs qui
+   * attendent une caisse, factures à encaisser, et ce que les clients ont
+   * demandé sans pouvoir l'acheter (7 derniers jours).
+   */
+  async floor(caller: MobileCaller) {
+    await this.managerGuard(caller);
+    const storeId = caller.device.store_id;
+    const { rows: carts } = await this.pg.query<{ user_name: string; n: string; total: string | null }>(
+      `SELECT user_name, count(*) AS n, sum(total) AS total FROM shelf_carts
+       WHERE store_id = $1 AND taken_at IS NULL AND cancelled_at IS NULL AND created_at >= now() - interval '12 hours' GROUP BY user_name ORDER BY user_name`,
+      [storeId],
+    );
+    const { rows: invoices } = await this.pg.query<{ status: string; n: string; total: string | null }>(
+      `SELECT status, count(*) AS n, sum(total) AS total FROM counter_invoices
+       WHERE store_id = $1 AND status IN ('waiting', 'editing', 'returned', 'paying') AND updated_at >= now() - interval '24 hours' GROUP BY status`,
+      [storeId],
+    );
+    const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const missed = (await this.latest('missed_sale', "AND store_id = $2 AND payload->>'created_at' >= $3", [storeId, since])).map((r) => r.payload);
+    const byLabel = new Map<string, { label: string; times: number; qty: number; reason: string; last: string }>();
+    for (const m of missed) {
+      const key = str(m['article_id']) || str(m['label']).toLowerCase();
+      const cur = byLabel.get(key) ?? { label: str(m['label']), times: 0, qty: 0, reason: str(m['reason']), last: '' };
+      cur.times++;
+      cur.qty += Number(m['qty'] ?? 0);
+      if (str(m['created_at']) > cur.last) cur.last = str(m['created_at']);
+      byLabel.set(key, cur);
+    }
+    return {
+      carts: carts.map((c) => ({ seller: c.user_name, count: Number(c.n), total: Number(c.total ?? 0) })),
+      invoices: invoices.map((i) => ({ status: i.status, count: Number(i.n), total: Number(i.total ?? 0) })),
+      missed: [...byLabel.values()].sort((a, b) => b.times - a.times || b.last.localeCompare(a.last)).slice(0, 30),
+    };
+  }
+
+  /** Commandes fournisseurs envoyées et pas encore toutes reçues, avec la date attendue. */
+  async managerOrders(caller: MobileCaller) {
+    await this.managerGuard(caller);
+    const suppliers = new Map((await this.latest('supplier', '', [], "jsonb_build_object('name', payload->'name')")).map((r) => [r.entity_id, str(r.payload['name'])]));
+    const today = new Date().toISOString().slice(0, 10);
+    const orders = (await this.openOrders(caller.device.store_id)).filter((o) => o.lines.some((l) => l.qty > l.received));
+    return {
+      orders: orders
+        .map((o) => ({
+          id: o.id,
+          number: o.number,
+          supplier: suppliers.get(o.supplierId) ?? '',
+          orderDate: o.orderDate,
+          expectedDate: o.expectedDate,
+          late: Boolean(o.expectedDate && o.expectedDate < today),
+          lines: o.lines.length,
+          partial: o.lines.some((l) => l.received > 0),
+        }))
+        .sort((a, b) => (a.expectedDate ?? a.orderDate).localeCompare(b.expectedDate ?? b.orderDate)),
+    };
+  }
+
+  /** Crédits clients, d'après l'état que les PC du magasin envoient toutes les 5 minutes. */
+  async receivables(caller: MobileCaller) {
+    await this.managerGuard(caller);
+    const { rows } = await this.pg.query<{ status: { receivables?: unknown; at?: string } | null; status_at: Date | null }>(
+      "SELECT status, status_at FROM devices WHERE store_id = $1 AND kind = 'pc' AND revoked_at IS NULL AND status ? 'receivables' ORDER BY status_at DESC NULLS LAST LIMIT 1",
+      [caller.device.store_id],
+    );
+    const r = rows[0];
+    return { receivables: r?.status?.receivables ?? null, at: r?.status_at ? new Date(r.status_at).toISOString() : null };
+  }
+
+  /** Fiche d'un article pour le gérant : stock partout, livraison, prix, coût et marge. */
+  async managerArticle(caller: MobileCaller, articleId: string) {
+    await this.managerGuard(caller);
+    const info = await this.productInfo(caller, articleId);
+    const a = (await this.one('article', articleId))!;
+    const local = (await this.storePrices(caller.device.store_id)).get(articleId) ?? null;
+    const price = local || Number(a['sale_price'] ?? 0) || 0;
+    const cost = Number(a['purchase_price'] ?? 0) || 0;
+    return {
+      ...info,
+      price,
+      basePrice: Number(a['sale_price'] ?? 0) || 0,
+      storePrice: local,
+      wholesale: Number(a['wholesale_price'] ?? 0) || null,
+      superWholesale: Number(a['super_wholesale_price'] ?? 0) || null,
+      cost,
+      margin: price > 0 && cost > 0 ? Math.round(((price - cost) / price) * 1000) / 10 : null,
+      alertQty: Number(a['alert_qty'] ?? 0) || 0,
+    };
+  }
+
+  /**
+   * Le gérant change le prix de détail de son magasin depuis le téléphone,
+   * en confirmant avec son code. Le prix part aux PC comme un « prix du
+   * magasin » (écran Prix par magasin) ; jamais sous le coût d'achat, sauf
+   * si le magasin permet la vente sous le prix de revient.
+   */
+  async setStorePrice(caller: MobileCaller, articleId: string, input: { price?: number; pin?: string }) {
+    await this.managerGuard(caller, true);
+    const price = Math.round(Number(input?.price));
+    if (!Number.isSafeInteger(price) || price <= 0 || price > 1_000_000_000) throw new BadRequestException('Prix invalide');
+    const me = await this.one('user', caller.user.id);
+    if (!me || !verifyPin(str(input?.pin), str(me['pin_hash']))) throw new ForbiddenException('Code incorrect');
+    const article = await this.one('article', articleId);
+    if (!article) throw new NotFoundException('Produit inconnu');
+    const storeId = caller.device.store_id;
+    const cost = Number(article['purchase_price'] ?? 0) || 0;
+    const settings = json<Record<string, unknown>>((await this.one('store', storeId))?.['settings'], {});
+    if (cost > 0 && price < cost && settings['allowBelowCost'] !== true) throw new BadRequestException(`Le prix ne peut pas descendre sous le coût d’achat (${cost.toLocaleString('fr-FR')} FCFA)`);
+    const id = `${articleId}:${storeId}`;
+    await this.pg.query(
+      `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
+       VALUES ($1, $2, 'store_price', $3, 'upsert', $4, NULL, $5, now())`,
+      [randomUUID(), caller.device.id, id, storeId, JSON.stringify({ article_id: articleId, store_id: storeId, sale_price: price })],
+    );
+    return { price };
+  }
+
   // ——— Réception sur le téléphone ———
 
   /** Bons de commande du magasin à réceptionner, avec ce qui reste à recevoir par ligne. */
@@ -871,13 +1271,22 @@ export class MobileService {
   // ——— Données pour le téléphone ———
 
   private async catalogVersion(): Promise<string> {
-    const { rows } = await this.pg.query<{ v: string | null }>("SELECT MAX(seq)::text AS v FROM events WHERE entity IN ('article', 'family', 'department')");
+    const { rows } = await this.pg.query<{ v: string | null }>("SELECT MAX(seq)::text AS v FROM events WHERE entity IN ('article', 'family', 'department', 'store_price')");
     return rows[0]?.v ?? '0';
   }
 
+  /** Prix de détail propres au magasin (écran « Prix par magasin »), par article. */
+  private async storePrices(storeId: string | undefined): Promise<Map<string, number>> {
+    if (!storeId) return new Map();
+    const rows = await this.latest('store_price', "AND entity_id LIKE '%:' || $2", [storeId]);
+    return new Map(rows.map((r) => [str(r.payload['article_id']), Number(r.payload['sale_price'] ?? 0) || 0]));
+  }
+
   /** Articles vendus du magasin, au format du téléphone (sans photo). */
-  private async phoneArticles(families: Map<string, string>, extra = '', params: unknown[] = []) {
+  private async phoneArticles(families: Map<string, string>, extra = '', params: unknown[] = [], storeId?: string) {
     const rows = await this.latest('article', extra, params, "payload - 'photo'");
+    const local = await this.storePrices(storeId);
+    const opt = (v: unknown) => (v === null || v === undefined ? null : Number(v) || null);
     return rows
       .filter((r) => r.payload['active'] !== 0 && r.payload['is_service'] !== 1)
       .map((r) => {
@@ -893,16 +1302,27 @@ export class MobileService {
           barcodes: ((p['barcodes'] as { code: string; pack_qty: number }[] | undefined) ?? []).map((b) => ({ code: String(b.code).trim(), packQty: Number(b.pack_qty ?? 1000) || 1000 })),
           packs:
             p['unit'] === 'piece'
-              ? ((p['packs'] as { name: string; units: number; barcode: string | null }[] | undefined) ?? []).map((k) => ({
+              ? (
+                  (p['packs'] as
+                    | { id?: string; name: string; units: number; barcode: string | null; sale_price?: number; wholesale_price?: number | null; super_wholesale_price?: number | null }[]
+                    | undefined) ?? []
+                ).map((k) => ({
+                  id: k.id ? String(k.id) : null,
                   name: k.name,
                   units: Number(k.units),
                   barcode: k.barcode ? String(k.barcode).trim() : null,
+                  price: Number(k.sale_price ?? 0) || 0,
+                  wholesale: opt(k.wholesale_price),
+                  superWholesale: opt(k.super_wholesale_price),
                 }))
               : [],
           // Les photos partent à part (une par fiche ouverte) : le catalogue reste léger.
           thumb: null as string | null,
           /** Prix de vente indicatif (la caisse refait le prix du magasin et les promotions). */
-          price: Number(p['sale_price'] ?? 0) || 0,
+          price: local.get(r.entity_id) || Number(p['sale_price'] ?? 0) || 0,
+          /** Prix de gros et de super gros (le téléphone retombe sur le détail s'ils manquent, comme la caisse). */
+          wholesale: opt(p['wholesale_price']),
+          superWholesale: opt(p['super_wholesale_price']),
         };
       });
   }
@@ -911,11 +1331,11 @@ export class MobileService {
    * Catalogue : articles, codes-barres, conditionnements et rayons, sans les
    * photos. Rien n'est renvoyé s'il n'a pas changé.
    */
-  async catalog(since?: string) {
+  async catalog(since?: string, storeId?: string) {
     const version = await this.catalogVersion();
     if (since && since === version) return { version, unchanged: true };
     const { departments, families } = await this.departments();
-    const articles = (await this.phoneArticles(families)).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    const articles = (await this.phoneArticles(families, '', [], storeId)).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     return { version, articles, departments: [...departments].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'fr')) };
   }
 
@@ -924,11 +1344,11 @@ export class MobileService {
    * article, code-barres, code d'un conditionnement, autre référence, ou mots
    * du nom. Couvre un catalogue pas encore (ou mal) téléchargé.
    */
-  async find(query: string) {
+  async find(query: string, storeId?: string) {
     const q = (query ?? '').trim();
     if (q.length < 2) return { articles: [] };
     const { families } = await this.departments();
-    const all = await this.phoneArticles(families);
+    const all = await this.phoneArticles(families, '', [], storeId);
     const fold = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const variants = new Set([q, q.replace(/^0+/, ''), `0${q}`]);
     const exact = all.filter(

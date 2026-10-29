@@ -180,7 +180,7 @@ export class SyncService {
   /** État du PC (sauvegarde, imprimante, envois en attente, licence), gardé pour l'écran « État des PC ». */
   async saveStatus(device: Device, status: unknown): Promise<{ ok: true }> {
     const text = JSON.stringify(status ?? null);
-    if (!status || typeof status !== 'object' || text.length > 8000) throw new BadRequestException('État du poste invalide');
+    if (!status || typeof status !== 'object' || text.length > 32_000) throw new BadRequestException('État du poste invalide');
     await this.pg.query('UPDATE devices SET status = $2, status_at = now() WHERE id = $1', [device.id, text]);
     return { ok: true };
   }

@@ -1,6 +1,6 @@
 # Installateurs Windows : ONIX 360 (caisse) et ONIX 360 Serveur, construits sur Windows
 # à chaque demande de fusion ou à la demande (Actions › Installateurs › Run workflow).
-# L'application Android ONIX 360 Inventaire (.apk) est construite sur Linux.
+# L'application Android ONIX 360 Mobile (.apk) est construite sur Linux.
 # Les fichiers .exe et .apk se téléchargent dans l'onglet « Summary » de l'exécution (Artifacts).
 name: Installateurs
 
@@ -41,7 +41,7 @@ jobs:
           retention-days: 30
 
   android:
-    name: Application Android d'inventaire
+    name: Application Android ONIX 360 Mobile
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -79,10 +79,10 @@ jobs:
           ./gradlew assembleRelease --no-daemon
           version=$(node -p "require('../../../package.json').version")
           mkdir -p ../release
-          cp app/build/outputs/apk/release/app-release.apk "../release/Onix360-Inventaire-$version.apk"
+          cp app/build/outputs/apk/release/app-release.apk "../release/Onix360-Mobile-$version.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: ONIX-360-Inventaire-android
+          name: ONIX-360-Mobile-android
           path: apps/inventory/release/*.apk
           if-no-files-found: error
           retention-days: 30

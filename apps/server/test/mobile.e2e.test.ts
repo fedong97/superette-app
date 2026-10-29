@@ -113,7 +113,7 @@ describe('inventaire sur téléphone', () => {
     expect((await jean.json()).message).toContain('droit de compter');
     // Un caissier se connecte pour préparer un panier, sans voir les inventaires.
     const paul = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
-    expect(paul.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false });
+    expect(paul.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false, sell: 'full', discount: false, tariff: false, manage: null });
     expect((await (await phone('/inventories', undefined, paul.session)).json()).inventories).toEqual([]);
     expect((await phone('/counts', { counts: [] }, paul.session)).status).toBe(403);
     const ok = await (await phone('/login', { login: 'AWA', pin: '5678' })).json();
@@ -304,6 +304,6 @@ describe('inventaire sur téléphone', () => {
 
   it('sert la page du gérant', async () => {
     const page = await fetch(`${url}/gerant/inventaire`);
-    expect(await page.text()).toContain('Inventaire sur téléphone');
+    expect(await page.text()).toContain('<h1>Téléphones</h1>');
   });
 });

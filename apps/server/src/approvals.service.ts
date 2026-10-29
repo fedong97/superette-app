@@ -80,10 +80,12 @@ export class ApprovalsService {
   }
 
   /** Demandes en attente, pour la page du gérant. */
-  async pending() {
+  /** Demandes en attente (d'un seul magasin pour le téléphone du gérant). */
+  async pending(storeId?: string) {
     await this.expire();
     const { rows } = await this.pg.query<{ id: string; store_id: string; register_id: string | null; action: string; requested_by: string | null; created_at: Date }>(
-      "SELECT id, store_id, register_id, action, requested_by, created_at FROM approvals WHERE status = 'pending' ORDER BY created_at",
+      `SELECT id, store_id, register_id, action, requested_by, created_at FROM approvals WHERE status = 'pending' ${storeId ? 'AND store_id = $1' : ''} ORDER BY created_at`,
+      storeId ? [storeId] : [],
     );
     const out = [];
     for (const r of rows) {
@@ -103,11 +105,11 @@ export class ApprovalsService {
   }
 
   /** Le gérant accepte avec son code (gérant ou administrateur du magasin) ou refuse. */
-  async decide(id: string, input: { approve: boolean; pin?: string }) {
+  async decide(id: string, input: { approve: boolean; pin?: string }, storeId?: string) {
     await this.expire();
     const { rows } = await this.pg.query<{ status: string; store_id: string }>('SELECT status, store_id FROM approvals WHERE id = $1', [id]);
     const a = rows[0];
-    if (!a) throw new NotFoundException('Demande introuvable');
+    if (!a || (storeId && a.store_id !== storeId)) throw new NotFoundException('Demande introuvable');
     if (a.status !== 'pending') throw new BadRequestException(a.status === 'expired' ? 'Demande expirée : la caisse doit redemander' : 'Demande déjà traitée');
     if (!input?.approve) {
       await this.pg.query("UPDATE approvals SET status = 'refused', decided_at = now() WHERE id = $1", [id]);

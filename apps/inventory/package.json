@@ -1,9 +1,9 @@
 {
   "name": "@superette/inventaire",
-  "productName": "ONIX 360 Inventaire",
-  "version": "0.97.0",
+  "productName": "ONIX 360 Mobile",
+  "version": "0.98.0",
   "private": true,
-  "description": "Application Android d'inventaire : scan des codes-barres, comptage hors ligne, envoi à ONIX 360 Serveur",
+  "description": "Application Android ONIX 360 Mobile : vendeur au rayon, gérant, inventaire, réception et contrôle à la sortie",
   "author": "FEDONG",
   "type": "module",
   "scripts": {

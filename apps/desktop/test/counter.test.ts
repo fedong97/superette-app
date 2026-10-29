@@ -187,4 +187,73 @@ describe('vendeur et caissier séparés', () => {
     expect(caisse.pos.getSale(sale.id).seller_id).toBe(sellerId);
     expect(await shelfCarts(caisse)).toEqual([]);
   });
+  it('vendeur complet au rayon : client, tarif gros, remise avec le code du gérant, suivi jusqu’au ticket', async () => {
+    const storeId = caisse.admin.station()!.store.id;
+    const admin = caisse.admin.listUsers().find((u) => u.login === 'steve')!.id;
+    const savon = caisse.catalogue.saveArticle(admin, { name: 'SAVON 400 G', unit: 'piece', vatRateId: caisse.admin.listVatRates()[0]!.id, purchasePrice: 400, salePrice: 700, wholesalePrice: 600 }).id;
+    caisse.stock.receive({ storeId, registerId: null, userId: admin }, { warehouseId: caisse.admin.salesWarehouse(storeId).id, lines: [{ articleId: savon, qty: 100_000, unitCost: 400 }] });
+    const client = caisse.customers.saveCustomer(admin, { name: 'Boutique Mama Ngo', phone: '699001122', creditLimit: 100_000 });
+    await syncOnce(caisse);
+
+    // Le téléphone du vendeur, relié par le QR du gérant.
+    const cookie = (await fetch(`${url}/?t=jeton`, { redirect: 'manual' })).headers.get('set-cookie')!.split(';')[0]!;
+    const pairing = await (await fetch(`${url}/admin/api/mobile/pairing`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ storeId }) })).json();
+    const token = (await (await fetch(`${url}/api/v1/mobile/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: pairing.code, name: 'Téléphone Paul' }) })).json()).token;
+    let session = '';
+    const phone = (path: string, body?: unknown) =>
+      fetch(`${url}/api/v1/mobile${path}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { authorization: `Bearer ${token}`, 'x-fedonix-session': session, 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    const login = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
+    session = login.session;
+    expect(login.can).toMatchObject({ cart: true, sell: 'full', discount: false, tariff: false, manage: null });
+
+    const found = (await (await phone('/customers?q=mama')).json()).customers;
+    expect(found).toEqual([expect.objectContaining({ id: client.id, name: 'Boutique Mama Ngo', priceLevel: 'retail', creditLimit: 100_000 })]);
+    const catalog = await (await phone('/catalog')).json();
+    expect(catalog.articles.find((a: { id: string }) => a.id === savon)).toMatchObject({ price: 700, wholesale: 600 });
+
+    // 10 savons au prix de gros, 500 FCFA de remise : Paul n'a aucun des deux droits, le gérant donne son code.
+    const cart = { id: 'panier-0002-paul', lines: [{ articleId: savon, qty: 10_000, discount: 500 }], customerId: client.id, priceLevel: 'wholesale' };
+    const noReason = await phone('/carts', cart);
+    expect(noReason.status).toBe(400);
+    expect((await noReason.json()).code).toBe('REASON_REQUIRED');
+    const asked = await phone('/carts', { ...cart, discountReason: 'Achat en quantité' });
+    expect(asked.status).toBe(403);
+    expect(await asked.json()).toMatchObject({ code: 'SUPERVISOR_REQUIRED' });
+    expect((await phone('/carts', { ...cart, discountReason: 'Achat en quantité', supervisorPin: '9999' })).status).toBe(403);
+    const ok = await (await phone('/carts', { ...cart, discountReason: 'Achat en quantité', supervisorPin: '2222' })).json();
+    expect(ok).toMatchObject({ id: cart.id, total: 5_500 });
+
+    // Le client ajoute un savon : le panier, pas encore en caisse, est renvoyé modifié sous le même numéro.
+    const edited = await (await phone('/carts', { ...cart, lines: [{ articleId: savon, qty: 11_000, discount: 500 }], discountReason: 'Achat en quantité', supervisorPin: '2222' })).json();
+    expect(edited).toMatchObject({ number: ok.number, total: 6_100 });
+
+    const queued = ((await atCash['counter.queue']!()) as Row[]).find((r) => r.id === `cart:${cart.id}`)!;
+    expect(queued).toMatchObject({ number: ok.number, total: 6_100, sellerName: 'Paul' });
+    const recap = (await atCash['counter.take']!(queued.id)) as { id: string; total: number; customerName: string };
+    expect(recap).toMatchObject({ total: 6_100, customerName: 'Boutique Mama Ngo' });
+    // En caisse : le vendeur ne peut plus le modifier ni l'annuler.
+    expect((await phone('/carts', { ...cart, lines: [{ articleId: savon, qty: 1_000 }] })).status).toBe(409);
+    expect((await phone(`/carts/${cart.id}/cancel`, {})).status).toBe(409);
+    expect((await (await phone('/carts')).json()).carts.find((c: { id: string }) => c.id === cart.id)).toMatchObject({ status: 'taken' });
+
+    // La caisse encaisse sans redemander le code : client, tarif gros, remise, motif et vendeur sont repris.
+    const sale = (await atCash['counter.pay']!({ ids: [recap.id], payments: [{ method: 'CASH', amount: 6_100 }] })) as { id: string; number: string; total_discount: number };
+    const stored = caisse.pos.getSale(sale.id);
+    expect(stored).toMatchObject({ customer_id: client.id, price_level: 'wholesale', total_ttc: 6_100, total_discount: 500, seller_id: caisse.admin.listUsers().find((u) => u.login === 'paul')!.id });
+    await syncOnce(caisse);
+    const mine = await (await phone('/carts')).json();
+    expect(mine.carts.find((c: { id: string }) => c.id === cart.id)).toMatchObject({ status: 'paid', saleNumber: sale.number, total: 6_100, customerName: 'Boutique Mama Ngo' });
+    expect(mine.day.tickets).toBeGreaterThanOrEqual(1);
+    expect(mine.day.total).toBeGreaterThanOrEqual(6_100);
+
+    // Un panier que le client abandonne est annulé : la caisse ne le voit plus.
+    expect((await phone('/carts', { id: 'panier-0003-paul', lines: [{ articleId: savon, qty: 1_000 }] })).status).toBe(200);
+    expect((await phone('/carts/panier-0003-paul/cancel', {})).status).toBe(200);
+    expect(((await atCash['counter.queue']!()) as Row[]).some((r) => r.id === 'cart:panier-0003-paul')).toBe(false);
+    expect((await (await phone('/carts')).json()).carts.find((c: { id: string }) => c.id === 'panier-0003-paul')).toMatchObject({ status: 'cancelled' });
+  });
 });

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f7a4d">
-<title>Inventaire sur téléphone · ONIX 360</title>
+<title>Téléphones · ONIX 360</title>
 <link rel="icon" href="/gerant/icon.png">
 <style>
   :root {
@@ -93,7 +93,7 @@
   function login(message) {
     clearInterval(timer);
     app.innerHTML = `<div class="connexion">
-      <h1>Inventaire sur téléphone</h1>
+      <h1>Téléphones</h1>
       ${message ? `<div class="message erreur">${esc(message)}</div>` : ''}
       <form id="f">
         <input type="password" id="mdp" placeholder="Mot de passe d’ONIX 360 Serveur" autocomplete="current-password" autofocus>
@@ -126,7 +126,7 @@
     if (!stores.some((s) => s.id === pairStore)) pairStore = stores[0]?.id ?? '';
     const left = pairing ? Math.max(0, Math.round((Date.parse(pairing.expiresAt) - Date.now()) / 1000)) : 0;
     return `<section><h2>Relier un téléphone</h2>
-      <p class="muted" style="margin:0 0 8px">Installez l’application ONIX 360 Inventaire sur le téléphone du compteur, ouvrez-la puis scannez ce QR code. Le téléphone et ce serveur doivent être sur le même réseau Wi-Fi.</p>
+      <p class="muted" style="margin:0 0 8px">Installez l’application ONIX 360 Mobile sur le téléphone du vendeur, du compteur ou du gérant, ouvrez-la puis scannez ce QR code. Le téléphone et ce serveur doivent être sur le même réseau Wi-Fi.</p>
       <div class="ligne">
         ${stores.length > 1 ? `<select id="pair-store">${stores.map((s) => `<option value="${esc(s.id)}" ${s.id === pairStore ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
         <button class="principal" id="pair" ${stores.length ? '' : 'disabled'}>${pairing ? 'Nouveau QR code' : 'Afficher le QR code'}</button>
@@ -184,7 +184,7 @@
     return `<h3>Aides sans compte <span class="muted" style="font-weight:400">(famille, intérimaires…)</span></h3>
       ${active.length ? `<div class="liste">${active.map((g) => `<div><div class="g">${esc(g.name)} <span class="pastille ok">Actif</span><small>Code <b>${esc(g.code)}</b> · jusqu’à ${date(g.expiresAt)} · signé sur le PC au nom de ${esc(g.onBehalfOf)}</small></div><button class="petit" data-guest-off="${esc(g.id)}">Couper</button></div>`).join('')}</div>` : '<div class="vide">Aucun aide pour cet inventaire.</div>'}
       ${shown ? `<div class="qr"><div class="img">${shown.qr}</div><div>
-        <div><b>${esc(shown.name)}</b> scanne ce QR code avec l’application ONIX 360 Inventaire</div>
+        <div><b>${esc(shown.name)}</b> scanne ce QR code avec l’application ONIX 360 Mobile</div>
         <div class="muted" style="margin-top:8px">ou tape le code sur l’écran de connexion (« Je suis un aide »)</div>
         <div class="code">${esc(shown.code.replace(/(\d{3})/, '$1 '))}</div>
         <div class="muted" style="margin-top:8px">Valable jusqu’à ${date(shown.expiresAt)}, et seulement pour cet inventaire : l’accès s’arrête à la clôture.</div>
@@ -204,7 +204,7 @@
     const open = data.inventories;
     const active = data.devices.filter((d) => !d.revoked);
     app.innerHTML = `
-      <header><a href="/gerant">‹ Gérant</a><h1>Inventaire sur téléphone</h1><button id="actualiser" title="Actualiser">⟳</button></header>
+      <header><a href="/gerant">‹ Gérant</a><h1>Téléphones</h1><button id="actualiser" title="Actualiser">⟳</button></header>
       <main>
         ${pairingBlock()}
         ${open.length ? open.map(inventoryBlock).join('') : '<section><h2>Inventaires en cours</h2><div class="vide">Aucun inventaire ouvert. Créez-le sur un PC dans Stock › Inventaires : il apparaît ici et sur les téléphones.</div></section>'}
@@ -217,6 +217,10 @@
         <section><h2>Réglages</h2>
           <label class="reglage"><input type="checkbox" id="r-recount" ${data.settings.recount ? 'checked' : ''}><span>Faire recompter les gros écarts<small>Un produit compté par une seule personne, loin du stock attendu, est proposé à un autre compteur.</small></span></label>
           <label class="reglage"><input type="checkbox" id="r-expected" ${data.settings.showExpected ? 'checked' : ''}><span>Montrer le stock attendu aux compteurs<small>Décoché : comptage à l’aveugle (conseillé). Coché : comme la fiche « compté + attendu ».</small></span></label>
+          <label class="reglage"><span>Vendeur au rayon sur le téléphone<small>Complet : client, tarif, cartons et remises comme sur le PC, suivi des paniers et ventes du jour. Simple : produits et quantités seulement, la caisse fait le reste.</small>
+            <select id="r-seller">${[['full', 'Complet (conseillé)'], ['simple', 'Simple'], ['off', 'Désactivé']].map(([v, l]) => `<option value="${v}" ${data.settings.seller === v ? 'selected' : ''}>${l}</option>`).join('')}</select></span></label>
+          <label class="reglage"><span>Espace du gérant sur le téléphone<small>Gestion : changer un prix, valider une commande, répondre aux demandes de la caisse. Consultation : tableaux et listes seulement.</small>
+            <select id="r-manager">${[['full', 'Gestion (conseillé)'], ['read', 'Consultation seule'], ['off', 'Désactivé']].map(([v, l]) => `<option value="${v}" ${data.settings.manager === v ? 'selected' : ''}>${l}</option>`).join('')}</select></span></label>
         </section>
         <section><h2>Téléphones reliés <span class="n">${active.length}</span></h2>
           ${data.devices.length ? `<div class="liste">${data.devices.map((d) => `<div><div class="g">${esc(d.name)} ${d.revoked ? '<span class="pastille non">Délié</span>' : d.online ? '<span class="pastille ok">En ligne</span>' : ''}<small>${esc(d.store)} · relié le ${date(d.createdAt)}${d.lastSeenAt ? ` · vu ${date(d.lastSeenAt)}` : ''}</small></div>${d.revoked ? '' : `<button class="petit" data-revoke="${esc(d.id)}">Délier</button>`}</div>`).join('')}</div>` : '<div class="vide">Aucun téléphone relié.</div>'}
@@ -269,11 +273,13 @@
       load();
     }));
     const save = async () => {
-      data.settings = await api('/admin/api/mobile/settings', { method: 'POST', body: JSON.stringify({ recount: document.getElementById('r-recount').checked, showExpected: document.getElementById('r-expected').checked }) }).catch((e) => (alert(e.message), data.settings));
+      data.settings = await api('/admin/api/mobile/settings', { method: 'POST', body: JSON.stringify({ recount: document.getElementById('r-recount').checked, showExpected: document.getElementById('r-expected').checked, seller: document.getElementById('r-seller').value, manager: document.getElementById('r-manager').value }) }).catch((e) => (alert(e.message), data.settings));
       load();
     };
     document.getElementById('r-recount').onchange = save;
     document.getElementById('r-expected').onchange = save;
+    document.getElementById('r-seller').onchange = save;
+    document.getElementById('r-manager').onchange = save;
   }
 
   load();

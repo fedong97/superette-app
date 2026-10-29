@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.98.0',
+    items: [
+      "L'application Android s'appelle maintenant ONIX 360 Mobile : vendeur au rayon, gérant, inventaire, réception et contrôle à la sortie. Elle s'installe par-dessus l'ancienne, rien n'est perdu.",
+      "Vendeur au rayon complet sur le téléphone : client, tarif (détail, gros, super gros), vente au carton, remise avec son motif (le gérant tape son code si le vendeur n'a pas le droit), puis « Envoyer à la caisse ».",
+      "La caisse reçoit le panier avec son client, son tarif et ses remises déjà validées : elle encaisse et imprime le ticket. Le vendeur suit chaque panier (en attente, en caisse, encaissé, rendu), le modifie ou l'annule tant qu'il attend, et voit ses ventes du jour.",
+      "Espace gérant sur le téléphone : journée, 7 jours et mois comparé au mois dernier, ventes par vendeur, caisses et écarts, ruptures et stock bas, fiche article avec marge et changement de prix, commandes fournisseurs, crédits clients à relancer (appel, WhatsApp) et demandes d'accord des caisses.",
+      'Au choix sur la page Téléphones du serveur : vendeur au rayon complet, simple ou désactivé ; espace gérant en gestion, en consultation seule ou désactivé.',
+    ],
+  },
+  {
     version: '0.97.0',
     items: [
       "Administration › Serveur central › État de la synchronisation : compare ce PC et le serveur (produits, clients, ventes…), montre ce qui manque d'un côté ou de l'autre et renvoie ce qui manque en un clic. Un point vert ou orange dans la barre du bas.",

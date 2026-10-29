@@ -38,3 +38,4 @@ export * from './personnel';
 export * from './vouchers';
 export * from './netContent';
 export * from './posters';
+export * from './discounts';

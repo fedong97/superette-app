@@ -148,7 +148,7 @@ describe('vendeur et caissier séparés', () => {
 
   it('remise : le vendeur sans le droit donne le code du gérant ; la caisse encaisse sans le redemander', async () => {
     await expect(atDesk['counter.send']!({ lines: [{ articleId: riz, qty: 1_000, discount: 500 }] })).rejects.toThrow(/validation du gérant/);
-    const sent = (await atDesk['counter.send']!({ lines: [{ articleId: riz, qty: 1_000, discount: 500 }], supervisorPin: '2222' })) as Row;
+    const sent = (await atDesk['counter.send']!({ lines: [{ articleId: riz, qty: 1_000, discount: 500 }], supervisorPin: '2222', discountReason: 'Client fidèle' })) as Row;
     expect(sent.total).toBe(4_500);
     // Le vendeur change la quantité d'une autre ligne : la remise déjà accordée reste valable.
     await atDesk['counter.edit']!(sent.id);

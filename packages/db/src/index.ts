@@ -76,6 +76,11 @@ import { PriceScheduleService } from './priceSchedules';
 import { RecurringOrderService } from './recurringOrders';
 import { StoreTransferService } from './storeTransfers';
 import { CounterService } from './counter';
+import { FieldRepService } from './fieldReps';
+import { PromoCodeService } from './promoCodes';
+import { OutageService } from './outages';
+import { StockAnomalyService } from './anomalies';
+import { ReportPresetService } from './reportPresets';
 import type { Clock } from './util';
 
 export * from './accounting';
@@ -157,6 +162,11 @@ export * from './priceSchedules';
 export * from './recurringOrders';
 export * from './storeTransfers';
 export * from './counter';
+export * from './fieldReps';
+export * from './promoCodes';
+export * from './outages';
+export * from './anomalies';
+export * from './reportPresets';
 export { AppError, type Clock, type Context, type ErrorFix } from './util';
 
 export interface Services {
@@ -238,6 +248,11 @@ export interface Services {
   recurringOrders: RecurringOrderService;
   storeTransfers: StoreTransferService;
   counter: CounterService;
+  fieldReps: FieldRepService;
+  promoCodes: PromoCodeService;
+  outages: OutageService;
+  anomalies: StockAnomalyService;
+  reportPresets: ReportPresetService;
 }
 
 export function createServices(db: Db, clock: Clock = () => new Date(), machineId?: () => string): Services {
@@ -249,7 +264,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const monitoring = new MonitoringService(db, clock, stock);
   const production = new ProductionService(db, clock, stock);
   const customers = new CustomerService(db, clock);
-  const expenses = new ExpenseService(db, clock);
+  const expenses = new ExpenseService(db, clock, admin);
   const charges = new ChargeService(db, clock);
   const controls = new ControlService(db, clock, customers);
   const quotes = new QuoteService(db, clock, admin, catalogue);
@@ -266,7 +281,10 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const loyalty = new LoyaltyService(db, clock, admin);
   const mobilePay = new MobilePayService(db, clock);
   const vouchers = new VoucherService(db, clock, admin);
-  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty, orders, vouchers);
+  const fieldReps = new FieldRepService(db, clock);
+  const promoCodes = new PromoCodeService(db, clock);
+  const outages = new OutageService(db, clock);
+  const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty, orders, vouchers, promoCodes, fieldReps, outages);
   const purchases = new PurchaseService(db, clock, stock);
   const receipts = new ReceiptService(db, clock, admin, pos, customers, expenses, treasury, inventories, rebates, quotes, purchases);
   const staff = new StaffService(db, clock, admin);
@@ -279,7 +297,8 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const tax = new TaxService(db, clock, accounting, statements);
   const disclosures = new DisclosureService(db, clock);
   const notes = new NotesService(db, clock, accounting, statements, tax, disclosures);
-  const attention = new AttentionService(db, clock, stock, pos, purchases, customers, rebates);
+  const anomalies = new StockAnomalyService(db, clock, stock, monitoring);
+  const attention = new AttentionService(db, clock, stock, pos, purchases, customers, rebates, anomalies);
   const digest = new DigestService(db, clock, admin, reports, attention);
   const sync = new SyncService(db, clock, stock);
   const license = new LicenseService(db, clock, () => sync.credentials() !== null, machineId);
@@ -311,14 +330,15 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const companies = new CompanyService(db, clock, admin, accounting, stock);
   const missedSales = new MissedSaleService(db, clock);
   const floor = new FloorService(db, clock, stock);
-  const insights = new InsightService(db, clock, catalogue, cashierControl, companies);
+  const insights = new InsightService(db, clock, catalogue, cashierControl, companies, customers);
   const recalls = new RecallService(db, clock, supplierReturns);
   const exitChecks = new ExitCheckService(db, clock, admin, pos);
   const priceSchedules = new PriceScheduleService(db, clock, catalogue, labels);
   const recurringOrders = new RecurringOrderService(db, clock, catalogue, orders);
   const storeTransfers = new StoreTransferService(db, clock, stock);
   const counter = new CounterService(db, clock, admin, pos, customers);
-  return { db, counter, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  const reportPresets = new ReportPresetService(db, clock);
+  return { db, counter, fieldReps, promoCodes, outages, anomalies, reportPresets, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

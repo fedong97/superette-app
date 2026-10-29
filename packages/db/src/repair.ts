@@ -50,7 +50,7 @@ function expectedStock(db: Db): Map<string, { article_id: string; warehouse_id: 
 }
 
 /** Articles et dépôts dont le stock enregistré ne correspond plus aux mouvements. */
-function stockGaps(db: Db) {
+export function stockGaps(db: Db) {
   const expected = expectedStock(db);
   const current = db.prepare('SELECT article_id, warehouse_id, qty, avg_cost FROM stock').all() as { article_id: string; warehouse_id: string; qty: number; avg_cost: number }[];
   const gaps: { article_id: string; warehouse_id: string; qty: number; avg: number }[] = [];

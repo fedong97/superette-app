@@ -67,6 +67,8 @@ export interface Article {
   photo_thumb: string | null;
   /** Article proposé en caisse quand celui-ci est épuisé. */
   substitute_id: string | null;
+  /** Remise maximale permise sur cet article, en % (null : la règle du magasin). */
+  max_discount_pct: number | null;
   substitute_code: string | null;
   substitute_name: string | null;
   /** Emplacement dans chaque dépôt (JSON : {"<dépôt>": "A3-2"}). */
@@ -139,6 +141,8 @@ export interface ArticleInput {
   packCostPrice?: Fcfa;
   /** Article proposé quand celui-ci est épuisé ; absent = inchangé. */
   substituteId?: string | null;
+  /** Remise maximale permise sur cet article, en % (null : la règle du magasin) ; absent = inchangée. */
+  maxDiscountPct?: number | null;
 }
 
 /** Résultat d'un scan en caisse. */
@@ -391,6 +395,9 @@ export class CatalogueService extends Base {
       if (input.substituteId === id) throw new AppError('Un article ne peut pas se remplacer lui-même', 'INVALID');
       if (!this.db.prepare('SELECT 1 FROM articles WHERE id = ?').get(input.substituteId)) throw new AppError('Article de remplacement introuvable', 'NOT_FOUND');
     }
+    if (input.maxDiscountPct !== undefined && input.maxDiscountPct !== null && (!Number.isInteger(input.maxDiscountPct) || input.maxDiscountPct < 0 || input.maxDiscountPct > 100)) {
+      throw new AppError('Remise maximale : un pourcentage entier entre 0 et 100', 'INVALID');
+    }
     for (const [label, v] of [
       ['Prix de vente', input.salePrice],
       ["Prix d'achat", input.purchasePrice],
@@ -477,6 +484,7 @@ export class CatalogueService extends Base {
         pack_purchase_price: packPurchase,
         pack_cost_price: packCost,
         substitute_id: input.substituteId === undefined ? (existing?.substitute_id ?? null) : input.substituteId || null,
+        max_discount_pct: input.maxDiscountPct === undefined ? (existing?.max_discount_pct ?? null) : input.maxDiscountPct,
         now,
       };
       try {
@@ -488,7 +496,7 @@ export class CatalogueService extends Base {
                  perishable=@perishable, plu=@plu, quick_key=@quick_key, min_qty=@min_qty, alert_qty=@alert_qty,
                  max_qty=@max_qty, active=@active, unit_name=@unit_name, wholesale_price=@wholesale_price,
                  super_wholesale_price=@super_wholesale_price, other_ref=@other_ref, pack_purchase_price=@pack_purchase_price,
-                 pack_cost_price=@pack_cost_price, substitute_id=@substitute_id, updated_at=@now WHERE id=@id`,
+                 pack_cost_price=@pack_cost_price, substitute_id=@substitute_id, max_discount_pct=@max_discount_pct, updated_at=@now WHERE id=@id`,
             )
             .run(params);
         } else {
@@ -496,10 +504,10 @@ export class CatalogueService extends Base {
             .prepare(
               `INSERT INTO articles (id, code, name, family_id, brand, unit, vat_rate_id, purchase_price, sale_price,
                  perishable, plu, quick_key, min_qty, alert_qty, max_qty, active, unit_name, wholesale_price, super_wholesale_price,
-                 other_ref, pack_purchase_price, pack_cost_price, substitute_id, created_at, updated_at)
+                 other_ref, pack_purchase_price, pack_cost_price, substitute_id, max_discount_pct, created_at, updated_at)
                VALUES (@id, @code, @name, @family_id, @brand, @unit, @vat_rate_id, @purchase_price, @sale_price,
                  @perishable, @plu, @quick_key, @min_qty, @alert_qty, @max_qty, @active, @unit_name, @wholesale_price, @super_wholesale_price,
-                 @other_ref, @pack_purchase_price, @pack_cost_price, @substitute_id, @now, @now)`,
+                 @other_ref, @pack_purchase_price, @pack_cost_price, @substitute_id, @max_discount_pct, @now, @now)`,
             )
             .run(params);
         }

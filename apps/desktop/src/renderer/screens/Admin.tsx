@@ -1353,6 +1353,7 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
       ) : (
         <p className="muted">Ce PC n'est pas relié au serveur central. Demandez à l'administrateur de le faire.</p>
       )}
+      {st.connected && isAdmin && <SyncCheckPanel />}
       {(conflicts.data ?? []).length > 0 && (
         <>
           <h3>Conflits à vérifier</h3>
@@ -1377,6 +1378,104 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * État de la synchronisation : ce PC et le serveur ont-ils les mêmes données ?
+ * Compte chaque type de donnée des deux côtés et propose de renvoyer ce qui manque.
+ */
+function SyncCheckPanel() {
+  const toast = useToast();
+  const last = useLoad(() => call('sync.lastCheck'), []);
+  const [check, setCheck] = useState<Result<'sync.check'> | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const shown = check ?? last.data ?? null;
+  const run = async () => {
+    setBusy('all');
+    try {
+      setCheck(await call('sync.check'));
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const resend = async (entity: string, label: string) => {
+    setBusy(entity);
+    try {
+      const r = await call('sync.resendEntity', entity);
+      toast.ok(r.queued ? `${label} : ${r.queued} donnée(s) renvoyée(s) au serveur` : `${label} : le serveur avait déjà tout`);
+      setCheck(r.check);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <>
+      <h3>
+        <span className={`sync-dot ${shown ? (shown.ok ? 'ok' : 'bad') : ''}`} />
+        État de la synchronisation
+      </h3>
+      <p className="muted">
+        Compare ce PC et le serveur : nombre de produits, clients, ventes… de chaque côté.
+        {shown ? ` Dernière vérification : ${dateTime(shown.at)}.` : ' Pas encore vérifié.'}
+      </p>
+      {shown && (
+        <>
+          <p className={shown.ok ? 'pos' : 'neg'}>
+            {shown.ok
+              ? 'Tout concorde : le serveur a les mêmes données que ce PC.'
+              : `À regarder : ${shown.rows.filter((r) => r.missing_on_server || r.only_on_server || r.pending).length} type(s) de données ne concordent pas.`}
+          </p>
+          <table className="list">
+            <thead>
+              <tr>
+                <th>Données</th>
+                <th className="r">Sur ce PC</th>
+                <th className="r">Sur le serveur</th>
+                <th className="r">Manque au serveur</th>
+                <th className="r">Seulement au serveur</th>
+                <th className="r">En attente d'envoi</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {shown.rows.map((r) => (
+                <tr key={r.entity}>
+                  <td>
+                    <span className={`sync-dot ${r.missing_on_server || r.only_on_server ? 'bad' : 'ok'}`} />
+                    {r.label}
+                  </td>
+                  <td className="r">{r.local}</td>
+                  <td className="r">{r.server}</td>
+                  <td className={`r ${r.missing_on_server ? 'neg' : ''}`}>{r.missing_on_server || '—'}</td>
+                  <td className="r">{r.only_on_server || '—'}</td>
+                  <td className="r">{r.pending || '—'}</td>
+                  <td>
+                    {r.missing_on_server > 0 && (
+                      <button className="small" disabled={!!busy} onClick={() => void resend(r.entity, r.label)}>
+                        {busy === r.entity ? 'Envoi…' : 'Renvoyer'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted small">
+            « Seulement au serveur » : supprimé sur ce PC, ou venu d'une autre caisse et pas encore reçu. La prochaine synchronisation le rapatrie.
+          </p>
+        </>
+      )}
+      <div className="actions">
+        <button disabled={!!busy} onClick={() => void run()}>
+          {busy === 'all' ? 'Vérification…' : 'Vérifier maintenant'}
+        </button>
+      </div>
+    </>
   );
 }
 

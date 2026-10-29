@@ -87,7 +87,7 @@ describe('paramètres du magasin', () => {
     const { s, ctx, savon, set } = setup();
     const awa = s.admin.createUser(ctx.userId, { name: 'Awa', login: 'awa', pin: '5678', role: 'cashier', storeId: ctx.storeId });
     const c = { ...ctx, userId: awa.id };
-    const sell = (discount: number) => s.pos.completeSale(c, { lines: [{ articleId: savon.id, qty: 10_000, discount }], payments: [{ method: 'CASH', amount: 12_370 - discount }] });
+    const sell = (discount: number) => s.pos.completeSale(c, { lines: [{ articleId: savon.id, qty: 10_000, discount }], discountReason: 'Client fidèle', payments: [{ method: 'CASH', amount: 12_370 - discount }] });
     expect(() => sell(500)).toThrow(/validation du gérant/);
     set({ maxDiscountPct: 5 });
     expect(sell(500).total_ttc).toBe(11_870);

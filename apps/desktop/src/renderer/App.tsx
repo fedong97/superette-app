@@ -71,20 +71,20 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   cash2: { label: 'Fiche de facturation 2', perm: ['cash'] },
   credit: { label: 'Vente à crédit', perm: ['credit'] },
   counter: { label: 'Factures à encaisser', perm: ['cash'] },
-  sales: { label: 'Mes factures', perm: ['sales', 'cash_z', 'cash_operations', 'sales_alerts', 'sale_edit_approve', 'vouchers'] },
+  sales: { label: 'Mes factures', perm: ['sales', 'cash_z', 'cash_operations', 'sales_alerts', 'sale_edit_approve', 'vouchers', 'outage_close'] },
   articles: { label: 'Produits', perm: ['articles', 'article_create'] },
   stock: {
     label: 'Stock',
-    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count', 'restock', 'day_tasks', 'store_transfers', 'lot_recall'],
+    perm: ['stock', 'stock_moves', 'stock_monitoring', 'stock_receive', 'stock_loss', 'stock_request', 'stock_adjust', 'stock_decide', 'transfer_view', 'transfer_create', 'transfer_direct', 'inventory', 'inventory_count', 'clearance', 'cycle_count', 'restock', 'day_tasks', 'store_transfers', 'lot_recall', 'stock_anomalies'],
   },
   purchases: { label: 'Achats', perm: ['purchases', 'purchase_orders', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns', 'group_orders', 'supplier_calendar', 'missed_report', 'mobile_reception'] },
   suppliers: { label: 'Fournisseurs', perm: ['suppliers', 'supplier_statement', 'free_goods'] },
-  customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement', 'summary_invoices', 'account_offsets', 'consignment'] },
-  expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans'] },
+  customers: { label: 'Clients', perm: ['customers', 'receivables', 'rebates', 'customer_statement', 'summary_invoices', 'account_offsets', 'consignment', 'field_reps'] },
+  expenses: { label: 'Dépenses', perm: ['expenses', 'expense_record', 'expense_categories', 'charge_plans', 'expense_approve'] },
   quotes: { label: 'Devis et proformas', perm: ['quotes', 'quote_save'] },
   deliveries: { label: 'Livraisons du jour', perm: ['deliveries'] },
   orders: { label: 'Commandes clients', perm: ['customer_orders', 'recurring_orders'] },
-  promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop'] },
+  promotions: { label: 'Promotions', perm: ['promotions', 'promotion_save', 'promotion_stop', 'promo_codes'] },
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
   accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'journal_edit', 'chart_accounts', 'fiscal_years', 'cash_forecast', 'budgets', 'analytics', 'cheque_deposits', 'patrimony', 'cheque_rejections'] },
@@ -299,6 +299,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'], perm: 'cash_operations' },
       { label: 'Rechercher dans les caisses', words: 'retrouver opération', open: ['sales', 'find'], perm: 'cash_operations' },
       { label: 'Contrôle des caissiers', open: ['control'], perm: 'cashier_control' },
+      { label: 'Ventes pendant une coupure', words: 'coupure panne courant eneo cahier', open: ['sales', 'outages'], perm: ['outage_close', 'sales'] },
       H('Encaissements'),
       { label: 'Règlements clients reçus', words: 'paiement encaissement client', open: ['customers', 'payments'] },
       { label: 'Point Mobile Money : comptes et bilan', open: ['agent', 'accounts'], perm: 'agent_accounts' },
@@ -329,6 +330,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Mouvements de stock', words: 'entrées sorties historique magasinier', open: ['stock', 'moves'], perm: 'stock_moves' },
       { label: 'Historique des ajustements', open: ['stock', 'adjustments'], perm: 'stock_moves' },
       { label: 'Monitoring du stock', open: ['stock', 'monitoring'], perm: ['stock_monitoring', 'stock_request', 'stock_decide'] },
+      { label: 'Anomalies de stock à vérifier', words: 'anomalie doublon négatif écart contrôle', open: ['stock', 'anomalies'], perm: 'stock_anomalies' },
       { label: 'Stock multi-magasin', open: ['stock', 'multi'], perm: 'stock' },
       { label: 'Articles par dépôt', open: ['stock', 'warehouses'], perm: 'stock' },
       H('Transferts'),
@@ -347,6 +349,7 @@ const MENUS: [string, MenuItem[]][] = [
       H('Prix et étiquettes'),
       { label: 'Prix programmés (à une date)', open: ['articles', 'schedules'], perm: ['price_schedule', 'price_update'] },
       { label: 'Promotions', words: 'promo remise réduction', open: ['promotions'], perm: 'promotions' },
+      { label: 'Codes de réduction', words: 'code promo coupon whatsapp flyer', open: ['promotions', 'codes'], perm: 'promo_codes' },
       { label: 'Étiquettes et codes-barres', words: 'étiquette prix code barre imprimer', open: ['labels'] },
       H('Fabrication'),
       { label: 'Nouvel ordre de fabrication', open: ['production', 'new'], perm: 'production_create' },
@@ -402,6 +405,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Compensations client / fournisseur', open: ['customers', 'offsets'], perm: 'account_offsets' },
       { label: 'Dépôt-vente chez les revendeurs', open: ['customers', 'consignment'], perm: 'consignment' },
       { label: 'Ristournes', open: ['customers', 'rebates-state'], perm: 'rebates' },
+      { label: 'Commerciaux de terrain', words: 'prévendeur représentant zone ville secteur', open: ['customers', 'field-reps'], perm: 'field_reps' },
     ],
   ],
   [
@@ -410,6 +414,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Nouvelle dépense', words: 'dépense charge sortie de caisse', open: ['expenses', 'new'], perm: 'expense_record' },
       { label: 'Historique des dépenses', words: 'charges dépenses', open: ['expenses', 'list'], perm: 'expenses' },
       { label: 'Dépenses par catégorie', open: ['expenses', 'summary'], perm: 'expenses' },
+      { label: 'Dépenses à approuver', words: 'approbation valider justificatif', open: ['expenses', 'approval'], perm: 'expense_approve' },
       H('Charges fixes'),
       { label: 'Définition des charges fixes', open: ['expenses', 'plans'], perm: 'charge_plans' },
       { label: 'Constats de charges', open: ['expenses', 'schedule'], perm: 'charge_plans' },
@@ -1527,7 +1532,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'deliveries' && <Deliveries active={w.id === active && !w.min} />}
             {w.kind === 'orders' && <Orders user={user} initialView={w.tab === 'recurring' ? 'recurring' : 'orders'} />}
             {w.kind === 'exit' && <ExitChecks initialTab={w.tab as ExitTab | undefined} />}
-            {w.kind === 'promotions' && <Promotions active={w.id === active && !w.min} />}
+            {w.kind === 'promotions' && <Promotions active={w.id === active && !w.min} initialTab={w.tab === 'codes' ? 'codes' : 'auto'} />}
             {w.kind === 'labels' && <Labels active={w.id === active && !w.min} />}
             {w.kind === 'reports' && <Reports view={w.tab} />}
             {w.kind === 'expenses' && <Expenses user={user} initialTab={w.tab as ExpensesTab | undefined} />}
@@ -1574,7 +1579,15 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <span title="Utilisateur connecté">
           {user.name} ({ROLE_LABELS[user.role]})
         </span>
-        <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>{syncLabel}</span>
+        <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>
+          {sync.data?.connected && sync.data.checkOk !== null && (
+            <span
+              className={`sync-dot ${sync.data.checkOk ? 'ok' : 'bad'}`}
+              title={sync.data.checkOk ? 'Dernière vérification : le serveur a les mêmes données que ce PC' : 'Dernière vérification : des données ne concordent pas (Administration › Serveur central)'}
+            />
+          )}
+          {syncLabel}
+        </span>
         {Boolean(fichesWaiting.data) && canWin('admin') && (
           <button className="warn soft" onClick={() => open('admin', 'fiches', 'Administration › Fiches boutique')} title="Fiches déposées dans le dossier partagé">
             {fichesWaiting.data === 1 ? '1 fiche à rapporter' : `${fichesWaiting.data} fiches à rapporter`}

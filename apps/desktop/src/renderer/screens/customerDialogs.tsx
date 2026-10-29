@@ -85,6 +85,7 @@ export function CustomerFields({
         <Field label="Zone ou tournée" hint="Quartier ou tournée du livreur : la liste des clients se filtre par zone">
           <input list="customer-zones" value={value.zone} onChange={(e) => set({ zone: e.target.value })} placeholder="BONAMOUSSADI" />
         </Field>
+        <CustomerRepField value={value.fieldRepId} onChange={(fieldRepId) => set({ fieldRepId })} />
         {canLinkSupplier && <LinkedSupplier value={value.supplierId} onChange={(supplierId) => set({ supplierId })} />}
       </div>
       <label className="check" title={canSetCredit ? 'Le client ne peut plus payer par chèque, ni en caisse ni en règlement' : 'Fixé par le gérant ou le comptable'}>
@@ -245,6 +246,8 @@ export interface CustomerDraft {
   /** Le client ne peut plus payer par chèque (chèque revenu impayé). */
   noCheque: boolean;
   zone: string;
+  /** Commercial de terrain qui suit le client (vide : aucun). */
+  fieldRepId: string;
   supplierId: string;
   /** Prix convenu (texte saisi) par article. */
   prices: Record<string, { name: string; price: string }>;
@@ -267,6 +270,7 @@ export const draftOf = (c: Customer | null, defaults?: { creditDefaultLimit: num
   noCheque: c ? c.no_cheque === 1 : false,
   discounts: Object.fromEntries(Object.entries(parseFamilyDiscounts(c?.family_discounts)).map(([k, bp]) => [k, String(bp / 100).replace('.', ',')])),
   zone: c?.zone ?? '',
+  fieldRepId: c?.field_rep_id ?? '',
   supplierId: c?.supplier_id ?? '',
   prices: Object.fromEntries(Object.entries(parseArticlePrices(c?.article_prices)).map(([k, price]) => [k, { name: '', price: String(price) }])),
 });
@@ -299,6 +303,7 @@ export function inputOf(d: CustomerDraft) {
         }),
     ),
     zone: d.zone.trim() || null,
+    fieldRepId: d.fieldRepId || null,
     supplierId: d.supplierId || null,
     articlePrices: Object.fromEntries(
       Object.entries(d.prices)
@@ -503,5 +508,24 @@ export function CustomerPaymentDialog({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Commercial de terrain qui suit le client : ses ventes lui sont attribuées, avec sa zone et sa ville du jour. */
+function CustomerRepField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const can = useCan();
+  const reps = useLoad(() => call('fieldReps.list', true), []);
+  if (!reps.data?.length) return null;
+  return (
+    <Field label="Commercial de terrain" hint={can('field_reps') ? 'Ses ventes à ce client comptent pour lui, dans sa zone' : 'Choisi par le gérant'}>
+      <select value={value} disabled={!can('field_reps')} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Aucun</option>
+        {reps.data.map((r) => (
+          <option key={r.id} value={r.id} disabled={!r.active && r.id !== value}>
+            {r.name} ({r.city} › {r.zone}){r.active ? '' : ' · inactif'}
+          </option>
+        ))}
+      </select>
+    </Field>
   );
 }

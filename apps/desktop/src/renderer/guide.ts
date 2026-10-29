@@ -109,6 +109,20 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.97.0',
+    items: [
+      "Administration › Serveur central › État de la synchronisation : compare ce PC et le serveur (produits, clients, ventes…), montre ce qui manque d'un côté ou de l'autre et renvoie ce qui manque en un clic. Un point vert ou orange dans la barre du bas.",
+      "Stock › À vérifier : réceptions saisies en double, stocks négatifs depuis plus de 3 jours, articles vendus sans jamais avoir été reçus et stocks qui ne suivent plus leurs mouvements. Chaque cas se corrige ou se laisse tel quel avec un motif.",
+      "Tableau de bord › Mon mois en clair : ce qui reste du mois après les achats, les dépenses et les pertes, le seuil de rentabilité et ce qu'il faut faire en priorité.",
+      "Dépenses : photo ou PDF du justificatif joint à chaque dépense, et dépenses à approuver par le gérant au-delà d'un montant (Paramètres).",
+      "Remise maxi par article (fiche article) et motif de la remise à choisir à la caisse : le gérant le retrouve dans le contrôle des caissiers.",
+      "Clients › Commerciaux de terrain : chaque commercial a sa zone et sa ville ; ses ventes se lisent par commercial, zone et ville dans les rapports.",
+      "Rapports : filtres enregistrés sous un nom (pour soi ou pour tous), et rapport en colonnes : ventes, marge ou quantités par mois, semaine ou année, côte à côte.",
+      "Caisse › Coupure : saisir les ventes notées sur un cahier pendant une coupure de courant, à leur heure ; ONIX compare au total du cahier avant de clôturer.",
+      "Promotions › Codes de réduction : codes à donner aux clients (NOEL25…), en % ou en montant, avec dates, minimum d'achat et une fois par client.",
+    ],
+  },
+  {
     version: '0.96.0',
     items: [
       'Achats › Registre des achats : toutes les factures fournisseurs, les avoirs et les réceptions pas encore facturées, avec filtres par période, fournisseur, type et état, totaux et export Excel.',

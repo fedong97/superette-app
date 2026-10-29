@@ -38,6 +38,12 @@ export interface StoreSettings {
   maxHeld: number;
   /** Autoriser un prix négocié sous le coût de revient (avec le code du gérant). */
   allowBelowCost: boolean;
+  /** Toute remise du ticket porte un motif choisi dans une liste (remise client fidèle, produit abîmé…). */
+  discountReasonRequired: boolean;
+  /** Dépense saisie par quelqu'un sans le droit d'approuver : à approuver par le gérant au-delà de ce montant ; 0 : jamais. */
+  expenseApprovalAbove: number;
+  /** Le gérant n'approuve une dépense qu'avec son justificatif joint (photo de la facture, fiche signée). */
+  expenseProofRequired: boolean;
 
   /** Durée de validité d'un bon d'achat, en jours ; 0 : sans limite. */
   voucherValidityDays: number;
@@ -246,6 +252,9 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   cancelMinutes: 0,
   maxHeld: 0,
   allowBelowCost: false,
+  discountReasonRequired: true,
+  expenseApprovalAbove: 0,
+  expenseProofRequired: false,
   voucherValidityDays: 365,
   cashCeiling: 0,
   changeToAccount: true,
@@ -345,6 +354,7 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   creditDefaultLimit: [0, 1e10],
   creditDefaultDays: [0, 365],
   expiryAlertDays: [1, 365],
+  expenseApprovalAbove: [0, 1e10],
   defaultAlertQty: [0, 1e6],
   supplierDefaultDays: [0, 365],
   defaultMarginPct: [0, 1000],

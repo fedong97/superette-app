@@ -123,7 +123,7 @@ export class ReportService extends Base {
   /** Lignes de vente de la période, retours compris (coût des retours repris du ticket d'origine). */
   private static readonly LINES = `
     WITH x AS (
-      SELECT s.id AS sale_id, s.kind, s.created_at, s.user_id, s.register_id, s.customer_id,
+      SELECT s.id AS sale_id, s.kind, s.created_at, s.user_id, s.register_id, s.customer_id, s.field_rep_id, s.field_zone, s.field_city,
              l.article_id, l.label, l.qty, l.unit_price, l.discount, l.vat_rate_bp, l.total_ttc,
              ROUND(l.total_ttc * 10000.0 / (10000 + l.vat_rate_bp)) AS ht,
              ROUND(l.qty * (CASE WHEN s.kind = 'return' THEN COALESCE(ol.unit_cost, 0) ELSE l.unit_cost END) / 1000.0) AS cost
@@ -152,6 +152,10 @@ export class ReportService extends Base {
     cashier: { key: 'x.user_id', label: "COALESCE(u.name, '?')", joins: 'LEFT JOIN users u ON u.id = x.user_id' },
     register: { key: 'x.register_id', label: "COALESCE(r.name, '?')", joins: 'LEFT JOIN registers r ON r.id = x.register_id' },
     customer: { key: "COALESCE(x.customer_id, '')", label: "COALESCE(c.name, 'Client comptoir')", joins: 'LEFT JOIN customers c ON c.id = x.customer_id' },
+    // Zone et ville figées sur la vente : un commercial qui change de secteur ne déplace pas ses anciennes ventes.
+    field_rep: { key: "COALESCE(x.field_rep_id, '')", label: "COALESCE(fr.name, 'Sans commercial')", joins: 'LEFT JOIN field_reps fr ON fr.id = x.field_rep_id' },
+    field_zone: { key: "COALESCE(x.field_city || ' › ' || x.field_zone, '')", label: "COALESCE(x.field_city || ' › ' || x.field_zone, 'Sans zone')" },
+    field_city: { key: "COALESCE(x.field_city, '')", label: "COALESCE(x.field_city, 'Sans ville')" },
   };
 
   private rows(storeId: string, from: string, to: string, dimension: SalesDimension): SalesReportRow[] {
@@ -250,6 +254,83 @@ export class ReportService extends Base {
       previous = { ...p, totals: this.totals(storeId, p.from, p.to) };
     }
     return { from, to, dimension: input.dimension, rows, totals, previous };
+  }
+
+  /**
+   * Rapport en colonnes : le regroupement choisi en lignes, une colonne par
+   * jour, semaine, mois ou année jusqu'à `end` (aujourd'hui par défaut), et le total.
+   */
+  periodMatrix(storeId: string, input: { dimension: MatrixDimension; step: MatrixStep; measure: MatrixMeasure; end?: string | null }): PeriodMatrix {
+    const d = ReportService.DIMENSIONS[input.dimension as keyof typeof ReportService.DIMENSIONS];
+    if (!d || TIME_DIMENSIONS.has(input.dimension)) throw new AppError('Regroupement inconnu', 'INVALID');
+    if (!(input.step in MATRIX_STEPS)) throw new AppError('Période inconnue', 'INVALID');
+    if (!(input.measure in MATRIX_MEASURES)) throw new AppError('Mesure inconnue', 'INVALID');
+    const to = input.end && DATE.test(input.end) ? input.end : this.today();
+    const columns: { key: string; label: string }[] = [];
+    let column: string;
+    if (input.step === 'day30') {
+      for (let i = 29; i >= 0; i--) {
+        const k = addDays(to, -i);
+        columns.push({ key: k, label: `${k.slice(8, 10)}/${k.slice(5, 7)}` });
+      }
+      column = "date(x.created_at, 'localtime')";
+    } else if (input.step === 'week12') {
+      const monday = addDays(to, -((new Date(`${to}T12:00:00Z`).getUTCDay() + 6) % 7));
+      for (let i = 11; i >= 0; i--) {
+        const k = addDays(monday, -7 * i);
+        columns.push({ key: k, label: `Sem. ${k.slice(8, 10)}/${k.slice(5, 7)}` });
+      }
+      column = "date(x.created_at, 'localtime', 'weekday 0', '-6 days')";
+    } else if (input.step === 'month12') {
+      const [y, m] = to.split('-').map(Number) as [number, number];
+      for (let i = 11; i >= 0; i--) {
+        const k = new Date(Date.UTC(y, m - 1 - i, 1)).toISOString().slice(0, 7);
+        columns.push({ key: k, label: `${MONTHS[Number(k.slice(5, 7)) - 1]!.slice(0, 4)}. ${k.slice(2, 4)}` });
+      }
+      column = "strftime('%Y-%m', x.created_at, 'localtime')";
+    } else {
+      const y = Number(to.slice(0, 4));
+      for (let i = 9; i >= 0; i--) columns.push({ key: String(y - i), label: String(y - i) });
+      column = "strftime('%Y', x.created_at, 'localtime')";
+    }
+    const first = columns[0]!.key;
+    const from = input.step === 'month12' ? `${first}-01` : input.step === 'year10' ? `${first}-01-01` : first;
+    const measure = { ttc: 'SUM(x.total_ttc)', margin: 'SUM(x.ht) - SUM(x.cost)', qty: 'SUM(x.qty)', tickets: "COUNT(DISTINCT CASE WHEN x.kind = 'sale' THEN x.sale_id END)" }[input.measure];
+    const raw = this.db
+      .prepare(
+        `${ReportService.LINES}
+         SELECT ${d.key} AS key, ${d.label} AS label, ${column} AS col, ${measure} AS value
+         FROM x ${d.joins ?? ''} GROUP BY 1, 3`,
+      )
+      .all({ storeId, from, to }) as { key: string; label: string; col: string; value: number }[];
+    const index = new Map(columns.map((c, i) => [c.key, i]));
+    const byRow = new Map<string, { key: string; label: string; values: number[]; total: number }>();
+    for (const r of raw) {
+      const i = index.get(r.col);
+      if (i === undefined) continue;
+      let row = byRow.get(r.key);
+      if (!row) byRow.set(r.key, (row = { key: r.key, label: r.label, values: columns.map(() => 0), total: 0 }));
+      row.values[i] = (row.values[i] ?? 0) + (r.value ?? 0);
+      row.total += r.value ?? 0;
+    }
+    const rows = [...byRow.values()].sort((a, b) => b.total - a.total).slice(0, 500);
+    const totals = columns.map((_, i) => rows.reduce((t, r) => t + r.values[i]!, 0));
+    return { step: input.step, measure: input.measure, dimension: input.dimension, from, to, columns, rows, totals, total: totals.reduce((t, v) => t + v, 0) };
+  }
+
+  /** Classeur Excel du rapport en colonnes. */
+  periodMatrixWorkbook(storeId: string, input: { dimension: MatrixDimension; step: MatrixStep; measure: MatrixMeasure; end?: string | null }): XlsxSheet[] {
+    const m = this.periodMatrix(storeId, input);
+    const store = this.db.prepare('SELECT name FROM stores WHERE id = ?').pluck().get(storeId) as string;
+    const format = input.measure === 'qty' ? ('qty' as const) : input.measure === 'tickets' ? ('int' as const) : ('money' as const);
+    return [
+      {
+        name: 'En colonnes',
+        title: [`${store} · ${MATRIX_MEASURES[m.measure]} par ${DIMENSION_LABELS[m.dimension].toLowerCase()}`, `${MATRIX_STEPS[m.step]} : du ${frDate(m.from)} au ${frDate(m.to)}`],
+        columns: [{ header: DIMENSION_LABELS[m.dimension], width: 30 }, ...m.columns.map((c) => ({ header: c.label, format, width: 11 })), { header: 'Total', format, width: 14 }],
+        rows: [...m.rows.map((r) => [r.label, ...r.values, r.total]), ['Total', ...m.totals, m.total]],
+      },
+    ];
   }
 
   /**
@@ -445,7 +526,22 @@ export class ReportService extends Base {
   }
 }
 
-export type SalesDimension = 'day' | 'week' | 'month' | 'hour' | 'weekday' | 'department' | 'family' | 'article' | 'cashier' | 'register' | 'customer' | 'payment';
+export type SalesDimension =
+  | 'day'
+  | 'week'
+  | 'month'
+  | 'hour'
+  | 'weekday'
+  | 'department'
+  | 'family'
+  | 'article'
+  | 'cashier'
+  | 'register'
+  | 'customer'
+  | 'field_rep'
+  | 'field_zone'
+  | 'field_city'
+  | 'payment';
 
 export const DIMENSION_LABELS: Record<SalesDimension, string> = {
   day: 'Jour',
@@ -459,8 +555,32 @@ export const DIMENSION_LABELS: Record<SalesDimension, string> = {
   cashier: 'Caissier',
   register: 'Caisse',
   customer: 'Client',
+  field_rep: 'Commercial',
+  field_zone: 'Zone',
+  field_city: 'Ville',
   payment: 'Paiement',
 };
+
+/** Rapport en colonnes : chaque colonne est une période (30 jours, 12 semaines, 12 mois ou 10 ans). */
+export type MatrixStep = 'day30' | 'week12' | 'month12' | 'year10';
+export type MatrixMeasure = 'ttc' | 'margin' | 'qty' | 'tickets';
+export type MatrixDimension = Exclude<SalesDimension, 'day' | 'week' | 'month' | 'hour' | 'weekday' | 'payment'>;
+
+export const MATRIX_STEPS: Record<MatrixStep, string> = { day30: '30 derniers jours', week12: '12 dernières semaines', month12: '12 derniers mois', year10: '10 dernières années' };
+export const MATRIX_MEASURES: Record<MatrixMeasure, string> = { ttc: 'CA TTC', margin: 'Marge HT', qty: 'Quantité', tickets: 'Tickets' };
+
+export interface PeriodMatrix {
+  step: MatrixStep;
+  measure: MatrixMeasure;
+  dimension: MatrixDimension;
+  from: string;
+  to: string;
+  columns: { key: string; label: string }[];
+  /** Une ligne par élément du regroupement ; une case à 0 : rien sur la période. */
+  rows: { key: string; label: string; values: number[]; total: number }[];
+  totals: number[];
+  total: number;
+}
 
 const TIME_DIMENSIONS = new Set<SalesDimension>(['day', 'week', 'month', 'hour', 'weekday']);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;

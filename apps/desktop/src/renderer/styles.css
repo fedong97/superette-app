@@ -1402,3 +1402,21 @@ ul.plain li { padding: 3px 0; }
 /* Poste du vendeur : ni billets, ni reçu, ni rendu ; la facture part à la caisse. */
 .counter-seller .pos-bills, .counter-seller .tk-er, .counter-seller .pc-bills, .counter-seller .pc-er, .counter-seller .pv-pay { display: none !important; }
 .counter-band { background: var(--brand-soft); color: var(--brand-deep); border: 1px solid var(--brand-line); border-radius: 10px; padding: 6px 12px; font-weight: 700; }
+
+/* Mon mois en clair : verdict en tête, conseils en cartes. */
+.month-verdict { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); margin-bottom: 14px; }
+.month-verdict strong { font-size: 20px; }
+.month-verdict.pos { border-color: var(--ok); }
+.month-verdict.pos strong { color: var(--ok); }
+.month-verdict.neg { border-color: var(--danger); }
+.month-verdict.neg strong { color: var(--danger); }
+.month-advice { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.month-tip { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); }
+.month-tip ul { margin: 0; padding-left: 18px; }
+.month-tip li b { float: right; font-weight: 600; }
+.month-tip button.link { align-self: flex-start; }
+.sync-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; background: var(--muted, #999); }
+.sync-dot.ok { background: var(--ok); }
+.sync-dot.bad { background: var(--warn); }
+.matrix-wrap { overflow: auto; max-height: 70vh; }
+.matrix-wrap table td.zero { color: var(--muted, #999); }

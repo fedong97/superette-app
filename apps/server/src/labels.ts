@@ -88,16 +88,22 @@ export const ENTITY_LABELS: Record<string, string> = {
   price_schedule: 'Prix programmés',
   recurring_order: 'Commande répétée',
   store_transfer_request: 'Demande de marchandise à un autre magasin',
+  expense_attachment: 'Justificatif de dépense',
+  field_rep: 'Commercial de terrain',
+  report_preset: 'Filtre de rapport enregistré',
+  outage: 'Ventes pendant une coupure',
+  promo_code: 'Code de réduction',
+  stock_anomaly_decision: 'Décision sur une anomalie de stock',
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
-  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale', 'gift_voucher', 'exit_check', 'recurring_order'] },
-  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover', 'agent_operation', 'agent_account', 'cash_alert'] },
+  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale', 'gift_voucher', 'exit_check', 'recurring_order', 'outage', 'promo_code', 'field_rep'] },
+  { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover', 'agent_operation', 'agent_account', 'cash_alert', 'expense_attachment'] },
   {
     key: 'stock',
     label: 'Stock',
-    entities: ['stock_movement', 'lot', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'stock_level', 'reception', 'production_order', 'lot_recall', 'store_transfer_request'],
+    entities: ['stock_movement', 'lot', 'inventory', 'inventory_line', 'inventory_entry', 'transfer', 'stock_request', 'stock_level', 'reception', 'production_order', 'lot_recall', 'store_transfer_request', 'stock_anomaly_decision'],
   },
   { key: 'achats', label: 'Achats', entities: ['purchase_order', 'supplier_invoice', 'supplier_payment', 'supplier', 'supplier_article', 'supplier_return'] },
   {
@@ -105,7 +111,7 @@ export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[]
     label: 'Articles et prix',
     entities: ['article', 'store_price', 'family', 'department', 'promotion', 'vat_rate', 'recipe', 'rebate_rules', 'container', 'price_schedule'],
   },
-  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['company', 'store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'attendance', 'time_punch', 'staff_agency', 'entrance', 'staff_team', 'staff_document', 'fingerprint_device', 'staff_warning', 'staff_alert', 'staff_leave', 'staff_schedule', 'expense_category'] },
+  { key: 'personnes', label: 'Utilisateurs et réglages', entities: ['company', 'store', 'warehouse', 'register', 'user', 'role_rights', 'user_rights', 'staff', 'staff_salary', 'attendance', 'time_punch', 'staff_agency', 'entrance', 'staff_team', 'staff_document', 'fingerprint_device', 'staff_warning', 'staff_alert', 'staff_leave', 'staff_schedule', 'expense_category', 'report_preset'] },
   {
     key: 'compta',
     label: 'Comptabilité',

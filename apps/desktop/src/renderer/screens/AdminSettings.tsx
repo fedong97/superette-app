@@ -514,6 +514,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       '',
       [
         { label: 'Remise maximale sans le code du gérant', hint: 'En % du ticket. 0 : toute remise demande le code (sauf droit « remise sans code »).', render: () => num('maxDiscountPct', '%') },
+        { label: 'Motif obligatoire pour une remise', hint: 'Oui : chaque remise du ticket porte un motif choisi dans une liste ; le Contrôle des caissiers les compte par vendeur. Une remise maximale propre à un article se règle sur sa fiche.', render: () => yes('discountReasonRequired') },
         {
           label: 'Arrondi des ventes payées en espèces',
           hint: 'Le ticket payé tout en espèces descend au multiple inférieur, en faveur du client.',
@@ -685,6 +686,14 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       [
         { label: 'Délai de paiement d’un nouveau fournisseur', render: () => num('supplierDefaultDays', 'jours') },
         { label: 'Marge proposée pour le prix de vente', hint: 'Sur la fiche produit, le prix conseillé = prix de revient + marge. 0 : pas de proposition.', render: () => num('defaultMarginPct', '%') },
+      ],
+    ],
+    [
+      'Dépenses',
+      '',
+      [
+        { label: 'Dépense à approuver par le gérant au-delà de', hint: 'Saisie par quelqu’un qui n’a pas le droit « Approuver les dépenses » : elle attend l’accord du gérant (Dépenses › À approuver). 0 : jamais.', render: () => num('expenseApprovalAbove', 'FCFA') },
+        { label: 'Justificatif obligatoire pour approuver', hint: 'Oui : le gérant n’approuve une dépense qu’avec sa pièce jointe (photo de la facture, fiche signée).', render: () => yes('expenseProofRequired') },
       ],
     ],
     [

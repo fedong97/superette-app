@@ -5,6 +5,7 @@ import type { PosService } from './pos';
 import type { PurchaseService } from './purchases';
 import type { RebateService } from './rebates';
 import type { StockService } from './stock';
+import type { StockAnomalyService } from './anomalies';
 import { Base, type Clock } from './util';
 
 export type AttentionKey =
@@ -22,7 +23,10 @@ export type AttentionKey =
   | 'production'
   | 'cash_alerts'
   | 'to_notify'
-  | 'store_requests';
+  | 'store_requests'
+  | 'stock_anomalies'
+  | 'expenses_pending'
+  | 'outages_open';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -54,6 +58,7 @@ export class AttentionService extends Base {
     private readonly purchases: PurchaseService,
     private readonly customers: CustomerService,
     private readonly rebates: RebateService,
+    private readonly anomalies: StockAnomalyService,
   ) {
     super(db, clock);
   }
@@ -286,6 +291,46 @@ export class AttentionService extends Base {
         amount: null,
         detail: r.ship + r.receive ? [r.ship ? `${r.ship} à expédier` : '', r.receive ? `${r.receive} à réceptionner` : ''].filter(Boolean).join(', ') : 'Rien à expédier ni à réceptionner',
         tone: 'warning',
+      });
+    }
+
+    if (want('stock_anomalies')) {
+      const cases = this.anomalies.cached(storeId);
+      items.push({
+        key: 'stock_anomalies',
+        label: 'Anomalies de stock à vérifier',
+        count: cases.length,
+        amount: null,
+        detail: cases.length ? firstNames(cases.map((c) => c.title)) : 'Aucun cas douteux trouvé',
+        tone: 'warning',
+      });
+    }
+
+    if (want('expenses_pending')) {
+      const r = this.db
+        .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total, group_concat(label, '|') AS labels FROM expenses WHERE store_id = ? AND status = 'active' AND approval = 'pending'")
+        .get(storeId) as { n: number; total: Fcfa; labels: string | null };
+      items.push({
+        key: 'expenses_pending',
+        label: 'Dépenses à approuver',
+        count: r.n,
+        amount: r.n ? r.total : null,
+        detail: r.n ? firstNames((r.labels ?? '').split('|')) : 'Aucune dépense en attente',
+        tone: 'warning',
+      });
+    }
+
+    if (want('outages_open')) {
+      const rows = this.db
+        .prepare("SELECT number, declared_total FROM outages WHERE store_id = ? AND status = 'open' ORDER BY started_at")
+        .all(storeId) as { number: string; declared_total: Fcfa }[];
+      items.push({
+        key: 'outages_open',
+        label: 'Coupures à finir de saisir',
+        count: rows.length,
+        amount: rows.length ? rows.reduce((t, r) => t + r.declared_total, 0) : null,
+        detail: rows.length ? `Coupure${rows.length > 1 ? 's' : ''} n° ${firstNames(rows.map((r) => r.number))} : saisissez les ventes du cahier puis clôturez` : 'Aucune coupure en cours',
+        tone: 'info',
       });
     }
 

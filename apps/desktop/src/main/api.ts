@@ -142,6 +142,12 @@ import {
   type JournalCode,
   type LabelItem,
   type SalesReportInput,
+  type MatrixDimension,
+  type ExpenseApproval,
+  type MatrixStep,
+  type MatrixMeasure,
+  type FieldRepInput,
+  type PromoCodeInput,
   type ReceptionLine,
   type Role,
   type UserRegisters,
@@ -1314,6 +1320,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), notInFiche(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
     'sync.resend': () => (requireAdmin(), sync.resend()),
+    /** État de la synchronisation : le PC et le serveur comparés, sorte par sorte. */
+    'sync.check': () => (requireUser(ADMIN), sync.check()),
+    'sync.lastCheck': () => (requireUser(ADMIN), s.sync.lastCheck()),
+    'sync.resendEntity': (entity: string) => (requireAdmin(), sync.resendEntity(entity)),
     'sync.conflicts': () => (requireUser(ADMIN), s.sync.conflicts()),
     'sync.disconnect': () => {
       requireAdmin();
@@ -1344,7 +1354,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         input.purchasePrice !== cur.purchase_price ||
         (input.wholesalePrice ?? null) !== cur.wholesale_price ||
         (input.superWholesalePrice ?? null) !== cur.super_wholesale_price ||
-        (input.packPurchasePrice !== undefined && input.packPurchasePrice !== cur.pack_purchase_price);
+        (input.packPurchasePrice !== undefined && input.packPurchasePrice !== cur.pack_purchase_price) ||
+        (input.maxDiscountPct !== undefined && (input.maxDiscountPct ?? null) !== cur.max_discount_pct);
       if (priceChanged && !can(u, ['article_price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix des produits", 'FORBIDDEN');
       if ((input.active ?? true) !== (cur.active === 1) && !can(u, ['article_deactivate'])) throw new AppError("Vous n'avez pas le droit de désactiver un produit", 'FORBIDDEN');
       // Le nom d'un produit déjà créé ne change que par le bouton « Modifier le nom » (catalogue.rename).
@@ -1654,10 +1665,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       keepChange?: Fcfa | null;
       /** Vente du carnet à souches (panne) : numéro de la souche et heure écrite. */
       book?: { number: string; at: string } | null;
+      /** Motif des remises, code de réduction, commercial de terrain. */
+      discountReason?: string | null;
+      promoCode?: string | null;
+      fieldRepId?: string | null;
+      /** Vente faite pendant une coupure déclarée. */
+      outage?: { id: string; at?: string | null; number?: string | null } | null;
     }) => {
       const c = ctx(POS);
       requireTill(user!);
-      if (input.book) requireUser(['sale_book']);
+      if (input.book || input.outage) requireUser(['sale_book']);
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
       const otherLevel = Boolean(input.priceLevel) && input.priceLevel !== usual;
@@ -1687,6 +1704,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         sellerId: input.sellerId ?? null,
         keepChange: input.keepChange ?? null,
         book: input.book ?? null,
+        discountReason: input.discountReason ?? null,
+        promoCode: input.promoCode ?? null,
+        fieldRepId: input.fieldRepId ?? null,
+        outage: input.outage ?? null,
       };
       if (input.replacesId) {
         const grant = editGrant(input.replacesId);
@@ -1864,6 +1885,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       warehouseId?: string | null;
       supervisorPin?: string;
       optionsPin?: string;
+      discountReason?: string | null;
+      fieldRepId?: string | null;
     }) => {
       const c = ctx(POS);
       const u = user!;
@@ -1902,6 +1925,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         discountBy: null,
         priceBy,
         optionsBy,
+        discountReason: input.discountReason?.trim() || old?.discountReason || null,
+        fieldRepId: input.fieldRepId ?? old?.fieldRepId ?? null,
       };
       const ready = s.counter.prepare(c.storeId, payload);
       // Remise : le droit du vendeur, le code du gérant, sous le maximum des paramètres, ou pas plus que la version validée.
@@ -1923,6 +1948,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         else if (can(u, ['discount'])) p.discountBy = u.id;
         else if (old?.discountBy && totals.totalDiscount <= oldDiscount) p.discountBy = old.discountBy;
         else if (!underMax) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
+        if (set.discountReasonRequired && !p.discountReason) throw new AppError('Choisissez le motif de la remise', 'REASON_REQUIRED');
       }
       const sent = await counterSend(s, {
         id: previous?.id ?? input.id ?? newCounterId(),
@@ -2075,7 +2101,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      * lignes, le client et les accords viennent des factures (rien n'est
      * changé à la caisse) ; la vente compte pour le vendeur.
      */
-    'counter.pay': async (input: { ids: string[]; payments: Payment[]; supervisorPin?: string; creditPin?: string; keepChange?: Fcfa | null }) => {
+    'counter.pay': async (input: { ids: string[]; payments: Payment[]; supervisorPin?: string; creditPin?: string; keepChange?: Fcfa | null; discountReason?: string | null; promoCode?: string | null }) => {
       const c = ctx(POS);
       const u = user!;
       requireTill(u);
@@ -2094,6 +2120,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         discountAuthorizedBy: input.supervisorPin ? supervisor(input.supervisorPin).id : base.discountAuthorizedBy,
         creditAuthorizedBy: input.creditPin ? supervisor(input.creditPin).id : null,
         keepChange: input.keepChange ?? null,
+        discountReason: input.discountReason?.trim() || base.discountReason || null,
+        promoCode: input.promoCode ?? null,
       });
       s.counter.recordPaid(ids, sale, u.name);
       s.counter.log(u.id, 'counter.pay', 'sale', sale.id, { number: sale.number, invoices: invoices.map((i) => i.number) });
@@ -2718,6 +2746,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!can(u, ['account_offsets', 'receivables'])) input = { ...input, supplierId: undefined };
       if (!can(u, ['customer_deactivate']) && (input.active ?? active) !== active) throw new AppError("Vous n'avez pas le droit de désactiver un client", 'FORBIDDEN');
       // Interdit de chèque : décidé par le gérant ou le comptable, comme le crédit.
+      // Commercial de terrain qui suit le client : décidé par qui gère les commerciaux.
+      if (input.fieldRepId !== undefined && (input.fieldRepId || null) !== (before?.field_rep_id ?? null) && !can(u, ['field_reps'])) {
+        throw new AppError("Vous n'avez pas le droit de choisir le commercial d'un client", 'FORBIDDEN');
+      }
       if (!can(u, ['receivables', 'cheque_rejections']) && input.noCheque !== undefined && input.noCheque !== Boolean(before?.no_cheque)) {
         throw new AppError("Vous n'avez pas le droit d'autoriser ou d'interdire les chèques à un client", 'FORBIDDEN');
       }
@@ -2918,10 +2950,19 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.expenses.update(c, id, sup, patch);
     },
     'expenses.get': (id: string) => (requireUser(), s.expenses.get(id)),
-    'expenses.list': (opts: { from?: string; to?: string; categoryId?: string; sessionId?: string; includeCancelled?: boolean }) =>
+    'expenses.list': (opts: { from?: string; to?: string; categoryId?: string; sessionId?: string; includeCancelled?: boolean; approval?: ExpenseApproval }) =>
       s.expenses.list(ctx(opts.sessionId ? undefined : ['expenses']).storeId, opts),
     'expenses.summary': (opts: { from?: string; to?: string }) => s.expenses.summary(ctx(['expenses']).storeId, opts),
     'expenses.print': (id: string) => (requireUser(), printer.expenseVoucher(id)),
+    /** Dépenses à approuver : le gérant les approuve (justificatif à l'appui) ou les refuse avec un motif. */
+    'expenses.approve': (id: string, note?: string | null) => s.expenses.approve(ctx(['expense_approve']), id, note),
+    'expenses.reject': (id: string, note: string) => s.expenses.reject(ctx(['expense_approve']), id, note),
+    /** Justificatifs : qui voit les dépenses les consulte ; qui saisit ou approuve en joint. */
+    'expenses.attachments': (expenseId: string) => (requireUser(['expenses', 'expense_record', 'expense_approve', ...POS]), s.expenses.attachments(expenseId)),
+    'expenses.attachment': (id: string) => (requireUser(['expenses', 'expense_approve']), s.expenses.attachment(id)),
+    'expenses.attach': (expenseId: string, file: { name: string; mime: string; data: string }) =>
+      s.expenses.attach(ctx(['expense_record', 'expense_approve', 'expense_cancel', ...POS]), expenseId, file),
+    'expenses.removeAttachment': (id: string) => s.expenses.removeAttachment(ctx(['expense_record', 'expense_approve', 'expense_cancel']), id),
 
     // --- Comptabilité --------------------------------------------------------
     'accounting.accounts': (includeInactive?: boolean) => (requireUser(), s.accounting.listAccounts(includeInactive)),
@@ -3226,6 +3267,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ['cash_alerts', can(u, ['treasury', 'cash_z'])],
         ['to_notify', can(u, ['missed_report', 'missed_sale'])],
         ['store_requests', can(u, ['store_transfers'])],
+        ['stock_anomalies', can(u, ['stock_anomalies'])],
+        ['expenses_pending', can(u, ['expense_approve'])],
+        ['outages_open', can(u, ['outage_close', 'sale_book'])],
       ];
       return s.attention.list(c.storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
     },
@@ -3397,6 +3441,73 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Classeur .xlsx : octets envoyés tels quels à l'écran, qui propose l'enregistrement. */
     'reports.salesXlsx': (input: SalesReportInput) => xlsxWorkbook(s.reports.salesWorkbook(ctx(['report_export']).storeId, input)),
     'reports.salesCsv': (from: string, to: string) => s.reports.salesExportCsv(ctx(['accounting_export', 'report_export']).storeId, from, to),
+    /** Rapport en colonnes : une colonne par jour, semaine, mois ou année. */
+    'reports.matrix': (input: { dimension: MatrixDimension; step: MatrixStep; measure: MatrixMeasure; end?: string | null }) => {
+      const c = ctx(['reports', 'sales']);
+      if (input.measure === 'margin') requireAmounts();
+      return s.reports.periodMatrix(c.storeId, input);
+    },
+    'reports.matrixXlsx': (input: { dimension: MatrixDimension; step: MatrixStep; measure: MatrixMeasure; end?: string | null }) => {
+      const c = ctx(['report_export']);
+      if (input.measure === 'margin') requireAmounts();
+      return xlsxWorkbook(s.reports.periodMatrixWorkbook(c.storeId, input));
+    },
+    /** Filtres de rapport enregistrés : les siens, et ceux partagés par le gérant. */
+    'presets.list': (screen: string) => s.reportPresets.list(requireUser().id, screen),
+    'presets.save': (input: { screen: string; name: string; params: Record<string, unknown>; shared?: boolean }) => {
+      const u = requireUser();
+      if (input.shared && !isSupervisor(u)) throw new AppError('Seul le gérant partage un filtre avec tous', 'FORBIDDEN');
+      return s.reportPresets.save(u.id, input);
+    },
+    'presets.remove': (id: string) => {
+      const u = requireUser();
+      s.reportPresets.remove(u.id, id, isSupervisor(u));
+    },
+
+    // --- 0.97.0 : idées retenues (concurrents) ----------------------------------------
+    /** Mon mois en clair : verdict, ce qui reste, seuil de rentabilité et conseils. */
+    'owner.monthClear': (month: string) => {
+      requireAmounts();
+      return s.insights.monthClear(ctx(['owner_report', 'dashboard']).storeId, month);
+    },
+    /** Anomalies de stock : les cas à vérifier, la décision du gérant et le journal. */
+    'anomalies.list': () => s.anomalies.list(ctx(['stock_anomalies']).storeId),
+    'anomalies.decide': (key: string, decision: 'fixed' | 'ignored', note?: string | null) => s.anomalies.decide(ctx(['stock_anomalies']), key, decision, note),
+    'anomalies.decisions': () => s.anomalies.decisions(ctx(['stock_anomalies']).storeId),
+    /** Commerciaux de terrain : liste pour la caisse et les fiches clients ; création par le gérant. */
+    'fieldReps.list': (includeInactive?: boolean) => (requireUser(), s.fieldReps.list(Boolean(includeInactive) && can(user!, ['field_reps']))),
+    'fieldReps.places': () => (requireUser(), s.fieldReps.places()),
+    'fieldReps.save': (input: FieldRepInput, id?: string | null) => s.fieldReps.save(requireUser(['field_reps']).id, input, id),
+    /** Codes de réduction : création, arrêt, utilisations ; contrôle à la caisse. */
+    'promoCodes.list': () => (requireUser(['promo_codes']), s.promoCodes.list()),
+    'promoCodes.save': (input: PromoCodeInput, id?: string | null) => s.promoCodes.save(requireUser(['promo_codes']).id, input, id),
+    'promoCodes.setActive': (id: string, active: boolean) => s.promoCodes.setActive(requireUser(['promo_codes']).id, id, active),
+    'promoCodes.uses': (id: string) => (requireUser(['promo_codes']), s.promoCodes.uses(id)),
+    'promoCodes.check': (code: string, subtotal: Fcfa, customerId?: string | null) => {
+      const c = ctx(POS);
+      const r = s.promoCodes.check(c.storeId, code, subtotal, customerId ?? null);
+      return { code: r.code.code, label: r.code.label, kind: r.code.kind, value: r.code.value, amount: r.amount };
+    },
+    /** Ventes pendant une coupure : déclaration avec le total du cahier, saisie, clôture contrôlée. */
+    'outages.list': (status?: 'open' | 'closed' | 'cancelled' | null) => s.outages.list(ctx(['sale_book', 'outage_close']).storeId, { status }),
+    'outages.current': () => (requireUser(), s.outages.openFor(ctx())),
+    'outages.declare': (input: { startedAt: string; endedAt: string; declaredTotal: Fcfa; note?: string | null }) => {
+      const c = ctx(['sale_book']);
+      requireTill(user!);
+      return s.outages.declare(c, input);
+    },
+    /** Écart avec le cahier : il faut le droit de clôturer une coupure, ou le code du gérant. */
+    'outages.close': (id: string, opts?: { reason?: string | null; supervisorPin?: string }) => {
+      const c = ctx(['sale_book', 'outage_close']);
+      const o = s.outages.get(id);
+      let closedBy: string | null = null;
+      if (o.gap !== 0 && !can(user!, ['outage_close'])) {
+        if (!opts?.supervisorPin) throw new AppError(`Écart de ${Math.abs(o.gap).toLocaleString('fr-FR')} FCFA avec le cahier : le code du gérant est nécessaire`, 'SUPERVISOR_REQUIRED');
+        closedBy = supervisor(opts.supervisorPin).id;
+      }
+      return s.outages.close(c, id, { reason: opts?.reason ?? null, closedBy });
+    },
+    'outages.cancel': (id: string) => s.outages.cancel(ctx(['sale_book', 'outage_close']), id),
   };
 }
 

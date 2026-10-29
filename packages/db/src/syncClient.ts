@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Fcfa, PriceLevel } from '@superette/core';
 import type { CounterAction, CounterInvoice, CounterPayload } from './counter';
 import type { Services } from './index';
-import type { SyncEvent } from './sync';
+import type { SyncCheck, SyncCheckRow, SyncEvent } from './sync';
 import { AppError } from './util';
 
 let clientVersion: string | null = null;
@@ -140,6 +140,56 @@ export async function resendMissing(s: Services): Promise<{ queued: number }> {
   }
   s.sync.markResendChecked();
   return { queued };
+}
+
+/**
+ * État de la synchronisation : pour chaque sorte de données, ce que le PC a,
+ * ce que le serveur a, et les écarts dans les deux sens. Le résultat est gardé
+ * pour le voyant de la barre d'état.
+ */
+export async function checkSync(s: Services): Promise<SyncCheck> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce poste n'est pas relié au serveur central", 'SYNC_NOT_CONFIGURED');
+  const storeId = s.admin.station()?.store.id ?? null;
+  const rows: SyncCheckRow[] = [];
+  for (const t of s.sync.checkTargets(storeId)) {
+    const { ids } = await request<{ ids: string[] }>(creds.url, '/api/v1/sync/known', { token: creds.token, body: { entity: t.entity } });
+    const server = new Set(ids);
+    const local = new Set(t.ids);
+    const pending = s.sync.pendingIds(t.entity);
+    rows.push({
+      entity: t.entity,
+      label: t.label,
+      local: local.size,
+      server: server.size,
+      missing_on_server: t.ids.filter((id) => !server.has(id) && !pending.has(id)).length,
+      only_on_server: ids.filter((id) => !local.has(id)).length,
+      pending: [...pending].filter((id) => local.has(id)).length,
+    });
+  }
+  const state = s.sync.state();
+  const check: SyncCheck = {
+    at: new Date().toISOString(),
+    ok: state.pending === 0 && state.conflicts === 0 && rows.every((r) => r.missing_on_server === 0 && r.only_on_server === 0),
+    rows,
+    pending: state.pending,
+    conflicts: state.conflicts,
+    lastSyncAt: state.lastSyncAt,
+    lastError: state.lastError,
+  };
+  s.sync.saveCheck(check);
+  return check;
+}
+
+/** Renvoie au serveur les données d'une sorte qu'il n'a pas (ligne de l'état de la synchronisation). */
+export async function resendEntity(s: Services, entity: string): Promise<{ queued: number }> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce poste n'est pas relié au serveur central", 'SYNC_NOT_CONFIGURED');
+  const t = s.sync.checkTargets(s.admin.station()?.store.id ?? null).find((x) => x.entity === entity);
+  if (!t) throw new AppError('Sorte de données inconnue', 'INVALID');
+  const { ids } = await request<{ ids: string[] }>(creds.url, '/api/v1/sync/known', { token: creds.token, body: { entity } });
+  const known = new Set(ids);
+  return { queued: s.sync.requeue(entity, t.ids.filter((id) => !known.has(id)), t.storeId) };
 }
 
 /** Relie le poste principal (déjà configuré) au serveur avec la clé d'enrôlement, puis envoie tout son historique. */

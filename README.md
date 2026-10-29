@@ -338,6 +338,17 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Commandes répétées des clients professionnels (`recurring_orders`) : créées et préparées seules, numéros stables entre PC.
 - Demandes entre magasins (`store_transfer_requests`) : proposées avant l'achat, expédiées puis reçues avec leurs lots et leur coût.
 
+**Contrôle, terrain et coupures (0.97.0)**
+- État de la synchronisation (`sync.check`) : nombre de lignes de chaque donnée sur le PC et sur le serveur, ce qui manque d'un côté ou de l'autre, renvoi par type de donnée ; point vert ou orange dans la barre d'état.
+- Anomalies de stock (`packages/db/src/anomalies.ts`) : réception en double, stock négatif depuis plus de 3 jours, vendu sans réception, stock qui ne suit plus ses mouvements ; chaque décision est gardée (`stock_anomaly_decisions`).
+- Mon mois en clair (`insights.monthClear`) : ce qui reste après marge, dépenses, pertes et écarts de caisse, verdict, seuil de rentabilité et actions prioritaires.
+- Dépenses : justificatifs joints (`expense_attachments`, photo ou PDF, 3 Mo) et approbation du gérant au-delà d'un montant (`expenseApprovalAbove`, `expenseProofRequired`).
+- Remises : remise maxi par article (`max_discount_pct`, au-delà le gérant) et motif obligatoire (`discountReasonRequired`, code `REASON_REQUIRED`).
+- Commerciaux de terrain (`field_reps`) : zone et ville figées sur la vente ; regroupements commercial, zone et ville dans les rapports.
+- Rapports : filtres enregistrés (`report_presets`) et rapport en colonnes par jour, semaine, mois ou année (`reports.periodMatrix`, export Excel).
+- Ventes pendant une coupure (`outages`) : coupure déclarée avec le total du cahier, ventes saisies à leur heure, écart à justifier à la clôture.
+- Codes de réduction (`promo_codes`) : % ou montant, dates, minimum, nombre d'utilisations, une fois par client.
+
 **Serveur central et plusieurs PC**
 - Chaque PC garde sa propre base et vend sans réseau ; les opérations partent au serveur toutes les 20 secondes dès que la connexion revient.
 - Le premier PC se relie au serveur avec la clé d'enrôlement (Administration › Serveur central) et envoie tout son historique.

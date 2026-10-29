@@ -2,6 +2,7 @@ import type { Fcfa, Milli } from '@superette/core';
 import type { CashierControlService } from './cashierControl';
 import type { CatalogueService } from './catalogue';
 import type { CompanyService } from './companies';
+import type { CustomerService } from './customers';
 import type { Db } from './database';
 import { AppError, Base, type Clock } from './util';
 
@@ -80,6 +81,45 @@ export interface OwnerReport {
   text: string;
 }
 
+/** « Mon mois en clair » : le mois du gérant en mots simples, avec ce qu'il faut faire. */
+export type MonthVerdict = 'very_good' | 'good' | 'tight' | 'loss';
+
+export const MONTH_VERDICTS: Record<MonthVerdict, string> = {
+  very_good: 'Très bon mois',
+  good: 'Bon mois',
+  tight: 'Mois juste',
+  loss: 'Mois à perte',
+};
+
+export interface MonthAdvice {
+  key: 'below_cost' | 'late_customers' | 'sleeping_stock' | 'cash_gaps' | 'losses' | 'expenses_up' | 'margin_down' | 'pending_expenses';
+  title: string;
+  detail: string;
+  /** Exemples cités (articles, clients) avec leur montant. */
+  items: { name: string; amount: Fcfa }[];
+  /** Écran où agir : fenêtre et onglet. */
+  open: [string, string?] | null;
+}
+
+export interface MonthClear {
+  month: string;
+  figures: MonthFigures;
+  previous: MonthFigures;
+  /** Casse, vol, péremption et consommation interne, au coût. */
+  losses: Fcfa;
+  /** Écarts des clôtures de caisse (négatif : il manquait de l'argent). */
+  cash_gaps: Fcfa;
+  /** Ce qui reste : marge − dépenses − pertes + écarts de caisse. */
+  net: Fcfa;
+  net_rate: number;
+  /** Ventes HT qu'il faut faire pour payer les dépenses du mois avec la marge actuelle (null : marge nulle). */
+  break_even: Fcfa | null;
+  verdict: MonthVerdict;
+  /** Phrase d'explication du verdict. */
+  summary: string;
+  advice: MonthAdvice[];
+}
+
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH = /^\d{4}-\d{2}$/;
 const round5 = (v: number) => Math.round(v / 5) * 5;
@@ -96,6 +136,7 @@ export class InsightService extends Base {
     private readonly catalogue: CatalogueService,
     private readonly cashierControl: CashierControlService,
     private readonly companies: CompanyService,
+    private readonly customers: CustomerService,
   ) {
     super(db, clock);
   }
@@ -300,5 +341,143 @@ export class InsightService extends Base {
       `Dettes fournisseurs : ${money(current.payables)}`,
     ].join('\n');
     return { store, current, previous, departments, text };
+  }
+
+  // --- Mon mois en clair -----------------------------------------------------------
+
+  /**
+   * Le mois expliqué simplement : ce qui reste une fois la marge, les dépenses,
+   * les pertes et les écarts de caisse comptés, un verdict, et des conseils
+   * tirés des chiffres du magasin (jamais de phrases toutes faites sans données).
+   */
+  monthClear(storeId: string, month: string): MonthClear {
+    const [y, m] = month.split('-').map(Number) as [number, number];
+    const figures = this.monthFigures(storeId, month);
+    const previous = this.monthFigures(storeId, new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7));
+    const p = { storeId, month };
+    const losses = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(ROUND(-m.qty * m.unit_cost / 1000.0)), 0) FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id
+         WHERE w.store_id = @storeId AND m.type IN ('BREAKAGE', 'THEFT', 'EXPIRY', 'INTERNAL_USE') AND strftime('%Y-%m', m.at, 'localtime') = @month`,
+      )
+      .pluck()
+      .get(p) as number;
+    const cashGaps = this.db
+      .prepare("SELECT COALESCE(SUM(difference), 0) FROM cash_sessions WHERE store_id = @storeId AND status = 'closed' AND strftime('%Y-%m', closed_at, 'localtime') = @month")
+      .pluck()
+      .get(p) as number;
+    const net = figures.margin - figures.expenses - losses + cashGaps;
+    const netRate = figures.sales_ht > 0 ? Math.round((net / figures.sales_ht) * 1000) / 10 : 0;
+    const rate = figures.sales_ht > 0 ? figures.margin / figures.sales_ht : 0;
+    const breakEven = rate > 0 ? Math.round((figures.expenses + losses) / rate) : null;
+    const verdict: MonthVerdict = net <= 0 ? 'loss' : netRate >= 10 ? 'very_good' : netRate >= 4 ? 'good' : 'tight';
+    const money = (v: number) => `${Math.round(v).toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ')} FCFA`;
+    const summary =
+      figures.sales_ht === 0
+        ? "Aucune vente ce mois-ci pour l'instant."
+        : net > 0
+          ? `Après la marge, les dépenses, les pertes et les écarts de caisse, il reste ${money(net)}, soit ${String(netRate).replace('.', ',')} % des ventes HT.`
+          : `Les dépenses, les pertes et les écarts de caisse dépassent la marge de ${money(-net)} : le magasin a perdu de l'argent ce mois-ci.`;
+
+    const advice: MonthAdvice[] = [];
+    const inMonth = "strftime('%Y-%m', s.created_at, 'localtime') = @month";
+    const belowCost = this.db
+      .prepare(
+        `SELECT l.label AS name, SUM(ROUND(l.qty * l.unit_cost / 1000.0) - ROUND(l.total_ttc * 10000.0 / (10000 + l.vat_rate_bp))) AS amount
+         FROM sale_lines l JOIN sales s ON s.id = l.sale_id JOIN articles a ON a.id = l.article_id
+         WHERE s.store_id = @storeId AND s.kind = 'sale' AND s.status = 'completed' AND ${inMonth} AND a.is_service = 0 AND l.unit_cost > 0
+         GROUP BY l.article_id HAVING amount > 0 ORDER BY amount DESC LIMIT 5`,
+      )
+      .all(p) as { name: string; amount: Fcfa }[];
+    if (belowCost.length) {
+      advice.push({
+        key: 'below_cost',
+        title: `${belowCost.length === 5 ? 'Les 5 articles' : belowCost.length > 1 ? `${belowCost.length} articles` : 'Un article'} vendu${belowCost.length > 1 ? 's' : ''} sous le prix d'achat`,
+        detail: `Ils ont fait perdre ${money(belowCost.reduce((t, r) => t + r.amount, 0))}. Revoyez leur prix de vente ou les remises accordées.`,
+        items: belowCost,
+        open: ['dashboard', 'prices'],
+      });
+    }
+    const late = this.customers
+      .listCustomers(storeId, { withBalance: true })
+      .filter((c) => c.overdue > 0)
+      .sort((a, b) => b.overdue - a.overdue);
+    if (late.length) {
+      advice.push({
+        key: 'late_customers',
+        title: `${late.length} client${late.length > 1 ? 's' : ''} en retard de paiement`,
+        detail: `${money(late.reduce((t, c) => t + c.overdue, 0))} de factures échues. Relancez-les par WhatsApp depuis le fichier des clients.`,
+        items: late.slice(0, 5).map((c) => ({ name: c.name, amount: c.overdue })),
+        open: ['customers', 'receivables'],
+      });
+    }
+    const since60 = new Date(this.clock().getTime() - 60 * 86_400_000).toISOString();
+    const sleeping = this.db
+      .prepare(
+        `SELECT a.name, SUM(ROUND(st.qty * st.avg_cost / 1000.0)) AS amount FROM stock st JOIN articles a ON a.id = st.article_id JOIN warehouses w ON w.id = st.warehouse_id
+         WHERE w.store_id = @storeId AND st.qty > 0 AND a.active = 1 AND a.is_service = 0
+           AND NOT EXISTS (SELECT 1 FROM stock_movements m WHERE m.article_id = st.article_id AND m.warehouse_id = st.warehouse_id AND m.type = 'SALE' AND m.at >= @since)
+           AND EXISTS (SELECT 1 FROM stock_movements m WHERE m.article_id = st.article_id AND m.warehouse_id = st.warehouse_id AND m.at < @since)
+         GROUP BY a.id HAVING amount > 0 ORDER BY amount DESC LIMIT 5`,
+      )
+      .all({ storeId, since: since60 }) as { name: string; amount: Fcfa }[];
+    if (sleeping.length) {
+      advice.push({
+        key: 'sleeping_stock',
+        title: 'De la marchandise dort en stock',
+        detail: `Sans aucune vente depuis 60 jours : ${money(sleeping.reduce((t, r) => t + r.amount, 0))} d'argent immobilisé rien que pour ces articles. Mettez-les en avant ou en promotion.`,
+        items: sleeping,
+        open: ['stock', 'state'],
+      });
+    }
+    if (cashGaps < 0) {
+      advice.push({
+        key: 'cash_gaps',
+        title: "Il a manqué de l'argent aux clôtures de caisse",
+        detail: `${money(-cashGaps)} d'écart sur le mois. Regardez le contrôle des caissiers pour voir qui et quand.`,
+        items: [],
+        open: ['control'],
+      });
+    }
+    if (losses > 0 && figures.margin > 0 && losses * 100 >= figures.margin * 3) {
+      advice.push({
+        key: 'losses',
+        title: 'Les pertes de stock pèsent sur la marge',
+        detail: `Casse, vol, péremption et consommation interne : ${money(losses)}, soit ${Math.round((losses / figures.margin) * 100)} % de la marge.`,
+        items: [],
+        open: ['stock', 'losses'],
+      });
+    }
+    if (previous.expenses > 0 && figures.expenses > previous.expenses * 1.2) {
+      advice.push({
+        key: 'expenses_up',
+        title: 'Les dépenses ont augmenté',
+        detail: `${money(figures.expenses)} contre ${money(previous.expenses)} le mois d'avant (+${Math.round(((figures.expenses - previous.expenses) / previous.expenses) * 100)} %).`,
+        items: [],
+        open: ['expenses', 'list'],
+      });
+    }
+    if (previous.sales_ht > 0 && figures.sales_ht > 0 && figures.margin_rate < previous.margin_rate - 2) {
+      advice.push({
+        key: 'margin_down',
+        title: 'Le taux de marge baisse',
+        detail: `${String(figures.margin_rate).replace('.', ',')} % contre ${String(previous.margin_rate).replace('.', ',')} % le mois d'avant : un prix d'achat a monté sans que le prix de vente suive, ou les remises ont augmenté.`,
+        items: [],
+        open: ['dashboard', 'prices'],
+      });
+    }
+    const pending = this.db
+      .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total FROM expenses WHERE store_id = ? AND status = 'active' AND approval = 'pending'")
+      .get(storeId) as { n: number; total: Fcfa };
+    if (pending.n > 0) {
+      advice.push({
+        key: 'pending_expenses',
+        title: `${pending.n} dépense${pending.n > 1 ? 's' : ''} à approuver`,
+        detail: `${money(pending.total)} en attente de votre décision. L'argent est déjà sorti : vérifiez les justificatifs.`,
+        items: [],
+        open: ['expenses', 'approval'],
+      });
+    }
+    return { month, figures, previous, losses, cash_gaps: cashGaps, net, net_rate: netRate, break_even: breakEven, verdict, summary, advice };
   }
 }

@@ -42,6 +42,14 @@ const POS: PageHelp = {
   intro: 'C’est l’écran de vente. On scanne ou on tape les produits, puis on encaisse. La caisse doit être ouverte (Trésorerie) avant la première vente.',
   sections: [
     {
+      title: "Motif de remise, code de réduction et coupure",
+      steps: [
+        "Une remise demande son motif (client fidèle, achat en gros, produit abîmé…) ; au-delà de la remise maxi de l'article, le code du gérant est demandé.",
+        "« Code promo » : tapez le code donné par le client ; la remise s'applique au ticket entier après les promotions.",
+        "« Coupure » : le PC était éteint et les ventes sont notées sur un cahier. Déclarez la coupure avec le total du cahier, saisissez chaque vente à son heure, puis clôturez : ONIX montre l'écart.",
+      ],
+    },
+    {
       title: "Bon d'achat, monnaie et carnet à souches",
       steps: [
         "« Bon d'achat » : vendez un bon cadeau payé en espèces ou Mobile Money. Il s'imprime avec un code-barres et vaut jusqu'à sa date de fin.",
@@ -170,6 +178,14 @@ export const HELP: Record<WinKind, PageHelp> = {
     intro: 'Retrouver une vente, la réimprimer, voir les clôtures Z et les opérations de caisse.',
     sections: [
     {
+      tab: "outages",
+      title: "Ventes pendant une coupure",
+      perm: "sale_book",
+      steps: [
+        "Toutes les coupures déclarées : total du cahier, ventes saisies et écart. Une coupure clôturée avec un écart garde son motif et le nom de celui qui a clôturé.",
+      ],
+    },
+    {
       tab: 'vouchers',
       title: "Bons d'achat et bons d'avoir",
       perm: 'vouchers',
@@ -283,6 +299,14 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Stock',
     intro: 'Quantités par dépôt, réceptions, pertes, transferts, inventaires et péremptions.',
     sections: [
+    {
+      tab: "anomalies",
+      title: "Anomalies à vérifier",
+      steps: [
+        "ONIX cherche les cas douteux : réception saisie deux fois, stock négatif depuis plus de 3 jours, article vendu sans jamais être reçu, stock qui ne suit plus ses mouvements.",
+        "Ouvrez un cas : ce qu'on voit, ce qu'il faut faire. « Corrigé » refait le calcul ou envoie la correction au contrôle ; « Laisser tel quel » demande un motif. Tout reste dans « Décisions prises ».",
+      ],
+    },
     {
       tab: 'recalls',
       title: 'Rappels de lots',
@@ -502,6 +526,15 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Clients',
     intro: 'Fiches clients, comptes, règlements et ristournes.',
     sections: [
+    {
+      tab: "field-reps",
+      title: "Commerciaux de terrain",
+      perm: "field_reps",
+      steps: [
+        "Chaque commercial a une zone et une ville. Rattachez-lui des clients (fiche client) ou choisissez-le à la caisse.",
+        "Les rapports se lisent par commercial, zone ou ville ; une vente garde la zone du jour même si le commercial change de secteur.",
+      ],
+    },
       { tab: 'list', title: 'Fiche client', steps: ['« Nouveau client » ou cliquez un client : téléphone, NIU, tarif (détail, gros), plafond de crédit et délai de paiement.'] },
       {
         tab: 'list',
@@ -573,6 +606,14 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Dépenses et charges',
     intro: 'Loyer, ENEO, salaires, transport… avec leur compte comptable.',
     sections: [
+    {
+      tab: "approval",
+      title: "Dépenses à approuver et justificatifs",
+      steps: [
+        "Joignez la photo de la facture ou un PDF à chaque dépense (fiche de la dépense › Justificatifs).",
+        "Au-delà du montant choisi dans Paramètres, une dépense saisie sans le droit « Approuver les dépenses » attend le gérant dans « À approuver » ; refusée, elle reste enregistrée avec le motif.",
+      ],
+    },
       { tab: 'new', title: 'Saisir une dépense', steps: ['Catégorie, libellé, bénéficiaire, montant et moyen de paiement (référence hors espèces), puis Enregistrer.', 'Une dépense en espèces d’un caissier sort de sa caisse et imprime un bon de sortie.', 'Payée par MoMo ou Orange Money : le caissier paie avec son compte (sa caisse électronique) ; au bureau, choisissez la caisse électronique, la centrale par défaut.'] },
       { tab: 'plans', title: 'Charges fixes', steps: ['Déclarez le loyer, les salaires… une fois : chaque mois, le constat attendu s’affiche.'] },
       { tab: 'schedule', title: 'Constats de charges', steps: ['Les charges du mois à constater ; une charge en retard s’affiche dans la barre du bas.'] },
@@ -672,6 +713,15 @@ export const HELP: Record<WinKind, PageHelp> = {
     intro: 'Prix promotionnels et offres « 3 pour 2 » appliqués tout seuls à la caisse.',
     sections: [
     {
+      tab: "codes",
+      title: "Codes de réduction",
+      perm: "promo_codes",
+      steps: [
+        "Créez un code (NOEL25…), en % ou en montant, avec dates, minimum d'achat, nombre d'utilisations et une fois par client si besoin, puis partagez-le par WhatsApp ou sur un flyer.",
+        "Le code se tape à la caisse (bouton « Code promo ») ; ses utilisations et les ventes des tickets s'affichent ici.",
+      ],
+    },
+    {
       title: 'Affiches promo',
       steps: ["« Affiches promo » : cochez les promotions, choisissez A4 ou A5 (deux par page) et imprimez. L'affiche montre le prix promo, l'ancien prix barré, le prix au kilo et les dates."],
     },
@@ -699,6 +749,13 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Rapports de ventes',
     intro: 'Le chiffre d’affaires par jour, rayon, article, caissier, client ou moyen de paiement.',
     sections: [
+    {
+      title: "Rapport en colonnes et filtres enregistrés",
+      steps: [
+        "« En colonnes » : ventes, marge ou quantités par rayon, article, commercial, zone… sur les 12 derniers mois, semaines ou années, côte à côte, avec export Excel.",
+        "« Enregistrer ce filtre » garde les critères sous un nom, pour vous ou pour tous ; « Filtres enregistrés… » les rappelle.",
+      ],
+    },
       { title: 'Lire un rapport', steps: ['Choisissez la période (hier, cette semaine, ce mois…) puis le regroupement.', 'Imprimez, ou « Exporter » en CSV pour Excel.'] },
       { title: 'Palmarès et produits sans vente', steps: ['Par article, rayon ou client, le classement donne le rang et la classe A, B ou C : A fait 80 % du chiffre, C les derniers 5 %.', '« Produits sans vente » liste les produits actifs non vendus sur la période, avec leur stock, et s’exporte en Excel.'] },
     ],
@@ -850,6 +907,14 @@ export const HELP: Record<WinKind, PageHelp> = {
     title: 'Tableau de bord et points d’attention',
     intro: 'Les chiffres du jour et ce qui attend une action.',
     sections: [
+    {
+      tab: "month",
+      title: "Mon mois en clair",
+      steps: [
+        "Ce qui reste du mois après la marge, les dépenses, les pertes et les écarts de caisse, avec un verdict simple et le seuil de rentabilité.",
+        "« Ce qu'il faut faire » : les actions prioritaires (articles vendus à perte, clients en retard, stock qui dort…), chacune ouvre l'écran concerné.",
+      ],
+    },
       { tab: 'day', title: 'La journée', steps: ['CA, tickets, panier moyen, marge par rayon, ventes par heure et meilleures ventes.'] },
       { tab: 'attention', title: 'Points d’attention', steps: ['Une tuile par point à traiter (ruptures, écarts de caisse, factures en retard…). Cliquez une tuile pour ouvrir l’écran concerné.'] },
       {

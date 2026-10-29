@@ -16,6 +16,7 @@ import {
   lineTotal,
   parseFamilyDiscounts,
   parseQtyTiers,
+  promoCodeAmount,
   roundCash,
   tariffPrice,
 } from '@superette/core';
@@ -27,6 +28,7 @@ import { Statement } from './Customers';
 import { OrderPickDialog } from './Orders';
 import { QuotePickDialog } from './Quotes';
 import { ArticleForm } from './Articles';
+import { FieldRepSelect, type Outage, OutageDialog, type PromoApplied, PromoCodeDialog, ReasonDialog, ReasonPicker, localInput } from './posExtras';
 import { QtyPrompt, type SaleRow, SaleRowList, SaleSearchDialog, rowKey, stockByDepot, stockIn, useSaleRows } from './SaleSearch';
 import { BookSaleDialog, CancelDialog, CashOpDialog, ContainerCounterDialog, HeldDialog, PaymentDialog, ReturnDialog, ScannedTicketDialog, SellVoucherDialog, WhatsappTicketDialog } from './PosDialogs';
 import { MissedSaleDialog } from './Floor';
@@ -107,7 +109,7 @@ function lineQty(l: PosLine): string {
   return pack ? `${l.qty / pack.units}` : qty(l.qty, l.unit);
 }
 
-type Dialog = null | 'counter' | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
+type Dialog = null | 'promo' | 'outage' | 'reason' | 'counter' | 'options' | 'pay' | 'close' | 'held' | 'statement' | 'cancel' | 'return' | 'cashIn' | 'cashOut' | 'search' | 'qty' | 'create' | 'weight' | 'discount' | 'vary' | 'customer' | 'custPay' | 'expense' | 'quote' | 'order' | 'missed' | 'ticket' | 'book' | 'voucher';
 type SellPayments = { method: 'CASH' | 'CUSTOMER_CREDIT' | Result<'pos.sell'>['payments'][number]['method']; amount: number; reference?: string }[];
 type Pane = 'lines' | 'payments' | 'delivery' | 'extra';
 type PrintChoice = 'none' | 'ticket' | 'listing';
@@ -262,6 +264,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const namesake = useLoad(() => (clientName.trim().length >= 2 ? call('customers.list', { search: clientName.trim() }) : Promise.resolve([])), [clientName]);
   /** Vente bloquée en attente du code gérant (remise ou dépassement du plafond). */
   const [pending, setPending] = useState<{ payments: SellPayments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string } | null>(null);
+  /** Motif des remises de la fiche, code de réduction et commercial de terrain. */
+  const [discountReason, setDiscountReason] = useState('');
+  const [promo, setPromo] = useState<PromoApplied | null>(null);
+  const [fieldRepId, setFieldRepId] = useState('');
+  /** Vente bloquée en attente du motif de remise : elle repart une fois le motif choisi. */
+  const [reasonFor, setReasonFor] = useState<{ payments: SellPayments; pins: { supervisorPin?: string; creditPin?: string; keepChange?: number | null } } | null>(null);
+  /** Coupure en cours de saisie : les ventes prennent l'heure indiquée pendant la coupure. */
+  const outageNow = useLoad(() => (has(user, 'sale_book') ? call('outages.current') : Promise.resolve(null)), []);
+  const [outage, setOutage] = useState<Outage | null>(null);
+  const [outageAt, setOutageAt] = useState('');
   const credit = mode === 'credit';
   const scanRef = useRef<HTMLInputElement>(null);
   /** Impression demandée à la validation : F2 ticket, F7 listing, F4 (VALIDER) aucune. */
@@ -293,7 +305,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   /** Facture en cours de modification : ce que le client a déjà réglé est repris. */
   const [replacing, setReplacing] = useState<{ id: string; number: string; paid: number } | null>(null);
   /** Reste à encaisser : le total, moins ce qui était déjà réglé sur la facture modifiée. */
-  const toPay = replacing ? Math.max(0, totals.totalTtc - replacing.paid) : totals.totalTtc;
+  // Code de réduction : recalculé sur le ticket du moment (le serveur refait le même calcul).
+  const promoOff = promo ? promoCodeAmount(promo.kind, promo.value, totals.totalTtc - fee) : 0;
+  const toPay = Math.max(0, totals.totalTtc - promoOff - (replacing?.paid ?? 0));
   /** Total à payer si tout est réglé en espèces (arrondi des paramètres). */
   const cashDue = roundCash(toPay, settings.cashRounding);
   // Une remise sous le maximum des paramètres passe sans le code du gérant.
@@ -472,6 +486,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     setLines([]);
     setCashGiven(0);
     setSelected(null);
+    setDiscountReason('');
+    setPromo(null);
+    setFieldRepId('');
     resetOptions();
   };
   /**
@@ -547,7 +564,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    * Envoie la vente ; si le serveur demande l'accord d'un gérant (remise d'un
    * caissier, plafond de crédit dépassé), on demande son code puis on relance.
    */
-  const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string; keepChange?: number | null } = {}) => {
+  const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string; keepChange?: number | null } = {}, reasonNow: string = discountReason) => {
     try {
       if (delivery.on && !delivery.address.trim()) {
         setPane('delivery');
@@ -567,19 +584,30 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           delivery: deliveryInput(),
           replacesId: replacing?.id ?? null,
           sellerId: seller?.id ?? null,
-          book,
+          book: outage ? null : book,
+          discountReason: reasonNow || null,
+          promoCode: promo?.code ?? null,
+          fieldRepId: fieldRepId || null,
+          outage: outage ? { id: outage.id, at: outageAt ? new Date(outageAt).toISOString() : null, number: book?.number ?? null } : null,
           ...pins,
         }),
       );
       setBook(null);
+      setDiscountReason('');
+      setPromo(null);
+      setFieldRepId('');
+      if (outage) outageNow.reload();
       drawer.reload();
       setCashGiven(0);
       setPending(null);
     } catch (err) {
       const code = (err as ApiError).code;
       if (code === 'CREDIT_LIMIT' && !pins.creditPin) setPending({ payments, supervisorPin: pins.supervisorPin, reason: 'credit', message: (err as Error).message });
-      else if (code === 'SUPERVISOR_REQUIRED' && !pins.supervisorPin) setPending({ payments, reason: 'discount', message: 'Le ticket comporte une remise.' });
-      else toast.error(err);
+      else if (code === 'SUPERVISOR_REQUIRED' && !pins.supervisorPin) setPending({ payments, reason: 'discount', message: (err as Error).message.includes('remise maxi') ? (err as Error).message : 'Le ticket comporte une remise.' });
+      else if (code === 'REASON_REQUIRED' && !reasonNow) {
+        setReasonFor({ payments, pins });
+        setDialog('reason');
+      } else toast.error(err);
     }
   };
 
@@ -601,6 +629,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         warehouseId: warehouseChoice,
         optionsPin,
         supervisorPin,
+        discountReason: discountReason || null,
+        fieldRepId: fieldRepId || null,
       });
       clear();
       setCustomer(null);
@@ -611,6 +641,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     } catch (err) {
       const code = (err as ApiError).code;
       if (code === 'SUPERVISOR_REQUIRED' && !supervisorPin) setCounterPin({ message: 'La facture comporte une remise.', print });
+      else if (code === 'REASON_REQUIRED') toast.error('Choisissez le motif de la remise : sélectionnez la ligne et rouvrez « Remise » (F6)');
       else toast.error(err);
     }
   };
@@ -885,7 +916,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const sel = lines.find((l) => l.key === selected);
   const salesWarehouse = (warehouses.data ?? []).find((w) => w.is_sales_default) ?? warehouses.data?.[0];
   // Après validation la fiche est vierge : le montant de la vente précédente ne reste pas affiché.
-  const shownTotal = lines.length ? totals.totalTtc : 0;
+  const shownTotal = lines.length ? totals.totalTtc - promoOff : 0;
   const change = lines.length ? Math.max(0, cashGiven - cashDue) : 0;
   const given = lines.length ? cashGiven : 0;
 
@@ -1245,9 +1276,11 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     {dialog === 'discount' && sel && (
       <DiscountDialog
         line={sel}
+        reason={discountReason}
         onClose={() => setDialog(null)}
-        onDone={(discount) => {
+        onDone={(discount, reason) => {
           setLines((ls) => ls.map((l) => (l.key === sel.key ? { ...l, discount } : l)));
+          if (reason) setDiscountReason(reason);
           setDialog(null);
         }}
       />
@@ -1284,6 +1317,44 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     {dialog === 'cancel' && day && <CancelDialog sessionId={day.id} onClose={() => setDialog(null)} />}
     {dialog === 'return' && <ReturnDialog initialSale={returnOf} onClose={() => (setDialog(null), setReturnOf(null))} />}
     {dialog === 'missed' && <MissedSaleDialog onClose={() => (setDialog(null), focusScan())} />}
+    {dialog === 'promo' && (
+      <PromoCodeDialog
+        subtotal={totals.totalTtc - fee}
+        customerId={customer?.id ?? null}
+        current={promo}
+        onClose={() => (setDialog(null), focusScan())}
+        onApply={(p) => (setPromo(p), setDialog(null), focusScan())}
+      />
+    )}
+    {dialog === 'outage' && (
+      <OutageDialog
+        current={outageNow.data ?? null}
+        canClose={can('outage_close')}
+        onClose={() => (setDialog(null), focusScan())}
+        onChanged={() => {
+          outageNow.reload();
+          setOutage(null);
+        }}
+        onEnter={(o) => {
+          setOutage(o);
+          setOutageAt(localInput(o.started_at));
+          setBook(null);
+        }}
+      />
+    )}
+    {dialog === 'reason' && reasonFor && (
+      <ReasonDialog
+        onClose={() => (setDialog(null), setReasonFor(null))}
+        onDone={(r) => {
+          setDiscountReason(r);
+          const again = reasonFor;
+          setReasonFor(null);
+          setDialog(null);
+          // La vente repart avec le motif (l'état n'est pas encore à jour : on le passe directement).
+          void sell(again.payments, again.pins, r);
+        }}
+      />
+    )}
     {dialog === 'book' && <BookSaleDialog current={book} onClose={() => (setDialog(null), focusScan())} onSet={(b) => (setBook(b), setDialog(null), focusScan())} />}
     {dialog === 'voucher' && day && <SellVoucherDialog sessionId={day.id} onClose={() => (setDialog(null), drawer.reload(), focusScan())} />}
     {dialog === 'ticket' && scanned && (
@@ -1411,7 +1482,36 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           )}
         </div>
       )}
-      {book && (
+      {promo && (
+        <div className="tre-warning">
+          Code de réduction {promo.code} ({promo.label}) : −{fcfa(promoOff)} sur le ticket.{' '}
+          <button className="link" onClick={() => setPromo(null)}>
+            Retirer
+          </button>
+        </div>
+      )}
+      {outage && (
+        <div className="tre-warning">
+          Saisie de la coupure n° {outage.number} : {fcfa(outageNow.data?.id === outage.id ? outageNow.data.entered_total : outage.entered_total)} saisis sur {fcfa(outage.declared_total)} notés.
+          Heure de la vente{' '}
+          <input type="datetime-local" value={outageAt} min={localInput(outage.started_at)} max={localInput(outage.ended_at)} onChange={(e) => setOutageAt(e.target.value)} />{' '}
+          <button className="link" onClick={() => setDialog('outage')}>
+            Voir l'écart et clôturer
+          </button>{' '}
+          <button className="link" onClick={() => setOutage(null)}>
+            Revenir aux ventes normales
+          </button>
+        </div>
+      )}
+      {!outage && outageNow.data && (
+        <div className="tre-warning">
+          La coupure n° {outageNow.data.number} n'est pas finie de saisir ({fcfa(outageNow.data.entered_total)} sur {fcfa(outageNow.data.declared_total)}).{' '}
+          <button className="link" onClick={() => setDialog('outage')}>
+            Continuer
+          </button>
+        </div>
+      )}
+      {book && !outage && (
         <div className="tre-warning">
           Vente du carnet à souches n° {book.number} écrite à {new Date(book.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} : saisissez les articles et encaissez.{' '}
           <button className="link" onClick={() => setBook(null)}>
@@ -1551,6 +1651,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                 {tariffSelect}
                 {depotSelect && <label>Dépôt</label>}
                 {depotSelect}
+                <FieldRepSelect value={fieldRepId} onChange={setFieldRepId} />
                 {optionChips}
               </div>
             </div>
@@ -1768,6 +1869,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                 Carnet{book ? ` n° ${book.number}` : ''}
               </button>
             )}
+            {can('sale_book') && (
+              <button className={outage || outageNow.data ? 'on' : ''} onClick={() => setDialog('outage')} title="Saisir les ventes notées sur un cahier pendant une coupure, contrôlées contre leur total">
+                Coupure{outageNow.data ? ` n° ${outageNow.data.number}` : ''}
+              </button>
+            )}
+            {!sellerPost && (
+              <button className={promo ? 'on' : ''} disabled={!lines.length} onClick={() => setDialog('promo')} title="Code de réduction donné par le client">
+                Code promo{promo ? ` ${promo.code}` : ''}
+              </button>
+            )}
             <hr />
             <button disabled={!sel} onClick={() => setDialog('vary')}>
               Varier
@@ -1833,6 +1944,16 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           {can('sale_book') && (
             <button className={book ? 'on' : ''} onClick={() => setDialog('book')} title="Saisir une vente écrite sur le carnet à souches pendant une panne">
               <i>📒</i>Carnet{book ? ` n° ${book.number}` : ''}
+            </button>
+          )}
+          {can('sale_book') && (
+            <button className={outage || outageNow.data ? 'on' : ''} onClick={() => setDialog('outage')} title="Saisir les ventes notées sur un cahier pendant une coupure, contrôlées contre leur total">
+              <i>⚡</i>Coupure{outageNow.data ? ` n° ${outageNow.data.number}` : ''}
+            </button>
+          )}
+          {!sellerPost && (
+            <button className={promo ? 'on' : ''} disabled={!lines.length} onClick={() => setDialog('promo')} title="Code de réduction donné par le client">
+              <i>🏷</i>Code promo{promo ? ` ${promo.code}` : ''}
             </button>
           )}
           <button className={pane === 'delivery' ? 'on' : ''} onClick={() => setPane(pane === 'delivery' ? 'lines' : 'delivery')}>
@@ -2679,10 +2800,12 @@ function WeightDialog({ article, onClose, onDone }: { article: Article; onClose:
   );
 }
 
-function DiscountDialog({ line, onClose, onDone }: { line: PosLine; onClose: () => void; onDone: (discount: number) => void }) {
+function DiscountDialog({ line, reason: initialReason, onClose, onDone }: { line: PosLine; reason: string; onClose: () => void; onDone: (discount: number, reason: string | null) => void }) {
+  const settings = useStoreSettings();
   const gross = lineTotal({ ...line, discount: 0 });
   const [mode, setMode] = useState<'pct' | 'amount'>('pct');
   const [value, setValue] = useState('');
+  const [reason, setReason] = useState(initialReason);
   const n = Number(value.replace(',', '.'));
   const discount = !value ? 0 : mode === 'pct' ? Math.round((gross * n) / 100) : Math.round(n);
   const valid = Number.isFinite(n) && discount >= 0 && discount <= gross;
@@ -2700,11 +2823,12 @@ function DiscountDialog({ line, onClose, onDone }: { line: PosLine; onClose: () 
         <input autoFocus inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
       </Field>
       {valid && discount > 0 && <p>Nouveau total de la ligne : {fcfa(gross - discount)}</p>}
+      {discount > 0 && <ReasonPicker value={reason} onChange={setReason} />}
       <div className="actions">
-        <button className="ghost" onClick={() => onDone(0)}>
+        <button className="ghost" onClick={() => onDone(0, null)}>
           Retirer la remise
         </button>
-        <button className="primary" disabled={!valid} onClick={() => onDone(discount)}>
+        <button className="primary" disabled={!valid || (discount > 0 && settings.discountReasonRequired && !reason)} onClick={() => onDone(discount, discount > 0 ? reason || null : null)}>
           Appliquer
         </button>
       </div>

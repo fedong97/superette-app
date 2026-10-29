@@ -16,11 +16,12 @@ import { PurchaseEntry } from './purchaseEntry';
 import { DayTasks, Restock } from './Floor';
 import { Recalls } from './Recalls';
 import { StoreTransfers } from './StoreTransfers';
+import { Anomalies } from './Anomalies';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
-type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle' | 'restock' | 'tasks' | 'stores' | 'recalls';
+type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle' | 'restock' | 'tasks' | 'stores' | 'recalls' | 'anomalies';
 
 const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
 
@@ -50,6 +51,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
     tasks: has(user, 'day_tasks'),
     stores: has(user, 'store_transfers'),
     recalls: has(user, 'lot_recall'),
+    anomalies: has(user, 'stock_anomalies'),
   };
   const tabs = (
     [
@@ -68,6 +70,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       ['moves', 'Mouvements'],
       ['adjustments', 'Ajustements'],
       ['monitoring', 'Monitoring'],
+      ['anomalies', 'À vérifier'],
       ['clearance', 'Déstockage'],
       ['losses', 'Démarque'],
       ['cycle', 'Inventaire tournant'],
@@ -97,6 +100,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       {tab === 'tasks' && allowed.tasks && <DayTasks />}
       {tab === 'stores' && allowed.stores && <StoreTransfers />}
       {tab === 'recalls' && allowed.recalls && <Recalls />}
+      {tab === 'anomalies' && allowed.anomalies && <Anomalies />}
       {tab === 'cycle' && allowed.cycle && <CycleCount onOpenInventory={allowed.inventory ? () => setTab('inventory') : undefined} />}
     </div>
   );

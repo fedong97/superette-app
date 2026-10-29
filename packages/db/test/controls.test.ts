@@ -46,9 +46,9 @@ describe('registres et contrôles', () => {
     const { s, ctx, coca, riz, at } = setup();
     at('2026-10-05T10:00:00Z');
     // Riz à 4 200 TTC − 1 500 de remise = 2 700 TTC, soit 2 264 HT pour un coût de 3 000.
-    s.pos.completeSale(ctx, { lines: [{ articleId: riz.id, qty: 1000, discount: 1500 }], payments: [{ method: 'CASH', amount: 2700 }], discountAuthorizedBy: ctx.userId });
+    s.pos.completeSale(ctx, { lines: [{ articleId: riz.id, qty: 1000, discount: 1500 }], payments: [{ method: 'CASH', amount: 2700 }], discountAuthorizedBy: ctx.userId, discountReason: 'Achat en gros' });
     // Petite remise (2 %) : pas d'alerte.
-    s.pos.completeSale(ctx, { lines: [{ articleId: coca.id, qty: 10_000, discount: 100 }], payments: [{ method: 'CASH', amount: 4900 }], discountAuthorizedBy: ctx.userId });
+    s.pos.completeSale(ctx, { lines: [{ articleId: coca.id, qty: 10_000, discount: 100 }], payments: [{ method: 'CASH', amount: 4900 }], discountAuthorizedBy: ctx.userId, discountReason: 'Achat en gros' });
     const c = s.pos.completeSale(ctx, { lines: [{ articleId: coca.id, qty: 1000 }], payments: [{ method: 'CASH', amount: 500 }] });
     s.pos.cancelSale(ctx, c.id, ctx.userId, 'Client parti');
     const client = s.customers.saveCustomer(ctx.userId, { name: 'M. Etoundi' });

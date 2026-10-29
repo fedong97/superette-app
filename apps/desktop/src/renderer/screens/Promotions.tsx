@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { POSTER_SIZES, PROMOTION_KINDS, type PosterSize, type PromotionKind, formatQty, promotionLabel } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, dateFr, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, today, useCan, useLoad, useToast } from '../ui';
+import { PromoCodes } from './PromoCodes';
 import { ArticlePicker } from './pickers';
 import { tx } from '../tax';
 
@@ -21,7 +22,32 @@ const offer = (p: Promotion) =>
   );
 
 /** Promotions datées appliquées d'elles-mêmes en caisse : prix promo, N achetés M payés, lot à prix fixe. */
-export function Promotions({ active }: { active: boolean }) {
+export function Promotions({ active, initialTab = 'auto' }: { active: boolean; initialTab?: 'auto' | 'codes' }) {
+  const can = useCan();
+  const [tab, setTab] = useState<'auto' | 'codes'>(initialTab === 'codes' && can('promo_codes') ? 'codes' : 'auto');
+  return (
+    <div className="page">
+      <header className="page-head">
+        <h1>Promotions</h1>
+      </header>
+      {can('promo_codes') && (
+        <Tabs
+          main
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            ['auto', 'Promotions en caisse'],
+            ['codes', 'Codes de réduction'],
+          ]}
+        />
+      )}
+      {tab === 'auto' && <AutoPromotions active={active} />}
+      {tab === 'codes' && <PromoCodes />}
+    </div>
+  );
+}
+
+function AutoPromotions({ active }: { active: boolean }) {
   const toast = useToast();
   const can = useCan();
   const list = useLoad(() => call('promotions.list'), []);
@@ -36,11 +62,8 @@ export function Promotions({ active }: { active: boolean }) {
   const rows = (list.data ?? []).filter((p) => filter === 'all' || p.status === 'running' || p.status === 'scheduled');
   const storeName = (id: string | null) => (id ? (stores.data?.find((s) => s.id === id)?.name ?? '?') : 'Tous les magasins');
   return (
-    <div className="page">
-      <header className="page-head">
-        <h1>Promotions</h1>
-        <span className="muted">Appliquées automatiquement en caisse pendant leur période, sans accord du gérant</span>
-      </header>
+    <div>
+      <p className="muted">Appliquées automatiquement en caisse pendant leur période, sans accord du gérant</p>
       <div className="filters">
         <div className="seg">
           <button className={filter === 'current' ? 'active' : ''} onClick={() => setFilter('current')}>

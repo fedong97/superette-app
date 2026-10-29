@@ -28,6 +28,8 @@ import {
   parseFamilyDiscounts,
   parseQtyTiers,
   tariffPrice,
+  cleanDiscountReason,
+  spreadCodeDiscount,
 } from '@superette/core';
 import { type AdminService, emoneyRegisterIds } from './admin';
 import type { CatalogueService } from './catalogue';
@@ -42,6 +44,9 @@ import { DELIVERY_FEE_ARTICLE_ID, type DeliveryInput, type DeliveryService } fro
 import { ENTRY_KINDS, type EmoneyRow, type EmoneyService, type EntryKind, isEmoney } from './emoney';
 import { AppError, type ErrorFix, Base, type Clock, type Context, newId } from './util';
 import type { VoucherService } from './vouchers';
+import type { PromoCodeService } from './promoCodes';
+import type { FieldRepService } from './fieldReps';
+import type { OutageService } from './outages';
 import { recalledQty } from './recalls';
 import type { Db } from './database';
 
@@ -204,6 +209,14 @@ export interface SaleInput {
   keepChange?: Fcfa | null;
   /** Vente notée sur le carnet à souches pendant une panne : numéro de la souche et heure écrite. */
   book?: { number: string; at: string } | null;
+  /** Motif des remises du ticket (liste de la caisse), obligatoire si le magasin le demande. */
+  discountReason?: string | null;
+  /** Code de réduction donné par le client. */
+  promoCode?: string | null;
+  /** Commercial de terrain de la vente ; sinon celui qui suit le client. */
+  fieldRepId?: string | null;
+  /** Vente faite pendant une coupure déclarée : la coupure et l'heure de la vente (numéro de souche facultatif). */
+  outage?: { id: string; at?: string | null; number?: string | null } | null;
 }
 
 export interface Sale {
@@ -233,6 +246,16 @@ export interface Sale {
   /** Vente saisie depuis le carnet à souches : numéro de la souche et heure notée. */
   book_number: string | null;
   book_at: string | null;
+  /** Motif des remises, code de réduction utilisé et sa remise. */
+  discount_reason?: string | null;
+  promo_code?: string | null;
+  promo_code_discount?: Fcfa;
+  /** Commercial de terrain, avec sa zone et sa ville au jour de la vente. */
+  field_rep_id?: string | null;
+  field_zone?: string | null;
+  field_city?: string | null;
+  /** Coupure pendant laquelle la vente a été faite. */
+  outage_id?: string | null;
   /** Tickets et factures (A4, listing) déjà imprimés : la réimpression porte « DUPLICATA ». */
   ticket_prints: number;
   invoice_prints: number;
@@ -378,6 +401,9 @@ export class PosService extends Base {
     private readonly loyalty: LoyaltyService,
     private readonly orders: OrderService,
     private readonly vouchers: VoucherService,
+    private readonly promoCodes: PromoCodeService,
+    private readonly fieldReps: FieldRepService,
+    private readonly outages: OutageService,
   ) {
     super(db, clock);
   }
@@ -869,6 +895,16 @@ export class PosService extends Base {
     const set = this.admin.storeSettings(ctx.storeId);
     const warehouse = this.saleWarehouse(ctx.storeId, input.warehouseId, { consignment: input.fromConsignment === true });
     const lines = this.priceLines(ctx.storeId, input.lines, level, input.customerId ?? null);
+    const overMax = this.overArticleMax(lines);
+    // Code de réduction : sur le ticket après promotions et remises, avant la livraison, réparti sur les lignes.
+    const promo = input.promoCode?.trim() ? this.promoCodes.check(ctx.storeId, input.promoCode, computeTotals(lines).totalTtc, input.customerId ?? null) : null;
+    if (promo && promo.amount > 0) {
+      const shares = spreadCodeDiscount(lines.map((l) => lineTotal(l)), promo.amount);
+      shares.forEach((share, i) => {
+        if (share > 0) lines[i] = { ...lines[i]!, discount: lines[i]!.discount + share };
+      });
+    }
+    const promoAmount = promo?.amount ?? 0;
     if (input.delivery) {
       this.deliveries.check(input.delivery);
       const fee = input.delivery.fee ?? 0;
@@ -889,8 +925,21 @@ export class PosService extends Base {
     const quote = input.quoteId ? this.quotes.authorizeSaleDiscounts(ctx.storeId, input.quoteId, lines) : null;
     let discountBy = input.discountAuthorizedBy ?? null;
     if (quote) discountBy ??= quote.by;
-    // L'arrondi des espèces n'est pas une remise à valider.
-    const granted = totals.totalDiscount - rounding;
+    // L'arrondi des espèces et le code de réduction ne sont pas des remises à valider.
+    const granted = totals.totalDiscount - rounding - promoAmount;
+    const reason = cleanDiscountReason(input.discountReason);
+    if (overMax.length && !quote) {
+      // Au-delà de la remise maxi d'un article, seul un administrateur ou un gérant décide (lui-même, ou son code).
+      const boss = (id: string | null | undefined) => {
+        if (!id) return false;
+        const u = this.admin.getUser(id);
+        return u.role === 'admin' || u.role === 'manager';
+      };
+      if (!boss(ctx.userId) && !boss(input.discountAuthorizedBy)) {
+        const o = overMax[0]!;
+        throw new AppError(`${o.label} : remise maxi ${o.max} % (demandée : ${o.pct} %). Le code du gérant est nécessaire`, 'SUPERVISOR_REQUIRED');
+      }
+    }
     if (granted > 0 && !quote) {
       const user = this.admin.getUser(ctx.userId);
       const authorizer = input.discountAuthorizedBy ? this.admin.getUser(input.discountAuthorizedBy) : null;
@@ -901,6 +950,8 @@ export class PosService extends Base {
       if (!this.admin.hasRight(user, 'discount') && !supervisor && !underMax) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
       if (underMax && !supervisor) discountBy ??= ctx.userId;
     }
+    // Le motif après l'accord : le caissier sait d'abord s'il peut faire la remise.
+    if (granted > 0 && !quote && set.discountReasonRequired && !reason) throw new AppError('Choisissez le motif de la remise', 'REASON_REQUIRED');
     for (const p of input.payments) {
       if (!(p.method in PAYMENT_METHODS)) throw new AppError(`Moyen de paiement inconnu : ${p.method}`, 'INVALID');
       if (requiresReference(p.method) && !p.reference?.trim()) {
@@ -910,7 +961,15 @@ export class PosService extends Base {
     const sources = input.fromConsignment ? [warehouse] : this.saleSources(ctx.storeId, ctx.userId, warehouse);
     this.assertNotRecalled(sources, lines);
     this.vouchers.checkPayments(ctx.storeId, input.payments);
-    const book = input.book ? this.checkBook(ctx, input.book) : null;
+    const outage = input.outage ? this.outages.forSale(ctx, input.outage.id, input.outage.at ?? input.book?.at) : null;
+    const book = outage
+      ? input.outage!.number?.trim() || input.book?.number?.trim()
+        ? { ...this.checkBook(ctx, { number: (input.outage!.number?.trim() || input.book!.number)!, at: outage.at }), at: outage.at }
+        : null
+      : input.book
+        ? this.checkBook(ctx, input.book)
+        : null;
+    const rep = this.fieldReps.forSale(input.fieldRepId, input.customerId);
     const plan = this.planStock(ctx.storeId, sources, lines, this.orders.reserved(ctx.storeId, input.orderId));
     const withoutStock = plan.short;
     // Chaque paiement va à la journée de la caisse de son type (espèces, électronique, banque).
@@ -969,6 +1028,16 @@ export class PosService extends Base {
         this.db.prepare('UPDATE sales SET seller_id = ? WHERE id = ?').run(input.sellerId, saleId);
       }
       if (book) this.db.prepare('UPDATE sales SET book_number = ?, book_at = ? WHERE id = ?').run(book.number, book.at, saleId);
+      if (outage) {
+        this.db.prepare('UPDATE sales SET outage_id = ?, book_at = ? WHERE id = ?').run(outage.id, outage.at, saleId);
+        this.audit(ctx.userId, 'sale.outage', 'sale', saleId, { number, outage: outage.id, at: outage.at });
+      }
+      if (rep) this.db.prepare('UPDATE sales SET field_rep_id = ?, field_zone = ?, field_city = ? WHERE id = ?').run(rep.id, rep.zone, rep.city, saleId);
+      if (promo) {
+        this.db.prepare('UPDATE sales SET promo_code = ?, promo_code_discount = ? WHERE id = ?').run(promo.code.code, promoAmount, saleId);
+        this.audit(ctx.userId, 'sale.promo_code', 'sale', saleId, { number, code: promo.code.code, amount: promoAmount });
+      }
+      if (granted > 0 && reason) this.db.prepare('UPDATE sales SET discount_reason = ? WHERE id = ?').run(reason, saleId);
       if (kept > 0) {
         // Client connu : la monnaie reste sur son compte (avoir) ; sinon un bon de monnaie imprimé avec le ticket.
         const voucher = customer ? null : this.vouchers.issue(ctx, { kind: 'change', amount: kept, saleId, holder: input.clientName ?? null });
@@ -1007,7 +1076,7 @@ export class PosService extends Base {
         ),
       );
       if (granted > 0) {
-        this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: granted, authorizedBy: discountBy, quoteId: input.quoteId ?? null });
+        this.audit(ctx.userId, 'sale.discount', 'sale', saleId, { amount: granted, authorizedBy: discountBy, quoteId: input.quoteId ?? null, reason });
       }
       if (rounding > 0) this.audit(ctx.userId, 'sale.rounding', 'sale', saleId, { amount: rounding, step: set.cashRounding });
       const changed = lines.filter((l) => l.priceSet);
@@ -1029,6 +1098,24 @@ export class PosService extends Base {
       if (input.delivery) this.deliveries.create(ctx, saleId, input.delivery);
       return sale;
     });
+  }
+
+  /**
+   * Lignes dont la remise manuelle dépasse la remise maxi de leur article
+   * (fiche article ; vide : la règle du magasin s'applique au ticket).
+   */
+  private overArticleMax(lines: PricedLine[]): { label: string; max: number; pct: number }[] {
+    const maxOf = this.db.prepare('SELECT max_discount_pct FROM articles WHERE id = ?').pluck();
+    const out: { label: string; max: number; pct: number }[] = [];
+    for (const l of lines) {
+      if (l.discount <= 0) continue;
+      const max = maxOf.get(l.articleId) as number | null | undefined;
+      if (max === null || max === undefined) continue;
+      const base = lineTotal({ ...l, discount: 0 });
+      if (base <= 0) continue;
+      if (l.discount * 100 > max * base) out.push({ label: l.label, max, pct: Math.round((l.discount * 1000) / base) / 10 });
+    }
+    return out;
   }
 
   /** Le stock restant d'un lot rappelé ne se vend plus : la vente est refusée si le reste ne suffit pas. */

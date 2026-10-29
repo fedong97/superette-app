@@ -2674,4 +2674,127 @@ CREATE TABLE counter_paid (
 CREATE INDEX counter_paid_sale ON counter_paid(sale_id);
 `,
   },
+  {
+    version: 63,
+    name: 'idées des concurrents : justificatifs, approbation, remises, commerciaux, coupures, codes de réduction, anomalies, filtres',
+    sql: `
+-- Justificatif d'une dépense (photo de la facture, PDF, fiche signée), en base64.
+CREATE TABLE expense_attachments (
+  id TEXT PRIMARY KEY,
+  expense_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX expense_attachments_expense ON expense_attachments(expense_id);
+
+-- Dépense à approuver par le gérant (au-delà du montant réglé dans les paramètres).
+ALTER TABLE expenses ADD COLUMN approval TEXT NOT NULL DEFAULT 'approved' CHECK (approval IN ('pending', 'approved', 'rejected'));
+ALTER TABLE expenses ADD COLUMN approved_by TEXT;
+ALTER TABLE expenses ADD COLUMN approved_at TEXT;
+ALTER TABLE expenses ADD COLUMN approval_note TEXT;
+
+-- Remise maximale propre à un article (en %, null : la règle du magasin) et motif des remises d'un ticket.
+ALTER TABLE articles ADD COLUMN max_discount_pct INTEGER;
+ALTER TABLE sales ADD COLUMN discount_reason TEXT;
+
+-- Commerciaux de terrain : la vente garde la zone et la ville du commercial au jour de la vente.
+CREATE TABLE field_reps (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT,
+  zone TEXT NOT NULL,
+  city TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE customers ADD COLUMN field_rep_id TEXT;
+ALTER TABLE sales ADD COLUMN field_rep_id TEXT;
+ALTER TABLE sales ADD COLUMN field_zone TEXT;
+ALTER TABLE sales ADD COLUMN field_city TEXT;
+
+-- Filtres de rapport enregistrés sous un nom (à soi, ou pour tous).
+CREATE TABLE report_presets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  screen TEXT NOT NULL,
+  name TEXT NOT NULL,
+  params TEXT NOT NULL,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Coupure : le total noté sur le cahier pendant la panne, contrôlé contre les ventes saisies ensuite.
+CREATE TABLE outages (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  register_id TEXT,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  declared_total INTEGER NOT NULL CHECK (declared_total > 0),
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'cancelled')),
+  entered_total INTEGER,
+  gap INTEGER,
+  gap_reason TEXT,
+  user_id TEXT,
+  closed_by TEXT,
+  closed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX outages_store ON outages(store_id, status);
+ALTER TABLE sales ADD COLUMN outage_id TEXT;
+CREATE INDEX sales_outage ON sales(outage_id) WHERE outage_id IS NOT NULL;
+
+-- Codes de réduction à distribuer (WhatsApp, flyer) : remise sur le ticket, suivie code par code.
+CREATE TABLE promo_codes (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('percent', 'amount')),
+  value INTEGER NOT NULL CHECK (value > 0),
+  min_total INTEGER NOT NULL DEFAULT 0,
+  starts_on TEXT,
+  ends_on TEXT,
+  max_uses INTEGER,
+  once_per_customer INTEGER NOT NULL DEFAULT 0,
+  store_id TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE sales ADD COLUMN promo_code TEXT;
+ALTER TABLE sales ADD COLUMN promo_code_discount INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX sales_promo_code ON sales(promo_code) WHERE promo_code IS NOT NULL;
+
+-- Anomalies de stock : la décision prise sur un cas (corrigé, laissé tel quel) pour ne plus le proposer.
+CREATE TABLE stock_anomaly_decisions (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  case_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('fixed', 'ignored')),
+  article_id TEXT,
+  warehouse_id TEXT,
+  before_qty INTEGER,
+  after_qty INTEGER,
+  note TEXT,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX stock_anomaly_decisions_key ON stock_anomaly_decisions(store_id, case_key);
+`,
+  },
 ];

@@ -3,6 +3,7 @@ import { type Result, call } from '../api';
 import { Empty, Modal, fcfa, qty, today, useCan, useLoad, useToast } from '../ui';
 import { saveXlsx } from './Controls';
 import { tx } from '../tax';
+import { SavedFilters } from './savedFilters';
 
 type Report = Result<'reports.sales'>;
 type Row = Report['rows'][number];
@@ -21,8 +22,32 @@ const DIMENSIONS: [Dimension, string][] = [
   ['cashier', 'Caissier'],
   ['register', 'Caisse'],
   ['customer', 'Client'],
+  ['field_rep', 'Commercial'],
+  ['field_zone', 'Zone'],
+  ['field_city', 'Ville'],
   ['payment', 'Paiement'],
 ];
+
+/** Rapport en colonnes : regroupement en lignes, une période par colonne. */
+type MatrixDim = Result<'reports.matrix'>['dimension'];
+type Step = Result<'reports.matrix'>['step'];
+type Measure = Result<'reports.matrix'>['measure'];
+const MATRIX_DIMS = DIMENSIONS.filter(([d]) => !['day', 'week', 'month', 'hour', 'weekday', 'payment'].includes(d)) as [MatrixDim, string][];
+const STEPS: [Step, string][] = [
+  ['day30', '30 derniers jours'],
+  ['week12', '12 dernières semaines'],
+  ['month12', '12 derniers mois'],
+  ['year10', '10 dernières années'],
+];
+const MEASURES: [Measure, string][] = [
+  ['ttc', 'CA TTC'],
+  ['margin', 'Marge HT'],
+  ['tickets', 'Tickets'],
+  ['qty', 'Quantités (articles)'],
+];
+
+/** Critères gardés par un filtre enregistré. */
+type Saved = { mode: 'table' | 'matrix'; presetId: string; from: string; to: string; dimension: Dimension; compare: Compare; step: Step; measure: Measure };
 const TIME = new Set<Dimension>(['day', 'week', 'month', 'hour', 'weekday']);
 const RANKED = new Set<Dimension>(['department', 'family', 'article']);
 
@@ -90,8 +115,27 @@ export function Reports({ view }: { view?: string }) {
   const [dimension, setDimension] = useState<Dimension>(yearly ? 'month' : DIMENSIONS.some(([d]) => d === view) ? (view as Dimension) : 'department');
   const [compare, setCompare] = useState<Compare>(yearly ? 'last_year' : 'previous');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean } | null>(null);
+  const [mode, setMode] = useState<'table' | 'matrix'>(view === 'matrix' ? 'matrix' : 'table');
+  const [step, setStep] = useState<Step>('month12');
+  const [measure, setMeasure] = useState<Measure>('ttc');
   const input = { from: period.from, to: period.to, dimension, compare: compare || null };
-  const report = useLoad(() => call('reports.sales', input), [period.from, period.to, dimension, compare]);
+  const report = useLoad(() => (mode === 'table' ? call('reports.sales', input) : Promise.resolve(undefined)), [period.from, period.to, dimension, compare, mode]);
+  const saved: Saved = { mode, presetId, from: period.from, to: period.to, dimension, compare, step, measure };
+  const applySaved = (p: Saved) => {
+    setMode(p.mode === 'matrix' ? 'matrix' : 'table');
+    if (p.presetId && p.presetId !== 'custom') {
+      setPresetId(p.presetId);
+      setPeriod(preset(p.presetId));
+    } else if (p.from && p.to) {
+      setPresetId('custom');
+      setPeriod({ from: p.from, to: p.to });
+    }
+    if (DIMENSIONS.some(([d]) => d === p.dimension)) setDimension(p.dimension);
+    setCompare(p.compare ?? '');
+    if (STEPS.some(([k]) => k === p.step)) setStep(p.step);
+    if (MEASURES.some(([k]) => k === p.measure)) setMeasure(p.measure);
+    setSort(null);
+  };
   const r = report.data;
   const t = r?.totals;
   const p = r?.previous?.totals;
@@ -147,8 +191,18 @@ export function Reports({ view }: { view?: string }) {
     <div className="page">
       <header className="page-head">
         <h1>Rapports de ventes</h1>
+        <div className="seg">
+          <button className={mode === 'table' ? 'active' : ''} onClick={() => setMode('table')}>
+            Tableau
+          </button>
+          <button className={mode === 'matrix' ? 'active' : ''} onClick={() => (setMode('matrix'), TIME.has(dimension) || dimension === 'payment' ? setDimension('department') : null)}>
+            En colonnes
+          </button>
+        </div>
+        <SavedFilters screen="reports" current={saved} onApply={applySaved} />
         <button
           className="primary"
+          hidden={mode === 'matrix'}
           disabled={!r || !can('report_export')}
           onClick={async () => {
             try {
@@ -167,6 +221,9 @@ export function Reports({ view }: { view?: string }) {
           Exporter vers Excel
         </button>
       </header>
+      {mode === 'matrix' && <Matrix dimension={MATRIX_DIMS.some(([d]) => d === dimension) ? (dimension as MatrixDim) : 'department'} step={step} measure={measure} onDimension={setDimension} onStep={setStep} onMeasure={setMeasure} />}
+      {mode === 'table' && (
+      <>
       <div className="filters">
         <select
           value={presetId}
@@ -316,10 +373,132 @@ export function Reports({ view }: { view?: string }) {
           )}
         </table>
       )}
+      </>
+      )}
       <p className="muted small">
         Marge = {tx('CA HT')} − coût d'achat moyen (CMUP) des articles au moment de la vente. Les retours sont déduits au coût de la vente d'origine.
       </p>
     </div>
+  );
+}
+
+/**
+ * Rapport en colonnes : le regroupement choisi en lignes, une colonne par jour,
+ * semaine, mois ou année, et le total. Une case vide : rien sur la période.
+ */
+function Matrix({
+  dimension,
+  step,
+  measure,
+  onDimension,
+  onStep,
+  onMeasure,
+}: {
+  dimension: MatrixDim;
+  step: Step;
+  measure: Measure;
+  onDimension: (d: MatrixDim) => void;
+  onStep: (s: Step) => void;
+  onMeasure: (m: Measure) => void;
+}) {
+  const toast = useToast();
+  const can = useCan();
+  const input = { dimension, step, measure };
+  const m = useLoad(() => call('reports.matrix', input), [dimension, step, measure]).data;
+  const show = (v: number) => (!v ? '' : measure === 'qty' ? qty(v) : measure === 'tickets' ? String(v) : fcfa(v));
+  return (
+    <>
+      <div className="filters">
+        <select value={step} onChange={(e) => onStep(e.target.value as Step)}>
+          {STEPS.map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <select value={measure} onChange={(e) => onMeasure(e.target.value as Measure)}>
+          {MEASURES.map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <div className="seg dims">
+          {MATRIX_DIMS.map(([d, label]) => (
+            <button key={d} className={dimension === d ? 'active' : ''} onClick={() => onDimension(d)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          className="primary"
+          style={{ marginLeft: 'auto' }}
+          disabled={!m || !can('report_export')}
+          onClick={async () => {
+            try {
+              const bytes = await call('reports.matrixXlsx', input);
+              const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `ventes-en-colonnes-${dimension}-${step}.xlsx`;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (err) {
+              toast.error(err);
+            }
+          }}
+        >
+          Exporter vers Excel
+        </button>
+      </div>
+      {m && m.rows.length === 0 ? (
+        <Empty>Aucune vente sur ces périodes.</Empty>
+      ) : (
+        m && (
+          <div className="matrix-wrap">
+            <table className="list compact report">
+              <thead>
+                <tr>
+                  <th>{DIMENSIONS.find(([d]) => d === dimension)?.[1]}</th>
+                  {m.columns.map((c) => (
+                    <th key={c.key} className="r nowrap">
+                      {c.label}
+                    </th>
+                  ))}
+                  <th className="r">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {m.rows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="nowrap">{r.label}</td>
+                    {r.values.map((v, i) => (
+                      <td key={m.columns[i]!.key} className={`r nowrap ${v ? '' : 'zero'}`}>
+                        {show(v)}
+                      </td>
+                    ))}
+                    <td className="r nowrap">
+                      <strong>{show(r.total)}</strong>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="total">
+                  <td>Total</td>
+                  {m.totals.map((v, i) => (
+                    <td key={m.columns[i]!.key} className="r nowrap">
+                      {show(v)}
+                    </td>
+                  ))}
+                  <td className="r nowrap">{show(m.total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )
+      )}
+    </>
   );
 }
 

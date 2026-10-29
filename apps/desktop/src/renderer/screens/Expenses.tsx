@@ -7,7 +7,7 @@ import { AccountPicker } from './accountPicker';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Expense = Result<'expenses.get'>;
 type Category = Result<'expenses.categories'>[number];
-export type ExpensesTab = 'list' | 'new' | 'summary' | 'categories' | 'plans' | 'schedule';
+export type ExpensesTab = 'list' | 'new' | 'approval' | 'summary' | 'categories' | 'plans' | 'schedule';
 
 export const EXPENSE_METHODS = {
   CASH: 'Espèces',
@@ -25,7 +25,10 @@ const monthStart = () => `${today().slice(0, 7)}-01`;
 /** Dépenses courantes : loyer, ENEO, salaires, transport… Elles passent seules en comptabilité. */
 export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab?: ExpensesTab }) {
   const plans = has(user, 'charge_plans');
-  const [tab, setTab] = useState<ExpensesTab>(initialTab === 'new' ? 'list' : !plans && (initialTab === 'schedule' || initialTab === 'plans') ? 'list' : initialTab);
+  const approver = has(user, 'expense_approve');
+  const [tab, setTab] = useState<ExpensesTab>(
+    initialTab === 'new' ? 'list' : (!plans && (initialTab === 'schedule' || initialTab === 'plans')) || (!approver && initialTab === 'approval') ? 'list' : initialTab,
+  );
   return (
     <div className="page">
       <header className="page-head">
@@ -38,12 +41,14 @@ export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab
         tabs={[
           ...(plans ? ([['schedule', 'Constats de charges']] as [ExpensesTab, string][]) : []),
           ['list', 'Historique des dépenses'],
+          ...(approver ? ([['approval', 'À approuver']] as [ExpensesTab, string][]) : []),
           ['summary', 'Par catégorie'],
           ...(plans ? ([['plans', 'Charges fixes']] as [ExpensesTab, string][]) : []),
           ['categories', 'Types de charge'],
         ]}
       />
       {tab === 'list' && <ExpenseList user={user} autoAdd={initialTab === 'new'} />}
+      {tab === 'approval' && approver && <ExpenseList user={user} pending />}
       {tab === 'summary' && <Summary />}
       {tab === 'categories' && <Categories />}
       {tab === 'plans' && plans && <ChargePlans />}
@@ -52,7 +57,7 @@ export function Expenses({ user, initialTab = 'list' }: { user: User; initialTab
   );
 }
 
-function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean }) {
+function ExpenseList({ user, autoAdd = false, pending = false }: { user: User; autoAdd?: boolean; pending?: boolean }) {
   const toast = useToast();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
@@ -62,14 +67,21 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
   const [open, setOpen] = useState<string | null>(null);
   const categories = useLoad(() => call('expenses.categories', true), []);
   const list = useLoad(
-    () => call('expenses.list', { from: from || undefined, to: to || undefined, categoryId: category || undefined, includeCancelled: cancelled }),
-    [from, to, category, cancelled],
+    () =>
+      call(
+        'expenses.list',
+        pending
+          ? { approval: 'pending' as const }
+          : { from: from || undefined, to: to || undefined, categoryId: category || undefined, includeCancelled: cancelled },
+      ),
+    [from, to, category, cancelled, pending],
   );
   const rows = list.data ?? [];
   const total = rows.filter((e) => e.status === 'active').reduce((t, e) => t + e.amount, 0);
   return (
     <>
-      <div className="filters">
+      {pending && <p className="muted">Dépenses saisies au-delà du montant réglé dans les paramètres par quelqu'un qui n'a pas le droit de les approuver. Ouvrez-en une pour voir son justificatif, puis approuvez ou refusez.</p>}
+      <div className="filters" hidden={pending}>
         <label className="inline">
           Du <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </label>
@@ -93,7 +105,9 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
           </button>
         )}
       </div>
-      {rows.length === 0 ? (
+      {rows.length === 0 && pending ? (
+        <Empty mood="bravo">Aucune dépense en attente d'approbation.</Empty>
+      ) : rows.length === 0 ? (
         <Empty>Aucune dépense sur la période. Saisissez ici le loyer, les factures ENEO, les salaires… ; les petites dépenses payées au tiroir se saisissent depuis la caisse (Action › Dépense payée en caisse).</Empty>
       ) : (
         <table className="list compact">
@@ -118,6 +132,9 @@ function ExpenseList({ user, autoAdd = false }: { user: User; autoAdd?: boolean 
                   {e.label}
                   {e.plan_id && <span className="tag normal">charge {monthLabel(e.plan_period!)}</span>}
                   {e.status === 'cancelled' && <span className="tag">annulée</span>}
+                  {e.approval === 'pending' && <span className="tag alerte">à approuver</span>}
+                  {e.approval === 'rejected' && <span className="tag rupture">refusée</span>}
+                  {e.attachments > 0 && <span className="muted" title="Justificatifs joints"> · 📎 {e.attachments}</span>}
                 </td>
                 <td>{e.beneficiary}</td>
                 <td>
@@ -391,7 +408,18 @@ export function ExpenseDialog({
 
 function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: User; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
-  const e = useLoad(() => call('expenses.get', id), [id]).data;
+  const [nonce, setNonce] = useState(0);
+  const e = useLoad(() => call('expenses.get', id), [id, nonce]).data;
+  const [decision, setDecision] = useState('');
+  const decide = async (approve: boolean) => {
+    try {
+      await (approve ? call('expenses.approve', id, decision || null) : call('expenses.reject', id, decision));
+      toast.ok(approve ? 'Dépense approuvée' : 'Dépense refusée : elle reste enregistrée, avec votre motif');
+      onChanged();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   const [reason, setReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
   const [askPin, setAskPin] = useState(false);
@@ -464,6 +492,14 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
               {e.authorized_by_name ? `, autorisée par ${e.authorized_by_name}` : ''}
             </td>
           </tr>
+          <tr>
+            <td>Approbation</td>
+            <td className={e.approval === 'rejected' ? 'neg' : ''}>
+              {e.approval === 'pending' ? 'À approuver par le gérant' : e.approval === 'rejected' ? 'Refusée' : 'Approuvée'}
+              {e.approved_by_name ? ` par ${e.approved_by_name}${e.approved_at ? ` le ${dateTime(e.approved_at)}` : ''}` : ''}
+              {e.approval_note ? ` : ${e.approval_note}` : ''}
+            </td>
+          </tr>
           {e.status === 'cancelled' && (
             <tr>
               <td>Annulée</td>
@@ -488,6 +524,22 @@ function ExpenseDetail({ id, user, onClose, onChanged }: { id: string; user: Use
           <Field label="Référence">
             <input value={editing.reference} onChange={(ev) => setEditing({ ...editing, reference: ev.target.value })} />
           </Field>
+        </div>
+      )}
+      <Proofs expenseId={id} active={e.status === 'active'} onChanged={() => setNonce((n) => n + 1)} />
+      {e.status === 'active' && e.approval === 'pending' && has(user, 'expense_approve') && (
+        <div className="grid2">
+          <Field label="Remarque (obligatoire pour refuser)">
+            <input value={decision} onChange={(ev) => setDecision(ev.target.value)} />
+          </Field>
+          <div className="actions">
+            <button className="danger" disabled={!decision.trim()} onClick={() => void decide(false)}>
+              Refuser
+            </button>
+            <button className="primary" onClick={() => void decide(true)}>
+              Approuver
+            </button>
+          </div>
         </div>
       )}
       {cancelling && (
@@ -1076,5 +1128,91 @@ function ChargeSchedule() {
         />
       )}
     </>
+  );
+}
+
+/** Lit un fichier choisi en base64 (sans l'en-tête « data: »). */
+const readBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+
+/** Justificatifs d'une dépense : photo de la facture, PDF, fiche signée. */
+function Proofs({ expenseId, active, onChanged }: { expenseId: string; active: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const can = useCan();
+  const list = useLoad(() => call('expenses.attachments', expenseId), [expenseId]);
+  const [shown, setShown] = useState<{ name: string; mime: string; url: string } | null>(null);
+  const add = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      await call('expenses.attach', expenseId, { name: file.name, mime: file.type, data: await readBase64(file) });
+      toast.ok('Justificatif joint');
+      list.reload();
+      onChanged();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const show = async (attachmentId: string) => {
+    try {
+      const a = await call('expenses.attachment', attachmentId);
+      setShown({ name: a.name, mime: a.mime, url: `data:${a.mime};base64,${a.data}` });
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const remove = async (attachmentId: string) => {
+    if (!(await askConfirm('Retirer ce justificatif ?'))) return;
+    try {
+      await call('expenses.removeAttachment', attachmentId);
+      list.reload();
+      onChanged();
+    } catch (err) {
+      toast.error(err);
+    }
+  };
+  const canAdd = active && can('expense_record', 'expense_approve', 'expense_cancel', 'cash');
+  return (
+    <div className="proofs">
+      <h3>Justificatifs</h3>
+      {(list.data ?? []).length === 0 && <p className="muted">Aucun justificatif joint.</p>}
+      <ul>
+        {(list.data ?? []).map((a) => (
+          <li key={a.id}>
+            <button className="link" onClick={() => void show(a.id)}>
+              📎 {a.name}
+            </button>{' '}
+            <span className="muted">
+              {Math.ceil(a.size / 1024)} Ko · {dateTime(a.created_at)}
+              {a.user_name ? ` · ${a.user_name}` : ''}
+            </span>{' '}
+            {canAdd && (
+              <button className="link" onClick={() => void remove(a.id)}>
+                Retirer
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canAdd && (
+        <label className="button">
+          Joindre une photo ou un PDF
+          <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden onChange={(ev) => void add(ev.target.files?.[0])} />
+        </label>
+      )}
+      {shown && (
+        <Modal title={shown.name} onClose={() => setShown(null)} wide>
+          {shown.mime === 'application/pdf' ? (
+            <iframe title={shown.name} src={shown.url} style={{ width: '100%', height: '70vh', border: 0 }} />
+          ) : (
+            <img alt={shown.name} src={shown.url} style={{ maxWidth: '100%' }} />
+          )}
+        </Modal>
+      )}
+    </div>
   );
 }

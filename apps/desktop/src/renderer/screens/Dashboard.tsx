@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, Tabs, fcfa, qty, today, useCan, useLoad } from '../ui';
 import { OwnerReport, PriceReview, TeamBoard } from './Floor';
+import { MonthClear } from './MonthClear';
 import { tx } from '../tax';
 import { type WinKind } from '../nav';
 
-export type DashboardTab = 'day' | 'attention' | 'prices' | 'team' | 'owner';
+export type DashboardTab = 'day' | 'attention' | 'month' | 'prices' | 'team' | 'owner';
 type Item = Result<'attention.list'>[number];
 /** Fenêtre et onglet qui traitent chaque point d'attention. */
-export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales', string];
+export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales' | 'expenses', string];
 
 const TARGET: Record<Item['key'], AttentionTarget> = {
   rupture: ['stock', 'critical'],
@@ -26,6 +27,9 @@ const TARGET: Record<Item['key'], AttentionTarget> = {
   to_notify: ['purchases', 'missed'],
   store_requests: ['stock', 'stores'],
   sale_edit_requests: ['sales', 'requests'],
+  stock_anomalies: ['stock', 'anomalies'],
+  expenses_pending: ['expenses', 'approval'],
+  outages_open: ['sales', 'outages'],
 };
 
 /** Tableau de bord : la journée en chiffres, et les points d'attention du gérant. */
@@ -47,6 +51,7 @@ export function Dashboard({ initialTab = 'day', onOpen }: { initialTab?: Dashboa
                 ['attention', "Points d'attention"],
               ] as [DashboardTab, string][])
             : []),
+          ...(can('owner_report') || can('dashboard') ? ([['month', 'Mon mois en clair']] as [DashboardTab, string][]) : []),
           ...(can('price_review') ? ([['prices', 'Prix à revoir']] as [DashboardTab, string][]) : []),
           ...(can('team_board') ? ([['team', 'Équipe de la semaine']] as [DashboardTab, string][]) : []),
           ...(can('owner_report') ? ([['owner', 'Rapport du mois']] as [DashboardTab, string][]) : []),
@@ -54,6 +59,7 @@ export function Dashboard({ initialTab = 'day', onOpen }: { initialTab?: Dashboa
       />
       {tab === 'day' && can('dashboard') && <Day onOpen={onOpen} />}
       {tab === 'attention' && can('dashboard') && <Attention onOpen={onOpen} />}
+      {tab === 'month' && (can('owner_report') || can('dashboard')) && <MonthClear onOpen={onOpen} />}
       {tab === 'prices' && can('price_review') && <PriceReview />}
       {tab === 'team' && can('team_board') && <TeamBoard />}
       {tab === 'owner' && can('owner_report') && <OwnerReport />}

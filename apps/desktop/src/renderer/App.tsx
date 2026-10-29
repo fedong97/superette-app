@@ -737,6 +737,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const [prefs, setPrefs] = useState<Record<string, unknown>>(state.prefs ?? {});
   const sync = useLoad(() => call('sync.state'), []);
   const backupLate = useLoad(() => call('backup.overdue'), []);
+  const copyFailed = useLoad(() => call('backup.copyFailed'), []);
   // Fiches déposées dans le dossier partagé : regardé moins souvent (dossier réseau ou cloud).
   const fichesWaiting = useLoad(() => (user.role === 'admin' ? call('fiche.pendingCount') : Promise.resolve(0)), []);
   useEffect(() => {
@@ -810,6 +811,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     const t = setInterval(() => {
       sync.reload();
       backupLate.reload();
+      copyFailed.reload();
       chargesLate.reload();
       gaps.reload();
     }, 15000);
@@ -1543,7 +1545,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
             {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
-            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload(), fichesWaiting.reload())} initialTab={w.tab as AdminTab | undefined} />}
+            {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload(), copyFailed.reload(), fichesWaiting.reload())} initialTab={w.tab as AdminTab | undefined} />}
             </RefreshCtx.Provider>
             </SingleViewCtx.Provider>
           </MdiWindow>
@@ -1596,6 +1598,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         {backupLate.data && canWin('admin') && (
           <button className="warn" onClick={() => open('admin', 'backups', 'Administration › Sauvegardes')} title="Aucune sauvegarde réussie depuis plus de 2 jours">
             Sauvegarde en retard
+          </button>
+        )}
+        {!backupLate.data && copyFailed.data && canWin('admin') && (
+          <button className="warn" onClick={() => open('admin', 'backups', 'Administration › Sauvegardes')} title={copyFailed.data}>
+            Clé USB : copie en échec
           </button>
         )}
         {Boolean(chargesLate.data?.count) && canWin('expenses') && (

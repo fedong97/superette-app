@@ -3,6 +3,22 @@
  * Les textes qui portent un nombre ou un nom passent par EN_PATTERNS.
  */
 export const EN: Record<string, string> = {
+  "Dépôt d’avance": "Advance deposit",
+  "Le client verse sur son compte sans rien acheter : « Dépôt d’avance… » sur l’onglet Compte de sa fiche, ou à la caisse par Action › Règlement client. Un reçu lui est remis.": "The customer pays into their account without buying anything: « Advance deposit… » on the Account tab of their record, or at the till via Action › Customer payment. A receipt is handed to them.",
+  "À la caisse, choisissez le client et payez en « Compte client » : l’achat est déduit de son avance et le ticket indique ce qu’il reste. Au-delà de l’avance, le reste est un crédit (plafond ou code du gérant).": "At the till, choose the customer and pay with « Customer account »: the purchase is taken from their advance and the receipt shows what is left. Beyond the advance, the rest is credit (limit or manager's code).",
+  "Nouveau PC après une panne : installez ONIX 360, branchez la clé et choisissez « Restaurer une sauvegarde » sur l’écran de bienvenue, sans créer de magasin. Connectez-vous ensuite avec vos identifiants habituels.": "New PC after a breakdown: install ONIX 360, plug in the stick and choose « Restore a backup » on the welcome screen, without creating a store. Then log in with your usual credentials.",
+  "Clé USB : copie en échec": "USB stick: copy failed",
+  "Avance déposée par le client": "Advance deposited by the customer",
+  "Dépôt d'avance…": "Advance deposit…",
+  "Restaurer sur ce PC la sauvegarde du": "Restore on this PC the backup of",
+  "Restauration… ONIX 360 redémarre": "Restoring… ONIX 360 restarts",
+  "Ancien PC en panne ou volé ?": "Old PC broken or stolen?",
+  "Restaurer une sauvegarde (clé USB, OneDrive…)": "Restore a backup (USB stick, OneDrive…)",
+  "Dépôt d'avance": "Advance deposit",
+  "Règlement de ce qu'il doit": "Payment of what they owe",
+  "Le client verse sur son compte. Ses achats à crédit (« Compte client » à la caisse) seront payés par cette avance": "The customer pays into their account. Their purchases on account (« Customer account » at the till) will be paid from this advance",
+  "Valider le dépôt d'avance": "Confirm the advance deposit",
+  "Avance disponible": "Advance available",
   "L'application Android s'appelle maintenant ONIX 360 Mobile : vendeur au rayon, gérant, inventaire, réception et contrôle à la sortie. Elle s'installe par-dessus l'ancienne, rien n'est perdu.": "The Android app is now called ONIX 360 Mobile: shelf seller, manager, stock count, receiving and exit check. It installs over the old one, nothing is lost.",
   "Vendeur au rayon complet sur le téléphone : client, tarif (détail, gros, super gros), vente au carton, remise avec son motif (le gérant tape son code si le vendeur n'a pas le droit), puis « Envoyer à la caisse ».": "Full shelf seller on the phone: customer, price level (retail, wholesale, super wholesale), sale by the case, discount with its reason (the manager types their code if the seller lacks the right), then “Send to the till”.",
   "La caisse reçoit le panier avec son client, son tarif et ses remises déjà validées : elle encaisse et imprime le ticket. Le vendeur suit chaque panier (en attente, en caisse, encaissé, rendu), le modifie ou l'annule tant qu'il attend, et voit ses ventes du jour.": "The till receives the basket with its customer, price level and already approved discounts: it collects and prints the receipt. The seller follows each basket (waiting, at the till, paid, returned), edits or cancels it while it waits, and sees their sales of the day.",

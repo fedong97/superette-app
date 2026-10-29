@@ -243,6 +243,8 @@ export interface Sale {
   /** Monnaie gardée sur le compte du client, ou en bon de monnaie (`change_voucher`). */
   change_kept: Fcfa;
   change_voucher: string | null;
+  /** Part sur le compte du client payée par son dépôt d'avance (le reste est un crédit). */
+  advance_used: Fcfa;
   /** Vente saisie depuis le carnet à souches : numéro de la souche et heure notée. */
   book_number: string | null;
   book_at: string | null;
@@ -985,7 +987,9 @@ export class PosService extends Base {
           })
         : this.customers.getCustomer(input.customerId)
       : null;
-    const due = customer && onCredit > 0 ? this.customers.dueDateFor(customer) : null;
+    // Avance déposée par le client : elle paie d'abord la part sur son compte, le reste seul est un crédit à échéance.
+    const advanceUsed = customer && onCredit > 0 ? Math.min(onCredit, Math.max(0, -this.customers.account(ctx.storeId, customer.id).balance)) : 0;
+    const due = customer && onCredit > advanceUsed ? this.customers.dueDateFor(customer) : null;
     const inPoints = input.payments.filter((p) => p.method === 'LOYALTY').reduce((t, p) => t + p.amount, 0);
     this.loyalty.checkRedeem(ctx.storeId, customer?.id, inPoints);
     // Monnaie gardée : au plus le rendu, si le magasin le permet.
@@ -1028,6 +1032,7 @@ export class PosService extends Base {
         this.db.prepare('UPDATE sales SET seller_id = ? WHERE id = ?').run(input.sellerId, saleId);
       }
       if (book) this.db.prepare('UPDATE sales SET book_number = ?, book_at = ? WHERE id = ?').run(book.number, book.at, saleId);
+      if (advanceUsed) this.db.prepare('UPDATE sales SET advance_used = ? WHERE id = ?').run(advanceUsed, saleId);
       if (outage) {
         this.db.prepare('UPDATE sales SET outage_id = ?, book_at = ? WHERE id = ?').run(outage.id, outage.at, saleId);
         this.audit(ctx.userId, 'sale.outage', 'sale', saleId, { number, outage: outage.id, at: outage.at });

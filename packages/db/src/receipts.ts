@@ -376,7 +376,14 @@ export class ReceiptService extends Base {
           unitName: pack ? undefined : unitNames.get(l.article_id),
         };
       }),
-      payments: sale.payments.map((p) => ({ label: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, amount: p.amount })),
+      // La part payée par le dépôt d'avance du client s'affiche à part : ce n'est pas un crédit à régler.
+      payments: sale.payments.flatMap((p) => {
+        const advance = p.method === 'CUSTOMER_CREDIT' ? Math.min(p.amount, sale.advance_used ?? 0) : 0;
+        return [
+          ...(advance ? [{ label: "Payé sur l'avance", amount: advance }] : []),
+          ...(p.amount > advance ? [{ label: `${PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}`, amount: p.amount - advance }] : []),
+        ];
+      }),
       totals: {
         ht: sale.total_ht,
         tva: sale.total_tva,
@@ -385,7 +392,7 @@ export class ReceiptService extends Base {
         promo: sale.total_promo,
         rounding: sale.rounding,
         change: sale.change_given,
-        remaining: sale.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0),
+        remaining: Math.max(0, sale.payments.filter((p) => p.method === 'CUSTOMER_CREDIT').reduce((t, p) => t + p.amount, 0) - (sale.advance_used ?? 0)),
       },
     };
   }
@@ -640,14 +647,14 @@ export class ReceiptService extends Base {
     const acc = this.customers.account(p.store_id, p.customer_id);
     return [
       ...this.header(),
-      { t: 'text', text: 'REÇU DE RÈGLEMENT', align: 'center', bold: true },
+      { t: 'text', text: p.advance ? "REÇU DE DÉPÔT D'AVANCE" : 'REÇU DE RÈGLEMENT', align: 'center', bold: true },
       { t: 'text', text: p.number },
       { t: 'text', text: `${dateFr(p.paid_at)}${p.user_name ? ` · ${p.user_name}` : ''}` },
       { t: 'text', text: `Client : ${p.customer_name}` },
       { t: 'rule' },
       { t: 'row', left: 'Reçu FCFA', right: money(p.amount), bold: true, big: true },
       { t: 'text', text: `${CUSTOMER_PAYMENT_METHODS[p.method]}${p.reference ? ` ${p.reference}` : ''}` },
-      { t: 'row', left: 'Reste dû après règlement', right: money(acc.balance) },
+      acc.balance < 0 ? { t: 'row', left: 'Avance disponible', right: money(-acc.balance), bold: true } : { t: 'row', left: 'Reste dû après règlement', right: money(acc.balance) },
       { t: 'rule' },
       { t: 'text', text: 'Merci !', align: 'center' },
     ];

@@ -196,7 +196,7 @@ export interface SystemHooks {
   chooseBackupFile(): Promise<string | null>;
   openFolder(path: string): Promise<void>;
   /** Ferme la base, la remplace par la sauvegarde et relance l'application. */
-  restore(file: string, userId: string): void;
+  restore(file: string, userId: string | null): void;
   /** Résumé du soir par e-mail : chiffre le mot de passe pour ce PC, envoie le résumé du jour. */
   digest?: { seal(password: string): string; sendNow(): Promise<string> };
   /** Mise à jour automatique du logiciel (absente dans les tests). */
@@ -790,6 +790,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!info.ok) throw new AppError(info.error ?? 'Fiche invalide', 'INVALID');
       if (info.fiche?.kind !== 'installation') throw new AppError("Ce fichier n'est pas une installation préparée au bureau", 'INVALID');
       dossiers().install(file);
+      return info;
+    },
+
+    /** Nouveau PC après une panne : choisit la sauvegarde (clé USB) avant de créer un magasin. */
+    'setup.chooseBackup': async () => {
+      if (s.admin.isInitialized()) throw new AppError('Ce PC a déjà une boutique : restaurez depuis Administration › Sauvegardes', 'INVALID');
+      const file = await system.chooseBackupFile();
+      return file ? inspectBackup(file) : null;
+    },
+    /** Nouveau PC : la boutique est remplacée par la sauvegarde, puis ONIX 360 redémarre dessus. */
+    'setup.restoreBackup': (file: string) => {
+      if (s.admin.isInitialized()) throw new AppError('Ce PC a déjà une boutique : restaurez depuis Administration › Sauvegardes', 'INVALID');
+      notInFiche();
+      const info = inspectBackup(file);
+      if (!info.ok) throw new AppError(info.error ?? 'Sauvegarde invalide', 'INVALID');
+      system.restore(file, null);
       return info;
     },
 
@@ -2850,6 +2866,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       atRegister?: boolean;
       /** Lettrage : factures que ce règlement solde, au lieu des plus anciennes. */
       allocations?: { saleId: string; amount: Fcfa }[] | null;
+      /** Dépôt d'avance : le client verse sur son compte sans rien devoir. */
+      advance?: boolean;
     }) => {
       const c = ctx(['customer_payment']);
       if (input.allocations?.length && !can(user!, ['customer_lettering'])) throw new AppError("Vous n'avez pas le droit de lettrer un règlement", 'FORBIDDEN');
@@ -3233,6 +3251,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),
+    /** Copie vers la clé USB (ou OneDrive) en échec : l'erreur, à afficher sur l'accueil, ou null. */
+    'backup.copyFailed': () => {
+      requireUser();
+      const st = s.backups.status();
+      return st.copy_pending && st.last_error ? st.last_error : null;
+    },
     'backup.now': () => s.backups.saveNow(requireUser(['backups']).id),
     // --- Sauvegarde en ligne (chiffrée sur ce PC, gardée par le serveur) ---------
     'backup.cloudStatus': () => (requireUser(['backups']), cloud.status()),

@@ -141,6 +141,8 @@ export interface CustomerPayment {
   notes: string | null;
   paid_at: string;
   user_name: string | null;
+  /** Dépôt d'avance : versé sans dette à régler, ses achats à crédit viennent en déduction. */
+  advance: number;
 }
 
 /**
@@ -520,7 +522,7 @@ export class CustomerService extends Base {
       .all({ storeId, customerId }) as { date: string; kind: StatementLine['kind']; ref_id: string; number: string; amount: number }[];
     const inRange = (d: string) => (!opts.from || d.slice(0, 10) >= opts.from) && (!opts.to || d.slice(0, 10) <= opts.to);
     const methods = new Map(
-      (this.db.prepare('SELECT id, method, reference FROM customer_payments WHERE customer_id = ?').all(customerId) as { id: string; method: string; reference: string | null }[]).map(
+      (this.db.prepare('SELECT id, method, reference, advance FROM customer_payments WHERE customer_id = ?').all(customerId) as { id: string; method: string; reference: string | null; advance: number }[]).map(
         (p) => [p.id, p],
       ),
     );
@@ -556,7 +558,7 @@ export class CustomerService extends Base {
                   ? 'Compensation avec son compte fournisseur'
                 : r.kind === 'change'
                   ? 'Monnaie laissée sur le compte'
-                  : `Règlement ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
+                  : `${pay?.advance ? "Dépôt d'avance" : 'Règlement'} ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }
     return { opening, lines, closing: running };
@@ -579,6 +581,8 @@ export class CustomerService extends Base {
       sessionId?: string | null;
       /** Lettrage manuel : les factures que ce règlement solde ; sinon les plus anciennes. */
       allocations?: { saleId: string; amount: Fcfa }[] | null;
+      /** Dépôt d'avance : accepté même au-delà de ce que doit le client (il solde d'abord sa dette). */
+      advance?: boolean;
     },
   ): CustomerPayment {
     if (!(input.method in CUSTOMER_PAYMENT_METHODS)) throw new AppError(`Mode de règlement inconnu : ${input.method}`, 'INVALID');
@@ -589,16 +593,18 @@ export class CustomerService extends Base {
     if (input.method === 'CHEQUE' && this.getCustomer(input.customerId).no_cheque) {
       throw new AppError('Ce client est interdit de chèque (chèque revenu impayé)', 'NO_CHEQUE');
     }
+    const customer = this.getCustomer(input.customerId);
+    if (input.advance && !customer.active) throw new AppError(`Le client ${customer.name} est désactivé`, 'INVALID');
     const { balance } = this.ledger(ctx.storeId, input.customerId);
-    if (input.amount > balance) {
+    if (!input.advance && input.amount > balance) {
       throw new AppError(`Le montant dépasse ce que doit le client (${formatFcfa(balance)})`, 'INVALID');
     }
     return this.tx(() => {
       const id = newId();
       this.db
         .prepare(
-          `INSERT INTO customer_payments (id, number, customer_id, store_id, register_id, session_id, method, amount, reference, notes, paid_at, user_id, from_central, clearing)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO customer_payments (id, number, customer_id, store_id, register_id, session_id, method, amount, reference, notes, paid_at, user_id, from_central, clearing, advance)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -617,9 +623,10 @@ export class CustomerService extends Base {
           input.method === 'CASH' && !input.sessionId ? 1 : 0,
           // Chèque : au 513 jusqu'à sa remise en banque (bordereau).
           input.method === 'CHEQUE' ? 1 : 0,
+          input.advance ? 1 : 0,
         );
       this.enqueue(ctx, 'customer_payment', id, 'upsert', {});
-      this.audit(ctx.userId, 'customer.payment', 'customer', input.customerId, { amount: input.amount, method: input.method });
+      this.audit(ctx.userId, input.advance ? 'customer.advance' : 'customer.payment', 'customer', input.customerId, { amount: input.amount, method: input.method });
       if (input.allocations?.length) this.setAllocations(ctx, id, input.allocations);
       return this.getPayment(id);
     });
@@ -642,7 +649,7 @@ export class CustomerService extends Base {
   private paymentQuery(where: string, limit = 1) {
     return this.db.prepare(
       `SELECT p.id, p.number, p.customer_id, c.name AS customer_name, p.store_id, p.session_id, p.method, p.amount, p.reference, p.notes,
-              p.paid_at, u.name AS user_name
+              p.paid_at, u.name AS user_name, p.advance
        FROM customer_payments p JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.user_id
        WHERE ${where} ORDER BY p.paid_at DESC LIMIT ${limit}`,
     );

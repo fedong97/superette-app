@@ -74,6 +74,25 @@ async function installPrepared(toast: ReturnType<typeof useToast>) {
   }
 }
 
+/** Nouveau PC après une panne ou un vol : la boutique revient de la sauvegarde gardée sur la clé USB. */
+async function restoreBackup(toast: ReturnType<typeof useToast>) {
+  try {
+    const info = await call('setup.chooseBackup');
+    if (!info) return;
+    if (!info.ok) return toast.error(`${info.name} : ${info.error ?? 'sauvegarde inutilisable'}. Choisissez une sauvegarde plus ancienne.`);
+    const when = new Date(info.created_at).toLocaleString('fr-FR');
+    const last = info.last_sale_at ? `, dernière vente le ${new Date(info.last_sale_at).toLocaleString('fr-FR')}` : '';
+    const ok = await askConfirm(
+      `Restaurer sur ce PC la sauvegarde du ${when}${info.store_name ? ` (${info.store_name})` : ''} : ${info.articles} articles, ${info.sales} tickets${last} ? ONIX 360 redémarre dessus ; connectez-vous avec vos identifiants habituels. Ce qui a été fait après cette sauvegarde est à ressaisir.`,
+    );
+    if (!ok) return;
+    await call('setup.restoreBackup', info.file);
+    toast.ok('Restauration… ONIX 360 redémarre');
+  } catch (err) {
+    toast.error(err);
+  }
+}
+
 function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }) {
   const toast = useToast();
   const [dossiers, setDossiers] = useState(false);
@@ -120,6 +139,12 @@ function NewStore({ onDone, onJoin }: { onDone: () => void; onJoin: () => void }
           Bienvenue dans ONIX 360
         </h1>
         <p>Première installation : renseignez votre magasin et le compte administrateur. Vous pourrez ajouter d'autres magasins et caisses ensuite.</p>
+        <p className="muted">
+          Ancien PC en panne ou volé ?{' '}
+          <button type="button" className="link" onClick={() => void restoreBackup(toast)}>
+            Restaurer une sauvegarde (clé USB, OneDrive…)
+          </button>
+        </p>
         <p className="muted">
           Boutique préparée au bureau ? <button type="button" className="link" onClick={() => void installPrepared(toast)}>Installer une boutique préparée…</button> · Fiche apportée par le technicien ou le
           comptable ? <button type="button" className="link" onClick={() => setDossiers(true)}>Ouvrir une boutique…</button>

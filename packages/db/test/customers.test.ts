@@ -1,5 +1,6 @@
 import { agingBucket, allocateOldestFirst, creditCheck } from '@superette/core';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { receiptToText } from '@superette/core';
 import { type Context, type Services, createServices, openDatabase } from '../src';
 
 let now = new Date('2026-10-06T08:00:00Z');
@@ -134,5 +135,35 @@ describe('clients et ventes à crédit', () => {
       ['ORANGE_MONEY', 5_000],
     ]);
     expect(z.cash.expected).toBe(10_000 + 5_000 + 25_000);
+  });
+
+  it("dépôt d'avance : le client verse 100 000, ses achats viennent en déduction", () => {
+    const client = s.customers.saveCustomer(ctx.userId, { name: 'Hôtel La Falaise' });
+    // Sans dépôt d'avance, on ne peut pas encaisser plus que ce qu'il doit.
+    expect(() => s.customers.receivePayment(ctx, { customerId: client.id, method: 'CASH', amount: 100_000 })).toThrow(/dépasse/);
+    const dep = s.customers.receivePayment(ctx, { customerId: client.id, method: 'CASH', amount: 100_000, advance: true });
+    expect(dep.advance).toBe(1);
+    expect(s.customers.account(ctx.storeId, client.id)).toMatchObject({ balance: -100_000, available: 100_000 });
+    expect(receiptToText(s.receipts.customerReceipt(dep.id), 48)).toMatch(/DÉPÔT D'AVANCE[\s\S]*Avance disponible\s+100 000/);
+
+    // Achat de 50 000 sur son compte, sans plafond de crédit ni code du gérant : payé par l'avance.
+    const sale = sell(client.id, 10, [{ method: 'CUSTOMER_CREDIT', amount: 50_000 }]);
+    expect(sale).toMatchObject({ advance_used: 50_000, due_date: null });
+    expect(s.customers.account(ctx.storeId, client.id)).toMatchObject({ balance: -50_000, openItems: [] });
+    const ticket = receiptToText(s.receipts.ticket(sale.id), 48);
+    expect(ticket).toMatch(/Payé sur l'avance\s+50 000/);
+    expect(ticket).toMatch(/Reste sur votre avance\s+50 000/);
+    expect(ticket).not.toMatch(/Reste à payer/);
+
+    // Achat de 60 000 : 50 000 sur l'avance, les 10 000 restants sont un crédit (gérant, faute de plafond).
+    expect(() => sell(client.id, 12, [{ method: 'CUSTOMER_CREDIT', amount: 60_000 }])).toThrow(/plafond/);
+    const over = sell(client.id, 12, [{ method: 'CUSTOMER_CREDIT', amount: 60_000 }], { creditAuthorizedBy: ctx.userId });
+    expect(over.advance_used).toBe(50_000);
+    expect(over.due_date).not.toBeNull();
+    expect(s.customers.account(ctx.storeId, client.id).balance).toBe(10_000);
+    expect(receiptToText(s.receipts.ticket(over.id), 48)).toMatch(/Reste à payer\s+10 000/);
+
+    // Au relevé, le dépôt est nommé comme tel.
+    expect(s.customers.statement(ctx.storeId, client.id).lines.find((l) => l.kind === 'payment')).toMatchObject({ kind: 'payment', label: "Dépôt d'avance Espèces", credit: 100_000 });
   });
 });

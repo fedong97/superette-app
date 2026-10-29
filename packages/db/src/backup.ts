@@ -40,10 +40,14 @@ export interface BackupStatus {
   auto_time: string | null;
   /** Sauvegarde automatique toutes les N minutes (0 : une fois par jour). */
   every_minutes: number;
+  /** Des sauvegardes attendent d'être recopiées dans le second dossier (clé USB débranchée, clé défectueuse). */
+  copy_pending: boolean;
 }
 
 const NAME = /^superette-.+-(\d{4}-\d{2}-\d{2})-(\d{4}(?:\d{2})?)-(auto|manual|safety)\.db$/;
 const DEFAULT_KEEP = 14;
+/** Copies vers la clé par passage (une par minute au plus) : la caisse ne doit pas attendre la clé. */
+const COPIES_PER_RUN = 3;
 
 /** Clé de tri chronologique tirée du nom (date et heure de la sauvegarde). */
 const when = (name: string) => {
@@ -183,6 +187,7 @@ export class BackupService extends Base {
       last_file: this.setting('backup.lastFile'),
       last_error: this.setting('backup.lastError'),
       overdue,
+      copy_pending: Boolean(this.setting('backup.copyDir')) && this.setting('backup.copyPending') === '1',
     };
   }
 
@@ -201,7 +206,11 @@ export class BackupService extends Base {
       this.setSetting('backup.keep', String(input.keep));
     }
     if (input.dir !== undefined) this.setSetting('backup.dir', input.dir?.trim() || null);
-    if (input.copyDir !== undefined) this.setSetting('backup.copyDir', input.copyDir?.trim() || null);
+    if (input.copyDir !== undefined) {
+      this.setSetting('backup.copyDir', input.copyDir?.trim() || null);
+      // Nouveau second dossier : il reçoit les sauvegardes déjà faites à la prochaine minute.
+      this.setSetting('backup.copyPending', input.copyDir?.trim() ? '1' : null);
+    }
     this.audit(userId, 'backup.configure', undefined, undefined, input);
     return this.status();
   }
@@ -272,17 +281,8 @@ export class BackupService extends Base {
       this.setSetting('backup.lastAt', this.clock().toISOString());
       this.setSetting('backup.lastFile', info.file);
       this.prune(status.dir, status.keep);
-      let error: string | null = null;
-      if (status.copy_dir) {
-        try {
-          mkdirSync(status.copy_dir, { recursive: true });
-          copyFileSync(info.file, join(status.copy_dir, info.name));
-          this.prune(status.copy_dir, status.keep);
-        } catch (e) {
-          error = `Copie vers ${status.copy_dir} impossible (clé USB débranchée ?) : ${e instanceof Error ? e.message : String(e)}`;
-        }
-      }
-      this.setSetting('backup.lastError', error);
+      this.setSetting('backup.lastError', null);
+      if (status.copy_dir) this.copyPending();
       return info;
     } catch (e) {
       this.setSetting('backup.lastError', e instanceof Error ? e.message : String(e));
@@ -308,11 +308,63 @@ export class BackupService extends Base {
     return now >= target && (!last || new Date(last) < target);
   }
 
+  /**
+   * Recopie dans le second dossier (clé USB, OneDrive) les sauvegardes automatiques
+   * qui n'y sont pas encore : celle qui vient d'être faite, et celles manquées
+   * pendant que la clé était débranchée. Chaque copie est relue sur la clé.
+   * Rend le nombre de fichiers copiés ; une erreur est gardée pour l'afficher.
+   * Au plus quelques fichiers par passage : le reste suit à la minute suivante.
+   */
+  copyPending(): number {
+    const status = this.status();
+    const target = status.copy_dir;
+    if (!target || !status.dir) return 0;
+    let copied = 0;
+    try {
+      mkdirSync(target, { recursive: true });
+      const already = new Set(this.files(target));
+      const wanted = this.files(status.dir)
+        .filter((f) => NAME.exec(f)?.[3] === 'auto')
+        .sort((a, b) => when(b).localeCompare(when(a)))
+        .slice(0, status.keep);
+      let left = 0;
+      for (const name of wanted) {
+        const dest = join(target, name);
+        if (already.has(name) && statSync(dest).size === statSync(join(status.dir, name)).size) continue;
+        if (copied >= COPIES_PER_RUN) {
+          left++;
+          continue;
+        }
+        const tmp = `${dest}.part`;
+        try {
+          copyFileSync(join(status.dir, name), tmp);
+          const check = inspectBackup(tmp);
+          if (!check.ok) throw new Error(`la copie relue sur ${target} est abîmée (${check.error}) : clé USB défectueuse ?`);
+          renameSync(tmp, dest);
+        } finally {
+          rmSync(tmp, { force: true });
+        }
+        copied++;
+      }
+      this.prune(target, status.keep);
+      this.setSetting('backup.copyPending', left ? '1' : null);
+      if (this.setting('backup.lastError')?.startsWith('Copie vers')) this.setSetting('backup.lastError', null);
+    } catch (e) {
+      this.setSetting('backup.copyPending', '1');
+      this.setSetting('backup.lastError', `Copie vers ${target} impossible (clé USB débranchée ?) : ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return copied;
+  }
+
   /** Sauvegarde automatique, n'échoue jamais (l'erreur est gardée pour l'afficher). */
   async runAutomatic(force = false): Promise<BackupInfo | null> {
     // Une fiche emportée est déjà une copie : pas de sauvegardes automatiques à côté d'elle.
     if (this.db.prepare("SELECT 1 FROM settings WHERE key = 'fiche.meta'").get()) return null;
-    if (!force && !this.autoDue()) return null;
+    if (!force && !this.autoDue()) {
+      // Clé rebranchée : les sauvegardes qu'elle a manquées y sont recopiées.
+      if (this.status().copy_pending) this.copyPending();
+      return null;
+    }
     if (!this.status().dir) return null;
     try {
       return await this.saveNow(null);
@@ -323,7 +375,7 @@ export class BackupService extends Base {
 
   /** Réglages propres au PC, gardés quand on restaure une sauvegarde plus ancienne. */
   localSettings(): Record<string, string | null> {
-    return Object.fromEntries(['backup.dir', 'backup.copyDir', 'backup.keep', 'backup.autoTime', 'backup.every', 'backup.lastAt', 'backup.lastFile', 'backup.lastError', 'license.key', 'license.trialStart', 'license.lastSeen', 'license.sent', 'digest.config', 'digest.smtpPass', 'digest.lastSent', 'cloud.key', 'cloud.salt', 'cloud.check', 'cloud.lastAt', 'cloud.lastFile', 'cloud.lastError', 'cloud.lastTry'].map((k) => [k, this.setting(k)]));
+    return Object.fromEntries(['backup.dir', 'backup.copyDir', 'backup.keep', 'backup.autoTime', 'backup.every', 'backup.lastAt', 'backup.lastFile', 'backup.lastError', 'backup.copyPending', 'license.key', 'license.trialStart', 'license.lastSeen', 'license.sent', 'digest.config', 'digest.smtpPass', 'digest.lastSent', 'cloud.key', 'cloud.salt', 'cloud.check', 'cloud.lastAt', 'cloud.lastFile', 'cloud.lastError', 'cloud.lastTry'].map((k) => [k, this.setting(k)]));
   }
 
   /** Efface les sauvegardes automatiques les plus anciennes au-delà de `keep`. */

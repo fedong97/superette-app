@@ -1530,7 +1530,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         totals.totalTtc >= replacing.paid ? `reste à encaisser ${amount(totals.totalTtc - replacing.paid)}` : `à rendre ${amount(replacing.paid - totals.totalTtc)}`
       } FCFA`
     : credit && customer && account.data
-      ? `Doit ${amount(account.data.balance)} · disponible ${amount(account.data.available)} FCFA`
+      ? `${account.data.balance < 0 ? `Avance ${amount(-account.data.balance)}` : `Doit ${amount(account.data.balance)}`} · disponible ${amount(account.data.available)} FCFA`
       : quote && lines.length
           ? `${quote.number} · prix garantis jusqu'au ${new Date(`${quote.validUntil}T12:00:00`).toLocaleDateString('fr-FR')}`
           : delivery.on
@@ -2359,7 +2359,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                   <b>{customer ? customer.name : credit ? 'Choisir le client' : 'Client comptoir'}</b>
                   <small>
                     {customer && account.data
-                      ? `${account.data.balance > 0 ? 'Doit' : account.data.balance < 0 ? 'Avoir' : 'Solde'} ${amount(Math.abs(account.data.balance))} FCFA${credit ? ` · disponible ${amount(account.data.available)}` : ''}`
+                      ? `${account.data.balance > 0 ? 'Doit' : account.data.balance < 0 ? 'Avance' : 'Solde'} ${amount(Math.abs(account.data.balance))} FCFA${credit ? ` · disponible ${amount(account.data.available)}` : ''}`
                       : credit
                         ? 'obligatoire pour une vente à crédit'
                         : 'touchez pour choisir un client'}

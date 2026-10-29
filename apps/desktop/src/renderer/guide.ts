@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.99.0',
+    items: [
+      "Nouveau PC après une panne ou un vol : l'écran de bienvenue propose « Restaurer une sauvegarde (clé USB, OneDrive…) », sans créer de magasin provisoire. Connectez-vous ensuite avec vos identifiants habituels.",
+      "Clé USB : les sauvegardes faites pendant qu'elle était débranchée y sont recopiées dès qu'elle revient, chaque copie est relue sur la clé, et « Clé USB : copie en échec » s'affiche sur l'accueil en cas de problème.",
+      "Dépôt d'avance : sur la fiche du client, « Dépôt d'avance… » encaisse une somme sans achat (reçu imprimé). Ses achats en « Compte client » en sont déduits et le ticket indique « Payé sur l'avance » et « Reste sur votre avance ».",
+    ],
+  },
+  {
     version: '0.98.0',
     items: [
       "L'application Android s'appelle maintenant ONIX 360 Mobile : vendeur au rayon, gérant, inventaire, réception et contrôle à la sortie. Elle s'installe par-dessus l'ancienne, rien n'est perdu.",

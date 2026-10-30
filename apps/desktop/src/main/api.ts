@@ -628,6 +628,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   };
   /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
   const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
+  /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
+  const attentionFor = (u: User, storeId: string) => {
+    const rules: [AttentionKey, boolean][] = [
+      ['rupture', can(u, STOCK)],
+      ['alerte', can(u, STOCK)],
+      ['cash_gaps', can(u, AMOUNTS) && can(u, ['gap_justify'])],
+      ['transfers', can(u, TRANSFERS)],
+      ['stock_requests', can(u, ['stock_decide'])],
+      ['rebates_pending', can(u, ['rebates'])],
+      ['rebates_balance', can(u, ['rebates'])],
+      ['inventories', can(u, INVENTORY)],
+      ['supplier_invoices', can(u, ['purchase_invoices'])],
+      ['late_customers', can(u, ['receivables'])],
+      ['production', can(u, ['production'])],
+      ['cash_alerts', can(u, ['treasury', 'cash_z'])],
+      ['to_notify', can(u, ['missed_report', 'missed_sale'])],
+      ['store_requests', can(u, ['store_transfers'])],
+      ['stock_anomalies', can(u, ['stock_anomalies'])],
+      ['expenses_pending', can(u, ['expense_approve'])],
+      ['outages_open', can(u, ['outage_close', 'sale_book'])],
+    ];
+    return s.attention.list(storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
+  };
   let lastStatusPush = 0;
   /** État de ce PC, envoyé au serveur et montré dans Administration › État des PC. */
   const stationStatus = (): StationStatus => {
@@ -3409,27 +3432,55 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
     'attention.list': () => {
       const c = ctx(['dashboard']);
+      return attentionFor(user!, c.storeId);
+    },
+    /**
+     * Accueil (0.103.0) : en un appel rafraîchi toutes les 30 secondes, ce que la
+     * personne connectée a le droit de voir. Le gérant a les chiffres du jour
+     * comparés à la veille à la même heure, les caisses en direct, les points
+     * d'attention et l'activité ; le vendeur et le caissier ont leur caisse et
+     * leurs factures envoyées.
+     */
+    'home.overview': async () => {
+      const c = ctx();
       const u = user!;
-      const rules: [AttentionKey, boolean][] = [
-        ['rupture', can(u, STOCK)],
-        ['alerte', can(u, STOCK)],
-        ['cash_gaps', can(u, AMOUNTS) && can(u, ['gap_justify'])],
-        ['transfers', can(u, TRANSFERS)],
-        ['stock_requests', can(u, ['stock_decide'])],
-        ['rebates_pending', can(u, ['rebates'])],
-        ['rebates_balance', can(u, ['rebates'])],
-        ['inventories', can(u, INVENTORY)],
-        ['supplier_invoices', can(u, ['purchase_invoices'])],
-        ['late_customers', can(u, ['receivables'])],
-        ['production', can(u, ['production'])],
-        ['cash_alerts', can(u, ['treasury', 'cash_z'])],
-        ['to_notify', can(u, ['missed_report', 'missed_sale'])],
-        ['store_requests', can(u, ['store_transfers'])],
-        ['stock_anomalies', can(u, ['stock_anomalies'])],
-        ['expenses_pending', can(u, ['expense_approve'])],
-        ['outages_open', can(u, ['outage_close', 'sale_book'])],
-      ];
-      return s.attention.list(c.storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
+      const now = new Date();
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const date = iso(now);
+      const before = new Date(now);
+      before.setDate(before.getDate() - 1);
+      const until = now.toTimeString().slice(0, 8);
+      const dash = can(u, ['dashboard']);
+      const registers = dash || can(u, ['cash_live']) ? s.pos.liveRegisters(c.storeId) : [];
+      const figures = (day: string, upTo?: string) => {
+        const d = s.reports.daily(c.storeId, day, upTo);
+        return { revenue: d.revenueTtc, tickets: d.ticketCount, average: d.averageBasket, margin: d.grossMargin, revenueHt: d.revenueHt, receipts: s.reports.receipts(c.storeId, day, upTo), byHour: d.byHour, top: d.topArticles.slice(0, 5) };
+      };
+      const stock = (level: 'rupture' | 'alerte') => {
+        const rows = s.stock.list(c.storeId, { level });
+        return { count: rows.length, items: rows.slice(0, 5).map((r) => ({ id: r.article_id, name: r.name, qty: r.qty, unit: r.unit })) };
+      };
+      // La caisse de la personne : seulement si elle en a une (le gérant sans caisse n'en voit pas ici).
+      const mine = c.registerId ? (registers.length ? registers : s.pos.liveRegisters(c.storeId)).find((r) => r.id === c.registerId) ?? null : null;
+      let sent: { waiting: number; returned: number; paid: number } | null = null;
+      if (can(u, POS) && u.role === 'seller') {
+        const list = await counterList(s, u.id).catch(() => null);
+        if (list) sent = { waiting: list.filter((i) => i.status === 'waiting' || i.status === 'paying' || i.status === 'editing').length, returned: list.filter((i) => i.status === 'returned').length, paid: list.filter((i) => i.status === 'paid').length };
+      }
+      return {
+        date,
+        at: now.toISOString(),
+        today: dash ? figures(date) : null,
+        yesterday: dash ? figures(iso(before), until) : null,
+        cashInDrawer: registers.filter((r) => r.status === 'open' && r.kind === 'cash').reduce((t, r) => t + (r.expected ?? 0), 0),
+        registers: can(u, ['cash_live']) || dash ? registers : [],
+        canLive: can(u, ['cash_live']),
+        attention: dash ? attentionFor(u, c.storeId).filter((i) => i.count > 0) : [],
+        activity: dash ? s.reports.activity(c.storeId, 10) : [],
+        stock: dash && can(u, STOCK) ? { rupture: stock('rupture'), alerte: stock('alerte') } : null,
+        mine,
+        sent,
+      };
     },
     // --- 0.81.0 : le magasin au quotidien -------------------------------------------
     /** « Le client voulait… » : produit absent, en rupture ou trop cher. */

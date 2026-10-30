@@ -14,6 +14,19 @@ export interface DailySummary {
   topArticles: { name: string; qty: number; revenueTtc: Fcfa }[];
 }
 
+/** Une ligne de l'activité du magasin (accueil du gérant). */
+export interface ActivityItem {
+  type: 'sale' | 'return' | 'cancelled' | 'receipt' | 'supplier_payment' | 'cash_in' | 'cash_out' | 'expense' | 'reception';
+  id: string;
+  number: string | null;
+  amount: Fcfa;
+  at: string;
+  who: string | null;
+  register: string | null;
+  party: string | null;
+  label: string | null;
+}
+
 /** Indicateurs de base de la phase 1 ; les tableaux de bord complets arrivent en phase 4. */
 /** Feuille sans colonnes ni lignes HT/TVA, et sans « TTC » dans les libellés (magasin sans TVA). */
 function withoutVat(sheet: XlsxSheet): XlsxSheet {
@@ -32,18 +45,20 @@ function withoutVat(sheet: XlsxSheet): XlsxSheet {
 }
 
 export class ReportService extends Base {
-  daily(storeId: string, date: string): DailySummary {
+  /** Chiffres d'un jour ; `until` (HH:MM:SS, heure locale) arrête le jour à cette heure, pour comparer à la veille à la même heure. */
+  daily(storeId: string, date: string, until?: string): DailySummary {
+    const upTo = until ? " AND time(created_at, 'localtime') <= @until" : '';
     const base = `FROM sale_lines l JOIN sales s ON s.id = l.sale_id
-                  WHERE s.store_id = @storeId AND s.status = 'completed' AND date(s.created_at, 'localtime') = @date`;
-    const params = { storeId, date };
+                  WHERE s.store_id = @storeId AND s.status = 'completed' AND date(s.created_at, 'localtime') = @date${upTo.replace('created_at', 's.created_at')}`;
+    const params = { storeId, date, until: until ?? '' };
     const head = this.db
       .prepare(
         `SELECT COUNT(*) AS tickets, COALESCE(SUM(total_ttc), 0) AS ttc, COALESCE(SUM(total_ht), 0) AS ht
-         FROM sales WHERE store_id = @storeId AND status = 'completed' AND date(created_at, 'localtime') = @date`,
+         FROM sales WHERE store_id = @storeId AND status = 'completed' AND date(created_at, 'localtime') = @date${upTo}`,
       )
       .get(params) as { tickets: number; ttc: number; ht: number };
     const sales = this.db
-      .prepare(`SELECT COUNT(*) FROM sales WHERE store_id = @storeId AND status = 'completed' AND kind = 'sale' AND date(created_at, 'localtime') = @date`)
+      .prepare(`SELECT COUNT(*) FROM sales WHERE store_id = @storeId AND status = 'completed' AND kind = 'sale' AND date(created_at, 'localtime') = @date${upTo}`)
       .pluck()
       .get(params) as number;
     const cost = this.db.prepare(`SELECT COALESCE(SUM(ROUND(l.qty * l.unit_cost / 1000.0)), 0) ${base}`).pluck().get(params) as number;
@@ -60,7 +75,7 @@ export class ReportService extends Base {
     const byHour = this.db
       .prepare(
         `SELECT CAST(strftime('%H', created_at, 'localtime') AS INTEGER) AS hour, SUM(total_ttc) AS revenueTtc, COUNT(*) AS tickets
-         FROM sales WHERE store_id = @storeId AND status = 'completed' AND kind = 'sale' AND date(created_at, 'localtime') = @date
+         FROM sales WHERE store_id = @storeId AND status = 'completed' AND kind = 'sale' AND date(created_at, 'localtime') = @date${upTo}
          GROUP BY hour ORDER BY hour`,
       )
       .all(params) as DailySummary['byHour'];
@@ -79,6 +94,54 @@ export class ReportService extends Base {
       byHour,
       topArticles,
     };
+  }
+
+  /** Règlements clients reçus dans la journée (toutes caisses), jusqu'à `until` s'il est donné. */
+  receipts(storeId: string, date: string, until?: string): Fcfa {
+    const upTo = until ? " AND time(paid_at, 'localtime') <= @until" : '';
+    return this.db
+      .prepare(`SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE store_id = @storeId AND date(paid_at, 'localtime') = @date${upTo}`)
+      .pluck()
+      .get({ storeId, date, until: until ?? '' }) as number;
+  }
+
+  /**
+   * Activité du magasin, la plus récente d'abord : ventes et retours, règlements
+   * clients et fournisseurs, entrées et sorties de caisse, dépenses et réceptions.
+   */
+  activity(storeId: string, limit = 12): ActivityItem[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT CASE WHEN s.status = 'cancelled' THEN 'cancelled' ELSE s.kind END AS type, s.id, s.number, s.total_ttc AS amount, s.created_at AS at,
+                  u.name AS who, r.name AS register, COALESCE(c.name, s.client_name) AS party, NULL AS label
+           FROM sales s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN registers r ON r.id = s.register_id LEFT JOIN customers c ON c.id = s.customer_id
+           WHERE s.store_id = @storeId
+           UNION ALL
+           SELECT 'receipt', p.id, p.number, p.amount, p.paid_at, u.name, r.name, c.name, NULL
+           FROM customer_payments p LEFT JOIN users u ON u.id = p.user_id LEFT JOIN registers r ON r.id = p.register_id JOIN customers c ON c.id = p.customer_id
+           WHERE p.store_id = @storeId
+           UNION ALL
+           SELECT 'supplier_payment', p.id, NULL, p.amount, p.paid_at, u.name, NULL, f.name, NULL
+           FROM supplier_payments p LEFT JOIN users u ON u.id = p.user_id JOIN suppliers f ON f.id = p.supplier_id
+           WHERE p.store_id = @storeId
+           UNION ALL
+           SELECT CASE WHEN t.direction = 'IN' THEN 'cash_in' ELSE 'cash_out' END, t.id, t.number, t.amount, t.at, u.name, r.name, t.party, t.label
+           FROM treasury_entries t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN registers r ON r.id = t.register_id
+           WHERE t.store_id = @storeId AND t.status = 'active'
+           UNION ALL
+           SELECT 'expense', e.id, e.number, e.amount, e.created_at, u.name, r.name, e.beneficiary, e.label
+           FROM expenses e LEFT JOIN users u ON u.id = e.user_id LEFT JOIN registers r ON r.id = e.register_id
+           WHERE e.store_id = @storeId AND e.status = 'active'
+           UNION ALL
+           SELECT 'reception', x.id, x.number,
+                  (SELECT COALESCE(SUM(ROUND(l.qty * l.unit_cost / 1000.0)), 0) FROM reception_lines l WHERE l.reception_id = x.id) - x.discount,
+                  x.received_at, u.name, NULL, f.name, NULL
+           FROM receptions x LEFT JOIN users u ON u.id = x.user_id LEFT JOIN suppliers f ON f.id = x.supplier_id
+           WHERE x.store_id = @storeId
+         ) ORDER BY at DESC LIMIT @limit`,
+      )
+      .all({ storeId, limit }) as ActivityItem[];
   }
 
   /** Export des ventes du jour pour la comptabilité existante (en attendant la phase 3). */

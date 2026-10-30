@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PAYMENT_METHODS, type PaymentMethod, type XlsxSheet, xlsxWorkbook } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, askConfirm, dateFr, dateTime, fcfa, qty, today, useLoad, useToast } from '../ui';
+import { Empty, Field, Modal, askConfirm, dateFr, dateTime, fcfa, qty, today, useFind, useLoad, useToast } from '../ui';
 import { SaleDetail } from './Sales';
 import { tx } from '../tax';
 
@@ -72,6 +72,8 @@ export function SalesRegister({ preset = 'all', focusSearch = false }: { preset?
   const [registerId, setRegisterId] = useState('');
   const [userId, setUserId] = useState('');
   const [search, setSearch] = useState('');
+  // Facture choisie dans l'activité de l'accueil : retrouvée par son numéro.
+  useFind('sales', setSearch);
   const [open, setOpen] = useState<Result<'pos.sale'> | null>(null);
   const reg = useLoad(
     () => call('controls.salesRegister', { ...period, kind: kind || null, status: status || null, registerId: registerId || null, userId: userId || null, search: search || null }),

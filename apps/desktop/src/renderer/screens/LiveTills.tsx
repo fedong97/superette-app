@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, fcfa, useLoad, useToast } from '../ui';
+import { Empty, fcfa, useFind, useLoad, useToast } from '../ui';
 import { FullTreasury } from './Treasury';
 
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -27,6 +27,8 @@ export function LiveTills({ user, onChanged }: { user: User; onChanged?: () => v
   const live = useLoad(() => call('treasury.live'), [tick]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<'day' | 'history'>('day');
+  // Caisse choisie depuis l'accueil ou le tableau de bord.
+  useFind('live', setSelected);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), REFRESH_MS);
     return () => clearInterval(t);

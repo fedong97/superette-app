@@ -25,13 +25,13 @@
   --surface-soft: #f8faf9;
   --surface-head: #f1f5f3;
   --row-hover: #f7faf9;
-  /* Barres de recherche et de scan de la caisse : le jaune d'avant, gardé à la demande. */
-  --scan-bg: #f6e05e;
-  --scan-line: #c9b015;
-  --scan-focus: #fbe97a;
-  --scan-client: #f4d84a;
-  --scan-client-line: #d3b52a;
-  --scan-soft: #fffbe6;
+  /* Barres de recherche et de scan de la caisse : jaune pâle, plus doux que le jaune d'avant. */
+  --scan-bg: #fdf4c8;
+  --scan-line: #e6cc5a;
+  --scan-focus: #fff9dc;
+  --scan-client: #fcefb4;
+  --scan-client-line: #e3c84b;
+  --scan-soft: #fffbea;
   --table-head: #dde9e4;
   --table-line: #cfdcd6;
   --table-alt: #f4f8f6;

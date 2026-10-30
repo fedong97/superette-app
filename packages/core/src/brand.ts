@@ -5,8 +5,16 @@
  * les fonds, et la couleur du texte posé dessus (blanc ou noir, la plus lisible).
  */
 
-export const DEFAULT_BRAND_COLOR = '#1f7a5c';
+export const DEFAULT_BRAND_COLOR = '#16866b';
 export const DEFAULT_BRAND_COLOR2 = '#57b083';
+/** Vert d'ONIX 360 avant 0.104.0 : un magasin qui l'avait gardé passe au nouveau vert. */
+export const LEGACY_BRAND_COLOR = '#1f7a5c';
+
+/**
+ * Teintes exactes du vert ONIX 360 (0.104.0) : foncé pour la barre latérale,
+ * survol des boutons, fonds très clairs pour les badges et les sélections.
+ */
+const ONIX_SHADES = { dark: '#0f735c', deep: '#075b48', soft: '#eaf5f1', pale: '#f3f9f7' };
 
 /** Palettes toutes prêtes proposées dans Administration. */
 export const BRAND_PRESETS: { name: string; color: string; color2: string }[] = [
@@ -86,17 +94,19 @@ export interface BrandPalette {
  * foncée pour ses titres afin qu'ils restent lisibles sur fond blanc.
  */
 export function brandPalette(color?: string | null, color2?: string | null): BrandPalette {
-  const brand = isHexColor(color) ? color.toLowerCase() : DEFAULT_BRAND_COLOR;
+  const picked = isHexColor(color) ? color.toLowerCase() : DEFAULT_BRAND_COLOR;
+  const brand = picked === LEGACY_BRAND_COLOR ? DEFAULT_BRAND_COLOR : picked;
   const brand2 = isHexColor(color2) ? color2.toLowerCase() : isHexColor(color) ? mixColors(brand, '#ffffff', 0.35) : DEFAULT_BRAND_COLOR2;
   let deep = mixColors(brand, '#000000', 0.35);
   for (let t = 0.45; contrast(deep, '#ffffff') < 7 && t <= 0.9; t += 0.1) deep = mixColors(brand, '#000000', t);
+  const onix = brand === DEFAULT_BRAND_COLOR ? ONIX_SHADES : null;
   return {
     brand,
     brand2,
-    dark: mixColors(brand, '#000000', 0.22),
-    deep,
-    soft: mixColors(brand, '#ffffff', 0.88),
-    pale: mixColors(brand, '#ffffff', 0.94),
+    dark: onix?.dark ?? mixColors(brand, '#000000', 0.14),
+    deep: onix?.deep ?? deep,
+    soft: onix?.soft ?? mixColors(brand, '#ffffff', 0.9),
+    pale: onix?.pale ?? mixColors(brand, '#ffffff', 0.95),
     bg: mixColors(brand, '#ffffff', 0.92),
     line: mixColors(brand, '#ffffff', 0.8),
     border: mixColors(brand, '#ffffff', 0.68),
@@ -107,22 +117,24 @@ export function brandPalette(color?: string | null, color2?: string | null): Bra
   };
 }
 
-/** Variables CSS de l'écran (`--brand`, `--brand-soft`…) tirées des deux couleurs. */
+/**
+ * Variables CSS de l'écran tirées des deux couleurs. Depuis 0.104.0 seules les
+ * teintes de la marque en viennent (`--brand`, `--brand-hover`, `--brand-dark`,
+ * `--brand-light`…) : le fond, les traits et le texte restent neutres (design.css).
+ */
 export function brandCssVars(color?: string | null, color2?: string | null): Record<string, string> {
   const p = brandPalette(color, color2);
   return {
     '--brand': p.brand,
     '--brand2': p.brand2,
-    '--brand-dark': p.dark,
+    '--brand-hover': p.dark,
+    '--brand-dark': p.deep,
     '--brand-deep': p.deep,
     '--brand-ink': p.ink,
     '--brand2-ink': p.ink2,
+    '--brand-light': p.soft,
+    '--brand-lighter': p.pale,
     '--brand-soft': p.soft,
     '--brand-pale': p.pale,
-    '--brand-line': p.border,
-    '--bg': p.bg,
-    '--line': p.line,
-    '--ink': p.text,
-    '--muted': p.muted,
   };
 }

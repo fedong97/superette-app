@@ -753,7 +753,7 @@ function TeamDialog({ team, onClose, onDone }: { team: Team | null; onClose: () 
     end: team?.end_time ?? '17:00',
     days: team?.days ?? '123456',
     tolerance: team?.tolerance === null || team?.tolerance === undefined ? '' : String(team.tolerance),
-    color: team?.color ?? '#1f7a5c',
+    color: team?.color ?? '#16866b',
     active: team ? Boolean(team.active) : true,
   });
   return (

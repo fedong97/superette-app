@@ -194,23 +194,8 @@ const MENU_ICONS: Record<string, string> = {
 
 /** Icône d'un écran : celle du premier menu qui l'ouvre. */
 const winIcon = (kind: WinKind) => MENU_ICONS[MENUS.find(([, items]) => items.some((it) => it.open?.[0] === kind))?.[0] ?? ''] ?? '▣';
-const MENU_COLORS: Record<string, string> = {
-  Fichier: '#64748b',
-  Vente: 'var(--brand)',
-  Trésorerie: '#e0a800',
-  Stock: '#65a30d',
-  Articles: '#0891b2',
-  Achats: '#2563eb',
-  Fournisseurs: '#0f766e',
-  Clients: '#db2777',
-  Dépenses: '#dc2626',
-  Personnel: '#ea580c',
-  Suivi: 'var(--brand2)',
-  Comptabilité: '#4f46e5',
-  Fiscalité: '#7c3aed',
-  Administration: '#64748b',
-  Aide: '#94a3b8',
-};
+/** 0.104.0 : tous les menus prennent la couleur de la marque (icônes et cartes sans couleur décorative). */
+const MENU_COLOR = 'var(--brand)';
 /** Réglages et Aide restent en bas de la barre verte ; les autres menus s'y affichent au choix de chacun. */
 const RAIL_FIXED = ['Administration', 'Aide'];
 const RAIL_LABELS: Record<string, string> = {
@@ -1224,7 +1209,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             <div key={name} className="menu">
               <button
                 className={`rail-item ${menu === name ? 'open' : ''}`}
-                style={{ '--c': MENU_COLORS[name] } as React.CSSProperties}
+                style={{ '--c': MENU_COLOR } as React.CSSProperties}
                 title={name}
                 data-tip={RAIL_LABELS[name] ?? name}
                 aria-haspopup="menu"
@@ -1280,7 +1265,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           <div key={name} className="menu">
             <button
               className={`rail-item ${menu === name ? 'open' : ''}`}
-              style={{ '--c': MENU_COLORS[name] } as React.CSSProperties}
+              style={{ '--c': MENU_COLOR } as React.CSSProperties}
               data-tip={RAIL_LABELS[name] ?? name}
               aria-haspopup="menu"
               aria-expanded={menu === name}
@@ -1680,7 +1665,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           </div>
           <div className="all-menus-grid">
             {visibleMenus.map(([name, items]) => (
-              <section key={name} className="menu-card" style={{ '--c': MENU_COLORS[name] } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
+              <section key={name} className="menu-card" style={{ '--c': MENU_COLOR } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
                 <h2>
                   <i aria-hidden>{MENU_ICONS[name]}</i>
                   {name}

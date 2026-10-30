@@ -25,8 +25,10 @@
   --surface-soft: #f8faf9;
   --surface-head: #f1f5f3;
   --row-hover: #f7faf9;
-  --topbar-bg: #eef1f4;
-  --topbar-line: #dde3e9;
+  /* Onglets rapides de la barre du haut : remplis d'un gris ardoise (pas de vert), l'onglet de devant en vert. */
+  --tab-bg: #e2e8f0;
+  --tab-line: #cbd5e1;
+  --tab-ink: #1e293b;
 
   --text-primary: #16332d;
   --text-secondary: #60736e;
@@ -293,11 +295,11 @@ table.list tr.total td { background: var(--surface-2); font-weight: 650; }
 /* Onglets rapides : discrets, l'onglet de devant en relief */
 /* 0.93.0 : deux lignes au plus, chaque onglet encadré d'un trait fin de la couleur du magasin. */
 .quick-tabs { gap: 4px; align-items: center; align-content: center; flex-wrap: wrap; max-height: 64px; overflow: hidden; }
-.quick-tabs button { border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; line-height: 18px; font-weight: 550; color: var(--ink); }
-.quick-tabs button:hover:not(:disabled) { background: var(--brand-lighter); border-color: var(--brand); color: var(--brand); }
-.quick-tabs button.open { color: var(--ink); box-shadow: inset 0 -2px 0 var(--line-strong); }
-.quick-tabs button.active { background: var(--brand-light); border-color: var(--brand); color: var(--brand-dark); box-shadow: none; font-weight: 650; }
-.quick-tabs button.active:hover:not(:disabled) { background: var(--brand-light); color: var(--brand-dark); }
+.quick-tabs button { border-radius: var(--radius-sm); background: var(--tab-bg); border: 1px solid var(--tab-line); padding: 4px 10px; font-size: 13px; line-height: 18px; font-weight: 550; color: var(--tab-ink); }
+.quick-tabs button:hover:not(:disabled) { background: color-mix(in srgb, var(--tab-bg) 80%, var(--tab-ink)); border-color: var(--tab-line); color: var(--tab-ink); }
+.quick-tabs button.open { color: var(--tab-ink); box-shadow: inset 0 -2px 0 var(--line-strong); }
+.quick-tabs button.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); box-shadow: none; font-weight: 650; }
+.quick-tabs button.active:hover:not(:disabled) { background: var(--brand-hover); color: var(--brand-ink); }
 .quick-tabs button.credit { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .quick-tabs button.credit.active { background: var(--warn-soft); color: var(--warn); }
 
@@ -503,8 +505,7 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
 .rail .side-user b { background: rgba(255, 255, 255, 0.16); color: #ffffff; }
 
 /* En-tête et barre d'état blancs */
-/* Barre du haut gris ardoise clair (neutre froid, distinct du blanc et du vert) ; les onglets restent blancs. */
-.topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-line); }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border-light); }
 .topbar .top-icon, .topbar .help-btn { color: var(--text-primary); }
 .topbar .top-icon:hover:not(:disabled), .topbar .help-btn:hover { color: var(--brand); background: var(--surface) !important; border-color: var(--border); }
 .topbar .top-icon.tab-add { border-color: var(--border); color: var(--text-secondary); }

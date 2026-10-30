@@ -189,6 +189,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - « Changer l'adresse » (Administration › Serveur central, `sync.changeUrl`) : même poste, même jeton, nouvelle adresse vérifiée auprès du serveur.
 - ONIX 360 Serveur : sauvegarde toutes les 1, 2, 4, 6 (par défaut), 12 ou 24 heures, 40 gardées, écrite sous un nom provisoire puis relue ; copie vers un second dossier (`backup_copy_dir`) relue et rattrapée toutes les 10 minutes ; dépôt d'une sauvegarde par l'interface (`POST /admin/api/backups/upload`, archive vérifiée) avant de la restaurer. « Serveur : sauvegarde à vérifier » dans la barre d'état des PC en cas d'échec, de retard ou de copie impossible.
 
+**Retouches de la palette (0.105.0)**
+- Tableaux : en-tête `--table-head` #DDE9E4, cadre `--table-line`, une ligne sur deux `--table-alt` (sous `:where()` pour laisser passer les lignes marquées).
+- Barres de titre des fenêtres vertes comme avant 0.104.0 ; cartes de chiffres et accès rapides teintés (`--stat-bg`, liseré vert) ; onglets rapides bleu clair (`--tab-*`).
+- Caisse : zone de saisie de la recherche jaune pâle (`--scan-*`), boutons du bas en une seule ligne (flex).
+- Accueil : `.windows > .home` défile (`overflow-y: auto`), il était coupé quand le contenu dépassait l'écran.
+
 **Nouvelle palette de couleurs (0.104.0)**
 - Neutres majoritaires, vert ONIX 360 en accent, couleurs réservées aux états. Variables globales en tête de `design.css` : marque (`--brand-dark` #075B48, `--brand` #16866B, `--brand-hover` #0F735C, `--brand-light` #EAF5F1, `--brand-lighter` #F3F9F7), fond `--bg` #F4F7F6, surfaces, texte (`--text-primary` #16332D, `--text-secondary`, `--text-muted`), bordures, états (`--success`, `--warning`, `--danger`, `--info` et leurs fonds), rayons 6/10/14 px et ombres légères. Les anciens noms (`--ink`, `--muted`, `--line`, `--panel`…) y sont rattachés.
 - Les couleurs du magasin (`brandCssVars`) ne donnent plus que les teintes de la marque ; le fond, les traits et le texte restent neutres. L'ancien vert par défaut (#1f7a5c) passe au nouveau.

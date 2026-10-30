@@ -157,8 +157,8 @@ ul.errors { color: var(--danger); }
 .toast-x { background: transparent; border: none; color: #fff; padding: 2px 6px; margin-left: auto; }
 
 /* Caisse : fiche de facturation */
-.scan-input { flex: 1; min-width: 260px; background: var(--brand-lighter); border-color: var(--brand) !important; font-size: 17px; padding: 7px 10px !important; font-style: italic; }
-.scan-input:focus { font-style: normal; background: var(--surface); }
+.scan-input { flex: 1; min-width: 260px; background: var(--scan-bg); border-color: var(--scan-line) !important; font-size: 17px; padding: 7px 10px !important; font-style: italic; }
+.scan-input:focus { font-style: normal; background: var(--scan-focus); }
 kbd { font-family: inherit; font-size: 11px; font-weight: 700; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; color: var(--text-secondary); }
 .last-sale { padding: 40px; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; color: var(--muted); }
 .change { font-size: 22px; color: var(--ink); }
@@ -719,7 +719,7 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: var
 .pos-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 34%); gap: 14px; min-height: 0; }
 .pos-shop { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
 .pos-search { display: flex; gap: 10px; }
-.pos-search .scan-wrap { flex: 1; display: flex; align-items: center; gap: 10px; height: 58px; padding: 0 8px 0 16px; background: #fff; border: 2px solid var(--brand); border-radius: var(--radius-lg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent); }
+.pos-search .scan-wrap { flex: 1; display: flex; align-items: center; gap: 10px; height: 58px; padding: 0 8px 0 16px; background: var(--scan-bg); border: 2px solid var(--scan-line); border-radius: var(--radius-lg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent); }
 .pos-search .scan-icon { font-size: 18px; }
 .pos-search .scan-input { flex: 1; border: none !important; outline: none !important; background: transparent; font-size: 19px; font-weight: 700; padding: 0 !important; }
 .pos-search .scan-input::placeholder { font-weight: 500; color: var(--muted); }
@@ -804,15 +804,16 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: var
 .tk-er b { font-size: 22px; font-variant-numeric: tabular-nums; }
 .tk-er .change { background: var(--success-bg); }
 .tk-er .change b { color: var(--success-ink); }
-.pos-actions { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)) minmax(0, 1.4fr) minmax(0, 1.8fr); gap: 8px; }
-.pos-actions button { height: 74px; padding: 4px; border: 1px solid var(--border-light); border-bottom: 3px solid var(--c, var(--border)); border-radius: var(--radius-lg); background: var(--surface) !important; color: var(--text-primary); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 13px; font-weight: 800; line-height: 1.1; }
-.pos-actions button i { font-style: normal; font-size: 20px; }
-.pos-actions button kbd { font-size: 9.5px; }
-.pos-actions button.pay { background: #fff !important; color: var(--brand); border: 2px solid var(--brand); border-bottom-width: 4px; font-size: 15px; }
-.pos-actions button.go { background: var(--brand) !important; color: var(--brand-ink); border-bottom-color: var(--brand-dark); flex-direction: row; gap: 12px; font-size: 19px; }
-.pos-actions button.go i { font-size: 28px; }
+/* 0.105.0 : tous les boutons sur une seule ligne, plus bas et plus serrés. */
+.pos-actions { display: flex; flex-wrap: nowrap; gap: 6px; }
+.pos-actions button { flex: 1 1 0; min-width: 0; overflow: hidden; height: 54px; padding: 3px 2px; border: 1px solid var(--border-light); border-bottom: 3px solid var(--c, var(--border)); border-radius: var(--radius-md); background: var(--surface) !important; color: var(--text-primary); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-size: 11.5px; font-weight: 700; line-height: 1.1; white-space: nowrap; text-overflow: ellipsis; }
+.pos-actions button i { font-style: normal; font-size: 16px; }
+.pos-actions button kbd { font-size: 9px; }
+.pos-actions button.pay { background: #fff !important; color: var(--brand); border: 2px solid var(--brand); border-bottom-width: 3px; font-size: 13px; flex-grow: 1.4; }
+.pos-actions button.go { background: var(--brand) !important; color: var(--brand-ink); border-bottom-color: var(--brand-dark); flex-direction: row; gap: 8px; font-size: 15px; flex-grow: 1.8; }
+.pos-actions button.go i { font-size: 20px; }
 .pos-actions button.go span { display: flex; flex-direction: column; align-items: flex-start; }
-.pos-actions button.go small { font-size: 11px; font-weight: 600; opacity: 0.9; }
+.pos-actions button.go small { font-size: 10px; font-weight: 600; opacity: 0.9; }
 .pos-actions .held-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; }
 .quick-tabs button.active:hover:not(:disabled) { background: var(--brand-hover); color: #fff; }
 .pos-tile { color: var(--ink); }
@@ -900,7 +901,7 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .pc-head { display: grid; grid-template-columns: auto 150px minmax(180px, 260px) auto auto 1fr; grid-auto-rows: minmax(30px, auto); gap: 6px 8px; align-items: center; }
 .pc-head > label { color: var(--text-secondary); }
 .pc-head input { height: 28px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 3px; font-size: 13.5px; }
-.pc-client { background: var(--brand-lighter); border: 1px solid var(--brand); border-radius: 3px; height: 28px; font-weight: 800; text-align: left; padding: 3px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.pc-client { background: var(--scan-client); border: 1px solid var(--scan-client-line); border-radius: 3px; height: 28px; font-weight: 800; text-align: left; padding: 3px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
 .pc-client.missing { background: var(--warning-bg); color: var(--danger-ink); }
 .pc-small { border: 1px solid var(--border); background: var(--surface-soft); border-radius: 3px; height: 28px; padding: 2px 8px; font-size: 13px; white-space: nowrap; }
 .pc-count { color: var(--text-secondary); white-space: nowrap; }
@@ -915,8 +916,8 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .pc-tabs button.active { background: #fff; font-weight: 800; margin-bottom: -1px; }
 .pc-tools { display: flex; gap: 6px; align-items: center; flex: none; }
 .pc-scan { position: relative; flex: 1; }
-.pc-scan input { width: 100%; height: 30px; background: var(--brand-lighter); border: 1px solid var(--brand); border-radius: 3px; padding: 3px 8px; font-size: 14px; font-style: italic; }
-.pc-scan input:focus { background: var(--surface); outline: 2px solid color-mix(in srgb, var(--brand) 25%, transparent); }
+.pc-scan input { width: 100%; height: 30px; background: var(--scan-client); border: 1px solid var(--scan-client-line); border-radius: 3px; padding: 3px 8px; font-size: 14px; font-style: italic; }
+.pc-scan input:focus { background: var(--scan-focus); outline: 2px solid var(--brand); }
 .pc-grid { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); }
 .pc-grid table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pc-grid th { position: sticky; top: 0; background: var(--surface-head); text-align: left; padding: 4px 6px; border: 1px solid var(--border); font-weight: 700; z-index: 1; }
@@ -980,7 +981,7 @@ body.mdi-dragging .mdi > .window { pointer-events: none; }
 .pv-entry > label { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--text-secondary); }
 .pv-grow { flex: 1; max-width: 520px; }
 .pv-scan { position: relative; }
-.pv-scan input { width: 100%; height: 26px; border: 1px solid var(--border); border-radius: 0; padding: 2px 7px; background: var(--warning-bg); font-size: 13px; }
+.pv-scan input { width: 100%; height: 26px; border: 1px solid var(--border); border-radius: 0; padding: 2px 7px; background: var(--scan-soft); font-size: 13px; }
 .pv-qty { width: 80px; height: 26px; border: 1px solid var(--border); border-radius: 0; padding: 2px 6px; text-align: right; }
 .pv-entry > button, .pv-actions button, .pv-payrow button { border: 1px solid var(--border); background: var(--surface); padding: 3px 11px; border-radius: 2px; font-size: 12.5px; height: 27px; display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); font-weight: 600; }
 .pv-entry > button.g, .pv-actions button.g { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }

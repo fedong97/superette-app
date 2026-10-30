@@ -25,6 +25,8 @@
   --surface-soft: #f8faf9;
   --surface-head: #f1f5f3;
   --row-hover: #f7faf9;
+  --topbar-bg: #eef1f4;
+  --topbar-line: #dde3e9;
 
   --text-primary: #16332d;
   --text-secondary: #60736e;
@@ -501,9 +503,10 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
 .rail .side-user b { background: rgba(255, 255, 255, 0.16); color: #ffffff; }
 
 /* En-tête et barre d'état blancs */
-.topbar { background: var(--surface); border-bottom: 1px solid var(--border-light); }
+/* Barre du haut gris ardoise clair (neutre froid, distinct du blanc et du vert) ; les onglets restent blancs. */
+.topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-line); }
 .topbar .top-icon, .topbar .help-btn { color: var(--text-primary); }
-.topbar .top-icon:hover:not(:disabled), .topbar .help-btn:hover { color: var(--brand); background: var(--brand-lighter) !important; border-color: var(--border-light); }
+.topbar .top-icon:hover:not(:disabled), .topbar .help-btn:hover { color: var(--brand); background: var(--surface) !important; border-color: var(--border); }
 .topbar .top-icon.tab-add { border-color: var(--border); color: var(--text-secondary); }
 .statusbar { background: var(--surface); border-top: 1px solid var(--border-light); color: var(--text-secondary); }
 

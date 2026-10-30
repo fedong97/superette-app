@@ -322,19 +322,22 @@ table.list tr.total td { background: var(--surface-2); font-weight: 650; }
 /* --- Fenêtres de travail (façon Sage) : barre blanche, accent sur la fenêtre de devant --- */
 .windows { background: var(--bg); }
 .mdi { border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); animation: pop-in var(--base) var(--ease); }
-.mdi.active { border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06); }
+.mdi.active { border: 2px solid var(--brand); box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06); }
 /* Boîte de dialogue devant (Paramètres, Ma caisse…) : la zone de travail derrière s'assombrit. */
 .mdi.dialog.active { box-shadow: 0 0 0 100vmax rgba(22, 51, 45, 0.24), 0 24px 60px rgba(15, 23, 42, 0.2); }
 .mdi.max { border: none; border-radius: 0; box-shadow: none; animation: none; }
-.mdi-bar { height: 40px; background: var(--surface-soft); color: var(--text-secondary); border-bottom: 1px solid var(--border-light); font-size: 13px; font-weight: 600; gap: 6px; }
-.mdi.active .mdi-bar { background: var(--surface); color: var(--text-primary); border-bottom-color: var(--border-light); box-shadow: inset 0 3px 0 var(--brand); }
+/* Barres de titre comme avant 0.104.0 : vert clair, vert plein sur la fenêtre de devant. */
+.mdi-bar { height: 40px; background: color-mix(in srgb, var(--brand) 12%, white); color: var(--text-primary); border-bottom: 1px solid color-mix(in srgb, var(--brand) 25%, white); font-size: 13px; font-weight: 600; gap: 6px; }
+.mdi.active .mdi-bar { background: var(--brand); color: var(--brand-ink); border-bottom-color: var(--brand); box-shadow: none; }
 .mdi.max.active { border: none; box-shadow: none; }
 .mdi.max.active .mdi-bar { box-shadow: none; }
-.mdi-bar i { color: var(--text-secondary); display: grid; place-items: center; }
-.mdi.active .mdi-bar i { color: var(--brand); }
+.mdi-bar i { color: var(--brand); display: grid; place-items: center; }
+.mdi.active .mdi-bar i { color: var(--brand-ink); }
 .mdi-bar button { color: inherit; border-radius: var(--radius-sm); }
-.mdi-bar button:hover, .mdi.active .mdi-bar button:hover { background: var(--brand-lighter); color: var(--brand); }
-.mdi-bar kbd, .mdi.active .mdi-bar kbd { background: transparent; border-color: var(--border); color: var(--text-muted); }
+.mdi-bar button:hover { background: var(--surface-soft); color: var(--text-primary); }
+.mdi.active .mdi-bar button:hover { background: rgba(255, 255, 255, 0.2); color: var(--brand-ink); }
+.mdi-bar kbd { background: transparent; border-color: var(--border); color: var(--text-muted); }
+.mdi.active .mdi-bar kbd { color: var(--brand-ink); border-color: rgba(255, 255, 255, 0.45); }
 .mdi-bar .mdi-x { background: transparent; }
 .mdi-bar .mdi-x:hover, .mdi.active .mdi-bar .mdi-x:hover { background: var(--danger); color: #ffffff; }
 .mdi-grip { background: linear-gradient(135deg, transparent 55%, var(--border) 55%); }

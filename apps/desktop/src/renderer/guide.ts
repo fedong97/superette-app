@@ -109,6 +109,15 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.105.0',
+    items: [
+      "Tableaux plus lisibles : en-tête vert-gris marqué, une ligne sur deux teintée, cadre visible ; les couleurs d'écart de l'inventaire restent prioritaires.",
+      "Fenêtres : barre de titre verte comme avant (vert plein sur la fenêtre de devant). Cartes de chiffres et accès rapides de l'accueil légèrement teintés de vert.",
+      "Caisse : la zone de saisie de la recherche est jaune pâle ; les boutons du bas sont plus petits et tiennent sur une seule ligne.",
+      "Accueil : la page défile jusqu'en bas (elle était coupée sous les points d'attention quand le magasin a beaucoup de caisses).",
+    ],
+  },
+  {
     version: '0.104.0',
     items: [
       "Nouvelles couleurs : fonds gris très clair, cartes et tableaux blancs, le vert ONIX 360 réservé aux actions principales et aux éléments actifs.",

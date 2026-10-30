@@ -25,6 +25,17 @@
   --surface-soft: #f8faf9;
   --surface-head: #f1f5f3;
   --row-hover: #f7faf9;
+  /* Barres de recherche et de scan de la caisse : jaune pâle, plus doux que le jaune d'avant. */
+  --scan-bg: #fdf4c8;
+  --scan-line: #e6cc5a;
+  --scan-focus: #fff9dc;
+  --scan-client: #fcefb4;
+  --scan-client-line: #e3c84b;
+  --scan-soft: #fffbea;
+  --table-head: #dde9e4;
+  --table-line: #cfdcd6;
+  --table-alt: #f4f8f6;
+  --table-hover: #e8f1ed;
   /* Onglets rapides de la barre du haut : remplis de bleu clair (pas de vert), l'onglet de devant en vert. */
   --tab-bg: #dbeafe;
   --tab-line: #bfdbfe;
@@ -311,19 +322,22 @@ table.list tr.total td { background: var(--surface-2); font-weight: 650; }
 /* --- Fenêtres de travail (façon Sage) : barre blanche, accent sur la fenêtre de devant --- */
 .windows { background: var(--bg); }
 .mdi { border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); animation: pop-in var(--base) var(--ease); }
-.mdi.active { border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06); }
+.mdi.active { border: 2px solid var(--brand); box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06); }
 /* Boîte de dialogue devant (Paramètres, Ma caisse…) : la zone de travail derrière s'assombrit. */
 .mdi.dialog.active { box-shadow: 0 0 0 100vmax rgba(22, 51, 45, 0.24), 0 24px 60px rgba(15, 23, 42, 0.2); }
 .mdi.max { border: none; border-radius: 0; box-shadow: none; animation: none; }
-.mdi-bar { height: 40px; background: var(--surface-soft); color: var(--text-secondary); border-bottom: 1px solid var(--border-light); font-size: 13px; font-weight: 600; gap: 6px; }
-.mdi.active .mdi-bar { background: var(--surface); color: var(--text-primary); border-bottom-color: var(--border-light); box-shadow: inset 0 3px 0 var(--brand); }
+/* Barres de titre comme avant 0.104.0 : vert clair, vert plein sur la fenêtre de devant. */
+.mdi-bar { height: 40px; background: color-mix(in srgb, var(--brand) 12%, white); color: var(--text-primary); border-bottom: 1px solid color-mix(in srgb, var(--brand) 25%, white); font-size: 13px; font-weight: 600; gap: 6px; }
+.mdi.active .mdi-bar { background: var(--brand); color: var(--brand-ink); border-bottom-color: var(--brand); box-shadow: none; }
 .mdi.max.active { border: none; box-shadow: none; }
 .mdi.max.active .mdi-bar { box-shadow: none; }
-.mdi-bar i { color: var(--text-secondary); display: grid; place-items: center; }
-.mdi.active .mdi-bar i { color: var(--brand); }
+.mdi-bar i { color: var(--brand); display: grid; place-items: center; }
+.mdi.active .mdi-bar i { color: var(--brand-ink); }
 .mdi-bar button { color: inherit; border-radius: var(--radius-sm); }
-.mdi-bar button:hover, .mdi.active .mdi-bar button:hover { background: var(--brand-lighter); color: var(--brand); }
-.mdi-bar kbd, .mdi.active .mdi-bar kbd { background: transparent; border-color: var(--border); color: var(--text-muted); }
+.mdi-bar button:hover { background: var(--surface-soft); color: var(--text-primary); }
+.mdi.active .mdi-bar button:hover { background: rgba(255, 255, 255, 0.2); color: var(--brand-ink); }
+.mdi-bar kbd { background: transparent; border-color: var(--border); color: var(--text-muted); }
+.mdi.active .mdi-bar kbd { color: var(--brand-ink); border-color: rgba(255, 255, 255, 0.45); }
 .mdi-bar .mdi-x { background: transparent; }
 .mdi-bar .mdi-x:hover, .mdi.active .mdi-bar .mdi-x:hover { background: var(--danger); color: #ffffff; }
 .mdi-grip { background: linear-gradient(135deg, transparent 55%, var(--border) 55%); }
@@ -511,15 +525,16 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
 .topbar .top-icon.tab-add { border-color: var(--border); color: var(--text-secondary); }
 .statusbar { background: var(--surface); border-top: 1px solid var(--border-light); color: var(--text-secondary); }
 
-/* Tableaux légers : en-tête gris vert très clair, corps blanc, traits fins */
-table.list { background: var(--surface); border-color: var(--border-light); }
-table.list thead th, table.list th { background: var(--surface-head); color: var(--text-primary); font-weight: 600; border-bottom: 1px solid var(--border-light); }
-:where(table.list) > tbody > tr { background: var(--surface); }
+/* Tableaux (0.105.0) : en-tête vert-gris marqué, une ligne sur deux teintée, cadre visible ; pas de grands aplats verts. */
+table.list { background: var(--surface); border: 1px solid var(--table-line); }
+table.list thead th, table.list th { background: var(--table-head); color: var(--text-primary); font-weight: 650; border-bottom: 1px solid var(--table-line); }
+:where(table.list > tbody > tr) { background: var(--surface); }
+/* :where() garde les lignes marquées (écart, sélection, alerte) au-dessus de la teinte alternée. */
+:where(table.list > tbody > tr:nth-child(even)) { background: var(--table-alt); }
 table.list td { border-bottom: 1px solid var(--border-light); }
-table.list tbody tr:hover { background: var(--row-hover); }
-table.list tr.clickable:hover { background: var(--row-hover); }
+table.list tbody tr:hover, table.list tr.clickable:hover { background: var(--table-hover); }
 table.list tr.selected, table.list tr.selected td { background: var(--brand-light); }
-table.list tr.total td { background: var(--surface-head); }
+table.list tr.total td { background: var(--table-head); border-top: 1px solid var(--table-line); }
 
 /* Cartes, panneaux et fenêtres : blancs, trait discret, ombre légère */
 .card, section.card { background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
@@ -610,3 +625,19 @@ ul.home-rank { list-style: none; padding-left: 0; }
 @media (max-width: 1100px) {
   .home-grid, .home-two { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* --- 0.105.0 : cartes de chiffres légèrement teintées du vert de la marque, liseré à gauche --- */
+:root {
+  --stat-bg: linear-gradient(135deg, #e6f2ed 0%, #f3f9f7 100%);
+  --stat-line: #d3e5dd;
+}
+.home-kpis button, .kpis > div, .tre-foot > div, .dl-kpis div,
+.kpis > div:nth-child(4n + 2), .kpis > div:nth-child(4n + 3), .kpis > div:nth-child(4n + 4),
+.tre-foot > div:nth-child(4n + 2), .tre-foot > div:nth-child(4n + 3), .tre-foot > div:nth-child(4n + 4) {
+  background: var(--stat-bg); border: 1px solid var(--stat-line); border-left: 3px solid var(--brand);
+}
+.home-kpis button:hover, .kpis > div.clickable:hover { border-color: var(--stat-line); border-left-color: var(--brand); box-shadow: var(--shadow-md); }
+/* Accès rapides de l'accueil : même teinte que les cartes de chiffres, pastille d'icône blanche. */
+.role-tiles button, .role-tiles button:hover:not(:disabled) { background: var(--stat-bg); border: 1px solid var(--stat-line); }
+.role-tiles button:hover:not(:disabled) { border-color: var(--brand); }
+.role-tiles .tile-icon { background: var(--surface); box-shadow: inset 0 0 0 1px var(--stat-line); }

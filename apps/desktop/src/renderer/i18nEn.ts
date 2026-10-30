@@ -5748,6 +5748,10 @@ export const EN: Record<string, string> = {
   "Nouvelles couleurs : fonds gris très clair, cartes et tableaux blancs, le vert ONIX 360 réservé aux actions principales et aux éléments actifs.": "New colours: very light grey backgrounds, white cards and tables, ONIX 360 green kept for main actions and active items.",
   "Couleurs des états partout : vert pour ce qui va bien, orange pour l'attention, rouge pour les erreurs et ruptures, bleu pour l'information.": "Status colours everywhere: green when all is well, orange for attention, red for errors and stock-outs, blue for information.",
   "Barre latérale vert profond avec les icônes de couleur des menus, onglets du haut en bleu clair, fenêtres à barre blanche.": "Deep green sidebar with the coloured menu icons, light blue tabs at the top, windows with a white title bar.",
+  "Tableaux plus lisibles : en-tête vert-gris marqué, une ligne sur deux teintée, cadre visible ; les couleurs d'écart de l'inventaire restent prioritaires.": "Easier-to-read tables: stronger green-grey header, every other row tinted, visible frame; inventory gap colours still take priority.",
+  "Fenêtres : barre de titre verte comme avant (vert plein sur la fenêtre de devant). Cartes de chiffres et accès rapides de l'accueil légèrement teintés de vert.": "Windows: green title bar as before (solid green on the front window). Figure cards and home quick links lightly tinted green.",
+  "Caisse : la zone de saisie de la recherche est jaune pâle ; les boutons du bas sont plus petits et tiennent sur une seule ligne.": "Till: the search entry field is pale yellow; the bottom buttons are smaller and fit on a single row.",
+  "Accueil : la page défile jusqu'en bas (elle était coupée sous les points d'attention quand le magasin a beaucoup de caisses).": "Home: the page now scrolls to the bottom (it was cut off below the attention points when the store has many tills).",
 };
 
 /** Textes avec un nombre, un numéro ou un nom : le premier motif qui correspond s'applique. */

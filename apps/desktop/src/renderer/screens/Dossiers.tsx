@@ -377,6 +377,7 @@ function BringBack({ info, onClose, onDone }: { info: FicheInfo; onClose: () => 
     setBusy(true);
     try {
       const r = await call('fiche.bringBack', info.file);
+      if (r.reset) toast.ok(`Boutique remise à zéro. Sauvegarde d’avant : ${r.backup}`);
       toast.ok(
         r.changes === 0 && r.settings === 0
           ? 'Fiche rapportée : rien n’avait été modifié dedans'
@@ -421,6 +422,13 @@ function BringBack({ info, onClose, onDone }: { info: FicheInfo; onClose: () => 
           </table>
           {info.returned_at ? (
             <p className="danger-text">Cette fiche a déjà été rapportée le {dateTime(info.returned_at)}.</p>
+          ) : f.reset ? (
+            <p className="danger-text">
+              Remise à zéro des données d’essai faite dans la fiche le {dateTime(f.reset.at)}
+              {f.reset.byName ? ` par ${f.reset.byName}` : ''} : la boutique va d’abord être remise à zéro (ventes, achats, caisses, dépenses et mouvements de stock effacés, toutes celles faites
+              jusqu’à maintenant comprises ; stock {f.reset.keepStock ? 'gardé comme stock de départ' : 'remis à zéro'}), avec une sauvegarde juste avant. Ensuite, ce qui a été modifié dans la
+              fiche est ajouté.
+            </p>
           ) : (
             <p>
               Ce qui a été modifié dans la fiche depuis le {dateTime(f.at)} est ajouté à la boutique. Les ventes faites ici pendant ce temps restent ; si un même élément a été changé des deux côtés, la modification la

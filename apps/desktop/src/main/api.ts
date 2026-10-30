@@ -943,9 +943,21 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'fiche.check': async (file: string) => (requireAdmin(), s.fiches.check(await local(file))),
     'fiche.bringBack': async (file: string) => {
       const u = requireAdmin();
-      const back = s.fiches.bringBack(u.id, await local(file));
+      const path = await local(file);
+      // Remise à zéro faite dans la fiche : la boutique la refait d'abord, avec une sauvegarde juste avant.
+      const meta = s.fiches.returnable(path);
+      let backup: string | null = null;
+      if (meta.reset) {
+        if (s.sync.credentials()) {
+          throw new AppError('Cette fiche demande une remise à zéro des données d’essai, mais ce PC est relié au serveur central : les autres PC lui renverraient les données d’essai. Déliez ce PC (Administration › Serveur central), rapportez la fiche, puis reliez-le', 'INVALID');
+        }
+        if (!s.backups.status().dir) throw new AppError('Cette fiche demande une remise à zéro : choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes), une sauvegarde est faite juste avant', 'INVALID');
+        backup = (await s.backups.backup(u.id, { kind: 'safety' })).file;
+        s.reset.run(u.id, { keepStock: meta.reset.keepStock });
+      }
+      const back = s.fiches.bringBack(u.id, path);
       s.fiches.archiveShared(file);
-      return back;
+      return { ...back, backup };
     },
     // Dossier partagé (réseau, OneDrive, Google Drive) : copie du comptable déposée seule, fiches déposées par le technicien.
     'fiche.share': () => (requireAdmin(), s.fiches.shareStatus()),
@@ -3332,7 +3344,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
 
     // --- Sauvegardes -------------------------------------------------------
     // --- Remise à zéro après l'installation ---------------------------------------
-    'reset.preview': () => (requireAdmin(), { ...s.reset.preview(), connected: Boolean(s.sync.credentials()), backupDir: s.backups.status().dir }),
+    'reset.preview': () => {
+      requireAdmin();
+      const fiche = s.fiches.current();
+      return { ...s.reset.preview(), connected: Boolean(s.sync.credentials()), backupDir: s.backups.status().dir, fiche: fiche?.kind ?? null, pending: fiche?.reset ?? null };
+    },
     /**
      * Efface les données d'essai (ventes, achats, caisses, stock…) et garde les
      * réglages et les fiches. Code de l'administrateur, phrase de confirmation,
@@ -3340,15 +3356,21 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      */
     'reset.run': async (opts: { keepStock?: boolean }, pin: string, confirm: string) => {
       const u = requireAdmin();
-      if (s.fiches.current()) throw new AppError('Ouvrez la boutique elle-même (pas une fiche ni le mode formation) pour la remettre à zéro', 'FICHE');
+      const fiche = s.fiches.current();
+      if (fiche && fiche.kind !== 'intervention') throw new AppError('Ouvrez la boutique elle-même ou une fiche d’intervention (pas une copie comptable ni le mode formation) pour la remettre à zéro', 'FICHE');
       if (s.sync.credentials()) {
         throw new AppError('Ce PC est relié au serveur central : les autres PC lui renverraient les données d’essai. Faites la remise à zéro avant de relier les PC, ou demandez au support de vider le serveur', 'INVALID');
       }
       if ((confirm ?? '').trim().toUpperCase() !== 'REMETTRE A ZERO') throw new AppError('Tapez REMETTRE A ZERO pour confirmer', 'INVALID');
       s.admin.login(u.login, pin ?? '');
+      // Fiche d'intervention : c'est une copie, rien à sauvegarder ; la boutique refera la remise à zéro au retour de la fiche.
+      if (fiche) {
+        const done = s.reset.run(u.id, { ...opts, inFiche: true });
+        return { ...done, backup: null, fiche: s.fiches.markReset(u, Boolean(opts.keepStock)) };
+      }
       if (!s.backups.status().dir) throw new AppError('Choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes) : une sauvegarde est faite juste avant la remise à zéro', 'INVALID');
       const backup = await s.backups.backup(u.id, { kind: 'safety' });
-      return { ...s.reset.run(u.id, opts), backup: backup.file };
+      return { ...s.reset.run(u.id, opts), backup: backup.file, fiche: null };
     },
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),

@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.106.0',
+    items: [
+      'Remise à zéro des données d’essai dans une fiche d’intervention : faite au bureau dans la fiche, elle est refaite dans la boutique quand la fiche y est rapportée (sauvegarde juste avant), puis les modifications de la fiche sont ajoutées.',
+    ],
+  },
+  {
     version: '0.105.0',
     items: [
       "Tableaux plus lisibles : en-tête vert-gris marqué, une ligne sur deux teintée, cadre visible ; les couleurs d'écart de l'inventaire restent prioritaires.",

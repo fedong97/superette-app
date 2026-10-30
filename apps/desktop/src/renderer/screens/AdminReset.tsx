@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { call } from '../api';
-import { Field, Modal, useLoad, useToast } from '../ui';
+import { Field, Modal, dateTime, useLoad, useToast } from '../ui';
 
 /**
  * Remise à zéro après l'installation : les ventes, achats, caisses et mouvements
@@ -42,7 +42,16 @@ function ResetDialog({ onClose, onDone }: { onClose: () => void; onDone: () => v
   const [busy, setBusy] = useState(false);
   const p = preview.data;
   if (!p) return null;
-  const blocked = p.connected ? 'Ce PC est relié au serveur central : faites la remise à zéro avant de relier les PC.' : !p.backupDir ? 'Choisissez d’abord le dossier des sauvegardes ci-dessus : une sauvegarde est faite juste avant.' : null;
+  // Fiche d'intervention : la remise à zéro est faite dans la fiche et refaite dans la boutique quand la fiche est rapportée.
+  const inFiche = p.fiche === 'intervention';
+  const blocked =
+    p.fiche && !inFiche
+      ? 'Ouvrez la boutique elle-même ou une fiche d’intervention : une copie comptable ou le mode formation ne se remettent pas à zéro.'
+      : p.connected
+        ? 'Ce PC est relié au serveur central : faites la remise à zéro avant de relier les PC.'
+        : !inFiche && !p.backupDir
+          ? 'Choisissez d’abord le dossier des sauvegardes ci-dessus : une sauvegarde est faite juste avant.'
+          : null;
   const ready = !blocked && confirm.trim().toUpperCase() === 'REMETTRE A ZERO' && pin.length >= 4 && !busy;
   return (
     <Modal title="Remettre à zéro les données d’essai" onClose={onClose} wide>
@@ -52,7 +61,7 @@ function ResetDialog({ onClose, onDone }: { onClose: () => void; onDone: () => v
           setBusy(true);
           try {
             const r = await call('reset.run', { keepStock }, pin, confirm);
-            toast.ok(`Remise à zéro faite. Sauvegarde d’avant : ${r.backup}`);
+            toast.ok(r.fiche ? 'Remise à zéro faite dans la fiche. La boutique sera remise à zéro quand la fiche y sera rapportée.' : `Remise à zéro faite. Sauvegarde d’avant : ${r.backup}`);
             onDone();
           } catch (err) {
             toast.error(err);
@@ -95,7 +104,15 @@ function ResetDialog({ onClose, onDone }: { onClose: () => void; onDone: () => v
           <p className="danger-text">{blocked}</p>
         ) : (
           <>
-            <p className="warn-text">Une sauvegarde complète est faite juste avant : en cas d’erreur, restaurez-la depuis la liste des sauvegardes.</p>
+            {inFiche ? (
+              <p className="warn-text">
+                Vous êtes dans une fiche d’intervention : la remise à zéro est faite ici, puis refaite dans la boutique quand la fiche y sera rapportée (une sauvegarde de la boutique est faite
+                juste avant). Les ventes faites dans la boutique d’ici là seront effacées aussi.
+                {p.pending ? ` Déjà demandée le ${dateTime(p.pending.at)} : elle sera refaite avec le choix ci-dessous pour le stock.` : ''}
+              </p>
+            ) : (
+              <p className="warn-text">Une sauvegarde complète est faite juste avant : en cas d’erreur, restaurez-la depuis la liste des sauvegardes.</p>
+            )}
             <Field label="Tapez REMETTRE A ZERO pour confirmer">
               <input autoFocus value={confirm} onChange={(e) => setConfirm(e.target.value)} onPaste={(e) => e.preventDefault()} />
             </Field>

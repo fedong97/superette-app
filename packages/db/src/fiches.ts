@@ -109,6 +109,17 @@ export interface FicheMeta {
   origin?: string | null;
   /** Compteurs de numéros au moment de la sortie. */
   counters: Record<string, number>;
+  /**
+   * Remise à zéro des données d'essai faite dans la fiche : la boutique la refait
+   * chez elle (avec son propre stock) juste avant d'ajouter ce qui a été fait dans la fiche.
+   */
+  reset?: FicheReset | null;
+}
+
+export interface FicheReset {
+  keepStock: boolean;
+  at: string;
+  byName: string | null;
 }
 
 /** Ce qu'on montre d'un dossier ou d'une fiche sans l'ouvrir. */
@@ -137,6 +148,8 @@ export interface FicheReturn {
   applied: number;
   conflicts: number;
   settings: number;
+  /** La boutique a été remise à zéro avant d'ajouter la fiche. */
+  reset?: boolean;
 }
 
 export interface FicheLogRow {
@@ -555,10 +568,19 @@ export class FicheService extends Base {
   }
 
   /**
-   * Rapporte une fiche d'intervention ou une copie comptable : ce qui a été fait
-   * dans la fiche est ajouté à la boutique, qui a continué de vendre entre-temps.
+   * Remise à zéro faite dans une fiche d'intervention : notée dans la fiche pour
+   * être refaite dans la boutique quand la fiche sera rapportée.
    */
-  bringBack(userId: string, file: string): FicheReturn {
+  markReset(user: { name: string } | null, keepStock: boolean): FicheReset {
+    const meta = this.current();
+    if (meta?.kind !== 'intervention') throw new AppError("Seule une fiche d'intervention peut porter une remise à zéro jusqu'à la boutique", 'FICHE');
+    const reset: FicheReset = { keepStock, at: this.now(), byName: user?.name ?? null };
+    this.db.prepare("UPDATE settings SET value = ? WHERE key = 'fiche.meta'").run(JSON.stringify({ ...meta, reset }));
+    return reset;
+  }
+
+  /** Vérifie qu'une fiche peut être rapportée ici et renvoie ce qu'elle dit d'elle-même (remise à zéro demandée comprise). */
+  returnable(file: string): FicheMeta {
     if (this.current()) throw new AppError('Ouvrez la boutique elle-même pour y rapporter une fiche', 'FICHE');
     const info = inspectDossier(file);
     if (!info.ok) throw new AppError(info.error ?? 'Fiche invalide', 'INVALID');
@@ -571,6 +593,16 @@ export class FicheService extends Base {
     }
     const returned = this.db.prepare('SELECT returned_at FROM fiche_log WHERE id = ?').pluck().get(meta.id) as string | null | undefined;
     if (returned) throw new AppError(`Cette fiche a déjà été rapportée le ${frDateTime(returned)}`, 'ALREADY_RETURNED');
+    return meta;
+  }
+
+  /**
+   * Rapporte une fiche d'intervention ou une copie comptable : ce qui a été fait
+   * dans la fiche est ajouté à la boutique, qui a continué de vendre entre-temps.
+   * Une remise à zéro demandée dans la fiche se fait avant (voir `returnable`).
+   */
+  bringBack(userId: string, file: string): FicheReturn {
+    const meta = this.returnable(file);
 
     // On travaille sur une copie : la fiche sur la clé USB n'est pas modifiée (mise à niveau du schéma comprise).
     const tmp = join(tmpdir(), `fedonix-retour-${newId()}.db`);
@@ -609,7 +641,7 @@ export class FicheService extends Base {
             insert.run({ ...row, user_id: null });
           }
         }
-        const summary: FicheReturn = { kind: meta.kind, byName: meta.byName, at: meta.at, changes: events.length, applied, conflicts, settings };
+        const summary: FicheReturn = { kind: meta.kind, byName: meta.byName, at: meta.at, changes: events.length, applied, conflicts, settings, reset: Boolean(meta.reset) };
         this.db
           .prepare(
             `INSERT INTO fiche_log (id, kind, file, base_seq, user_id, created_at, returned_at, returned_by, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -618,7 +650,7 @@ export class FicheService extends Base {
           .run(meta.id, meta.kind, file, meta.baseSeq, meta.byId, meta.at, this.now(), userId, JSON.stringify(summary));
         this.audit(userId, 'fiche.return', 'fiche', meta.id, summary);
       });
-      return { kind: meta.kind, byName: meta.byName, at: meta.at, changes: events.length, applied, conflicts, settings };
+      return { kind: meta.kind, byName: meta.byName, at: meta.at, changes: events.length, applied, conflicts, settings, reset: Boolean(meta.reset) };
     } finally {
       fiche.close();
       for (const ext of ['', '-wal', '-shm']) rmSync(`${tmp}${ext}`, { force: true });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, today, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { BalanceDialog, EMPTY_OPENING, OpeningField, saveOpening } from './balanceAdjust';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 import { tx } from '../tax';
@@ -136,7 +137,7 @@ function SupplierDialog({
       )}
       {tab === 'card' && <SupplierForm supplier={supplier} canEdit={canEdit} onSaved={onSaved} />}
       {tab === 'articles' && supplier && <SupplierArticles supplierId={supplier.id} canEdit={canArticles} />}
-      {tab === 'account' && supplier && <SupplierAccount supplierId={supplier.id} />}
+      {tab === 'account' && supplier && <SupplierAccount supplierId={supplier.id} name={supplier.name} />}
     </Modal>
   );
 }
@@ -144,6 +145,8 @@ function SupplierDialog({
 function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | null; canEdit: boolean; onSaved: (s: Supplier) => void }) {
   const toast = useToast();
   const settings = useStoreSettings();
+  const can = useCan();
+  const [opening, setOpening] = useState(EMPTY_OPENING);
   const [f, setF] = useState({
     name: supplier?.name ?? '',
     contact: supplier?.contact ?? '',
@@ -173,7 +176,9 @@ function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | nul
             },
             supplier?.id,
           );
-          toast.ok('Fournisseur enregistré');
+          // Nouveau fournisseur : ce qu'on lui doit déjà devient son solde d'ouverture.
+          const withOpening = !supplier && (await saveOpening('supplier', saved.id, opening).catch((err) => (toast.error(err), false)));
+          toast.ok(withOpening ? "Fournisseur enregistré avec son solde d'ouverture" : 'Fournisseur enregistré');
           onSaved(saved);
         } catch (err) {
           toast.error(err);
@@ -215,6 +220,7 @@ function SupplierForm({ supplier, canEdit, onSaved }: { supplier: Supplier | nul
         <Field label="Notes">
           <input value={f.notes} onChange={set('notes')} />
         </Field>
+        {!supplier && can('balance_adjust') && <OpeningField party="supplier" value={opening} onChange={setOpening} />}
         {supplier && (
           <label>
             <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> Fournisseur actif
@@ -363,12 +369,27 @@ function SupplierArticles({ supplierId, canEdit }: { supplierId: string; canEdit
   );
 }
 
-function SupplierAccount({ supplierId }: { supplierId: string }) {
+function SupplierAccount({ supplierId, name }: { supplierId: string; name: string }) {
+  const can = useCan();
   const invoices = useLoad(() => call('purchases.invoices', { supplierId }).catch(() => null), [supplierId]);
   const orders = useLoad(() => call('purchases.orders', { supplierId }), [supplierId]);
+  const [adjusting, setAdjusting] = useState(false);
   const balance = (invoices.data ?? []).reduce((t, i) => t + (i.kind === 'invoice' ? i.balance : -i.balance), 0);
   return (
     <div className="grid2 top">
+      {adjusting && (
+        <BalanceDialog
+          party="supplier"
+          id={supplierId}
+          name={name}
+          balance={balance}
+          onClose={() => setAdjusting(false)}
+          onDone={() => {
+            setAdjusting(false);
+            invoices.reload();
+          }}
+        />
+      )}
       <section>
         <h3>Factures et avoirs</h3>
         {invoices.data === null ? (
@@ -390,6 +411,13 @@ function SupplierAccount({ supplierId }: { supplierId: string }) {
               </tr>
             </tbody>
           </table>
+        )}
+        {can('balance_adjust') && invoices.data !== null && (
+          <div className="actions">
+            <button onClick={() => setAdjusting(true)} title="Solde d’ouverture oublié à la création, ou correction du solde avec son motif">
+              Ajuster le solde…
+            </button>
+          </div>
         )}
       </section>
       <section>

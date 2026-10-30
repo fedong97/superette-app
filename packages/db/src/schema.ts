@@ -2843,4 +2843,60 @@ CREATE INDEX book_codes_code ON book_codes(code);
 CREATE INDEX book_codes_article ON book_codes(article_id, units);
 `,
   },
+  {
+    version: 66,
+    name: "soldes d'ouverture et ajustements, annulation des règlements, avances fournisseurs, caisse des vendeurs",
+    sql: `
+-- Solde d'ouverture saisi sur la fiche du client, ou ajustement de son solde : la même pièce
+-- que la reprise, passée en à-nouveaux (ouverture) ou en opérations diverses (ajustement).
+ALTER TABLE opening_balances ADD COLUMN kind TEXT NOT NULL DEFAULT 'opening';
+ALTER TABLE opening_balances ADD COLUMN label TEXT;
+-- Vendeur et caissier séparés : la caisse qui reçoit les factures de ce vendeur (null : toutes).
+ALTER TABLE users ADD COLUMN counter_register_id TEXT;
+
+-- Pièces d'« Encaisser » et « Décaisser » : avance versée à un fournisseur, règlement fournisseur
+-- annulé (l'argent revient), et lien vers le règlement client ou fournisseur annulé.
+CREATE TABLE treasury_entries_new (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  direction TEXT NOT NULL CHECK (direction IN ('IN', 'OUT')),
+  kind TEXT NOT NULL CHECK (kind IN ('staff_advance', 'staff_salary', 'staff_repayment', 'customer_refund', 'container_deposit', 'container_refund', 'agent_in', 'agent_out', 'voucher_sale', 'supplier_advance', 'supplier_refund', 'other')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  method TEXT NOT NULL,
+  reference TEXT,
+  piece TEXT,
+  label TEXT NOT NULL,
+  party TEXT,
+  staff_id TEXT,
+  salary_id TEXT,
+  customer_id TEXT,
+  account_id TEXT,
+  register_id TEXT,
+  session_id TEXT,
+  from_central INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancel_reason TEXT,
+  cancelled_by TEXT,
+  authorized_by TEXT,
+  printed INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  supplier_id TEXT,
+  invoice_id TEXT,
+  payment_id TEXT
+);
+INSERT INTO treasury_entries_new (id, number, store_id, direction, kind, amount, method, reference, piece, label, party, staff_id, salary_id, customer_id, account_id,
+  register_id, session_id, from_central, status, cancel_reason, cancelled_by, authorized_by, printed, user_id, at, updated_at)
+  SELECT id, number, store_id, direction, kind, amount, method, reference, piece, label, party, staff_id, salary_id, customer_id, account_id,
+  register_id, session_id, from_central, status, cancel_reason, cancelled_by, authorized_by, printed, user_id, at, updated_at FROM treasury_entries;
+DROP TABLE treasury_entries;
+ALTER TABLE treasury_entries_new RENAME TO treasury_entries;
+CREATE INDEX treasury_entries_session ON treasury_entries(session_id);
+CREATE INDEX treasury_entries_staff ON treasury_entries(staff_id);
+CREATE INDEX treasury_entries_payment ON treasury_entries(payment_id);
+CREATE INDEX treasury_entries_invoice ON treasury_entries(invoice_id);
+`,
+  },
 ];

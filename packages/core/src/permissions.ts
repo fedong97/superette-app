@@ -116,6 +116,9 @@ export const PERMISSIONS = {
   central_cash: { label: 'Caisse centrale : apports, dépôts en banque, sorties', group: 'Trésorerie', type: 'Menu', roles: MANAGE },
   cash_desk: { label: 'Encaisser et décaisser dans une caisse ouverte (une sortie demande le code du gérant)', group: 'Trésorerie', type: 'Bouton', parent: 'treasury' },
   cash_desk_edit: { label: 'Modifier, antidater ou supprimer une entrée ou une sortie de la journée, annuler l’impression d’un reçu', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
+  payment_cancel: { label: 'Annuler un règlement ou un dépôt d’avance de la journée (client ou fournisseur) : l’argent est rendu', group: 'Trésorerie', type: 'Bouton', parent: 'cash_desk_edit' },
+  supplier_advance: { label: 'Verser une avance à un fournisseur', group: 'Trésorerie', type: 'Bouton', parent: 'supplier_pay' },
+  cash_live: { label: 'Caisses en direct : opérations de toutes les caisses, intervenir sur une caisse', group: 'Trésorerie', type: 'Menu', roles: MANAGE },
 
   // --- Fichier des clients -----------------------------------------------------
   customers: { label: 'Liste et fiches des clients', group: 'Fichier des clients', type: 'Menu', roles: COUNTER },
@@ -127,6 +130,7 @@ export const PERMISSIONS = {
   customer_payment: { label: 'Encaisser un règlement client', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   customer_statement: { label: "Consulter et imprimer l'extrait de compte d'un client", group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
   summary_invoices: { label: 'Factures récapitulatives des clients (fin de mois)', group: 'Fichier des clients', type: 'Bouton', parent: 'customers' },
+  balance_adjust: { label: 'Saisir le solde d’ouverture ou ajuster le solde d’un client ou d’un fournisseur', group: 'Fichier des clients', type: 'Fonction', roles: ACCOUNTING },
   customer_lettering: { label: 'Lettrer un règlement client sur les factures choisies', group: 'Fichier des clients', type: 'Bouton', parent: 'customer_payment' },
   account_offsets: { label: 'Compenser le compte client et le compte fournisseur d’un même tiers', group: 'Fichier des clients', type: 'Fonction', roles: ACCOUNTING },
   consignment: { label: 'Dépôt-vente chez les revendeurs : envoyer, contrôler, facturer le vendu', group: 'Fichier des clients', type: 'Menu', roles: MANAGE },

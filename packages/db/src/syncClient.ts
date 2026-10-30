@@ -270,6 +270,26 @@ export async function joinStore(s: Services, url: string, activationCode: string
   return s.admin.station();
 }
 
+/** Le serveur central répond-il à cette adresse ? (avant de demander l'identifiant) */
+export async function pingServer(url: string): Promise<void> {
+  const r = await request<{ ok?: boolean; service?: string }>(url.trim(), '/api/v1/health', { timeoutMs: 10_000 });
+  if (r?.service !== 'superette-server') throw new AppError("Cette adresse ne répond pas comme un serveur ONIX 360", 'SYNC_ERROR');
+}
+
+/**
+ * Rejoindre un magasin sans code de caisse : l'adresse du serveur, puis
+ * l'identifiant et le code d'un utilisateur déjà créé. Le PC reçoit le
+ * catalogue, les utilisateurs et le stock, sans caisse propre.
+ */
+export async function joinStoreAsUser(s: Services, url: string, login: string, pin: string, name: string): Promise<ReturnType<Services['admin']['station']>> {
+  if (s.admin.isInitialized()) throw new AppError('Ce poste contient déjà des données', 'ALREADY_INITIALIZED');
+  const creds = await request<DeviceCredentials>(url, '/api/v1/devices/join', { body: { login, pin, name } });
+  s.sync.saveCredentials(url, creds.deviceId, creds.token);
+  await syncOnce(s);
+  s.admin.joinStation(creds.storeId);
+  return s.admin.station();
+}
+
 /** Accord du gérant demandé au serveur : il répond depuis la page du gérant sur son téléphone. */
 export async function requestApproval(s: Services, action: string, requestedBy: string): Promise<{ id: string; expiresInSeconds: number }> {
   const creds = s.sync.credentials();

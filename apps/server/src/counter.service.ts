@@ -30,6 +30,8 @@ export interface CounterInvoice {
   lockedHere: boolean;
   saleNumber: string | null;
   doneBy: string | null;
+  /** Caisse qui doit l'encaisser (null : toutes). */
+  registerId: string | null;
   at: string;
   updatedAt: string;
   /** Contenu de la facture (lignes, client, tarif, accords), lu tel quel par le PC. */
@@ -86,6 +88,8 @@ export class CounterService {
       lockedHere: r.lock_device === device.id,
       saleNumber: r.sale_number,
       doneBy: r.done_by,
+      // Caisse de destination choisie pour le vendeur (dans la facture elle-même).
+      registerId: typeof r.payload === 'object' && r.payload ? ((r.payload as { registerId?: string | null }).registerId ?? null) : null,
       at: new Date(r.created_at).toISOString(),
       updatedAt: new Date(r.updated_at).toISOString(),
       ...(withPayload ? { payload: r.payload } : {}),

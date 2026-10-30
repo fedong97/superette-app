@@ -1438,3 +1438,27 @@ ul.plain li { padding: 3px 0; }
 .book-print { display: inline-flex; gap: 6px; align-items: center; }
 .book-print input { width: 52px; }
 @media (max-width: 900px) { .book-reader { grid-template-columns: 1fr; } .book-photo { position: static; } }
+
+/* Caisses en direct (0.102.0) : une carte par caisse, rafraîchie seule. */
+.live-tills .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.live-tills .page-head .spacer { flex: 1; }
+.live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin: 12px 0; }
+.live-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; padding: 12px; font-weight: 400; cursor: pointer; }
+.live-card.open { border-left-color: var(--ok); }
+.live-card.closed { border-left-color: var(--muted); }
+.live-card.on { outline: 2px solid var(--brand); }
+.live-card.mine .live-head b::after { content: ' · ma caisse'; font-weight: 400; color: var(--muted); }
+.live-head { display: flex; justify-content: space-between; gap: 8px; }
+.live-state { font-size: 13px; color: var(--muted); }
+.live-state.open { color: var(--ok); font-weight: 700; }
+.live-who { font-weight: 700; }
+.live-figures { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.live-figures > span { display: flex; flex-direction: column; }
+.live-figures small { color: var(--muted); font-size: 12px; }
+.live-detail { margin-top: 8px; }
+.live-detail .tre-bar .spacer { flex: 1; }
+.tabs-inline { display: inline-flex; gap: 4px; }
+.tabs-inline button.active { background: var(--brand-soft); font-weight: 700; }
+.treasury.embedded { margin-top: 10px; }
+.opening-field { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; }
+.opening-field legend { font-weight: 700; padding: 0 6px; }

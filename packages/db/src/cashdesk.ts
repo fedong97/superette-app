@@ -1,6 +1,7 @@
 import { type Fcfa, PAYMENT_METHODS, parseStoreSettings } from '@superette/core';
 import type { CustomerPaymentMethod, CustomerService } from './customers';
 import { ENTRY_KINDS, EmoneyService, type EntryKind, isPayout } from './emoney';
+import { SUPPLIER_OPENING } from './opening';
 import type { ExpenseService } from './expenses';
 import type { CashJournalRow, PosService } from './pos';
 import type { PurchaseService, SupplierPaymentMethod } from './purchases';
@@ -23,6 +24,8 @@ const ENTRY_DIRECTION: Record<EntryKind, 'IN' | 'OUT' | null> = {
   agent_in: 'IN',
   agent_out: 'OUT',
   voucher_sale: 'IN',
+  supplier_advance: 'OUT',
+  supplier_refund: 'IN',
   other: null,
 };
 
@@ -46,6 +49,13 @@ export interface TreasuryEntry {
   salary_id: string | null;
   customer_id: string | null;
   customer_name: string | null;
+  /** Avance versée à un fournisseur, ou son règlement annulé. */
+  supplier_id: string | null;
+  supplier_name: string | null;
+  /** Avoir créé par l'avance au fournisseur, ou facture du règlement annulé. */
+  invoice_id: string | null;
+  /** Règlement client ou fournisseur annulé par cette pièce. */
+  payment_id: string | null;
   account_id: string | null;
   account_label: string | null;
   register_id: string | null;
@@ -75,6 +85,9 @@ export interface EntryInput {
   staffId?: string | null;
   salaryId?: string | null;
   customerId?: string | null;
+  supplierId?: string | null;
+  /** Règlement client ou fournisseur annulé (le jour même, dans sa journée) : contre-passation. */
+  payment?: { id: string; invoiceId?: string | null } | null;
   accountId?: string | null;
   /** Dans cette journée ouverte (« Encaisser », « Décaisser ») ; sinon au bureau. */
   sessionId?: string | null;
@@ -111,6 +124,7 @@ export type CashOutInput = DeskBase &
     | { type: 'staff_advance'; staffId: string }
     | { type: 'staff_salary'; salaryId: string }
     | { type: 'customer_refund'; customerId: string }
+    | { type: 'supplier_advance'; supplierId: string }
     | { type: 'other'; accountId: string; party?: string | null }
   );
 
@@ -193,8 +207,8 @@ export class CashDeskService extends Base {
   get(id: string): TreasuryEntry {
     const e = this.db
       .prepare(
-        `SELECT e.*, s.name AS staff_name, c.name AS customer_name, a.label AS account_label, r.name AS register_name, u.name AS user_name, v.name AS authorized_by_name
-         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN accounts a ON a.id = e.account_id
+        `SELECT e.*, s.name AS staff_name, c.name AS customer_name, f.name AS supplier_name, a.label AS account_label, r.name AS register_name, u.name AS user_name, v.name AS authorized_by_name
+         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN suppliers f ON f.id = e.supplier_id LEFT JOIN accounts a ON a.id = e.account_id
          LEFT JOIN registers r ON r.id = e.register_id LEFT JOIN users u ON u.id = e.user_id LEFT JOIN users v ON v.id = e.authorized_by WHERE e.id = ?`,
       )
       .get(id) as TreasuryEntry | undefined;
@@ -250,6 +264,7 @@ export class CashDeskService extends Base {
     let staffId: string | null = null;
     let salaryId: string | null = null;
     let customerId: string | null = null;
+    let supplierId: string | null = null;
     let accountId: string | null = null;
     if (kind === 'staff_advance' || kind === 'staff_repayment' || kind === 'staff_salary') {
       const salary = kind === 'staff_salary' ? this.staff.getSalary(input.salaryId ?? '') : null;
@@ -281,9 +296,15 @@ export class CashDeskService extends Base {
     } else if (kind === 'customer_refund') {
       const acc = this.customers.account(ctx.storeId, input.customerId ?? '');
       const credit = Math.max(0, -acc.balance);
-      if (input.amount > credit) throw new AppError(credit ? `Le client n'a que ${credit} FCFA d'avance ou d'avoir` : "Ce client n'a ni avance ni avoir à rendre", 'INVALID');
+      // Un règlement annulé rend ce que le client a versé, même s'il soldait une dette.
+      if (!input.payment && input.amount > credit) throw new AppError(credit ? `Le client n'a que ${credit} FCFA d'avance ou d'avoir` : "Ce client n'a ni avance ni avoir à rendre", 'INVALID');
       customerId = acc.customer.id;
       label ||= `Avance rendue à ${acc.customer.name}`;
+    } else if (kind === 'supplier_advance' || kind === 'supplier_refund') {
+      const supplier = this.purchases.getSupplier(input.supplierId ?? '');
+      if (kind === 'supplier_refund' && !input.payment) throw new AppError('Choisissez le règlement fournisseur annulé', 'INVALID');
+      supplierId = supplier.id;
+      label ||= kind === 'supplier_advance' ? `Avance à ${supplier.name}` : `Règlement de ${supplier.name} annulé`;
     } else if (kind === 'container_deposit' || kind === 'container_refund') {
       // Consigne d'emballages : dette envers les clients (4194), pas une vente.
       if (method !== 'CASH') throw new AppError('La consigne se paie en espèces', 'INVALID');
@@ -312,12 +333,17 @@ export class CashDeskService extends Base {
       const id = newId();
       const now = this.now();
       const prefix = input.direction === 'IN' ? 'EN' : 'DE';
+      // Avance au fournisseur : un avoir à son compte (ce qu'il nous doit en marchandise ou en argent), sans achat.
+      const invoiceId =
+        kind === 'supplier_advance'
+          ? this.advanceCredit(ctx, supplierId!, input.amount, label, `${prefix}-${id.slice(0, 8)}`)
+          : (input.payment?.invoiceId ?? null);
       this.db
         .prepare(
           `INSERT INTO treasury_entries (id, number, store_id, direction, kind, amount, method, reference, piece, label, party, staff_id, salary_id, customer_id, account_id,
-             register_id, session_id, from_central, status, authorized_by, printed, user_id, at, updated_at)
+             register_id, session_id, from_central, status, authorized_by, printed, user_id, at, updated_at, supplier_id, invoice_id, payment_id)
            VALUES (@id, @number, @store, @direction, @kind, @amount, @method, @reference, @piece, @label, @party, @staff, @salary, @customer, @account,
-             @register, @session, @fromCentral, 'active', @authorizedBy, 0, @user, @now, @now)`,
+             @register, @session, @fromCentral, 'active', @authorizedBy, 0, @user, @now, @now, @supplier, @invoice, @payment)`,
         )
         .run({
           id,
@@ -341,6 +367,9 @@ export class CashDeskService extends Base {
           authorizedBy: input.authorizedBy ?? null,
           user: ctx.userId,
           now,
+          supplier: supplierId,
+          invoice: invoiceId,
+          payment: input.payment?.id ?? null,
         });
       this.enqueue(ctx, 'treasury_entry', id, 'upsert', {});
       this.audit(input.authorizedBy ?? ctx.userId, `treasury_entry.${input.direction.toLowerCase()}`, 'treasury_entry', id, { kind, amount: input.amount, method, by: ctx.userId });
@@ -443,6 +472,8 @@ export class CashDeskService extends Base {
         return { source: 'entry', id: this.record(c, { ...input, direction: 'OUT', kind: 'staff_salary', salaryId: input.salaryId, sessionId, authorizedBy }).id };
       case 'customer_refund':
         return { source: 'entry', id: this.record(c, { ...input, direction: 'OUT', kind: 'customer_refund', customerId: input.customerId, sessionId, authorizedBy }).id };
+      case 'supplier_advance':
+        return { source: 'entry', id: this.record(c, { ...input, direction: 'OUT', kind: 'supplier_advance', supplierId: input.supplierId, sessionId, authorizedBy }).id };
       case 'other':
         return { source: 'entry', id: this.record(c, { ...input, direction: 'OUT', kind: 'other', accountId: input.accountId, party: input.party, sessionId, authorizedBy }).id };
       default:
@@ -577,12 +608,115 @@ export class CashDeskService extends Base {
       const left = this.staff.balance(e.staff_id!).advances;
       if (left < e.amount) throw new AppError("Cette avance est déjà retenue ou remboursée : supprimez d'abord la retenue ou le remboursement", 'INVALID');
     }
+    if (e.kind === 'supplier_advance' && e.invoice_id) {
+      const refunded = this.db.prepare('SELECT COUNT(*) FROM supplier_payments WHERE invoice_id = ?').pluck().get(e.invoice_id) as number;
+      if (refunded) throw new AppError('Le fournisseur a déjà remboursé une partie de cette avance : elle ne se supprime plus', 'INVALID');
+    }
     this.tx(() => {
       this.db.prepare("UPDATE treasury_entries SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, updated_at = ? WHERE id = ?").run(reason.trim(), by, this.now(), id);
+      // Avance supprimée : l'avoir qu'elle avait mis au compte du fournisseur tombe à zéro (il reste dans l'historique).
+      if (e.kind === 'supplier_advance' && e.invoice_id) {
+        this.db
+          .prepare("UPDATE supplier_invoices SET total_ht = 0, total_tva = 0, total_ttc = 0, notes = trim(COALESCE(notes, '') || ' (avance supprimée : ' || ? || ')') WHERE id = ?")
+          .run(reason.trim(), e.invoice_id);
+        this.enqueue(ctx, 'supplier_invoice', e.invoice_id, 'upsert', {});
+      }
       this.enqueue(ctx, 'treasury_entry', id, 'upsert', {});
       this.audit(by, 'treasury_entry.cancel', 'treasury_entry', id, { number: e.number, amount: e.amount, reason, by: ctx.userId });
     });
     return this.get(id);
+  }
+
+  /** Avoir d'une avance au fournisseur : il baisse ce qu'on lui doit, sans être un achat (ni TVA, ni charge). */
+  private advanceCredit(ctx: Context, supplierId: string, amount: Fcfa, label: string, ref: string): string {
+    const invoice = this.purchases.createInvoice(ctx, {
+      supplierId,
+      kind: 'credit_note',
+      supplierNumber: `Avance ${ref}`,
+      invoiceDate: this.today(),
+      totalHt: amount,
+      totalTva: 0,
+      notes: label,
+    });
+    this.db.prepare('UPDATE supplier_invoices SET opening = ? WHERE id = ?').run(SUPPLIER_OPENING.advance, invoice.id);
+    return invoice.id;
+  }
+
+  /** Règlement client ou fournisseur déjà annulé par une pièce encore valable. */
+  reversalOf(paymentId: string): TreasuryEntry | null {
+    const id = this.db.prepare("SELECT id FROM treasury_entries WHERE payment_id = ? AND status = 'active'").pluck().get(paymentId) as string | undefined;
+    return id ? this.get(id) : null;
+  }
+
+  /**
+   * Annule un règlement ou un dépôt d'avance d'un client, ou un règlement à un
+   * fournisseur, fait dans une journée encore ouverte (le client revient sur sa
+   * décision, saisie en double…). L'argent repart (ou revient) dans la même
+   * journée par une pièce de contre-passation : le règlement reste dans
+   * l'historique, marqué annulé, et le compte du tiers retrouve son solde.
+   * Supprimer cette pièce rétablit le règlement.
+   */
+  reversePayment(ctx: Context, source: 'customer_payment' | 'supplier_payment', id: string, by: string, reason: string): TreasuryEntry {
+    if (!reason.trim()) throw new AppError("Indiquez le motif de l'annulation", 'INVALID');
+    if (this.reversalOf(id)) throw new AppError('Ce règlement est déjà annulé', 'INVALID');
+    if (source === 'customer_payment') {
+      const p = this.customers.getPayment(id);
+      if (p.store_id !== ctx.storeId) throw new AppError("Ce règlement est d'un autre magasin", 'FORBIDDEN');
+      const sessionId = this.paymentSession(p.session_id, p.method);
+      if (this.db.prepare("SELECT 1 FROM cheque_deposit_lines l JOIN cheque_deposits d ON d.id = l.deposit_id WHERE l.payment_id = ? AND d.status = 'active'").get(id)) {
+        throw new AppError('Ce chèque est déjà remis en banque', 'INVALID');
+      }
+      return this.tx(() => {
+        // Lettrage du règlement annulé : les ventes qu'il soldait redeviennent dues.
+        this.db.prepare('DELETE FROM payment_allocations WHERE payment_id = ?').run(id);
+        const e = this.record(this.deskCtx(ctx, sessionId), {
+          direction: 'OUT',
+          kind: 'customer_refund',
+          amount: p.amount,
+          method: p.method,
+          reference: p.reference ?? (p.method === 'CASH' ? null : p.number),
+          customerId: p.customer_id,
+          payment: { id: p.id },
+          label: `Annulation ${p.advance ? "du dépôt d'avance" : 'du règlement'} ${p.number} : ${reason.trim()}`,
+          sessionId,
+          authorizedBy: by,
+        });
+        this.audit(by, 'customer_payment.cancel', 'customer_payment', id, { number: p.number, amount: p.amount, reason, entry: e.number, by: ctx.userId });
+        return e;
+      });
+    }
+    const p = this.db.prepare('SELECT * FROM supplier_payments WHERE id = ?').get(id) as
+      | { id: string; invoice_id: string; supplier_id: string; store_id: string; method: string; amount: Fcfa; reference: string | null; session_id: string | null }
+      | undefined;
+    if (!p || p.store_id !== ctx.storeId) throw new AppError('Règlement introuvable', 'NOT_FOUND');
+    const invoice = this.purchases.getInvoice(p.invoice_id);
+    if (invoice.kind !== 'invoice') throw new AppError("Un remboursement d'avoir reçu ne s'annule pas ici : saisissez une sortie", 'INVALID');
+    const sessionId = this.paymentSession(p.session_id, p.method);
+    return this.tx(() => {
+      const e = this.record(this.deskCtx(ctx, sessionId), {
+        direction: 'IN',
+        kind: 'supplier_refund',
+        amount: p.amount,
+        method: p.method,
+        reference: p.reference ?? (p.method === 'CASH' ? null : invoice.number),
+        supplierId: p.supplier_id,
+        payment: { id: p.id, invoiceId: p.invoice_id },
+        label: `Annulation du règlement de la facture ${invoice.supplier_number} : ${reason.trim()}`,
+        sessionId,
+        authorizedBy: by,
+      });
+      this.audit(by, 'supplier_payment.cancel', 'supplier_invoice', p.invoice_id, { amount: p.amount, reason, entry: e.number, by: ctx.userId });
+      return e;
+    });
+  }
+
+  /** Journée d'un règlement à annuler : la même, encore ouverte. */
+  private paymentSession(sessionId: string | null, method: string): string {
+    if (!sessionId) throw new AppError("Ce règlement n'a pas été fait dans une caisse : il s'annule par une entrée ou une sortie au bureau", 'INVALID');
+    if (!['CASH', 'MTN_MOMO', 'ORANGE_MONEY'].includes(method)) throw new AppError('Un règlement par chèque, carte ou virement ne s’annule pas ici : faites un remboursement', 'INVALID');
+    const se = this.pos.getSession(sessionId);
+    if (se.status !== 'open') throw new AppError('La journée de ce règlement est clôturée : faites plutôt un remboursement', 'SESSION_CLOSED');
+    return sessionId;
   }
 
   /**

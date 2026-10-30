@@ -200,7 +200,7 @@ export class AdminService {
         id: d.id,
         name: d.name,
         store: names.get(d.store_id) ?? '—',
-        register: d.kind === 'mobile' ? 'Téléphone d’inventaire' : (names.get(d.register_id) ?? '—'),
+        register: d.kind === 'mobile' ? 'Téléphone d’inventaire' : d.register_id.startsWith('poste:') ? 'Sans caisse (caisse de l’utilisateur)' : (names.get(d.register_id) ?? '—'),
         kind: d.kind,
         createdAt: d.created_at,
         lastSeenAt: d.last_seen_at,

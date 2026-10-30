@@ -151,6 +151,13 @@ export interface CustomerPayment {
  * Rien n'est stocké comme « payé » : tout se recalcule, donc deux caisses qui
  * encaissent hors ligne le même client finissent avec le même compte.
  */
+/** Libellé d'une pièce de solde : reprise, solde d'ouverture saisi sur la fiche, ou ajustement. */
+function openingLabel(o: { doc_ref: string | null; kind: string; label: string | null } | undefined): string {
+  if (o?.kind === 'adjustment') return `Ajustement de solde${o.label ? ` : ${o.label}` : ''}`;
+  if (o?.label) return `Solde d'ouverture (${o.label})`;
+  return `Solde repris${o?.doc_ref ? ` (pièce ${o.doc_ref})` : ''}`;
+}
+
 export class CustomerService extends Base {
   private number(prefix: string, counter: string): string {
     return `${prefix}-${this.stationPrefix()}-${String(this.nextCounter(counter)).padStart(5, '0')}`;
@@ -527,7 +534,23 @@ export class CustomerService extends Base {
       ),
     );
     const openingRefs = new Map(
-      (this.db.prepare('SELECT id, doc_ref FROM opening_balances WHERE customer_id = ?').all(customerId) as { id: string; doc_ref: string | null }[]).map((o) => [o.id, o.doc_ref]),
+      (this.db.prepare('SELECT id, doc_ref, kind, label FROM opening_balances WHERE customer_id = ?').all(customerId) as { id: string; doc_ref: string | null; kind: string; label: string | null }[]).map(
+        (o) => [o.id, o],
+      ),
+    );
+    // Règlements annulés le jour même : l'argent rendu au client les contre-passe.
+    const reversed = new Set(
+      this.db.prepare("SELECT payment_id FROM treasury_entries WHERE customer_id = ? AND payment_id IS NOT NULL AND status = 'active'").pluck().all(customerId) as string[],
+    );
+    const refundLabel = new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT e.id, p.number FROM treasury_entries e JOIN customer_payments p ON p.id = e.payment_id
+             WHERE e.customer_id = ? AND e.kind = 'customer_refund' AND e.status = 'active'`,
+          )
+          .all(customerId) as { id: string; number: string }[]
+      ).map((x) => [x.id, `Annulation du règlement ${x.number}`]),
     );
     let opening = 0;
     let running = 0;
@@ -543,7 +566,7 @@ export class CustomerService extends Base {
       const pay = methods.get(r.ref_id);
       const label =
         r.kind === 'opening'
-          ? `Solde repris${openingRefs.get(r.ref_id) ? ` (pièce ${openingRefs.get(r.ref_id)})` : ''}`
+          ? openingLabel(openingRefs.get(r.ref_id))
           : r.kind === 'sale'
           ? 'Vente à crédit'
           : r.kind === 'return'
@@ -551,14 +574,14 @@ export class CustomerService extends Base {
             : r.kind === 'rebate'
               ? 'Ristourne accordée en avoir'
               : r.kind === 'refund'
-                ? 'Avance ou avoir rendu au client'
+                ? refundLabel.get(r.ref_id) ?? 'Avance ou avoir rendu au client'
                 : r.kind === 'rejected'
                   ? 'Chèque revenu impayé (frais compris)'
                 : r.kind === 'offset'
                   ? 'Compensation avec son compte fournisseur'
                 : r.kind === 'change'
                   ? 'Monnaie laissée sur le compte'
-                  : `${pay?.advance ? "Dépôt d'avance" : 'Règlement'} ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}`;
+                  : `${pay?.advance ? "Dépôt d'avance" : 'Règlement'} ${CUSTOMER_PAYMENT_METHODS[pay?.method as CustomerPaymentMethod] ?? ''}${pay?.reference ? ` (${pay.reference})` : ''}${reversed.has(r.ref_id) ? ' (annulé)' : ''}`;
       lines.push({ date: r.date, kind: r.kind, ref_id: r.ref_id, number: r.number, label, debit: Math.max(0, r.amount), credit: Math.max(0, -r.amount), balance: running });
     }
     return { opening, lines, closing: running };

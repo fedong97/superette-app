@@ -74,6 +74,7 @@ import {
   type WeekSchedule,
   approvalStatus,
   requestApproval,
+  pingServer,
   shelfCarts,
   type CounterInvoice,
   type CounterPayload,
@@ -164,6 +165,7 @@ import {
   type CentralNature,
   type CashInInput,
   type CashOutInput,
+  type BalanceAdjustment,
   type StaffInput,
   type InventoryInput,
   type InventorySheetModel,
@@ -400,9 +402,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const r = s.admin.getRegister(id);
       return r.active && r.kind === 'cash' && r.store_id === storeId ? r : null;
     };
+    // Le gérant qui intervient sur une autre caisse (Caisses en direct) y travaille jusqu'à ce qu'il revienne à la sienne.
+    if (isSupervisor(u) && chosenRegisterId) return usable(chosenRegisterId) ?? (assigned ? usable(assigned) : usable(station.register?.id ?? null));
     if (assigned) return usable(assigned);
     if (!isSupervisor(u)) return null;
-    return usable(chosenRegisterId) ?? usable(station.register?.id ?? null);
+    return usable(station.register?.id ?? null);
   };
   const ctx = (need?: readonly Permission[]): Context => {
     const u = requireUser(need);
@@ -788,6 +792,19 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'setup.activateRegister': (code: string) => s.admin.activateRegister(code),
     /** Nouveau PC : rejoint un magasin existant via le serveur central (avant toute connexion). */
     'setup.join': (url: string, activationCode: string) => (notInFiche(), sync.join(url, activationCode)),
+    /**
+     * Nouveau PC sans code de caisse : l'adresse du serveur, puis l'identifiant et le code
+     * d'un utilisateur du magasin. Le PC reçoit les données, puis l'utilisateur est connecté.
+     */
+    'setup.ping': (url: string) => pingServer(url),
+    'setup.joinAsUser': async (url: string, login: string, pin: string) => {
+      notInFiche();
+      const station = await sync.joinAsUser(url, login, pin);
+      chosenRegisterId = null;
+      user = s.admin.login(login, pin);
+      if (station && !s.fiches.current()) s.attendance.arrive(user.id, station.store.id);
+      return { store: station?.store ?? null, user: { id: user.id, name: user.name } };
+    },
     /** PC du client : installe la boutique préparée au bureau (fiche d'installation) à la place de la base vide. */
     'setup.installFiche': (file: string) => {
       if (s.admin.isInitialized()) throw new AppError('Ce PC a déjà une boutique : ouvrez la fiche depuis « Ouvrir une boutique »', 'INVALID');
@@ -1111,7 +1128,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Gérant ou administrateur sans caisse attribuée : caisse sur laquelle il travaille. */
     'pos.chooseRegister': (registerId: string | null) => {
       const u = requireUser();
-      if (!isSupervisor(u) || s.admin.getUser(u.id).register_id) throw new AppError('Votre caisse est fixée par l’administrateur', 'FORBIDDEN');
+      if (!isSupervisor(u)) throw new AppError('Votre caisse est fixée par l’administrateur', 'FORBIDDEN');
       if (registerId) {
         const r = s.admin.getRegister(registerId);
         if (!r.active || r.kind !== 'cash' || r.store_id !== ctx().storeId) throw new AppError('Caisse indisponible', 'INVALID');
@@ -1583,6 +1600,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Fournisseurs et achats -----------------------------------------------
     'suppliers.list': (opts?: { search?: string; includeInactive?: boolean }) => (requireUser(), s.purchases.listSuppliers(opts)),
     'suppliers.get': (id: string) => (requireUser(), s.purchases.getSupplier(id)),
+    /** Solde d'ouverture (à la création) ou ajustement du solde d'un fournisseur. */
+    'suppliers.adjustBalance': (id: string, input: BalanceAdjustment) => s.opening.adjustSupplier(ctx(['balance_adjust']), id, input),
     'suppliers.save': (input: SupplierInput, id?: string) => {
       const u = requireUser(['supplier_edit']);
       // Nouveau fournisseur : le délai de paiement par défaut vient des paramètres.
@@ -1813,7 +1832,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireSaleAccess(saleId);
       const sale = s.pos.getSale(saleId);
       editGrant(saleId);
-      return { ...s.pos.editableSale(saleId), number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
+      const editable = s.pos.editableSale(saleId);
+      // Le gérant intervient sur la caisse de la facture : il y travaille le temps de la modifier.
+      const u = requireUser();
+      if (isSupervisor(u) && sale.register_id && sale.register_id !== ctx().registerId) chosenRegisterId = sale.register_id;
+      return { ...editable, number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
     },
     'pos.return': async (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) => {
       const ret = s.pos.returnSale(ctx(['sale_return']), { ...input, supervisorId: supervisor(input.supervisorPin).id });
@@ -1989,6 +2012,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         optionsBy,
         discountReason: input.discountReason?.trim() || old?.discountReason || null,
         fieldRepId: input.fieldRepId ?? old?.fieldRepId ?? null,
+        // La caisse choisie pour ce vendeur dans Administration › Utilisateurs.
+        registerId: s.admin.getUser(u.id).counter_register_id ?? null,
       };
       const ready = s.counter.prepare(c.storeId, payload);
       // Remise : le droit du vendeur, le code du gérant, sous le maximum des paramètres, ou pas plus que la version validée.
@@ -2067,7 +2092,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'counter.queue': async () => {
       const c = ctx(POS);
       await flushCounterPaid(s).catch(() => undefined);
-      const invoices = (await counterList(s)).map((i) => ({ ...i, cart: false }));
+      // Chaque caisse ne voit que les factures qui lui sont destinées (et celles de vendeurs sans caisse fixée) ; le gérant les voit toutes.
+      const forHere = (i: CounterInvoice) => !i.registerId || i.registerId === c.registerId || isSupervisor(user!);
+      const invoices = (await counterList(s)).filter(forHere).map((i) => ({ ...i, cart: false }));
       const carts = s.fiches.current() ? [] : await shelfCarts(s).catch(() => []);
       const fromPhones = carts.map((k) => {
         let total = 0;
@@ -2148,6 +2175,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (done) {
         await flushCounterPaid(s).catch(() => undefined);
         throw new AppError(`Cette facture est déjà encaissée sur cette caisse (${done.sale_number})`, 'INVALID');
+      }
+      // Facture destinée à une autre caisse : seul le gérant peut l'encaisser ailleurs.
+      const target = (await counterGet(s, id)).payload?.registerId ?? null;
+      if (target && target !== c.registerId && !isSupervisor(u)) {
+        const name = (() => {
+          try {
+            return s.admin.getRegister(target).name;
+          } catch {
+            return 'une autre caisse';
+          }
+        })();
+        throw new AppError(`Cette facture est envoyée à ${name} : elle s'encaisse là-bas`, 'FORBIDDEN');
       }
       return counterRecap(await counterAction(s, id, 'take', { by: u.name }));
     },
@@ -2244,7 +2283,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return {
         registers,
         canOpen: can(user!, ['cash_open']),
-        canChooseRegister: isSupervisor(user!) && !s.admin.getUser(user!.id).register_id,
+        canChooseRegister: isSupervisor(user!),
         canCentral: can(user!, ['central_cash']),
         centralBalance: can(user!, ['central_cash', 'accounting']) ? s.treasury.balance(c.storeId) : null,
         gapThreshold: s.admin.getStore(c.storeId).cash_gap_threshold,
@@ -2257,6 +2296,20 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
             const open = s.pos.currentSession(id);
             return { ...r, session: open, stale: open ? s.pos.isStale(open) : false };
           }),
+      };
+    },
+    /** Caisses en direct : toutes les caisses du magasin, leur journée et la caisse où travaille le gérant. */
+    'treasury.live': () => {
+      const c = ctx(['cash_live']);
+      const u = user!;
+      const own = s.admin.getUser(u.id).register_id;
+      return {
+        registers: s.pos.liveRegisters(c.storeId),
+        workRegisterId: c.registerId,
+        /** Le gérant travaille sur une autre caisse que la sienne. */
+        intervening: Boolean(chosenRegisterId && chosenRegisterId !== own && c.registerId === chosenRegisterId),
+        canIntervene: isSupervisor(u),
+        connected: Boolean(s.sync.credentials()),
       };
     },
     /** Rouvre les caisses électronique et banque de l'utilisateur (après une clôture en cours de journée). */
@@ -2500,6 +2553,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ...desk,
         needsPin: !can(user!, ['cashout']),
         canEdit: can(user!, ['cash_desk_edit']),
+        canReverse: can(user!, ['payment_cancel']),
+        canSupplierAdvance: can(user!, ['supplier_advance']),
+        suppliers: s.purchases.listSuppliers().map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
         // Tous les clients : un dépôt d'avance se fait aussi pour un client qui ne doit rien.
         customers: s.customers.listCustomers(c.storeId).map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
         invoices: s.purchases
@@ -2521,7 +2577,19 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = deskCtx(sessionId);
       // Le code saisi l'emporte : il sert aussi à dépasser le plafond des avances.
       const by = supervisorPin ? supervisor(supervisorPin).id : can(user!, ['cashout']) ? user!.id : supervisor('').id;
+      if (input.type === 'supplier_advance' && !can(user!, ['supplier_advance']) && !can(s.admin.getUser(by), ['supplier_advance'])) {
+        throw new AppError("Vous n'avez pas le droit de verser une avance à un fournisseur", 'FORBIDDEN');
+      }
       return s.cashdesk.cashOut(c, sessionId, input, by);
+    },
+    /**
+     * Annule un règlement ou un dépôt d'avance client, ou un règlement fournisseur,
+     * de la journée ouverte : l'argent est rendu (ou revient) par une pièce de contre-passation.
+     */
+    'cashdesk.reverse': (source: 'customer_payment' | 'supplier_payment', id: string, reason: string, supervisorPin?: string) => {
+      const c = ctx(TREASURY);
+      const by = can(user!, ['payment_cancel']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      return s.cashdesk.reversePayment(c, source, id, by, reason);
     },
     /** Reçu (entrée) ou bon (sortie) d'une ligne de la journée : ticket ou A4. Le reçu réimprimé porte « DUPLICATA ». */
     'cashdesk.print': async (sessionId: string, source: string, id: string, format: 'ticket' | 'a4' = 'ticket') => {
@@ -2805,6 +2873,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean; zone?: string | null }) => s.customers.listCustomers(ctx().storeId, opts),
     'customers.zones': () => (requireUser(), s.customers.zones()),
     'customers.get': (id: string) => (requireUser(), s.customers.getCustomer(id)),
+    /** Solde d'ouverture (à la création) ou ajustement du solde d'un client. */
+    'customers.adjustBalance': (id: string, input: BalanceAdjustment) => s.opening.adjustCustomer(ctx(['balance_adjust']), id, input),
     'customers.save': (input: CustomerInput, id?: string) => {
       const u = requireUser([id ? 'customer_edit' : 'customer_create', 'customer_deactivate', 'receivables', 'customer_price_level']);
       const before = id ? s.customers.getCustomer(id) : null;

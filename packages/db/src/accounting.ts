@@ -665,8 +665,9 @@ export class AccountingService extends Base {
     const rows = this.db
       .prepare(
         `SELECT e.number, e.direction, e.kind, e.amount, e.method, e.label, e.reference, e.account_id, e.from_central, date(e.at, 'localtime') AS d,
-                s.code AS staff_code, s.name AS staff_name, s.salary_account, s.advance_account, c.code AS customer_code, c.name AS customer_name
-         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id
+                s.code AS staff_code, s.name AS staff_name, s.salary_account, s.advance_account, c.code AS customer_code, c.name AS customer_name,
+                f.code AS supplier_code, f.name AS supplier_name
+         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN suppliers f ON f.id = e.supplier_id
          WHERE e.store_id = ? AND e.status = 'active'`,
       )
       .all(storeId) as {
@@ -686,6 +687,8 @@ export class AccountingService extends Base {
       advance_account: string | null;
       customer_code: string | null;
       customer_name: string | null;
+      supplier_code: string | null;
+      supplier_name: string | null;
     }[];
     return rows
       .filter((e) => inRange(e.d, opts.from, opts.to))
@@ -701,7 +704,9 @@ export class AccountingService extends Base {
               ? side(e.advance_account!, -sign * e.amount, label, staff)
               : e.kind === 'customer_refund'
                 ? side(r.customers, -sign * e.amount, label, { code: e.customer_code ?? '', name: e.customer_name ?? '' })
-                : side(e.account_id ?? r.transfer, -sign * e.amount, label);
+                : e.kind === 'supplier_advance' || e.kind === 'supplier_refund'
+                  ? side(r.suppliers, -sign * e.amount, label, { code: e.supplier_code ?? '', name: e.supplier_name ?? '' })
+                  : side(e.account_id ?? r.transfer, -sign * e.amount, label);
         return {
           journal: e.from_central ? ('CA' as const) : METHOD_JOURNAL(e.method),
           date: e.d,
@@ -724,15 +729,17 @@ export class AccountingService extends Base {
     const customers = (
       this.db
         .prepare(
-          `SELECT o.number, o.doc_date AS d, o.doc_ref, o.amount, c.code, c.name FROM opening_balances o JOIN customers c ON c.id = o.customer_id WHERE o.store_id = ?`,
+          `SELECT o.number, o.doc_date AS d, o.doc_ref, o.amount, o.kind, o.label, c.code, c.name FROM opening_balances o JOIN customers c ON c.id = o.customer_id WHERE o.store_id = ?`,
         )
-        .all(storeId) as { number: string; d: string; doc_ref: string | null; amount: number; code: string; name: string }[]
+        .all(storeId) as { number: string; d: string; doc_ref: string | null; amount: number; kind: string; label: string | null; code: string; name: string }[]
     )
       .filter((o) => inRange(o.d, opts.from, opts.to))
       .map((o) => {
-        const l = label(`${o.amount > 0 ? 'créance' : 'avoir'} ${o.name}${o.doc_ref ? ` n° ${o.doc_ref}` : ''}`);
+        // Ajustement de solde fait depuis la fiche : en opérations diverses, avec son motif.
+        const adjust = o.kind === 'adjustment';
+        const l = adjust ? `Ajustement de solde ${o.name}${o.label ? ` : ${o.label}` : ''}` : label(`${o.amount > 0 ? 'créance' : 'avoir'} ${o.name}${o.doc_ref ? ` n° ${o.doc_ref}` : ''}`);
         return {
-          journal: 'AN' as const,
+          journal: adjust ? ('OD' as const) : ('AN' as const),
           date: o.d,
           ref: o.number,
           label: l,
@@ -743,17 +750,18 @@ export class AccountingService extends Base {
     const suppliers = (
       this.db
         .prepare(
-          `SELECT i.number, i.kind, i.supplier_number, i.invoice_date AS d, i.total_ttc, f.code, f.name
-           FROM supplier_invoices i JOIN suppliers f ON f.id = i.supplier_id WHERE i.store_id = ? AND i.opening = 1`,
+          `SELECT i.number, i.kind, i.supplier_number, i.invoice_date AS d, i.total_ttc, i.opening, i.notes, f.code, f.name
+           FROM supplier_invoices i JOIN suppliers f ON f.id = i.supplier_id WHERE i.store_id = ? AND i.opening IN (1, 2)`,
         )
-        .all(storeId) as { number: string; kind: 'invoice' | 'credit_note'; supplier_number: string; d: string; total_ttc: number; code: string; name: string }[]
+        .all(storeId) as { number: string; kind: 'invoice' | 'credit_note'; supplier_number: string; d: string; total_ttc: number; opening: number; notes: string | null; code: string; name: string }[]
     )
       .filter((i) => inRange(i.d, opts.from, opts.to))
       .map((i) => {
         const amount = i.kind === 'invoice' ? i.total_ttc : -i.total_ttc;
-        const l = label(`${amount > 0 ? 'dette' : 'avoir'} ${i.name} n° ${i.supplier_number}`);
+        const adjust = i.opening === 2;
+        const l = adjust ? `Ajustement de solde ${i.name}${i.notes ? ` : ${i.notes}` : ''}` : label(`${amount > 0 ? 'dette' : 'avoir'} ${i.name} n° ${i.supplier_number}`);
         return {
-          journal: 'AN' as const,
+          journal: adjust ? ('OD' as const) : ('AN' as const),
           date: i.d,
           ref: i.number,
           label: l,

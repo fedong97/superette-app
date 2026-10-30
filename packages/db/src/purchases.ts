@@ -302,6 +302,7 @@ export class PurchaseService extends Base {
                 (SELECT COUNT(*) FROM supplier_articles sa WHERE sa.supplier_id = s.id) AS article_count,
                 COALESCE((SELECT SUM(CASE WHEN i.kind = 'invoice' THEN i.total_ttc ELSE -i.total_ttc END) FROM supplier_invoices i WHERE i.supplier_id = s.id), 0)
                 - COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.supplier_id = s.id), 0)
+                + COALESCE((SELECT SUM(e.amount) FROM treasury_entries e WHERE e.supplier_id = s.id AND e.kind = 'supplier_refund' AND e.status = 'active'), 0)
                 - COALESCE((SELECT SUM(o.amount) FROM account_offsets o WHERE o.supplier_id = s.id AND o.status = 'active'), 0) AS balance
          FROM suppliers s
          WHERE (@all = 1 OR s.active = 1) AND (@search IS NULL OR s.name LIKE @search OR s.code LIKE @search OR s.phone LIKE @search)
@@ -1184,6 +1185,7 @@ export class PurchaseService extends Base {
     return this.db.prepare(
       `SELECT i.*, s.name AS supplier_name,
               COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.invoice_id = i.id), 0)
+              - COALESCE((SELECT SUM(e.amount) FROM treasury_entries e WHERE e.invoice_id = i.id AND e.kind = 'supplier_refund' AND e.status = 'active'), 0)
               + COALESCE((SELECT SUM(o.amount) FROM account_offsets o WHERE o.invoice_id = i.id AND o.status = 'active'), 0) AS paid
        FROM supplier_invoices i JOIN suppliers s ON s.id = i.supplier_id
        WHERE ${where} ORDER BY i.due_date, i.invoice_date`,

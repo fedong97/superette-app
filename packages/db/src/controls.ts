@@ -587,13 +587,22 @@ export class ControlService extends Base {
          SELECT o.offset_date, 'payment', o.id, o.number, 'OFFSET|' || i.number, -o.amount
          FROM account_offsets o JOIN supplier_invoices i ON i.id = o.invoice_id
          WHERE o.store_id = @storeId AND o.supplier_id = @supplierId AND o.status = 'active'
+         UNION ALL
+         SELECT date(e.at, 'localtime'), 'payment', e.id, e.number, 'CANCEL|' || i.supplier_number, e.amount
+         FROM treasury_entries e JOIN supplier_invoices i ON i.id = e.invoice_id
+         WHERE e.store_id = @storeId AND e.supplier_id = @supplierId AND e.kind = 'supplier_refund' AND e.status = 'active'
          ) ORDER BY date, kind = 'payment', number`,
       )
       .all({ storeId, supplierId }) as { date: string; kind: 'invoice' | 'credit_note' | 'payment'; ref_id: string; number: string; label: string; amount: number }[];
     for (const l of rows) {
       if (l.kind !== 'payment') continue;
       const [method, reference] = l.label.split('|');
-      l.label = method === 'OFFSET' ? `Compensation avec son compte client (${reference})` : `Règlement ${SUPPLIER_PAYMENT_METHODS[method as keyof typeof SUPPLIER_PAYMENT_METHODS] ?? method}${reference ? ` ${reference}` : ''}`;
+      l.label =
+        method === 'CANCEL'
+          ? `Règlement de la facture ${reference} annulé`
+          : method === 'OFFSET'
+            ? `Compensation avec son compte client (${reference})`
+            : `Règlement ${SUPPLIER_PAYMENT_METHODS[method as keyof typeof SUPPLIER_PAYMENT_METHODS] ?? method}${reference ? ` ${reference}` : ''}`;
     }
     return rows;
   }
@@ -638,6 +647,7 @@ export class ControlService extends Base {
       .prepare(
         `SELECT i.supplier_id, i.kind, i.total_ttc, i.due_date,
                 COALESCE((SELECT SUM(p.amount) FROM supplier_payments p WHERE p.invoice_id = i.id), 0)
+                - COALESCE((SELECT SUM(e.amount) FROM treasury_entries e WHERE e.invoice_id = i.id AND e.kind = 'supplier_refund' AND e.status = 'active'), 0)
                 + COALESCE((SELECT SUM(o.amount) FROM account_offsets o WHERE o.invoice_id = i.id AND o.status = 'active'), 0) AS paid
          FROM supplier_invoices i WHERE i.store_id = ?`,
       )
@@ -674,6 +684,9 @@ export class ControlService extends Base {
              FROM supplier_invoices WHERE store_id = @storeId AND invoice_date >= @since
              UNION ALL
              SELECT supplier_id, substr(paid_at, 1, 10), -amount FROM supplier_payments WHERE store_id = @storeId AND substr(paid_at, 1, 10) >= @since
+             UNION ALL
+             SELECT supplier_id, date(at, 'localtime'), amount FROM treasury_entries
+             WHERE store_id = @storeId AND kind = 'supplier_refund' AND status = 'active' AND date(at, 'localtime') >= @since
            ) GROUP BY supplier_id`,
         )
         .all({ storeId, since }) as { id: string; movements: number; last_at: string; change: number }[];

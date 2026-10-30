@@ -109,6 +109,17 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.102.0',
+    items: [
+      "Clients et fournisseurs : « Solde d'ouverture » dès la création de la fiche (ce que le client vous doit, ou ce que vous devez au fournisseur), et « Ajuster le solde… » avec son motif. La pièce reste dans le relevé du compte.",
+      "Caisse : « Annuler ce règlement… » sur un dépôt d'avance ou un règlement client ou fournisseur de la journée ouverte ; nouvelle sortie « Avance fournisseur ». Les entrées et sorties de caisse se suppriment toujours par « Plus ».",
+      "Rejoindre un magasin : l'adresse du serveur, puis l'identifiant et le code de l'utilisateur, sans code de caisse. Chacun se connecte ensuite avec son rôle.",
+      "Administration › Utilisateurs : chaque vendeur choisit la caisse où partent ses factures ; une caisse ne voit que les factures qui lui sont destinées.",
+      "Trésorerie › Caisses en direct (aussi dans le tableau de bord) : toutes les caisses du magasin, rafraîchies seules, avec le caissier en place, les opérations du jour et l'historique ; le gérant modifie une facture ou intervient sur une caisse.",
+      "Barre latérale : le sous-menu ne clignote plus quand le curseur reste dessus.",
+    ],
+  },
+  {
     version: '0.101.0',
     items: [
       "Serveur central remplacé ou restauré (même sur un autre PC) : chaque caisse le voit toute seule, lui renvoie ce qu'il a perdu (ventes, journées de caisse, règlements, réceptions, mouvements de stock…) et reçoit de nouveau les opérations des autres caisses.",

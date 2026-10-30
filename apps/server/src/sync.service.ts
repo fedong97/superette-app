@@ -5,6 +5,7 @@ import { CONFIG, type ServerConfig } from './config';
 import { type Db, PG } from './database';
 import { readEpoch } from './epoch';
 import { readLicense } from './license';
+import { verifyPin } from './mobile.service';
 
 /** Données partagées entre tous les magasins ; le reste ne circule qu'à l'intérieur d'un magasin. */
 export const GLOBAL_ENTITIES = [
@@ -169,6 +170,40 @@ export class SyncService {
     const register = rows.find((r) => r.payload.activation_code === code && r.payload.active !== 0);
     if (!register) throw new NotFoundException("Code d'activation inconnu. Vérifiez que le poste principal s'est bien synchronisé.");
     return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id);
+  }
+
+  /**
+   * Nouveau PC sans code de caisse : il rejoint le magasin avec l'adresse du
+   * serveur et l'identifiant et le code d'un utilisateur du magasin (vendeur,
+   * magasinier, caissier…). Le PC n'est rattaché à aucune caisse : chacun
+   * travaille ensuite sur la caisse que l'administration lui attribue.
+   */
+  async join(input: { login: string; pin: string; name?: string }) {
+    const login = String(input?.login ?? '').trim().toLowerCase();
+    const pin = String(input?.pin ?? '');
+    if (!login || !pin) throw new BadRequestException('Identifiant et code obligatoires');
+    const { rows } = await this.pg.query<{ entity_id: string; payload: Record<string, unknown> }>(
+      `SELECT DISTINCT ON (entity_id) entity_id, payload FROM events
+       WHERE entity = 'user' AND entity_id IN (
+         SELECT entity_id FROM events WHERE entity = 'user' AND lower(payload->>'login') = $1)
+       ORDER BY entity_id, seq DESC`,
+      [login],
+    );
+    const user = rows.find(
+      (r) => String(r.payload['login'] ?? '').toLowerCase() === login && r.payload['active'] !== 0 && !r.payload['deleted_at'] && verifyPin(pin, String(r.payload['pin_hash'] ?? '')),
+    );
+    if (!user) throw new ForbiddenException("Identifiant ou code incorrect (ou l'utilisateur n'est pas encore arrivé au serveur : synchronisez le PC principal)");
+    let storeId = user.payload['store_id'] ? String(user.payload['store_id']) : null;
+    if (!storeId) {
+      // Administrateur de tous les magasins : le seul magasin, sinon il faut un utilisateur du magasin.
+      const { rows: stores } = await this.pg.query<{ entity_id: string }>(
+        "SELECT DISTINCT entity_id FROM events WHERE entity = 'store' AND op = 'upsert'",
+      );
+      if (stores.length !== 1) throw new BadRequestException('Plusieurs magasins sur ce serveur : connectez-vous avec un utilisateur du magasin de ce PC');
+      storeId = stores[0]!.entity_id;
+    }
+    // Le PC n'occupe aucune caisse : la place est tenue par un identifiant propre au poste.
+    return this.createDevice(input.name?.trim() || 'Poste', storeId, `poste:${randomUUID()}`);
   }
 
   async authenticate(authorization: string | undefined, appVersion?: string): Promise<Device> {

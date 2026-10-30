@@ -5752,6 +5752,17 @@ export const EN: Record<string, string> = {
   "Fenêtres : barre de titre verte comme avant (vert plein sur la fenêtre de devant). Cartes de chiffres et accès rapides de l'accueil légèrement teintés de vert.": "Windows: green title bar as before (solid green on the front window). Figure cards and home quick links lightly tinted green.",
   "Caisse : la zone de saisie de la recherche est jaune pâle ; les boutons du bas sont plus petits et tiennent sur une seule ligne.": "Till: the search entry field is pale yellow; the bottom buttons are smaller and fit on a single row.",
   "Accueil : la page défile jusqu'en bas (elle était coupée sous les points d'attention quand le magasin a beaucoup de caisses).": "Home: the page now scrolls to the bottom (it was cut off below the attention points when the store has many tills).",
+  "Remise à zéro des données d’essai dans une fiche d’intervention : faite au bureau dans la fiche, elle est refaite dans la boutique quand la fiche y est rapportée (sauvegarde juste avant), puis les modifications de la fiche sont ajoutées.": "Reset of the test data in a service copy: done at the office in the copy, it is redone in the shop when the copy is brought back (backup just before), then the copy's changes are added.",
+  "Ouvrez la boutique elle-même ou une fiche d’intervention : une copie comptable ou le mode formation ne se remettent pas à zéro.": "Open the shop itself or a service copy: an accountant copy or training mode cannot be reset.",
+  "Remise à zéro faite dans la fiche. La boutique sera remise à zéro quand la fiche y sera rapportée.": "Reset done in the copy. The shop will be reset when the copy is brought back to it.",
+  "Vous êtes dans une fiche d’intervention : la remise à zéro est faite ici, puis refaite dans la boutique quand la fiche y sera rapportée (une sauvegarde de la boutique est faite juste avant). Les ventes faites dans la boutique d’ici là seront effacées aussi.": "You are in a service copy: the reset is done here, then redone in the shop when the copy is brought back (a backup of the shop is made just before). Sales made in the shop until then will be erased too.",
+  "Déjà demandée le": "Already requested on",
+  ": elle sera refaite avec le choix ci-dessous pour le stock.": ": it will be redone with the stock choice below.",
+  "Boutique remise à zéro. Sauvegarde d’avant :": "Shop reset. Backup from before:",
+  "Remise à zéro des données d’essai faite dans la fiche le": "Reset of the test data done in the copy on",
+  "gardé comme stock de départ": "kept as opening stock",
+  "remis à zéro": "reset to zero",
+  "), avec une sauvegarde juste avant. Ensuite, ce qui a été modifié dans la fiche est ajouté.": "), with a backup just before. Then what was changed in the copy is added.",
 };
 
 /** Textes avec un nombre, un numéro ou un nom : le premier motif qui correspond s'applique. */

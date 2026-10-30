@@ -165,4 +165,35 @@ describe('fiches envoyées et dossier partagé', () => {
     expect(s.fiches.shareStatus().pending).toHaveLength(0);
     expect(existsSync(join(share, 'Retours', 'Rapportées', basename(fiche.file)))).toBe(true);
   });
+  it("remise à zéro faite dans une fiche d'intervention : refaite dans la boutique au retour, avant les modifications", async () => {
+    const { root, s, ctx, admin, tva, savon, sell, clock, setNow } = setup();
+    sell();
+    const info = await s.fiches.export(admin, 'intervention', join(root, 'usb'), '0.106.0');
+    setNow('2026-10-17T09:00:00');
+    sell(); // vente d'essai faite pendant l'intervention : effacée aussi
+
+    // Chez le technicien : remise à zéro dans la fiche, puis un réglage de produit.
+    const t = openServices(info.file, clock);
+    t.reset.run(admin.id, { keepStock: true, inFiche: true });
+    expect(t.fiches.markReset(admin, true)).toMatchObject({ keepStock: true, byName: 'Steve' });
+    expect(t.pos.listSales({ storeId: ctx.storeId })).toHaveLength(0);
+    setNow('2026-10-17T10:00:00');
+    t.catalogue.saveArticle(admin.id, { name: 'Savon Azur', unit: 'piece', vatRateId: tva, purchasePrice: 0, salePrice: 450 }, savon.id);
+    expect(t.sync.pending(1000).some((e) => e.entity === 'stock_movement')).toBe(false);
+    t.db.close();
+
+    // Retour : la fiche dit qu'il faut remettre la boutique à zéro, puis ses modifications sont ajoutées.
+    setNow('2026-10-17T11:00:00');
+    expect(s.fiches.check(info.file).fiche?.reset).toMatchObject({ keepStock: true });
+    const meta = s.fiches.returnable(info.file);
+    expect(meta.reset).toMatchObject({ keepStock: true });
+    s.reset.run(ctx.userId, { keepStock: meta.reset!.keepStock });
+    const back = s.fiches.bringBack(ctx.userId, info.file);
+    expect(back).toMatchObject({ reset: true, conflicts: 0 });
+    expect(s.pos.listSales({ storeId: ctx.storeId })).toHaveLength(0);
+    expect(s.catalogue.getArticle(savon.id, ctx.storeId).sale_price).toBe(450);
+    // Stock de départ : celui de la boutique (50 reçus, 2 vendus), une seule fois.
+    const moves = s.db.prepare("SELECT qty FROM stock_movements WHERE article_id = ?").pluck().all(savon.id) as number[];
+    expect(moves).toEqual([48_000]);
+  });
 });

@@ -100,6 +100,12 @@ const KEPT_COUNTER = "name LIKE 'article.code%' OR name LIKE 'barcode.%' OR name
 export interface ResetOptions {
   /** Garder les quantités en stock comme stock de départ (sinon tout le stock repart de zéro). */
   keepStock?: boolean;
+  /**
+   * Remise à zéro faite dans une fiche d'intervention : les mouvements de stock
+   * de départ ne repartent pas avec la fiche, la boutique refait sa propre remise
+   * à zéro (avec son stock à elle) quand la fiche est rapportée.
+   */
+  inFiche?: boolean;
 }
 
 export interface ResetPreview {
@@ -171,14 +177,14 @@ export class ResetService extends Base {
         for (const s of opening) {
           const row = { id: newId(), article_id: s.article_id, warehouse_id: s.warehouse_id, qty: s.qty, unit_cost: s.avg_cost, user_id: userId, at: now };
           insert.run(row);
-          this.enqueue(null, 'stock_movement', row.id, 'upsert', { ...row, type: 'INVENTORY_ADJUST', lot_id: null, reason: 'Stock de départ (remise à zéro)', ref_type: 'reset', ref_id: null });
+          if (!opts.inFiche) this.enqueue(null, 'stock_movement', row.id, 'upsert', { ...row, type: 'INVENTORY_ADJUST', lot_id: null, reason: 'Stock de départ (remise à zéro)', ref_type: 'reset', ref_id: null });
         }
         const broken = this.db.pragma('foreign_key_check') as { table: string; parent: string }[];
         if (broken.length) {
           const where = [...new Set(broken.map((b) => `${b.table} → ${b.parent}`))].slice(0, 5).join(', ');
           throw new AppError(`Remise à zéro annulée : des fiches gardées renvoient encore à des données effacées (${where}). Rien n'a été effacé.`, 'INVALID');
         }
-        this.audit(userId, 'data.reset', undefined, undefined, { keepStock: Boolean(opts.keepStock), before });
+        this.audit(userId, 'data.reset', undefined, undefined, { keepStock: Boolean(opts.keepStock), inFiche: Boolean(opts.inFiche), before });
       });
     } finally {
       if (fk) this.db.pragma('foreign_keys = ON');

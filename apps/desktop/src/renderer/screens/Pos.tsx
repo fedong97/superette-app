@@ -135,13 +135,8 @@ const initials = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
     .join('');
-const TILE_COLORS = ['var(--brand)', '#e0a800', '#0891b2', '#db2777', '#7c3aed', '#22a06b', '#2563eb', '#ea580c'];
-/** Couleur stable par produit (le nom donne toujours la même). */
-const tileColor = (name: string) => {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return { '--c': TILE_COLORS[h % TILE_COLORS.length] } as React.CSSProperties;
-};
+/** 0.104.0 : une seule teinte pour les tuiles, la couleur de la marque (plus de couleur par produit). */
+const tileColor = (_name: string) => ({ '--c': 'var(--brand)' }) as React.CSSProperties;
 
 /**
  * Fiche de facturation (vente au comptant ou à crédit), pensée pour le tactile :
@@ -2536,7 +2531,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
 
       <div className="pos-actions">
         {sellerPost ? (
-          <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon" style={{ '--c': '#e0a800' } as React.CSSProperties}>
+          <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon">
             <i aria-hidden>↺</i>
             <span>
               Mes factures
@@ -2546,10 +2541,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           </button>
         ) : (
           <>
-        <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()} style={{ '--c': '#e0a800' } as React.CSSProperties}>
+        <button disabled={!lines.length || !can('sale_hold')} onClick={() => void hold()}>
           <i aria-hidden>⏸</i>En attente <kbd>F3</kbd>
         </button>
-        <button disabled={!can('sale_resume')} onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente" style={{ '--c': '#e0a800' } as React.CSSProperties}>
+        <button disabled={!can('sale_resume')} onClick={() => setDialog('held')} title="Rappeler un ticket mis en attente">
           <i aria-hidden>↺</i>
           <span>
             Rappeler
@@ -2557,36 +2552,36 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           </span>
           <kbd>F10</kbd>
         </button>
-        <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)" style={{ '--c': '#0891b2' } as React.CSSProperties}>
+        <button disabled={!can('drawer_open')} onClick={openDrawer} title="Ouvre le tiroir-caisse sans vente (tracé dans le journal)">
           <i aria-hidden>🗃</i>Tiroir <kbd>F5</kbd>
         </button>
           </>
         )}
         {can('missed_sale') && (
-          <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre" style={{ '--c': '#0d9488' } as React.CSSProperties}>
+          <button onClick={() => setDialog('missed')} title="Noter un produit demandé que vous n'avez pas pu vendre">
             <i aria-hidden>🙋</i>Le client voulait… <kbd>Ctrl+M</kbd>
           </button>
         )}
         {!sellerPost && (
           <>
-        <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket de caisse' : 'Réimprimer le dernier ticket'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+        <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={ticketKey} title={lines.length ? 'Valider et imprimer le ticket de caisse' : 'Réimprimer le dernier ticket'}>
           <i aria-hidden>🧾</i>Ticket <kbd>F2</kbd>
         </button>
-        <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket" style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+        <button disabled={!lastSale || lines.length > 0} onClick={printA4} title="Facture A4 du dernier ticket">
           <i aria-hidden>📄</i>Facture A4 <kbd>F9</kbd>
         </button>
-        <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp" style={{ '--c': '#16a34a' } as React.CSSProperties}>
+        <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp">
           <i aria-hidden>💬</i>WhatsApp
         </button>
-        <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'} style={{ '--c': '#7c3aed' } as React.CSSProperties}>
+        <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'}>
           <i aria-hidden>☰</i>Listing <kbd>F7</kbd>
         </button>
           </>
         )}
-        <button disabled={!lines.length} onClick={() => void askClear()} title="Vider la fiche en cours (Ctrl+Suppr)" style={{ '--c': '#dc2626' } as React.CSSProperties}>
+        <button disabled={!lines.length} onClick={() => void askClear()} title="Vider la fiche en cours (Ctrl+Suppr)" style={{ '--c': 'var(--danger)' } as React.CSSProperties}>
           <i aria-hidden>🗑</i>Vider <kbd>Ctrl+Suppr</kbd>
         </button>
-        <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche" style={{ '--c': '#94a3b8' } as React.CSSProperties}>
+        <button onClick={() => (lines.length ? toast.error('Terminez ou mettez en attente la fiche en cours') : onClose())} title="Fermer la fiche">
           <i aria-hidden>✕</i>Fermer
         </button>
         {sellerPost ? (

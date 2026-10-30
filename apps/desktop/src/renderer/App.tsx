@@ -194,6 +194,7 @@ const MENU_ICONS: Record<string, string> = {
 
 /** Icône d'un écran : celle du premier menu qui l'ouvre. */
 const winIcon = (kind: WinKind) => MENU_ICONS[MENUS.find(([, items]) => items.some((it) => it.open?.[0] === kind))?.[0] ?? ''] ?? '▣';
+/** Couleur de l'icône de chaque menu dans la barre latérale. */
 const MENU_COLORS: Record<string, string> = {
   Fichier: '#64748b',
   Vente: 'var(--brand)',
@@ -211,6 +212,8 @@ const MENU_COLORS: Record<string, string> = {
   Administration: '#64748b',
   Aide: '#94a3b8',
 };
+/** 0.104.0 : les cartes de « Tous les menus » prennent la couleur de la marque. */
+const MENU_COLOR = 'var(--brand)';
 /** Réglages et Aide restent en bas de la barre verte ; les autres menus s'y affichent au choix de chacun. */
 const RAIL_FIXED = ['Administration', 'Aide'];
 const RAIL_LABELS: Record<string, string> = {
@@ -1680,7 +1683,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
           </div>
           <div className="all-menus-grid">
             {visibleMenus.map(([name, items]) => (
-              <section key={name} className="menu-card" style={{ '--c': MENU_COLORS[name] } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
+              <section key={name} className="menu-card" style={{ '--c': MENU_COLOR } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
                 <h2>
                   <i aria-hidden>{MENU_ICONS[name]}</i>
                   {name}

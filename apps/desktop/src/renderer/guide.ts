@@ -109,6 +109,14 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.104.0',
+    items: [
+      "Nouvelles couleurs : fonds gris très clair, cartes et tableaux blancs, le vert ONIX 360 réservé aux actions principales et aux éléments actifs.",
+      "Couleurs des états partout : vert pour ce qui va bien, orange pour l'attention, rouge pour les erreurs et ruptures, bleu pour l'information.",
+      "Barre latérale vert profond avec les icônes de couleur des menus, onglets du haut en bleu clair, fenêtres à barre blanche.",
+    ],
+  },
+  {
     version: '0.103.0',
     items: [
       "Accueil du gérant « Mon magasin maintenant » : chiffres du jour qui s'animent et se comparent à hier à la même heure (ventes, tickets, panier moyen, marge, règlements, espèces en caisse), rafraîchis toutes les 30 secondes.",

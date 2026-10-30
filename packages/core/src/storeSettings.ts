@@ -1,5 +1,5 @@
 import { type BadgeLayout, DEFAULT_BADGE, normalizeBadge } from './badge';
-import { DEFAULT_BRAND_COLOR, DEFAULT_BRAND_COLOR2, isHexColor } from './brand';
+import { DEFAULT_BRAND_COLOR, DEFAULT_BRAND_COLOR2, LEGACY_BRAND_COLOR, isHexColor } from './brand';
 import { type DocTemplate, normalizeDefaults, normalizeTemplates } from './docTemplates';
 import { type BarcodeLabelFormatId, isBarcodeLabelFormat } from './labels';
 import { DEFAULT_PAYROLL, normalizePayroll, type PayrollRules } from './payroll';
@@ -459,6 +459,8 @@ export function parseStoreSettings(json: string | null | undefined): StoreSettin
   if (!json) return { ...DEFAULT_STORE_SETTINGS };
   try {
     const parsed = { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(json) as Partial<StoreSettings>) };
+    // L'ancien vert par défaut (avant 0.104.0) devient le nouveau vert ONIX 360.
+    if (parsed.brandColor === LEGACY_BRAND_COLOR) parsed.brandColor = DEFAULT_BRAND_COLOR;
     return { ...parsed, payroll: { ...DEFAULT_PAYROLL, ...parsed.payroll }, badge: normalizeBadge(parsed.badge) };
   } catch {
     return { ...DEFAULT_STORE_SETTINGS };

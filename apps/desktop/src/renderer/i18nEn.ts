@@ -5745,6 +5745,9 @@ export const EN: Record<string, string> = {
   "Vendeur et caissier : « Ma caisse et mes factures » sur l'accueil (caisse ouverte, attendu dans le tiroir, factures envoyées en attente, renvoyées ou encaissées).": "Seller and cashier: “My till and my invoices” on the home page (till open, expected in the drawer, invoices sent and waiting, returned or paid).",
   "Tâches du jour : les tâches du même genre se regroupent (« Réception attendue 8 ») et toute la ligne ouvre l'écran de la tâche.": "Daily tasks: tasks of the same kind are grouped (“Expected delivery 8”) and the whole line opens the task's screen.",
   "Tableau de bord › La journée : les caisses en direct en haut. « Personnaliser l'accueil » masque les blocs inutiles.": "Dashboard › The day: live tills at the top. “Customize home page” hides the blocks you don't need.",
+  "Nouvelles couleurs : fonds gris très clair, cartes et tableaux blancs, le vert ONIX 360 réservé aux actions principales et aux éléments actifs.": "New colours: very light grey backgrounds, white cards and tables, ONIX 360 green kept for main actions and active items.",
+  "Couleurs des états partout : vert pour ce qui va bien, orange pour l'attention, rouge pour les erreurs et ruptures, bleu pour l'information.": "Status colours everywhere: green when all is well, orange for attention, red for errors and stock-outs, blue for information.",
+  "Barre latérale vert profond avec les icônes de couleur des menus, onglets du haut en bleu clair, fenêtres à barre blanche.": "Deep green sidebar with the coloured menu icons, light blue tabs at the top, windows with a white title bar.",
 };
 
 /** Textes avec un nombre, un numéro ou un nom : le premier motif qui correspond s'applique. */

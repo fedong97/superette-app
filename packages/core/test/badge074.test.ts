@@ -24,7 +24,12 @@ describe("couleurs de l'entreprise", () => {
     const p = brandPalette('#f4d84a', '#ffffff');
     // Une principale très claire : les titres prennent sa version foncée.
     expect(contrast(p.deep, '#ffffff')).toBeGreaterThanOrEqual(7);
-    expect(brandPalette(null, null).brand).toBe('#1f7a5c');
+    expect(brandPalette(null, null).brand).toBe('#16866b');
+    // 0.104.0 : le vert ONIX 360 donne les teintes exactes de la palette, l'ancien vert passe au nouveau.
+    expect(brandPalette(null, null)).toMatchObject({ dark: '#0f735c', deep: '#075b48', soft: '#eaf5f1', pale: '#f3f9f7' });
+    expect(brandPalette('#1f7a5c', null).brand).toBe('#16866b');
+    expect(brandCssVars(null, null)).toMatchObject({ '--brand': '#16866b', '--brand-hover': '#0f735c', '--brand-dark': '#075b48', '--brand-light': '#eaf5f1' });
+    expect(brandCssVars(null, null)).not.toHaveProperty('--bg');
     expect(brandCssVars('#C62828', '#F2994A')).toMatchObject({ '--brand': '#c62828', '--brand2': '#f2994a', '--brand-ink': '#ffffff' });
   });
 
@@ -35,7 +40,8 @@ describe("couleurs de l'entreprise", () => {
     expect(s.badge).toMatchObject({ model: 'arc', width: 150 });
     expect(() => mergeStoreSettings(null, { brandColor: 'rouge' })).toThrow(/Couleur/);
     // Paramètres enregistrés avant 0.74 : le badge et les couleurs par défaut.
-    expect(parseStoreSettings('{"rccm":"X"}')).toMatchObject({ brandColor: '#1f7a5c', badge: DEFAULT_BADGE });
+    expect(parseStoreSettings('{"rccm":"X"}')).toMatchObject({ brandColor: '#16866b', badge: DEFAULT_BADGE });
+    expect(parseStoreSettings('{"brandColor":"#1f7a5c"}').brandColor).toBe('#16866b');
   });
 
   it('teinte les en-têtes de tableau des documents A4', () => {

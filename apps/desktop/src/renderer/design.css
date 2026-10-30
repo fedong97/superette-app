@@ -637,3 +637,7 @@ ul.home-rank { list-style: none; padding-left: 0; }
   background: var(--stat-bg); border: 1px solid var(--stat-line); border-left: 3px solid var(--brand);
 }
 .home-kpis button:hover, .kpis > div.clickable:hover { border-color: var(--stat-line); border-left-color: var(--brand); box-shadow: var(--shadow-md); }
+/* Accès rapides de l'accueil : même teinte que les cartes de chiffres, pastille d'icône blanche. */
+.role-tiles button, .role-tiles button:hover:not(:disabled) { background: var(--stat-bg); border: 1px solid var(--stat-line); }
+.role-tiles button:hover:not(:disabled) { border-color: var(--brand); }
+.role-tiles .tile-icon { background: var(--surface); box-shadow: inset 0 0 0 1px var(--stat-line); }

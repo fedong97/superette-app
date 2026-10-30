@@ -25,6 +25,10 @@
   --surface-soft: #f8faf9;
   --surface-head: #f1f5f3;
   --row-hover: #f7faf9;
+  --table-head: #dde9e4;
+  --table-line: #cfdcd6;
+  --table-alt: #f4f8f6;
+  --table-hover: #e8f1ed;
   /* Onglets rapides de la barre du haut : remplis de bleu clair (pas de vert), l'onglet de devant en vert. */
   --tab-bg: #dbeafe;
   --tab-line: #bfdbfe;
@@ -511,15 +515,16 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
 .topbar .top-icon.tab-add { border-color: var(--border); color: var(--text-secondary); }
 .statusbar { background: var(--surface); border-top: 1px solid var(--border-light); color: var(--text-secondary); }
 
-/* Tableaux légers : en-tête gris vert très clair, corps blanc, traits fins */
-table.list { background: var(--surface); border-color: var(--border-light); }
-table.list thead th, table.list th { background: var(--surface-head); color: var(--text-primary); font-weight: 600; border-bottom: 1px solid var(--border-light); }
-:where(table.list) > tbody > tr { background: var(--surface); }
+/* Tableaux (0.105.0) : en-tête vert-gris marqué, une ligne sur deux teintée, cadre visible ; pas de grands aplats verts. */
+table.list { background: var(--surface); border: 1px solid var(--table-line); }
+table.list thead th, table.list th { background: var(--table-head); color: var(--text-primary); font-weight: 650; border-bottom: 1px solid var(--table-line); }
+:where(table.list > tbody > tr) { background: var(--surface); }
+/* :where() garde les lignes marquées (écart, sélection, alerte) au-dessus de la teinte alternée. */
+:where(table.list > tbody > tr:nth-child(even)) { background: var(--table-alt); }
 table.list td { border-bottom: 1px solid var(--border-light); }
-table.list tbody tr:hover { background: var(--row-hover); }
-table.list tr.clickable:hover { background: var(--row-hover); }
+table.list tbody tr:hover, table.list tr.clickable:hover { background: var(--table-hover); }
 table.list tr.selected, table.list tr.selected td { background: var(--brand-light); }
-table.list tr.total td { background: var(--surface-head); }
+table.list tr.total td { background: var(--table-head); border-top: 1px solid var(--table-line); }
 
 /* Cartes, panneaux et fenêtres : blancs, trait discret, ombre légère */
 .card, section.card { background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }

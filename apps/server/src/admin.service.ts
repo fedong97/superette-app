@@ -215,6 +215,9 @@ export class AdminService {
         count: backups.length,
         dir: this.backups.available ? await this.backups.dir() : null,
         keep: await this.backups.keep(),
+        every: await this.backups.every(),
+        copyDir: await this.backups.copyDir(),
+        copyError: this.backups.copyError,
         error: this.backups.lastError,
       },
     };

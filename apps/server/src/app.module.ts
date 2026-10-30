@@ -13,6 +13,7 @@ import { ShopService } from './shop.service';
 import { StationBackupService } from './stationBackup.service';
 import { CONFIG, type ServerConfig } from './config';
 import { type Db, PG, openDb } from './database';
+import { readEpoch } from './epoch';
 import { SyncController } from './sync.controller';
 import { SyncService } from './sync.service';
 import { UpdatesController } from './updates.controller';
@@ -48,7 +49,9 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
     };
   }
 
-  onApplicationBootstrap() {
+  async onApplicationBootstrap() {
+    // L'époque de la base existe avant le premier PC : sur un serveur neuf, elle commence à 0.
+    await readEpoch(this.pg);
     this.backups.start();
     this.alerts.start();
   }

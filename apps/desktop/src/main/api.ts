@@ -1368,6 +1368,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'sync.connect': (url: string, enrollmentKey: string) => (requireAdmin(), notInFiche(), sync.connect(url, enrollmentKey)),
     'sync.now': () => (requireUser(), sync.now()),
+    'sync.changeUrl': (url: string) => (requireAdmin(), notInFiche(), sync.changeUrl(url)),
     'sync.resend': () => (requireAdmin(), sync.resend()),
     /** État de la synchronisation : le PC et le serveur comparés, sorte par sorte. */
     'sync.check': () => (requireUser(ADMIN), sync.check()),

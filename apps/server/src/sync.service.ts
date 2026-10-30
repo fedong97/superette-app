@@ -1,7 +1,9 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BackupService, type ServerBackupState } from './backup.service';
 import { CONFIG, type ServerConfig } from './config';
 import { type Db, PG } from './database';
+import { readEpoch } from './epoch';
 import { readLicense } from './license';
 
 /** Données partagées entre tous les magasins ; le reste ne circule qu'à l'intérieur d'un magasin. */
@@ -72,6 +74,7 @@ export class SyncService {
   constructor(
     @Inject(PG) private readonly pg: Db,
     @Inject(CONFIG) private readonly config: ServerConfig,
+    @Inject(BackupService) private readonly backups: BackupService,
   ) {}
 
   /** Clé d'enrôlement : celle de la configuration, sinon celle créée au premier démarrage. */
@@ -247,7 +250,23 @@ export class SyncService {
   }
 
   /** Opérations des autres postes : données partagées + celles du magasin du poste. */
-  async pull(device: Device, since: number, limit: number): Promise<{ events: SyncEvent[]; cursor: number; hasMore: boolean; license: string | null }> {
+  async pull(
+    device: Device,
+    since: number,
+    limit: number,
+  ): Promise<{
+    events: SyncEvent[];
+    cursor: number;
+    hasMore: boolean;
+    license: string | null;
+    /** Époque de la base : le PC qui la voit changer reprend sa lecture à `epochSeq` et renvoie ce qui manque. */
+    epoch: string;
+    epochSeq: number;
+    epochFrom: string | null;
+    /** Dernier numéro d'opération du serveur : un curseur plus grand vient d'une autre base. */
+    lastSeq: number;
+    serverBackup: ServerBackupState | null;
+  }> {
     const max = Math.min(Math.max(limit || 1000, 1), 5000);
     const { rows } = await this.pg.query<{
       seq: string;
@@ -268,6 +287,8 @@ export class SyncService {
     );
     const page = rows.slice(0, max);
     const cursor = page.length ? Number(page[page.length - 1]!.seq) : since || 0;
+    const epoch = await readEpoch(this.pg);
+    const { rows: last } = await this.pg.query<{ seq: string | null }>('SELECT MAX(seq)::text AS seq FROM events');
     return {
       // Les opérations du poste lui-même avancent le curseur sans lui être renvoyées.
       events: page
@@ -286,6 +307,11 @@ export class SyncService {
       hasMore: rows.length > max,
       // Licence du magasin : les PC où elle n'a pas été activée la reçoivent ainsi.
       license: (await this.currentLicense())?.key ?? null,
+      epoch: epoch.id,
+      epochSeq: epoch.seq,
+      epochFrom: epoch.from,
+      lastSeq: Number(last[0]?.seq ?? 0),
+      serverBackup: await this.backups.state().catch(() => null),
     };
   }
 }

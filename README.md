@@ -181,6 +181,13 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Copie de chaque sauvegarde vers un second dossier : clé USB ou dossier OneDrive / Google Drive. Une clé débranchée est signalée sans bloquer la sauvegarde.
 - « Sauvegarder maintenant », « Copier sur une clé USB… » (jamais effacée par la rotation) et « Sauvegarde en retard » dans la barre d'état après 2 jours sans sauvegarde réussie.
 - Restauration par l'administrateur, depuis la liste ou un fichier : contrôle du fichier, confirmation en tapant RESTAURER, copie « Avant restauration » de la base actuelle, redémarrage, trace dans le journal d'audit. Les réglages de sauvegarde du PC sont conservés.
+- Guide complet pour les utilisateurs (poste seul et plusieurs PC, panne d'un ou de plusieurs ordinateurs, adresses du serveur selon le réseau) : [docs/sauvegarde-et-reprise.md](docs/sauvegarde-et-reprise.md).
+
+**Reprise après la panne du serveur central (0.101.0)**
+- Époque de la base du serveur (`settings.sync_epoch` : identifiant, dernier numéro et date de la dernière opération au début de l'époque), créée au démarrage et renouvelée à chaque restauration. `GET /api/v1/sync/pull` la donne avec `lastSeq` et l'état des sauvegardes du serveur (`serverBackup`).
+- Le PC qui voit l'époque changer (ou un curseur plus grand que `lastSeq`) reprend sa lecture au début de la nouvelle époque, remet dans sa file d'envoi la dernière opération de chaque donnée qu'il a faite depuis la sauvegarde (30 jours de marge ; tout l'historique sur un serveur neuf ; le serveur ignore les identifiants qu'il a déjà), et refait le renvoi des données manquantes, qui couvre maintenant aussi les pièces du magasin (ventes, journées, entrées et sorties de caisse, règlements, dépenses, commandes, réceptions, factures et paiements fournisseurs, caisse centrale, Mobile Money, trésorerie, écritures, transferts, devis, commandes clients, coupures, lots et mouvements de stock) : les pièces d'un PC tombé en panne repartent depuis les autres PC du magasin. L'état de la synchronisation compare aussi ces pièces.
+- « Changer l'adresse » (Administration › Serveur central, `sync.changeUrl`) : même poste, même jeton, nouvelle adresse vérifiée auprès du serveur.
+- ONIX 360 Serveur : sauvegarde toutes les 1, 2, 4, 6 (par défaut), 12 ou 24 heures, 40 gardées, écrite sous un nom provisoire puis relue ; copie vers un second dossier (`backup_copy_dir`) relue et rattrapée toutes les 10 minutes ; dépôt d'une sauvegarde par l'interface (`POST /admin/api/backups/upload`, archive vérifiée) avant de la restaurer. « Serveur : sauvegarde à vérifier » dans la barre d'état des PC en cas d'échec, de retard ou de copie impossible.
 
 **Fiches boutique (0.58.0)**
 - Chaque boutique est un fichier. Fichier › Ouvrir une boutique, ou « Changer de boutique » à la connexion, liste les boutiques du PC (`poste.json` dans le dossier de données retient la dernière ouverte) ; les nouvelles boutiques et les fiches copiées vont dans `Documents\FEDONIX 360\Dossiers`. Changer de boutique relance le logiciel ; chaque boutique a ses utilisateurs. L'essai de licence est commun aux boutiques d'un PC.
@@ -413,7 +420,7 @@ npm run build:win -w @superette/server-app   # → apps/server-app/release/Onix3
 ```
 
 - L'installateur ouvre le pare-feu Windows pour l'application, et ONIX 360 Serveur démarre avec Windows (icône près de l'horloge ; fermer la fenêtre laisse le serveur tourner).
-- La base est dans `%APPDATA%\FEDO Serveur\donnees`, les sauvegardes dans `Documents\FEDO Serveur\Sauvegardes` (une par jour, les 30 dernières gardées ; dossier et nombre réglables).
+- La base est dans `%APPDATA%\FEDO Serveur\donnees`, les sauvegardes dans `Documents\FEDO Serveur\Sauvegardes` (toutes les 6 heures, les 40 dernières gardées ; dossier, second dossier de copie, fréquence et nombre réglables).
 - L'interface (`http://localhost:3000/`, ou l'adresse du PC depuis un autre PC ou un téléphone, avec un mot de passe) montre l'état des postes, les ventes du jour par magasin, le journal de tout ce que les PC envoient, les ventes des 14 derniers jours, les sauvegardes (télécharger, restaurer) et la clé d'enrôlement, créée au premier démarrage.
 - Le port (3000) se change dans `%APPDATA%\FEDO Serveur\reglages.json`.
 

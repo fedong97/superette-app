@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { type Services, checkSync, enrollStation, joinStore, resendEntity, resendMissing, syncOnce } from '@superette/db';
+import { type Services, changeServerUrl, checkSync, enrollStation, joinStore, resendEntity, resendMissing, syncOnce } from '@superette/db';
 
 const INTERVAL_MS = 20_000;
 
@@ -42,6 +42,8 @@ export function createSyncRunner(s: Services) {
         return { queued, check: await checkSync(s) };
       }),
     connect: (url: string, enrollmentKey: string) => run(() => enrollStation(s, url.trim(), enrollmentKey.trim(), hostname())),
+    /** Même serveur, nouvelle adresse : le PC garde son identité. */
+    changeUrl: (url: string) => run(() => changeServerUrl(s, url)),
     join: (url: string, activationCode: string) => run(() => joinStore(s, url.trim(), activationCode.trim(), hostname())),
     stop: () => clearInterval(timer),
   };

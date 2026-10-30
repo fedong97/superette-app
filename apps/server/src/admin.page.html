@@ -237,8 +237,9 @@
     if (!b.available) return '<span class="pastille non">PostgreSQL</span>';
     if (b.error) return '<span class="pastille erreur">Échec</span>';
     if (!b.last) return '<span class="pastille alerte">Aucune</span>';
+    if (b.copyError) return '<span class="pastille alerte">Copie impossible</span>';
     var age = Date.now() - new Date(b.last.at).getTime();
-    return '<span class="pastille ' + (age < 36 * 3600000 ? 'ok' : 'alerte') + '">' + esc(depuis(b.last.at)) + '</span>';
+    return '<span class="pastille ' + (age < Math.max(2 * b.every, 24) * 3600000 + 3600000 ? 'ok' : 'alerte') + '">' + esc(depuis(b.last.at)) + '</span>';
   }
 
   // ——— Accueil ———
@@ -388,8 +389,11 @@
       return api('backups').then(function (liste) {
         var h = '<h2>Sauvegardes</h2>' +
           (b.error ? '<div class="message erreur">La dernière sauvegarde automatique a échoué : ' + esc(b.error) + '</div>' : '') +
-          '<div class="bloc"><p style="margin-top:0">Le serveur fait une sauvegarde complète <b>chaque jour</b>, toute seule, et garde les <b>' + b.keep + '</b> plus récentes.<br>' +
-          'Dossier : <code>' + esc(b.dir) + '</code></p>' +
+          (b.copyError ? '<div class="message erreur">' + esc(b.copyError) + '</div>' : '') +
+          (!b.copyDir ? '<div class="message erreur">Les sauvegardes restent sur le disque de ce PC : s\'il tombe en panne, elles sont perdues avec lui. Choisissez ci-dessous un second dossier (clé USB laissée branchée, autre disque, OneDrive).</div>' : '') +
+          '<div class="bloc"><p style="margin-top:0">Le serveur fait une sauvegarde complète <b>toutes les ' + b.every + ' heure' + (b.every > 1 ? 's' : '') + '</b>, toute seule, la relit, et garde les <b>' + b.keep + '</b> plus récentes.<br>' +
+          'Dossier : <code>' + esc(b.dir) + '</code>' +
+          (b.copyDir ? '<br>Copie de chaque sauvegarde vers : <code>' + esc(b.copyDir) + '</code>' : '') + '</p>' +
           '<button class="principal" id="sauver">Sauvegarder maintenant</button></div>' +
           '<div class="bloc"><h3 style="margin-top:0">Sauvegardes disponibles</h3>';
         if (!liste.length) h += '<p class="muted">Aucune sauvegarde pour l\'instant.</p>';
@@ -400,9 +404,14 @@
                 '<td class="nombre"><a class="bouton" href="/admin/api/backups/' + encodeURIComponent(f.name) + '">Télécharger</a> <button class="danger" data-restaurer="' + esc(f.name) + '" data-date="' + esc(date(f.at)) + '">Restaurer</button></td></tr>';
             }).join('') + '</tbody></table>';
         }
-        h += '<p class="muted">Pour remettre une sauvegarde venue d\'un autre PC, copiez son fichier dans le dossier ci-dessus : elle apparaît dans la liste.</p></div>' +
+        h += '</div>' +
+          '<div class="bloc"><h3 style="margin-top:0">Remettre une sauvegarde venue d\'ailleurs</h3>' +
+          '<p class="muted" style="margin-top:0">Nouveau serveur après une panne : choisissez le fichier <code>fedo-serveur-….tar.gz</code> sur la clé USB ou le disque de copie. Il est vérifié puis ajouté à la liste ci-dessus ; cliquez ensuite sur « Restaurer ».</p>' +
+          '<div class="ligne"><div><input type="file" id="fichier-sauvegarde" accept=".gz"></div><div><button id="deposer-sauvegarde">Ajouter à la liste</button></div><div id="progression-sauvegarde" class="muted"></div></div></div>' +
           '<div class="bloc"><h3 style="margin-top:0">Réglages des sauvegardes</h3><div class="ligne">' +
-          '<div style="flex:1 1 320px"><label>Dossier (par exemple une clé USB ou un dossier Google Drive / OneDrive)</label><input id="dossier" style="width:100%" value="' + esc(b.dir) + '"></div>' +
+          '<div style="flex:1 1 320px"><label>Dossier des sauvegardes</label><input id="dossier" style="width:100%" value="' + esc(b.dir) + '"></div>' +
+          '<div style="flex:1 1 320px"><label>Copie vers un second dossier (clé USB, autre disque, OneDrive ; vide : aucune)</label><input id="copie" style="width:100%" value="' + esc(b.copyDir || '') + '"></div>' +
+          '<div><label>Fréquence</label><select id="frequence">' + [1, 2, 4, 6, 12, 24].map(function (n) { return '<option value="' + n + '"' + (n === b.every ? ' selected' : '') + '>' + (n === 1 ? 'Toutes les heures' : n === 24 ? 'Une fois par jour' : 'Toutes les ' + n + ' heures') + '</option>'; }).join('') + '</select></div>' +
           '<div><label>Nombre gardé</label><input id="garder" type="number" min="1" max="365" style="width:90px" value="' + b.keep + '"></div>' +
           '<div><button id="regler">Enregistrer</button></div></div></div>';
         return h;
@@ -492,15 +501,35 @@
       s.onclick = function () { action(s, function () { return api('backups', { method: 'POST' }); }, 'Sauvegarde faite').then(function () { afficher(true); }); };
       page.querySelectorAll('[data-restaurer]').forEach(function (b) {
         b.onclick = function () {
-          if (!confirm('Remettre le serveur dans l\'état du ' + b.getAttribute('data-date') + ' ?\n\nCe qui est arrivé au serveur depuis cette date en sera retiré : les PC le gardent chez eux, mais les nouveaux PC ne le recevront pas. L\'état actuel est d\'abord sauvegardé.')) return;
+          if (!confirm('Remettre le serveur dans l\'état du ' + b.getAttribute('data-date') + ' ?\n\nCe qui est arrivé au serveur depuis cette date en sera retiré, mais les PC le gardent chez eux : à leur prochaine synchronisation, ils le renvoient tout seuls. L\'état actuel est d\'abord sauvegardé.')) return;
           action(b, function () { return api('backups/' + encodeURIComponent(b.getAttribute('data-restaurer')) + '/restore', { method: 'POST' }); }, 'Sauvegarde restaurée').then(function () { afficher(true); });
         };
       });
       var r = document.getElementById('regler');
       r.onclick = function () {
         action(r, function () {
-          return api('backups/settings', { method: 'POST', body: { dir: document.getElementById('dossier').value, keep: Number(document.getElementById('garder').value) } });
+          return api('backups/settings', { method: 'POST', body: { dir: document.getElementById('dossier').value, copyDir: document.getElementById('copie').value, every: Number(document.getElementById('frequence').value), keep: Number(document.getElementById('garder').value) } });
         }, 'Réglages enregistrés').then(function () { afficher(true); });
+      };
+      var d = document.getElementById('deposer-sauvegarde');
+      d.onclick = function () {
+        var f = document.getElementById('fichier-sauvegarde').files[0];
+        if (!f) { toast('Choisissez d\'abord le fichier fedo-serveur-….tar.gz'); return; }
+        var p = document.getElementById('progression-sauvegarde');
+        d.disabled = true;
+        var x = new XMLHttpRequest();
+        x.open('POST', '/admin/api/backups/upload?name=' + encodeURIComponent(f.name));
+        x.setRequestHeader('Content-Type', 'application/octet-stream');
+        x.upload.onprogress = function (e) { if (e.lengthComputable) p.textContent = 'Envoi : ' + Math.round(e.loaded * 100 / e.total) + ' %'; };
+        x.onload = function () {
+          d.disabled = false;
+          var r = null;
+          try { r = JSON.parse(x.responseText); } catch (e) { r = null; }
+          if (x.status >= 200 && x.status < 300) { toast('Sauvegarde ajoutée : cliquez sur « Restaurer » sur sa ligne'); afficher(true); }
+          else { p.textContent = ''; toast((r && r.message) || ('Erreur ' + x.status)); }
+        };
+        x.onerror = function () { d.disabled = false; p.textContent = ''; toast('Envoi interrompu'); };
+        x.send(f);
       };
     },
     majs: function () {

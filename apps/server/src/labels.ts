@@ -92,13 +92,15 @@ export const ENTITY_LABELS: Record<string, string> = {
   field_rep: 'Commercial de terrain',
   report_preset: 'Filtre de rapport enregistré',
   outage: 'Ventes pendant une coupure',
+  outage_page: 'Page du carnet de coupure',
+  book_code: 'Code du carnet de coupure',
   promo_code: 'Code de réduction',
   stock_anomaly_decision: 'Décision sur une anomalie de stock',
 };
 
 /** Familles du journal d'activité. */
 export const ENTITY_GROUPS: { key: string; label: string; entities: string[] }[] = [
-  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale', 'gift_voucher', 'exit_check', 'recurring_order', 'outage', 'promo_code', 'field_rep'] },
+  { key: 'ventes', label: 'Ventes', entities: ['sale', 'sale_delivery', 'customer_payment', 'quote', 'customer_order', 'customer', 'summary_invoice', 'container_move', 'courier_return', 'payment_allocation', 'sale_edit_request', 'consignment_count', 'missed_sale', 'gift_voucher', 'exit_check', 'recurring_order', 'outage', 'outage_page', 'promo_code', 'field_rep'] },
   { key: 'caisse', label: 'Caisse', entities: ['cash_session', 'cash_operation', 'central_cash_movement', 'emoney_movement', 'treasury_entry', 'expense', 'cash_handover', 'agent_operation', 'agent_account', 'cash_alert', 'expense_attachment'] },
   {
     key: 'stock',

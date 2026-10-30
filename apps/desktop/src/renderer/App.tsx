@@ -299,7 +299,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Listing des opérations de caisse', open: ['sales', 'cashops'], perm: 'cash_operations' },
       { label: 'Rechercher dans les caisses', words: 'retrouver opération', open: ['sales', 'find'], perm: 'cash_operations' },
       { label: 'Contrôle des caissiers', open: ['control'], perm: 'cashier_control' },
-      { label: 'Ventes pendant une coupure', words: 'coupure panne courant eneo cahier', open: ['sales', 'outages'], perm: ['outage_close', 'sales'] },
+      { label: 'Ventes pendant une coupure', words: 'coupure panne courant eneo cahier carnet photo', open: ['sales', 'outages'], perm: ['outage_close', 'sales'] },
       H('Encaissements'),
       { label: 'Règlements clients reçus', words: 'paiement encaissement client', open: ['customers', 'payments'] },
       { label: 'Point Mobile Money : comptes et bilan', open: ['agent', 'accounts'], perm: 'agent_accounts' },

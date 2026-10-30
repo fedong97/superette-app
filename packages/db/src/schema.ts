@@ -2807,4 +2807,40 @@ ALTER TABLE customer_payments ADD COLUMN advance INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sales ADD COLUMN advance_used INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 65,
+    name: 'photos des pages du carnet de coupure',
+    sql: `
+-- Page du carnet tenu pendant une coupure, photographiée : elle sert à saisir les ventes
+-- et reste jointe à la coupure comme preuve. En base64, comme les justificatifs de dépense.
+CREATE TABLE outage_pages (
+  id TEXT PRIMARY KEY,
+  outage_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  page INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX outage_pages_outage ON outage_pages(outage_id);
+
+-- Codes du carnet de coupure : un numéro court (1 à 9999) par article et par conditionnement
+-- (units = unités de détail contenues, en millièmes : 1000 = l'unité). Les mêmes dans tous les magasins.
+CREATE TABLE book_codes (
+  id TEXT PRIMARY KEY,
+  code INTEGER NOT NULL CHECK (code BETWEEN 1 AND 9999),
+  article_id TEXT NOT NULL,
+  units INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX book_codes_code ON book_codes(code);
+CREATE INDEX book_codes_article ON book_codes(article_id, units);
+`,
+  },
 ];

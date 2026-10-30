@@ -1423,3 +1423,18 @@ ul.plain li { padding: 3px 0; }
 .sync-dot.bad { background: var(--warn); }
 .matrix-wrap { overflow: auto; max-height: 70vh; }
 .matrix-wrap table td.zero { color: var(--muted, #999); }
+
+/* Carnet de coupure lu en photo : la page à gauche, les lignes lues à droite, chacune sous sa bande de la photo. */
+.modal.wide:has(.book-reader) { width: min(1060px, calc(100% - 24px)); }
+.book-reader { display: grid; grid-template-columns: minmax(180px, 26%) 1fr; gap: 16px; align-items: start; }
+.book-photo { width: 100%; border: 1px solid var(--line); border-radius: 8px; position: sticky; top: 0; }
+.book-reader td.book-article { min-width: 170px; }
+.book-reader input.w4 { width: 56px; }
+.book-reader input.w5 { width: 70px; }
+.book-reader input.w6 { width: 90px; }
+.book-reader tr.book-strip td { padding: 6px 0 0; border-bottom: 0; }
+.book-reader tr.book-strip img { width: 100%; max-width: 760px; height: auto; display: block; border-radius: 4px; }
+.book-reader tr.warn td { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.book-print { display: inline-flex; gap: 6px; align-items: center; }
+.book-print input { width: 52px; }
+@media (max-width: 900px) { .book-reader { grid-template-columns: 1fr; } .book-photo { position: static; } }

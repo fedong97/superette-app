@@ -44,6 +44,7 @@ const WIPED = [
   'manual_entry_lines',
   'missed_sales',
   'outages',
+  'outage_pages',
   'mobile_payments',
   'payment_allocations',
   'production_orders',

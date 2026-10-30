@@ -1,5 +1,7 @@
 import {
   type DenominationCount,
+  bookCodesTableHtml,
+  bookPagesHtml,
   ELECTRONIC_METHODS,
   type BarcodeLabelFormatId,
   type BarcodeLabelOptions,
@@ -3593,6 +3595,38 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.outages.close(c, id, { reason: opts?.reason ?? null, closedBy });
     },
     'outages.cancel': (id: string) => s.outages.cancel(ctx(['sale_book', 'outage_close']), id),
+    /** Carnet de coupure ONIX : pages à cases à imprimer d'avance, et la liste des codes des articles. */
+    'outages.bookPrint': (pages: number) => {
+      const c = ctx(['sale_book', 'outage_close']);
+      return printer.posters(bookPagesHtml(pages, { storeName: s.admin.getStore(c.storeId).name, registerName: c.registerId ? s.admin.getRegister(c.registerId).name : null }), 'a4');
+    },
+    'outages.bookCodes': () => {
+      const c = ctx(['sale_book', 'outage_close']);
+      s.bookCodes.assign(c.userId);
+      return s.bookCodes.list(c.storeId);
+    },
+    'outages.bookCodesPrint': () => {
+      const c = ctx(['sale_book', 'outage_close']);
+      s.bookCodes.assign(c.userId);
+      return printer.listing(c.storeId, 'Codes du carnet de coupure', bookCodesTableHtml(s.bookCodes.list(c.storeId)), 'print');
+    },
+    /** Pages du carnet en photo : jointes à la coupure, affichées à côté de la saisie. */
+    'outages.pages': (id: string) => (ctx(['sale_book', 'outage_close']), s.outages.pages(id)),
+    'outages.page': (pageId: string) => (ctx(['sale_book', 'outage_close']), s.outages.page(pageId)),
+    'outages.addPage': (id: string, file: { name: string; mime: string; data: string }) => s.outages.addPage(ctx(['sale_book']), id, file),
+    'outages.removePage': (pageId: string) => s.outages.removePage(ctx(['sale_book']), pageId),
+    /** Ventes d'une page relue : toutes ou aucune. Un prix du carnet différent du catalogue demande le droit « prix » ou le code du gérant. */
+    'outages.enterSales': (id: string, sales: { at: string; number?: string | null; lines: SaleLineInput[] }[], opts?: { supervisorPin?: string }) => {
+      const c = ctx(['sale_book']);
+      requireTill(user!);
+      s.license.assertCanSell();
+      const boss = opts?.supervisorPin ? supervisor(opts.supervisorPin) : null;
+      if (sales.some((v) => v.lines.some((l) => l.price != null)) && !can(user!, ['price']) && !boss) {
+        throw new AppError('Des prix du carnet diffèrent du catalogue : le code du gérant est nécessaire', 'SUPERVISOR_REQUIRED');
+      }
+      const authorizedBy = boss ? boss.id : can(user!, ['discount']) ? user!.id : null;
+      return s.pos.completeOutageSales(c, id, sales, { discountAuthorizedBy: authorizedBy });
+    },
   };
 }
 

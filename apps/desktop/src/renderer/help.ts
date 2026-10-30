@@ -46,7 +46,8 @@ const POS: PageHelp = {
       steps: [
         "Une remise demande son motif (client fidèle, achat en gros, produit abîmé…) ; au-delà de la remise maxi de l'article, le code du gérant est demandé.",
         "« Code promo » : tapez le code donné par le client ; la remise s'applique au ticket entier après les promotions.",
-        "« Coupure » : le PC était éteint et les ventes sont notées sur un cahier. Déclarez la coupure avec le total du cahier, saisissez chaque vente à son heure, puis clôturez : ONIX montre l'écart.",
+        "« Coupure » (ou ⋯ Actions › Ventes pendant une coupure) : le PC était éteint et les ventes sont notées sur un cahier. Déclarez la coupure avec le total du cahier, saisissez chaque vente à son heure, puis clôturez : ONIX montre l'écart.",
+        "Carnet ONIX à cases : « Lire une page du carnet », puis la photo de la page. ONIX lit les chiffres sur ce PC, sans internet. Vérifiez chaque ligne à côté de son écriture (les douteuses sont en orange), corrigez ou cochez « Vérifié », puis « Enregistrer les ventes de la page ».",
       ],
     },
     {
@@ -183,6 +184,8 @@ export const HELP: Record<WinKind, PageHelp> = {
       perm: "sale_book",
       steps: [
         "Toutes les coupures déclarées : total du cahier, ventes saisies et écart. Une coupure clôturée avec un écart garde son motif et le nom de celui qui a clôturé.",
+        "Avant la prochaine coupure : « Imprimer des pages de carnet » (pages à cases, un chiffre par case) et « Imprimer la liste des codes » (le code court de chaque article, avec son prix). Gardez-les près de la caisse.",
+        "Les photos des pages lues restent jointes à la coupure, comme preuve.",
       ],
     },
     {

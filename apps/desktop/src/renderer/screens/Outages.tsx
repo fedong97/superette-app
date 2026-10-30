@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { call } from '../api';
 import { Empty, dateTime, fcfa, useLoad } from '../ui';
+import { BookPrintButtons } from './outageBook';
 
 const STATUS = { open: 'En cours de saisie', closed: 'Clôturée', cancelled: 'Annulée' } as const;
 const TAG = { open: 'alerte', closed: 'normal', cancelled: '' } as const;
@@ -19,7 +20,8 @@ export function Outages() {
           <option value="closed">Clôturées</option>
           <option value="cancelled">Annulées</option>
         </select>
-        <span className="muted">Les ventes d'une coupure se saisissent à la caisse (bouton « Coupure »).</span>
+        <span className="muted">Les ventes d'une coupure se saisissent à la caisse (bouton « Coupure »), à la main ou en photographiant les pages du carnet ONIX.</span>
+        <BookPrintButtons />
       </div>
       {rows.length === 0 ? (
         <Empty>Aucune coupure déclarée.</Empty>
@@ -49,6 +51,7 @@ export function Outages() {
                 <td className="r">{fcfa(o.declared_total)}</td>
                 <td className="r">
                   {fcfa(o.entered_total)} <span className="muted">({o.sales})</span>
+                  {o.pages > 0 && <div className="muted small">{o.pages} page(s) du carnet en photo</div>}
                 </td>
                 <td className={`r ${o.gap ? 'neg' : ''}`}>{fcfa(o.gap)}</td>
                 <td>{o.gap_reason ?? ''}</td>

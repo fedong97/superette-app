@@ -39,3 +39,6 @@ export * from './vouchers';
 export * from './netContent';
 export * from './posters';
 export * from './discounts';
+export * from './outageBook';
+export * from './outageBookRead';
+export * from './digitNet';

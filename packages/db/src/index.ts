@@ -77,6 +77,7 @@ import { RecurringOrderService } from './recurringOrders';
 import { StoreTransferService } from './storeTransfers';
 import { CounterService } from './counter';
 import { FieldRepService } from './fieldReps';
+import { BookCodeService } from './bookCodes';
 import { PromoCodeService } from './promoCodes';
 import { OutageService } from './outages';
 import { StockAnomalyService } from './anomalies';
@@ -163,6 +164,7 @@ export * from './recurringOrders';
 export * from './storeTransfers';
 export * from './counter';
 export * from './fieldReps';
+export * from './bookCodes';
 export * from './promoCodes';
 export * from './outages';
 export * from './anomalies';
@@ -249,6 +251,7 @@ export interface Services {
   storeTransfers: StoreTransferService;
   counter: CounterService;
   fieldReps: FieldRepService;
+  bookCodes: BookCodeService;
   promoCodes: PromoCodeService;
   outages: OutageService;
   anomalies: StockAnomalyService;
@@ -282,6 +285,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const mobilePay = new MobilePayService(db, clock);
   const vouchers = new VoucherService(db, clock, admin);
   const fieldReps = new FieldRepService(db, clock);
+  const bookCodes = new BookCodeService(db, clock);
   const promoCodes = new PromoCodeService(db, clock);
   const outages = new OutageService(db, clock);
   const pos = new PosService(db, clock, admin, catalogue, stock, customers, quotes, promotions, treasury, emoney, deliveries, loyalty, orders, vouchers, promoCodes, fieldReps, outages);
@@ -338,7 +342,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const storeTransfers = new StoreTransferService(db, clock, stock);
   const counter = new CounterService(db, clock, admin, pos, customers);
   const reportPresets = new ReportPresetService(db, clock);
-  return { db, counter, fieldReps, promoCodes, outages, anomalies, reportPresets, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  return { db, counter, fieldReps, bookCodes, promoCodes, outages, anomalies, reportPresets, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

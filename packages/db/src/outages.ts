@@ -20,6 +20,8 @@ export interface Outage {
   /** Ventes saisies pour cette coupure (en cours, ou figé à la clôture). */
   entered_total: Fcfa;
   sales: number;
+  /** Photos des pages du carnet jointes. */
+  pages: number;
   /** Total déclaré moins ventes saisies : positif, il manque des ventes ; négatif, il y en a trop. */
   gap: Fcfa;
   gap_reason: string | null;
@@ -28,6 +30,22 @@ export interface Outage {
   closed_at: string | null;
   created_at: string;
 }
+
+/** Photo d'une page du carnet de coupure, sans son contenu (liste). */
+export interface OutagePage {
+  id: string;
+  outage_id: string;
+  page: number;
+  name: string;
+  mime: string;
+  size: number;
+  user_name: string | null;
+  created_at: string;
+}
+
+/** Une page de carnet en photo : 4 Mo au plus (le fichier voyage vers les autres PC). */
+export const OUTAGE_PAGE_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+export const OUTAGE_PAGE_MAX_BYTES = 4 * 1024 * 1024;
 
 const STATUS_LABEL = { open: 'en cours de saisie', closed: 'clôturée', cancelled: 'annulée' } as const;
 
@@ -38,7 +56,8 @@ export class OutageService extends Base {
         `SELECT o.id, o.number, o.store_id, o.register_id, r.name AS register_name, o.started_at, o.ended_at, o.declared_total, o.note, o.status,
            o.entered_total AS frozen, o.gap AS frozen_gap, o.gap_reason, u.name AS user_name, c.name AS closed_by_name, o.closed_at, o.created_at,
            (SELECT COALESCE(SUM(s.total_ttc), 0) FROM sales s WHERE s.outage_id = o.id AND s.status = 'completed') AS live,
-           (SELECT COUNT(*) FROM sales s WHERE s.outage_id = o.id AND s.status = 'completed') AS sales
+           (SELECT COUNT(*) FROM sales s WHERE s.outage_id = o.id AND s.status = 'completed') AS sales,
+           (SELECT COUNT(*) FROM outage_pages p WHERE p.outage_id = o.id AND p.status = 'active') AS pages
          FROM outages o LEFT JOIN registers r ON r.id = o.register_id LEFT JOIN users u ON u.id = o.user_id LEFT JOIN users c ON c.id = o.closed_by ${where}`,
       )
       .all(...args) as (Omit<Outage, 'entered_total' | 'gap'> & { frozen: Fcfa | null; frozen_gap: Fcfa | null; live: Fcfa })[];
@@ -147,5 +166,70 @@ export class OutageService extends Base {
       this.audit(ctx.userId, 'outage.cancel', 'outage', id, { number: o.number });
     });
     return this.get(id);
+  }
+
+  // --- Pages du carnet en photo ------------------------------------------------
+
+  /** Joint la photo d'une page du carnet (base64) : elle sert à saisir les ventes et reste comme preuve. */
+  addPage(ctx: Context, outageId: string, file: { name: string; mime: string; data: string }): OutagePage {
+    const o = this.get(outageId);
+    if (o.store_id !== ctx.storeId) throw new AppError("Cette coupure n'est pas celle de ce magasin", 'INVALID');
+    if (o.status !== 'open') throw new AppError(`La coupure n° ${o.number} est ${STATUS_LABEL[o.status]} : plus de page à y joindre`, 'INVALID');
+    if (!(file.mime in OUTAGE_PAGE_TYPES)) throw new AppError('Joignez une photo de la page (JPEG ou PNG)', 'INVALID');
+    const data = String(file.data ?? '').replace(/^data:[^,]*,/, '');
+    if (!/^[A-Za-z0-9+/]+=*$/.test(data)) throw new AppError('Photo illisible', 'INVALID');
+    const size = Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+    if (size <= 0) throw new AppError('Photo vide', 'INVALID');
+    if (size > OUTAGE_PAGE_MAX_BYTES) throw new AppError('Photo trop lourde : 4 Mo au plus', 'INVALID');
+    const pages = this.pages(outageId);
+    if (pages.length >= 30) throw new AppError('Trente pages au plus par coupure', 'INVALID');
+    const page = pages.reduce((m, p) => Math.max(m, p.page), 0) + 1;
+    const name = (file.name ?? '').trim().slice(0, 120) || `page ${page}`;
+    const id = newId();
+    this.tx(() => {
+      const at = this.now();
+      this.db
+        .prepare(
+          `INSERT INTO outage_pages (id, outage_id, store_id, page, name, mime, size, data, user_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .run(id, outageId, o.store_id, page, name, file.mime, size, data, ctx.userId, at, at);
+      this.enqueue(ctx, 'outage_page', id, 'upsert', {});
+      this.audit(ctx.userId, 'outage.page', 'outage', outageId, { number: o.number, page, size });
+    });
+    return this.pages(outageId).find((p) => p.id === id)!;
+  }
+
+  pages(outageId: string): OutagePage[] {
+    return this.db
+      .prepare(
+        `SELECT p.id, p.outage_id, p.page, p.name, p.mime, p.size, u.name AS user_name, p.created_at FROM outage_pages p
+         LEFT JOIN users u ON u.id = p.user_id WHERE p.outage_id = ? AND p.status = 'active' ORDER BY p.page`,
+      )
+      .all(outageId) as OutagePage[];
+  }
+
+  /** Contenu d'une page (base64), pour l'afficher à côté de la saisie. */
+  page(id: string): OutagePage & { data: string } {
+    const row = this.db
+      .prepare(
+        `SELECT p.id, p.outage_id, p.page, p.name, p.mime, p.size, u.name AS user_name, p.created_at, p.data FROM outage_pages p
+         LEFT JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.status = 'active'`,
+      )
+      .get(id) as (OutagePage & { data: string }) | undefined;
+    if (!row) throw new AppError('Page introuvable', 'NOT_FOUND');
+    return row;
+  }
+
+  /** Retire une photo jointe par erreur, tant que la coupure est en cours de saisie. */
+  removePage(ctx: Context, id: string): void {
+    const p = this.page(id);
+    const o = this.get(p.outage_id);
+    if (o.status !== 'open') throw new AppError(`La coupure n° ${o.number} est ${STATUS_LABEL[o.status]} : ses pages restent comme preuve`, 'INVALID');
+    this.tx(() => {
+      this.db.prepare("UPDATE outage_pages SET status = 'deleted', data = '', updated_at = ? WHERE id = ?").run(this.now(), id);
+      this.enqueue(ctx, 'outage_page', id, 'upsert', {});
+      this.audit(ctx.userId, 'outage.page_remove', 'outage', o.id, { number: o.number, page: p.page });
+    });
   }
 }

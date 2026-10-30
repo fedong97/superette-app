@@ -258,10 +258,18 @@ export class AdminController {
 
   @Post('admin/api/backups/settings')
   @HttpCode(200)
-  async backupSettings(@Req() req: Request, @Body() body: { dir?: string; keep?: number }) {
+  async backupSettings(@Req() req: Request, @Body() body: { dir?: string; keep?: number; every?: number; copyDir?: string | null }) {
     this.guard(req);
     await this.backups.configure(body ?? {});
     return { ok: true };
+  }
+
+  /** Sauvegarde venue d'ailleurs (clé USB, ancien serveur) : déposée dans le dossier, prête à restaurer. */
+  @Post('admin/api/backups/upload')
+  @HttpCode(200)
+  uploadBackup(@Req() req: Request, @Query('name') name: string) {
+    this.guard(req);
+    return this.backups.upload(name, req);
   }
 
   @Get('admin/api/backups/:name')

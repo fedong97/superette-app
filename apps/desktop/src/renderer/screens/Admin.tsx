@@ -1285,6 +1285,14 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 <th>État</th>
                 <td className={st.lastError ? 'neg' : 'pos'}>{st.lastError ?? 'Connecté'}</td>
               </tr>
+              {(st.serverBackupAt || st.serverBackupProblem) && (
+                <tr>
+                  <th>Sauvegarde du serveur</th>
+                  <td className={st.serverBackupProblem ? 'neg' : 'pos'}>
+                    {st.serverBackupProblem ?? `Dernière le ${dateTime(st.serverBackupAt!)}`}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
           <div className="actions">
@@ -1328,6 +1336,26 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
               Synchroniser maintenant
             </button>
           </div>
+          {isAdmin && (
+            <form
+              className="actions"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void act(async () => {
+                  const r = await call('sync.changeUrl', url || st.url || '');
+                  setUrl('');
+                  return r;
+                });
+              }}
+            >
+              <Field label="Nouvelle adresse du même serveur" hint="Le serveur a changé d'adresse IP, ou sa sauvegarde a été remise sur un autre PC : ce PC garde sa liaison.">
+                <input value={url} placeholder={st.url ?? 'http://192.168.1.20:3000'} onChange={(e) => setUrl(e.target.value)} required />
+              </Field>
+              <button type="submit" disabled={busy}>
+                Changer l'adresse
+              </button>
+            </form>
+          )}
         </>
       ) : isAdmin ? (
         <form
@@ -1937,10 +1965,14 @@ function CloudBackup({ isAdmin, onDownloaded }: { isAdmin: boolean; onDownloaded
   };
   return (
     <>
-      <h3>Sauvegarde en ligne</h3>
+      <h3>Copie chiffrée sur le serveur central (« sauvegarde en ligne »)</h3>
       <p className="muted">
-        Après chaque sauvegarde, une copie chiffrée de la base part sur le serveur central. En cas de vol, d'incendie ou de panne du PC, vous la récupérez sur un autre PC
-        relié au serveur.
+        Une fois par jour, une copie chiffrée de la base part sur le serveur central, qui en garde 10. En cas de vol, d'incendie ou de panne de ce PC, vous la récupérez sur
+        un autre PC relié au même serveur.
+      </p>
+      <p className="warn-text">
+        Cette copie est rangée sur le serveur central, pas sur internet. Si le serveur central est un PC du magasin, elle disparaît avec lui (incendie, vol, foudre) : gardez
+        aussi une copie hors du magasin, avec « Copie de chaque sauvegarde vers » sur un dossier OneDrive ou Google Drive, ou une clé USB emportée chaque soir.
       </p>
       {!st.linked ? (
         <p className="muted">Ce PC n'est pas relié au serveur central (Administration › Serveur central) : la sauvegarde en ligne n'est pas disponible.</p>

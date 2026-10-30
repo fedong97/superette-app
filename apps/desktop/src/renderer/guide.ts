@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.101.0',
+    items: [
+      "Serveur central remplacé ou restauré (même sur un autre PC) : chaque caisse le voit toute seule, lui renvoie ce qu'il a perdu (ventes, journées de caisse, règlements, réceptions, mouvements de stock…) et reçoit de nouveau les opérations des autres caisses.",
+      "Administration › Serveur central › « Changer l'adresse » : le serveur a changé d'adresse IP, ou sa sauvegarde a été remise sur un autre PC ; la caisse garde sa liaison, sans délier ni clé d'enrôlement.",
+      "ONIX 360 Serveur : sauvegarde toutes les 6 heures (réglable de 1 à 24 heures), relue, et recopiée sur un second dossier (clé USB, autre disque, OneDrive), avec rattrapage quand la clé revient. Une sauvegarde venue d'une clé USB se dépose depuis l'interface puis se restaure.",
+      "Barre d'état des PC : « Serveur : sauvegarde à vérifier » quand la sauvegarde du serveur échoue, est en retard ou ne peut pas être copiée.",
+      "« Sauvegarde en ligne » s'appelle maintenant « Copie chiffrée sur le serveur central » : si le serveur est un PC du magasin, gardez aussi une copie hors du magasin.",
+    ],
+  },
+  {
     version: '0.100.0',
     items: [
       "Carnet de coupure ONIX : Trésorerie › Ventes pendant une coupure imprime des pages à cases et la liste des codes courts des articles, à garder près de la caisse.",

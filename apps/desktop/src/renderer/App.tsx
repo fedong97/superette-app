@@ -1605,6 +1605,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             Clé USB : copie en échec
           </button>
         )}
+        {sync.data?.connected && sync.data.serverBackupProblem && canWin('admin') && (
+          <button className="warn" onClick={() => open('admin', 'server', 'Administration › Serveur central')} title={sync.data.serverBackupProblem}>
+            Serveur : sauvegarde à vérifier
+          </button>
+        )}
         {Boolean(chargesLate.data?.count) && canWin('expenses') && (
           <button className="warn" onClick={() => open('expenses', 'schedule', 'Dépenses › Constats de charges')} title={`${fcfa(chargesLate.data!.amount)} de charges fixes non constatées`}>
             {chargesLate.data!.count === 1 ? '1 charge en retard' : `${chargesLate.data!.count} charges en retard`}

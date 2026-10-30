@@ -27,6 +27,10 @@ export interface SyncState {
   /** Dernier état de la synchronisation : tout concordait (true), des écarts (false), jamais vérifié (null). */
   checkOk: boolean | null;
   checkAt: string | null;
+  /** Problème de sauvegarde du serveur central, signalé par lui (null : rien à signaler, ou serveur ancien). */
+  serverBackupProblem: string | null;
+  /** Dernière sauvegarde réussie du serveur central (null : inconnue). */
+  serverBackupAt: string | null;
 }
 
 /** Entités stockées telles quelles dans une table (clé `id`). */
@@ -194,6 +198,27 @@ const RESEND: { entity: string; ids: string; store?: boolean }[] = [
   { entity: 'recipe', ids: 'SELECT id FROM recipes' },
   { entity: 'stock_level', ids: "SELECT s.warehouse_id || ':' || s.article_id FROM stock s JOIN warehouses w ON w.id = s.warehouse_id WHERE w.store_id = ?", store: true },
   { entity: 'inventory', ids: 'SELECT id FROM inventories WHERE store_id = ?', store: true },
+  // Pièces du magasin : un serveur restauré n'a pas celles arrivées après sa sauvegarde, et un PC
+  // tombé en panne ne peut plus renvoyer les siennes. Les autres PC du magasin les ont : ils les renvoient.
+  { entity: 'lot', ids: 'SELECT l.id FROM lots l JOIN warehouses w ON w.id = l.warehouse_id WHERE w.store_id = ?', store: true },
+  { entity: 'stock_movement', ids: 'SELECT m.id FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id WHERE w.store_id = ?', store: true },
+  { entity: 'cash_session', ids: 'SELECT id FROM cash_sessions WHERE store_id = ?', store: true },
+  { entity: 'cash_operation', ids: 'SELECT o.id FROM cash_operations o JOIN cash_sessions c ON c.id = o.session_id WHERE c.store_id = ?', store: true },
+  { entity: 'sale', ids: 'SELECT id FROM sales WHERE store_id = ?', store: true },
+  { entity: 'customer_payment', ids: 'SELECT id FROM customer_payments WHERE store_id = ?', store: true },
+  { entity: 'expense', ids: 'SELECT id FROM expenses WHERE store_id = ?', store: true },
+  { entity: 'purchase_order', ids: 'SELECT id FROM purchase_orders WHERE store_id = ?', store: true },
+  { entity: 'reception', ids: 'SELECT id FROM receptions WHERE store_id = ?', store: true },
+  { entity: 'supplier_invoice', ids: 'SELECT id FROM supplier_invoices WHERE store_id = ?', store: true },
+  { entity: 'supplier_payment', ids: 'SELECT id FROM supplier_payments WHERE store_id = ?', store: true },
+  { entity: 'central_cash_movement', ids: 'SELECT id FROM central_cash_movements WHERE store_id = ?', store: true },
+  { entity: 'emoney_movement', ids: 'SELECT id FROM emoney_movements WHERE store_id = ?', store: true },
+  { entity: 'treasury_entry', ids: 'SELECT id FROM treasury_entries WHERE store_id = ?', store: true },
+  { entity: 'manual_entry', ids: 'SELECT id FROM manual_entries WHERE store_id = ?', store: true },
+  { entity: 'transfer', ids: 'SELECT id FROM transfers WHERE store_id = ?', store: true },
+  { entity: 'quote', ids: 'SELECT id FROM quotes WHERE store_id = ?', store: true },
+  { entity: 'customer_order', ids: 'SELECT id FROM customer_orders WHERE store_id = ?', store: true },
+  { entity: 'outage', ids: 'SELECT id FROM outages WHERE store_id = ?', store: true },
 ];
 
 /**
@@ -216,8 +241,16 @@ const CHECK: { entity: string; label: string; ids: string; store?: boolean }[] =
   { entity: 'field_rep', label: 'Commerciaux de terrain', ids: 'SELECT id FROM field_reps' },
   { entity: 'sale', label: 'Ventes et retours', ids: 'SELECT id FROM sales WHERE store_id = ?', store: true },
   { entity: 'cash_session', label: 'Journées de caisse', ids: 'SELECT id FROM cash_sessions WHERE store_id = ?', store: true },
+  { entity: 'cash_operation', label: 'Entrées et sorties de caisse', ids: 'SELECT o.id FROM cash_operations o JOIN cash_sessions c ON c.id = o.session_id WHERE c.store_id = ?', store: true },
+  { entity: 'customer_payment', label: 'Règlements clients', ids: 'SELECT id FROM customer_payments WHERE store_id = ?', store: true },
   { entity: 'expense', label: 'Dépenses', ids: 'SELECT id FROM expenses WHERE store_id = ?', store: true },
+  { entity: 'purchase_order', label: 'Bons de commande', ids: 'SELECT id FROM purchase_orders WHERE store_id = ?', store: true },
   { entity: 'reception', label: 'Réceptions', ids: 'SELECT id FROM receptions WHERE store_id = ?', store: true },
+  { entity: 'supplier_invoice', label: 'Factures fournisseurs', ids: 'SELECT id FROM supplier_invoices WHERE store_id = ?', store: true },
+  { entity: 'supplier_payment', label: 'Paiements fournisseurs', ids: 'SELECT id FROM supplier_payments WHERE store_id = ?', store: true },
+  { entity: 'central_cash_movement', label: 'Caisse centrale', ids: 'SELECT id FROM central_cash_movements WHERE store_id = ?', store: true },
+  { entity: 'manual_entry', label: 'Écritures saisies', ids: 'SELECT id FROM manual_entries WHERE store_id = ?', store: true },
+  { entity: 'stock_movement', label: 'Mouvements de stock', ids: 'SELECT m.id FROM stock_movements m JOIN warehouses w ON w.id = m.warehouse_id WHERE w.store_id = ?', store: true },
   { entity: 'inventory', label: 'Inventaires', ids: 'SELECT id FROM inventories WHERE store_id = ?', store: true },
   { entity: 'outage', label: 'Coupures', ids: 'SELECT id FROM outages WHERE store_id = ?', store: true },
 ];
@@ -291,7 +324,24 @@ export class SyncService extends Base {
       lastError: this.get('sync.lastError'),
       checkOk: this.lastCheck()?.ok ?? null,
       checkAt: this.lastCheck()?.at ?? null,
+      serverBackupProblem: this.serverBackup()?.problem ?? null,
+      serverBackupAt: this.serverBackup()?.at ?? null,
     };
+  }
+
+  private serverBackup(): { at: string | null; problem: string | null } | null {
+    const raw = this.get('sync.serverBackup');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as { at: string | null; problem: string | null };
+    } catch {
+      return null;
+    }
+  }
+
+  /** État des sauvegardes du serveur central, reçu à chaque synchronisation. */
+  setServerBackup(state: { at: string | null; problem: string | null } | null): void {
+    this.set('sync.serverBackup', state ? JSON.stringify(state) : null);
   }
 
   credentials(): { url: string; token: string } | null {
@@ -306,8 +356,48 @@ export class SyncService extends Base {
     this.set('sync.token', token);
   }
 
+  /** Nouvelle adresse du même serveur (IP changée, nom de domaine) : le poste et sa lecture restent. */
+  setUrl(url: string): void {
+    this.set('sync.url', url.replace(/\/+$/, ''));
+  }
+
+  /** Époque de la base du serveur lue la dernière fois (voir `serverChanged`). */
+  epoch(): string | null {
+    return this.get('sync.epoch');
+  }
+
+  setEpoch(epoch: string): void {
+    this.set('sync.epoch', epoch);
+  }
+
+  /**
+   * La base du serveur a changé (serveur neuf, sauvegarde restaurée, ici ou sur un autre
+   * PC) : ses numéros d'opérations ne suivent plus ceux que ce PC a lus. La lecture
+   * reprend au début de la nouvelle époque ; les opérations de ce PC faites depuis la
+   * sauvegarde (avec 30 jours de marge pour un PC resté hors ligne) repartent, chacune
+   * une fois avec son dernier identifiant (le serveur ignore celles qu'il a déjà) ; et
+   * la vérification des données manquantes sera refaite.
+   */
+  serverChanged(input: { epoch: string; epochSeq: number; epochFrom: string | null }): { requeued: number } {
+    return this.tx(() => {
+      this.setCursor(Math.max(0, input.epochSeq));
+      this.setEpoch(input.epoch);
+      this.set('sync.resendChecked', null);
+      this.set('sync.lastCheck', null);
+      const from = input.epochFrom ? new Date(Date.parse(input.epochFrom) - 30 * 24 * 3_600_000).toISOString() : '';
+      const requeued = this.db
+        .prepare(
+          `UPDATE outbox SET sent_at = NULL WHERE seq IN (
+             SELECT MAX(seq) FROM outbox WHERE entity <> 'stock_level' AND created_at >= ? GROUP BY entity, entity_id
+           ) AND sent_at IS NOT NULL`,
+        )
+        .run(from).changes;
+      return { requeued };
+    });
+  }
+
   disconnect(): void {
-    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError']) this.set(k, null);
+    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup']) this.set(k, null);
   }
 
   setCursor(cursor: number): void {
@@ -386,8 +476,8 @@ export class SyncService extends Base {
     return RESEND.filter((r) => !r.store || storeId).map((r) => ({
       entity: r.entity,
       ids: (r.store ? this.db.prepare(r.ids).pluck().all(storeId) : this.db.prepare(r.ids).pluck().all()) as string[],
-      // Le stock part comme celui de `publishStock` : visible de tous les magasins.
-      storeId: r.entity === 'inventory' ? storeId : null,
+      // Le stock part comme celui de `publishStock` : visible de tous les magasins ; les pièces restent au magasin.
+      storeId: r.store && r.entity !== 'stock_level' ? storeId : null,
     }));
   }
 

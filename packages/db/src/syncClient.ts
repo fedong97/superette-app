@@ -47,8 +47,24 @@ interface DeviceCredentials {
   registerId: string;
 }
 
-/** Envoie les opérations en attente puis récupère celles des autres postes. */
-export async function syncOnce(s: Services): Promise<{ sent: number; received: number; conflicts: number }> {
+interface PullPage {
+  events: SyncEvent[];
+  cursor: number;
+  hasMore: boolean;
+  license?: string | null;
+  /** Absents d'un serveur plus ancien. */
+  epoch?: string;
+  epochSeq?: number;
+  epochFrom?: string | null;
+  lastSeq?: number;
+  serverBackup?: { at: string | null; problem: string | null } | null;
+}
+
+/**
+ * Envoie les opérations en attente puis récupère celles des autres postes.
+ * `restarted` : deuxième passage après un changement de base du serveur.
+ */
+export async function syncOnce(s: Services, restarted = false): Promise<{ sent: number; received: number; conflicts: number }> {
   const creds = s.sync.credentials();
   if (!creds) throw new AppError("Ce poste n'est pas relié au serveur central", 'SYNC_NOT_CONFIGURED');
   let sent = 0;
@@ -93,9 +109,22 @@ export async function syncOnce(s: Services): Promise<{ sent: number; received: n
     }
     for (;;) {
       const since = s.sync.state().cursor;
-      const page = await request<{ events: SyncEvent[]; cursor: number; hasMore: boolean; license?: string | null }>(creds.url, `/api/v1/sync/pull?since=${since}&limit=1000`, {
+      const page = await request<PullPage>(creds.url, `/api/v1/sync/pull?since=${since}&limit=1000`, {
         token: creds.token,
       });
+      if (page.serverBackup !== undefined) s.sync.setServerBackup(page.serverBackup ?? null);
+      // Base du serveur changée (serveur neuf, sauvegarde restaurée) : la lecture reprend au début
+      // de la nouvelle époque, et ce que le serveur a pu perdre repart avant (une seule fois).
+      if (page.epoch) {
+        const known = s.sync.epoch();
+        const changed = known ? known !== page.epoch : since > (page.lastSeq ?? since);
+        if (changed && !restarted) {
+          s.sync.serverChanged({ epoch: page.epoch, epochSeq: page.epochSeq ?? 0, epochFrom: page.epochFrom ?? null });
+          const again = await syncOnce(s, true);
+          return { sent: sent + again.sent, received: received + again.received, conflicts: conflicts + again.conflicts };
+        }
+        if (!known) s.sync.setEpoch(page.epoch);
+      }
       const result = s.sync.applyRemote(page.events);
       s.sync.setCursor(page.cursor);
       s.license.acceptFromServer(page.license);
@@ -190,6 +219,31 @@ export async function resendEntity(s: Services, entity: string): Promise<{ queue
   const { ids } = await request<{ ids: string[] }>(creds.url, '/api/v1/sync/known', { token: creds.token, body: { entity } });
   const known = new Set(ids);
   return { queued: s.sync.requeue(entity, t.ids.filter((id) => !known.has(id)), t.storeId) };
+}
+
+/**
+ * Nouvelle adresse pour le même serveur (IP changée, serveur déplacé avec sa
+ * sauvegarde) : le PC garde son identité et sa lecture. Refusé si le serveur à
+ * cette adresse ne connaît pas ce PC.
+ */
+export async function changeServerUrl(s: Services, url: string): Promise<ReturnType<typeof syncOnce>> {
+  const creds = s.sync.credentials();
+  if (!creds) throw new AppError("Ce poste n'est pas relié au serveur central", 'SYNC_NOT_CONFIGURED');
+  const clean = String(url ?? '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s/]+/i.test(clean)) throw new AppError('Adresse invalide : par exemple http://192.168.1.20:3000', 'INVALID');
+  try {
+    await request(clean, '/api/v1/devices/status', { token: creds.token });
+  } catch (e) {
+    if (e instanceof AppError && e.code === 'SYNC_UNAUTHORIZED') {
+      throw new AppError(
+        "Le serveur à cette adresse ne connaît pas ce PC (serveur neuf, ou sauvegarde plus ancienne que la liaison de ce PC) : déliez ce PC, puis reliez-le avec la clé d'enrôlement.",
+        'SYNC_UNAUTHORIZED',
+      );
+    }
+    throw e;
+  }
+  s.sync.setUrl(clean);
+  return syncOnce(s);
 }
 
 /** Relie le poste principal (déjà configuré) au serveur avec la clé d'enrôlement, puis envoie tout son historique. */

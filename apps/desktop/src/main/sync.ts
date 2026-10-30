@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { type Services, changeServerUrl, checkSync, enrollStation, joinStore, resendEntity, resendMissing, syncOnce } from '@superette/db';
+import { type Services, changeServerUrl, checkSync, enrollStation, joinStore, joinStoreAsUser, resendEntity, resendMissing, syncOnce } from '@superette/db';
 
 const INTERVAL_MS = 20_000;
 
@@ -45,6 +45,8 @@ export function createSyncRunner(s: Services) {
     /** Même serveur, nouvelle adresse : le PC garde son identité. */
     changeUrl: (url: string) => run(() => changeServerUrl(s, url)),
     join: (url: string, activationCode: string) => run(() => joinStore(s, url.trim(), activationCode.trim(), hostname())),
+    /** Sans code de caisse : identifiant et code d'un utilisateur du magasin. */
+    joinAsUser: (url: string, login: string, pin: string) => run(() => joinStoreAsUser(s, url.trim(), login.trim(), pin, hostname())),
     stop: () => clearInterval(timer),
   };
 }

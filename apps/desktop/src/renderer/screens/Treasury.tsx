@@ -6,6 +6,8 @@ import { CashInDialog, CashOutDialog, DeskActions, type DeskProps, type DeskRow,
 import { EmoneyCentral } from './EmoneyCentral';
 import { ZView } from './PosDialogs';
 import { BeforeClose } from './Floor';
+import { SaleDetail } from './Sales';
+import { LiveTills } from './LiveTills';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type State = Result<'treasury.state'>;
@@ -14,7 +16,7 @@ type LinkedRow = State['linked'][number];
 type Journey = Result<'treasury.session'>;
 type CashRow = Journey['cash']['entries'][number];
 
-export type TreasuryTab = 'day' | 'history' | 'central' | 'emoney';
+export type TreasuryTab = 'day' | 'history' | 'central' | 'emoney' | 'live';
 
 /** Caisse choisie en haut de l'écran : une caisse de vente, ou la caisse centrale. */
 const CENTRAL = 'central';
@@ -33,6 +35,11 @@ interface TreasuryProps {
   registerId?: string | null;
   initialTab?: TreasuryTab;
   onChanged?: () => void;
+  /** Caisse montrée à l'ouverture (Caisses en direct). */
+  initialRegisterId?: string | null;
+  /** Dans « Caisses en direct » : sans titre de page, rechargé à chaque `tick`. */
+  embedded?: boolean;
+  tick?: number;
 }
 
 /**
@@ -40,6 +47,7 @@ interface TreasuryProps {
  * ouvre et ferme sa caisse sans voir ni ventes, ni attendu, ni journées.
  */
 export function Treasury(props: TreasuryProps) {
+  if (props.initialTab === 'live' && props.user.rights.includes('cash_live')) return <LiveTills user={props.user} onChanged={props.onChanged} />;
   return props.user.rights.includes('cash_amounts') ? <FullTreasury {...props} /> : <CashierTreasury {...props} />;
 }
 
@@ -48,16 +56,21 @@ export function Treasury(props: TreasuryProps) {
  * son fond, entrées et sorties d'espèces, clôture avec comptage à l'aveugle et
  * versement à la caisse centrale, historique des journées et livre de la centrale.
  */
-function FullTreasury({
+export function FullTreasury({
   user,
   registerId = null,
   initialTab = 'day',
   onChanged,
+  initialRegisterId = null,
+  embedded = false,
+  tick = 0,
 }: TreasuryProps) {
   const toast = useToast();
-  const state = useLoad(() => call('treasury.state'), [registerId]);
+  const state = useLoad(() => call('treasury.state'), [registerId, tick]);
   const canCentral = user.rights.includes('central_cash') || user.rights.includes('accounting');
-  const [selected, setSelected] = useState<string | null>(canCentral && initialTab === 'central' ? CENTRAL : canCentral && initialTab === 'emoney' ? EMONEY : null);
+  const [selected, setSelected] = useState<string | null>(
+    initialRegisterId ?? (canCentral && initialTab === 'central' ? CENTRAL : canCentral && initialTab === 'emoney' ? EMONEY : null),
+  );
   const [tab, setTab] = useState<Exclude<TreasuryTab, 'central' | 'emoney'>>(initialTab === 'history' ? 'history' : 'day');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'open' | 'close' | 'handover' | 'declared' | 'central-in' | 'central-out' | null>(null);
@@ -68,10 +81,10 @@ function FullTreasury({
   const register: RegisterRow | undefined = registers.find((r) => r.id === selected) ?? registers.find((r) => r.isThisStation) ?? registers[0];
   const emoneyView = selected === EMONEY;
   const central = selected === CENTRAL || emoneyView;
-  const history = useLoad(() => (register && !central ? call('treasury.sessions', register.id) : Promise.resolve([])), [register?.id, central]);
+  const history = useLoad(() => (register && !central ? call('treasury.sessions', register.id) : Promise.resolve([])), [register?.id, central, tick]);
   // Journée affichée : celle choisie, sinon la journée ouverte, sinon la dernière clôturée.
   const shownId = sessionId ?? register?.session?.id ?? history.data?.[0]?.id ?? null;
-  const journey = useLoad(() => (shownId && !central ? call('treasury.session', shownId) : Promise.resolve(null)), [shownId, central]);
+  const journey = useLoad(() => (shownId && !central ? call('treasury.session', shownId) : Promise.resolve(null)), [shownId, central, tick]);
 
   // Écarts à justifier, toutes caisses : un clic ouvre la journée sur sa caisse.
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
@@ -88,7 +101,7 @@ function FullTreasury({
   };
   // Le gérant vient de changer de caisse : on affiche la nouvelle.
   useEffect(() => {
-    if (selected !== CENTRAL && selected !== EMONEY) setSelected(null);
+    if (!embedded && selected !== CENTRAL && selected !== EMONEY) setSelected(null);
   }, [registerId]);
   const reload = () => {
     state.reload();
@@ -105,10 +118,12 @@ function FullTreasury({
   const mine = Boolean(register && state.data.linked.some((l) => l.id === register.id));
 
   return (
-    <div className="page treasury">
-      <header className="page-head">
-        <h1>Opérations de trésorerie</h1>
-      </header>
+    <div className={embedded ? 'treasury embedded' : 'page treasury'}>
+      {!embedded && (
+        <header className="page-head">
+          <h1>Opérations de trésorerie</h1>
+        </header>
+      )}
       <div className="tre-bar">
         <label>
           Type
@@ -469,7 +484,7 @@ function Day({
             </div>
           )}
           {view === 'cash' && <Totals open={totals} onToggle={() => setTotals(!totals)} entries={cash.entries} exits={cash.exits} />}
-          {view === 'sales' && <SalesList sales={sales} />}
+          {view === 'sales' && <SalesList sales={sales} onChanged={onJustified} />}
           {view === 'z' && <ZView z={z} />}
         </>
       )}
@@ -632,7 +647,7 @@ function CashPane({ title, rows, party, total, direction, desk }: { title: strin
   );
 }
 
-function SalesList({ sales }: { sales: Journey['sales'] }) {
+function SalesList({ sales, onChanged }: { sales: Journey['sales']; onChanged?: () => void }) {
   const [open, setOpen] = useState<Result<'pos.sale'> | null>(null);
   const toast = useToast();
   return (
@@ -655,7 +670,7 @@ function SalesList({ sales }: { sales: Journey['sales'] }) {
               key={x.id}
               className={`clickable ${x.status === 'cancelled' ? 'inactive' : ''}`}
               onDoubleClick={() => call('pos.sale', x.id).then(setOpen, toast.error)}
-              title="Double-clic : détail du ticket"
+              title="Double-clic : détail du ticket (réimprimer, modifier, annuler)"
             >
               <td>{x.number}</td>
               <td>{time(x.created_at)}</td>
@@ -675,24 +690,8 @@ function SalesList({ sales }: { sales: Journey['sales'] }) {
           )}
         </tbody>
       </table>
-      {open && (
-        <Modal title={`Ticket ${open.number}`} onClose={() => setOpen(null)}>
-          <table className="list compact">
-            <tbody>
-              {open.lines.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.label}</td>
-                  <td className="r">{fcfa(l.total_ttc)}</td>
-                </tr>
-              ))}
-              <tr>
-                <th>Total</th>
-                <th className="r">{fcfa(open.total_ttc)}</th>
-              </tr>
-            </tbody>
-          </table>
-        </Modal>
-      )}
+      {/* Détail du ticket : réimpression, modification et annulation, selon les droits (le gérant intervient ainsi sur toute caisse). */}
+      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} onChanged={onChanged} />}
     </div>
   );
 }

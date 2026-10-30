@@ -29,6 +29,22 @@ export interface TakeoverLine {
   amount: Fcfa;
 }
 
+/** Solde d'ouverture ou ajustement saisi depuis la fiche d'un client ou d'un fournisseur. */
+export interface BalanceAdjustment {
+  /** Positif : le tiers doit plus (client) ou on lui doit plus (fournisseur). Négatif : l'inverse. */
+  amount: Fcfa;
+  kind: 'opening' | 'adjustment';
+  label?: string | null;
+  /** Date de la pièce (aujourd'hui par défaut). */
+  date?: string | null;
+}
+
+/**
+ * Factures fournisseurs qui ne sont pas des achats (colonne `opening`) : solde repris
+ * ou saisi à l'ouverture, ajustement de solde, avance versée au fournisseur.
+ */
+export const SUPPLIER_OPENING = { purchase: 0, opening: 1, adjustment: 2, advance: 3 } as const;
+
 export interface TakeoverResult {
   kind: TakeoverKind;
   /** Aperçu : rien n'est enregistré. */
@@ -155,7 +171,7 @@ export class OpeningService extends Base {
         if (!match) existing.push({ id: customer.id, name: customer.name, phone: customer.phone });
         let action = match ? 'Fiche complétée' : 'Fiche créée';
         if (row.balance !== 0) {
-          if (this.db.prepare('SELECT 1 FROM opening_balances WHERE store_id = ? AND customer_id = ?').get(ctx.storeId, customer.id)) {
+          if (this.db.prepare("SELECT 1 FROM opening_balances WHERE store_id = ? AND customer_id = ? AND kind = 'opening'").get(ctx.storeId, customer.id)) {
             throw new AppError(`${row.name} : son solde a déjà été repris`, 'DUPLICATE');
           }
           const docDate = row.docDate ?? this.today();
@@ -284,11 +300,80 @@ export class OpeningService extends Base {
     }
   }
 
+  // --- Solde d'ouverture et ajustement, depuis la fiche -------------------------
+
+  /**
+   * Solde d'ouverture saisi à la création d'un client (ce qu'il doit déjà ; négatif :
+   * son avance ou avoir), ou ajustement de son solde avec un motif. Positif, le client
+   * doit plus ; négatif, il doit moins. La pièce se passe en à-nouveaux (ouverture) ou
+   * en opérations diverses (ajustement), contre le compte d'attente 4711.
+   */
+  adjustCustomer(ctx: Context, customerId: string, input: BalanceAdjustment): { id: string; number: string } {
+    const customer = this.customers.getCustomer(customerId);
+    const { amount, kind, label, docDate } = this.checkAdjustment(ctx, input);
+    if (kind === 'opening' && this.db.prepare("SELECT 1 FROM opening_balances WHERE store_id = ? AND customer_id = ? AND kind = 'opening'").get(ctx.storeId, customer.id)) {
+      throw new AppError(`Le solde d'ouverture de ${customer.name} est déjà saisi : faites un ajustement de solde`, 'DUPLICATE');
+    }
+    return this.tx(() => {
+      const id = newId();
+      const number = this.number(kind === 'opening' ? 'RO' : 'SA');
+      this.db
+        .prepare(
+          `INSERT INTO opening_balances (id, number, store_id, customer_id, amount, doc_ref, doc_date, due_date, user_id, created_at, kind, label)
+           VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(id, number, ctx.storeId, customer.id, amount, docDate, dueDate(docDate, customer.payment_terms_days), ctx.userId, this.now(), kind, label);
+      this.enqueue(ctx, 'opening_balance', id, 'upsert', {});
+      this.audit(ctx.userId, `customer.${kind === 'opening' ? 'opening_balance' : 'balance_adjustment'}`, 'customer', customer.id, { number, amount, label });
+      return { id, number };
+    });
+  }
+
+  /**
+   * Même chose pour un fournisseur : positif, on lui doit plus (une facture de
+   * reprise) ; négatif, on lui doit moins (un avoir de reprise).
+   */
+  adjustSupplier(ctx: Context, supplierId: string, input: BalanceAdjustment): { id: string; number: string } {
+    const supplier = this.purchases.getSupplier(supplierId);
+    const { amount, kind, label, docDate } = this.checkAdjustment(ctx, input);
+    if (kind === 'opening' && this.db.prepare('SELECT 1 FROM supplier_invoices WHERE store_id = ? AND supplier_id = ? AND opening = 1').get(ctx.storeId, supplier.id)) {
+      throw new AppError(`Le solde d'ouverture de ${supplier.name} est déjà saisi : faites un ajustement de solde`, 'DUPLICATE');
+    }
+    return this.tx(() => {
+      const ref = this.number(kind === 'opening' ? 'RO' : 'SA');
+      const invoice = this.purchases.createInvoice(ctx, {
+        supplierId: supplier.id,
+        kind: amount > 0 ? 'invoice' : 'credit_note',
+        supplierNumber: kind === 'opening' ? `Solde d'ouverture ${ref}` : `Ajustement ${ref}`,
+        invoiceDate: docDate,
+        dueDate: dueDate(docDate, supplier.payment_terms_days),
+        totalHt: Math.abs(amount),
+        totalTva: 0,
+        notes: label ?? (kind === 'opening' ? "Solde d'ouverture saisi sur la fiche" : null),
+      });
+      this.db.prepare('UPDATE supplier_invoices SET opening = ? WHERE id = ?').run(kind === 'opening' ? SUPPLIER_OPENING.opening : SUPPLIER_OPENING.adjustment, invoice.id);
+      this.audit(ctx.userId, `supplier.${kind === 'opening' ? 'opening_balance' : 'balance_adjustment'}`, 'supplier', supplier.id, { number: invoice.number, amount, label });
+      return { id: invoice.id, number: invoice.number };
+    });
+  }
+
+  private checkAdjustment(ctx: Context, input: BalanceAdjustment) {
+    const amount = Math.round(Number(input.amount));
+    if (!Number.isSafeInteger(amount) || amount === 0) throw new AppError('Indiquez un montant (négatif pour une avance ou un avoir)', 'INVALID');
+    const kind = input.kind === 'opening' ? 'opening' : 'adjustment';
+    const label = input.label?.trim() || null;
+    if (kind === 'adjustment' && !label) throw new AppError("Indiquez le motif de l'ajustement", 'INVALID');
+    const docDate = input.date || this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(docDate)) throw new AppError('Date invalide', 'INVALID');
+    this.checkDate(ctx.storeId, docDate, 'La date');
+    return { amount, kind, label, docDate } as const;
+  }
+
   // --- Suivi ------------------------------------------------------------------
 
   summary(storeId: string): TakeoverSummary {
     const customers = this.db
-      .prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total, MAX(substr(created_at, 1, 10)) AS date FROM opening_balances WHERE store_id = ?')
+      .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total, MAX(substr(created_at, 1, 10)) AS date FROM opening_balances WHERE store_id = ? AND kind = 'opening'")
       .get(storeId) as TakeoverSummary['customers'];
     const suppliers = this.db
       .prepare(

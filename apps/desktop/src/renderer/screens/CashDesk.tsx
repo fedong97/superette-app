@@ -40,6 +40,7 @@ type InType = (typeof IN_TYPES)[number][0];
 const OUT_TYPES = [
   ['transfer', 'Reversement / Virement'],
   ['supplier', 'Règlement'],
+  ['advance', 'Avance fournisseur'],
   ['expense', 'Charge'],
   ['refund', "Rendre l'avance d'un client"],
   ['loan', 'Personnel (avance, salaire)'],
@@ -336,6 +337,8 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
                 ? { ...base, type, toRegisterId: target || null }
                 : type === 'supplier'
                   ? { ...base, type, invoiceId: target }
+                  : type === 'advance'
+                    ? { ...base, type: 'supplier_advance' as const, supplierId: target }
                   : type === 'expense'
                     ? { ...base, type, categoryId: target, beneficiary: party || null }
                     : type === 'other'
@@ -360,7 +363,7 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
       >
         <Head o={o} amount={amount} setAmount={setAmount} method={method} setMethod={setMethod} />
         <div className="desk-types">
-          {OUT_TYPES.map(([k, l]) => (
+          {OUT_TYPES.filter(([k]) => k !== 'advance' || o.canSupplierAdvance).map(([k, l]) => (
             <label key={k}>
               <input type="radio" name="out-type" checked={type === k} onChange={() => setType(k)} /> {l}
             </label>
@@ -391,6 +394,19 @@ export function CashOutDialog({ sessionId, onClose, onDone }: { sessionId: strin
               {invoices.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.supplier_name} · facture {i.supplier_number} · reste {fcfa(i.balance)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {type === 'advance' && (
+          <Field label="Fournisseur" hint="L’avance baisse ce qu’on lui doit (ou devient ce qu’il nous doit). Elle se supprime le jour même tant qu’il ne l’a pas remboursée.">
+            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">Choisir…</option>
+              {o.suppliers.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                  {x.balance ? ` · solde ${fcfa(x.balance)}` : ''}
                 </option>
               ))}
             </select>
@@ -523,6 +539,8 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
   }, [open]);
   const entry = row?.source === 'entry';
   const editable = Boolean(row && desk.open && !row.closing && (entry || row.source === 'expense'));
+  // Un règlement ou un dépôt d'avance du jour s'annule : l'argent est rendu par une pièce de contre-passation.
+  const reversible = Boolean(row && desk.open && (row.source === 'customer_payment' || row.source === 'supplier_payment'));
   const otherOut = Boolean(row && desk.open && entry && row.kind === 'other');
   const why = !row ? 'Choisissez d’abord une ligne' : !desk.open ? 'La journée est clôturée' : undefined;
   const onlyDesk = direction === 'IN' ? 'Seulement une entrée faite par « Encaisser »' : 'Seulement une sortie faite par « Décaisser » ou une dépense';
@@ -554,7 +572,12 @@ export function DeskActions({ direction, row, desk }: { direction: 'IN' | 'OUT';
               </>
             )}
             {item('Modifier', editable, () => (setOpen(false), setDialog('edit')), why ?? onlyDesk)}
-            {item('Supprimer', editable, () => (setOpen(false), setDialog('delete')), why ?? onlyDesk)}
+            {item(
+              reversible ? 'Annuler ce règlement…' : 'Supprimer',
+              editable || reversible,
+              () => (setOpen(false), setDialog('delete')),
+              why ?? onlyDesk,
+            )}
             <hr />
             {direction === 'IN' ? (
               <>
@@ -612,14 +635,16 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
   const [reference, setReference] = useState(row.reference ?? '');
   if (!o) return null;
   const source = row.source as 'entry' | 'expense';
+  const payment = row.source === 'customer_payment' || row.source === 'supplier_payment' ? row.source : null;
   // Le tiers se corrige sur une autre entrée ou sortie et sur une dépense (bénéficiaire) ; le montant, sauf consigne, point MoMo, bon d'achat.
   const partyEditable = source === 'expense' || row.kind === 'other';
   const amountEditable = source === 'expense' || ['other', 'staff_advance', 'staff_repayment', 'staff_salary', 'customer_refund'].includes(row.kind ?? '');
-  const title = { edit: 'Modifier', backdate: 'Antidater', delete: 'Supprimer', unprint: "Annuler l'impression du reçu", 'to-supplier': 'Convertir en règlement fournisseur', 'to-customer': 'Convertir en remboursement client' }[kind];
+  const title = { edit: 'Modifier', backdate: 'Antidater', delete: row.source === 'customer_payment' || row.source === 'supplier_payment' ? 'Annuler le règlement' : 'Supprimer', unprint: "Annuler l'impression du reçu", 'to-supplier': 'Convertir en règlement fournisseur', 'to-customer': 'Convertir en remboursement client' }[kind];
   const invoices = o.invoices.filter((i) => i.kind === 'invoice' && i.balance >= row.amount);
   const credits = o.customers.filter((c) => -c.balance >= row.amount);
-  const p = o.canEdit ? undefined : pin;
-  const ready = (o.canEdit || pin.length >= 4) && (kind !== 'delete' || reason.trim()) && (!kind.startsWith('to-') || target) && (kind !== 'edit' || (label.trim() && parseAmount(amount)));
+  const allowed = payment ? o.canReverse : o.canEdit;
+  const p = allowed ? undefined : pin;
+  const ready = (allowed || pin.length >= 4) && (kind !== 'delete' || reason.trim()) && (!kind.startsWith('to-') || target) && (kind !== 'edit' || (label.trim() && parseAmount(amount)));
   return (
     <Modal title={title} onClose={onClose}>
       <form
@@ -635,7 +660,8 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
                 p,
               );
             if (kind === 'backdate') await call('cashdesk.backdate', source, row.id, new Date(at).toISOString(), p);
-            if (kind === 'delete') await call('cashdesk.cancel', source, row.id, reason, p);
+            if (kind === 'delete' && payment) await call('cashdesk.reverse', payment, row.id, reason, p);
+            else if (kind === 'delete') await call('cashdesk.cancel', source, row.id, reason, p);
             if (kind === 'unprint') await call('cashdesk.unprint', row.id, p);
             if (kind === 'to-supplier') await call('cashdesk.convert', row.id, { type: 'supplier', invoiceId: target }, p);
             if (kind === 'to-customer') await call('cashdesk.convert', row.id, { type: 'customer', customerId: target }, p);
@@ -674,8 +700,16 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
             <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
           </Field>
         )}
+        {kind === 'delete' && payment && (
+          <p className="muted">
+            {payment === 'customer_payment'
+              ? 'L’argent est rendu au client par une sortie de cette journée ; son compte retrouve le solde d’avant le règlement.'
+              : 'L’argent revient dans cette journée ; la facture du fournisseur redevient à payer.'}{' '}
+            Supprimer ensuite cette pièce d’annulation rétablit le règlement.
+          </p>
+        )}
         {kind === 'delete' && (
-          <Field label="Motif de la suppression" hint="La ligne reste dans l’historique, barrée, avec ce motif.">
+          <Field label={payment ? "Motif de l'annulation" : 'Motif de la suppression'} hint={payment ? undefined : 'La ligne reste dans l’historique, barrée, avec ce motif.'}>
             <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
         )}
@@ -704,7 +738,7 @@ function RowDialog({ kind, row, desk, onClose, onDone }: { kind: Exclude<ActionD
             </select>
           </Field>
         )}
-        {!o.canEdit && (
+        {!allowed && (
           <>
             <Field label="Code du gérant">
               <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />

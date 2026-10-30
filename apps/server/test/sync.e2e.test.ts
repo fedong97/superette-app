@@ -3,7 +3,7 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Context, LicenseService, type Services, createServices, enrollStation, joinStore, openDatabase, syncOnce } from '@superette/db';
+import { type Context, LicenseService, type Services, createServices, enrollStation, joinStore, joinStoreAsUser, openDatabase, syncOnce } from '@superette/db';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/main';
@@ -460,6 +460,21 @@ describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchroni
     expect(pc4.db.prepare('SELECT COUNT(*) FROM stock_movements WHERE warehouse_id = ?').pluck().get(pc1.admin.salesWarehouse(ctx1.storeId).id)).toBe(0);
   });
 
+  it("un PC rejoint le magasin avec l'identifiant et le code d'un utilisateur, sans code de caisse", async () => {
+    pc1.admin.createUser(ctx1.userId, { name: 'Paul', login: 'paul', pin: '5678', role: 'seller', storeId: ctx1.storeId });
+    await syncOnce(pc1);
+    await expect(joinStoreAsUser(fresh(), url, 'paul', '9999', 'PC vendeur')).rejects.toThrow('incorrect');
+    await expect(joinStoreAsUser(fresh(), url, 'inconnu', '5678', 'PC vendeur')).rejects.toThrow('incorrect');
+    // L'administrateur de tous les magasins doit dire lequel : ici Akwa et Bastos sont sur le serveur.
+    await expect(joinStoreAsUser(fresh(), url, 'steve', '1234', 'PC du gérant')).rejects.toThrow('Plusieurs magasins');
+    const pc = fresh();
+    const station = await joinStoreAsUser(pc, url, 'paul', '5678', 'PC vendeur');
+    expect(station?.store.code).toBe('DLA1');
+    expect(station?.register).toBeNull();
+    expect(pc.admin.login('paul', '5678').role).toBe('seller');
+    expect(pc.catalogue.scan('5449000000996', station!.store.id)?.article.id).toBe(articleId);
+  });
+
   it('la licence activée sur le PC 1 arrive sur le PC 2 et limite le nombre de PC', async () => {
     expect(pc2.license.status().state).toBe('trial');
     pc1.license.activate(ctx1.userId, licenseKey(pc1.license.machineCode(), 2));
@@ -471,6 +486,8 @@ describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchroni
     const code3 = pc1.admin.createRegister(ctx1.userId, ctx1.storeId).activation_code;
     await syncOnce(pc1);
     await expect(joinStore(fresh(), url, code3, 'PC caisse 3')).rejects.toThrow('permet 2 PC');
+    // Un PC sans caisse compte aussi : on ne contourne pas la licence en rejoignant par un utilisateur.
+    await expect(joinStoreAsUser(fresh(), url, 'paul', '5678', 'PC vendeur 2')).rejects.toThrow('permet 2 PC');
   });
   describe("l'interface du serveur", () => {
     let cookie = '';

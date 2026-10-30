@@ -88,7 +88,7 @@ const WINDOWS: Record<WinKind, { label: string; perm: Permission[] }> = {
   labels: { label: 'Étiquettes', perm: ['labels'] },
   reports: { label: 'Rapports de ventes', perm: ['reports'] },
   accounting: { label: 'Comptabilité', perm: ['accounting', 'vat_return', 'tax', 'tax_settings', 'bank_reconciliation', 'statements', 'journal_entry', 'journal_edit', 'chart_accounts', 'fiscal_years', 'cash_forecast', 'budgets', 'analytics', 'cheque_deposits', 'patrimony', 'cheque_rejections'] },
-  treasury: { label: 'Opérations de trésorerie', perm: ['treasury', 'cash_history', 'central_cash'] },
+  treasury: { label: 'Opérations de trésorerie', perm: ['treasury', 'cash_history', 'central_cash', 'cash_live'] },
   dashboard: { label: 'Tableau de bord', perm: ['dashboard', 'price_review', 'team_board', 'owner_report'] },
   admin: { label: 'Administration', perm: ['admin'] },
   production: { label: 'Fabrication', perm: ['production', 'production_recipes', 'production_create', 'production_validate'] },
@@ -293,6 +293,7 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Registre de caisse (Z)', words: 'z clôture journal de caisse registre', open: ['sales', 'z'], perm: 'cash_z' },
       { label: 'Historique des journées de caisse', words: 'écarts journées z', open: ['treasury', 'history'], perm: 'cash_history', badge: 'gaps' },
       H('Toutes les caisses'),
+      { label: 'Caisses en direct', words: 'temps réel suivi des caisses gérant intervenir journée en cours', open: ['treasury', 'live'], perm: 'cash_live' },
       { label: 'Caisse centrale', open: ['treasury', 'central'], perm: 'central_cash' },
       { label: 'Caisses électroniques (MoMo, OM)', words: 'mobile money orange money mtn', open: ['treasury', 'emoney'], perm: 'central_cash' },
       { label: 'Positions (caisses, banques, Mobile Money)', open: ['accounting', 'treasury'] },
@@ -579,7 +580,7 @@ const QUICK_BY_ROLE: Record<Role, QuickTab[]> = {
     { label: 'V. cash 1', open: ['cash1'] },
     { label: 'Tableau de bord', open: ['dashboard', 'day'] },
     { label: "Points d'attention", open: ['dashboard', 'attention'] },
-    { label: 'Journées de caisse', open: ['treasury', 'history'] },
+    { label: 'Caisses en direct', open: ['treasury', 'live'] },
     { label: 'Bons de commande', open: ['purchases', 'orders'] },
     { label: 'État du stock', open: ['stock', 'state'] },
   ],
@@ -1123,8 +1124,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     const top = at.top > window.innerHeight / 2 ? at.bottom - h : at.top;
     el.style.top = `${Math.max(10, Math.min(top, window.innerHeight - h - 10))}px`;
   };
-  /** Liste d'un menu, ouverte à côté de la barre verte (ou sous le nom de l'utilisateur). */
-  const MenuDrop = ({ name, items, up, right, at }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean; at?: typeof menuAt }) => {
+  /**
+   * Liste d'un menu, ouverte à côté de la barre verte (ou sous le nom de l'utilisateur).
+   * Appelée comme une fonction, pas comme un composant : redéfinie à chaque rendu, elle
+   * serait démontée puis remontée (avec son animation) à chaque rafraîchissement de fond.
+   */
+  const menuDrop = ({ name, items, up, right, at }: { name: string; items: MenuItem[]; up?: boolean; right?: boolean; at?: typeof menuAt }) => {
     const groups = items.reduce<MenuItem[][]>((g, i) => (i.sep || !g.length ? [...g, [i]] : (g[g.length - 1]!.push(i), g)), []);
     return (
     <div
@@ -1238,7 +1243,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 <span className="rail-label">{RAIL_LABELS[name] ?? name}</span>
                 <Ico.ChevronRight className="rail-chev" size={15} aria-hidden />
               </button>
-              {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
+              {menu === name && menuDrop({ name, items: visibleItems(items), at: menuAt })}
             </div>
           ))}
         </div>
@@ -1290,7 +1295,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               <span className="rail-label">{RAIL_LABELS[name] ?? name}</span>
               <Ico.ChevronRight className="rail-chev" size={15} aria-hidden />
             </button>
-            {menu === name && <MenuDrop name={name} items={visibleItems(items)} at={menuAt} />}
+            {menu === name && menuDrop({ name, items: visibleItems(items), at: menuAt })}
           </div>
         ))}
         <div className="menu side-user-wrap">
@@ -1308,7 +1313,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               <small>{ROLE_LABELS[user.role]}</small>
             </span>
           </button>
-          {menu === '__side_user' && <MenuDrop name="Mon compte" items={visibleItems(FILE_MENU)} at={menuAt} />}
+          {menu === '__side_user' && menuDrop({ name: 'Mon compte', items: visibleItems(FILE_MENU), at: menuAt })}
         </div>
         <button className="side-toggle" title={side === 'narrow' ? 'Agrandir la barre latérale' : 'Réduire la barre latérale'} onClick={toggleSide}>
           {side === 'narrow' ? <Ico.PanelLeftOpen size={17} /> : <Ico.PanelLeftClose size={17} />}
@@ -1544,7 +1549,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {w.kind === 'control' && <CashierControl />}
             {w.kind === 'accounting' && <Accounting user={user} initialTab={w.tab as AccountingTab | undefined} />}
             {w.kind === 'treasury' && <Treasury user={user} registerId={state.register?.id ?? null} initialTab={w.tab as TreasuryTab | undefined} onChanged={() => (refresh(), gaps.reload())} />}
-            {w.kind === 'dashboard' && <Dashboard initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
+            {w.kind === 'dashboard' && <Dashboard user={user} initialTab={w.tab as DashboardTab | undefined} onOpen={([kind, tab]) => open(kind, tab)} />}
             {w.kind === 'admin' && <Admin user={user} onChanged={() => (refresh(), backupLate.reload(), copyFailed.reload(), fichesWaiting.reload())} initialTab={w.tab as AdminTab | undefined} />}
             </RefreshCtx.Provider>
             </SingleViewCtx.Provider>

@@ -10,6 +10,7 @@ import { Consignment } from './Consignment';
 import { tx } from '../tax';
 import { InvoicePreview } from './docPreview';
 import { SummaryInvoices } from './SummaryInvoices';
+import { BalanceDialog, EMPTY_OPENING, OpeningField, saveOpening } from './balanceAdjust';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 export type CustomersTab = 'list' | 'statement' | 'receivables' | 'limits' | 'recent' | 'payments' | 'rebates' | 'summary' | 'offsets' | 'consignment' | 'field-reps' | `rebates-${RebatesTab}`;
@@ -281,6 +282,7 @@ function CustomerCard({ user, customer, onSaved }: { user: User; customer: Custo
   const toast = useToast();
   const settings = useStoreSettings();
   const [draft, setDraft] = useState(() => draftOf(customer, settings));
+  const [opening, setOpening] = useState(EMPTY_OPENING);
   // Un client existant : la fiche se corrige avec « Modifier un client » ; plafond, tarif et activité ont leurs propres droits.
   const canSave = customer
     ? has(user, 'customer_edit') || has(user, 'receivables') || has(user, 'customer_price_level') || has(user, 'customer_deactivate')
@@ -291,7 +293,9 @@ function CustomerCard({ user, customer, onSaved }: { user: User; customer: Custo
         e.preventDefault();
         try {
           const saved = await call('customers.save', inputOf(draft), customer?.id);
-          toast.ok(customer ? 'Fiche client enregistrée' : `Client ${saved.code} créé`);
+          // Nouveau client : ce qu'il doit déjà (ou son avance) devient son solde d'ouverture.
+          const withOpening = !customer && (await saveOpening('customer', saved.id, opening).catch((err) => (toast.error(err), false)));
+          toast.ok(customer ? 'Fiche client enregistrée' : `Client ${saved.code} créé${withOpening ? " avec son solde d'ouverture" : ''}`);
           onSaved(saved);
         } catch (err) {
           toast.error(err);
@@ -299,6 +303,7 @@ function CustomerCard({ user, customer, onSaved }: { user: User; customer: Custo
       }}
     >
       <CustomerFields value={draft} onChange={setDraft} canSetCredit={canSetCredit(user)} canSetLevel={canSetLevel(user)} canLinkSupplier={canLinkSupplier(user)} />
+      {!customer && has(user, 'balance_adjust') && <OpeningField party="customer" value={opening} onChange={setOpening} />}
       {customer && (
         <label>
           <input type="checkbox" checked={draft.active} disabled={!has(user, 'customer_deactivate')} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} /> Client actif
@@ -321,6 +326,7 @@ function Account({ customer }: { customer: Customer }) {
   const [receipt, setReceipt] = useState<string | null>(null);
   const [offsetting, setOffsetting] = useState(false);
   const [reminding, setReminding] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   if (!acc.data) return null;
   const a = acc.data;
@@ -405,6 +411,11 @@ function Account({ customer }: { customer: Customer }) {
             Compenser avec son compte fournisseur…
           </button>
         )}
+        {can('balance_adjust') && (
+          <button title="Solde d’ouverture oublié à la création, ou correction du solde avec son motif" onClick={() => setAdjusting(true)}>
+            Ajuster le solde…
+          </button>
+        )}
         {can('customer_payment') && (
           <button title="Le client verse sur son compte ; ses achats à crédit viennent ensuite en déduction" onClick={() => setPaying('advance')}>
             Dépôt d'avance…
@@ -446,6 +457,19 @@ function Account({ customer }: { customer: Customer }) {
       )}
       {preview && <InvoicePreview saleId={preview} onClose={() => setPreview(null)} />}
       {reminding && <ReminderDialog queue={[customer.id]} onClose={() => setReminding(false)} />}
+      {adjusting && (
+        <BalanceDialog
+          party="customer"
+          id={customer.id}
+          name={customer.name}
+          balance={a.balance}
+          onClose={() => setAdjusting(false)}
+          onDone={() => {
+            setAdjusting(false);
+            acc.reload();
+          }}
+        />
+      )}
     </>
   );
 }

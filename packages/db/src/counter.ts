@@ -31,6 +31,8 @@ export interface CounterPayload {
   discountReason?: string | null;
   /** Commercial de terrain de la vente. */
   fieldRepId?: string | null;
+  /** Caisse qui doit l'encaisser (celle du vendeur dans Administration › Utilisateurs) ; absente : n'importe quelle caisse. */
+  registerId?: string | null;
 }
 
 export type CounterStatus = 'waiting' | 'editing' | 'returned' | 'paying' | 'paid' | 'cancelled';
@@ -62,6 +64,8 @@ export interface CounterInvoice {
   lockedHere: boolean;
   saleNumber: string | null;
   doneBy: string | null;
+  /** Caisse de destination (absente : toutes les caisses). */
+  registerId?: string | null;
   at: string;
   updatedAt: string;
   payload?: CounterPayload;

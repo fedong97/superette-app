@@ -129,7 +129,7 @@ export class ResetService extends Base {
     return {
       sales: n('SELECT COUNT(*) FROM sales'),
       receptions: n('SELECT COUNT(*) FROM receptions'),
-      supplierInvoices: n('SELECT COUNT(*) FROM supplier_invoices WHERE opening = 0'),
+      supplierInvoices: n('SELECT COUNT(*) FROM supplier_invoices WHERE opening IN (0, 3)'),
       cashSessions: n('SELECT COUNT(*) FROM cash_sessions'),
       expenses: n('SELECT COUNT(*) FROM expenses'),
       movements: n('SELECT COUNT(*) FROM stock_movements'),
@@ -153,8 +153,8 @@ export class ResetService extends Base {
           ? (this.db.prepare('SELECT article_id, warehouse_id, qty, avg_cost FROM stock WHERE qty <> 0').all() as { article_id: string; warehouse_id: string; qty: number; avg_cost: number }[])
           : [];
         for (const t of WIPED) if (tables.has(t)) this.db.prepare(`DELETE FROM ${t}`).run();
-        // Factures fournisseurs des essais ; la reprise des soldes de départ reste.
-        this.db.prepare('DELETE FROM supplier_invoices WHERE opening = 0').run();
+        // Factures fournisseurs et avances des essais ; la reprise des soldes de départ et les ajustements restent.
+        this.db.prepare('DELETE FROM supplier_invoices WHERE opening IN (0, 3)').run();
         if (opts.keepStock) {
           this.db.prepare('DELETE FROM lots WHERE qty <= 0').run();
         } else {

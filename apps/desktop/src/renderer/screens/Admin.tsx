@@ -675,6 +675,8 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
     /** Caisses électroniques cochées : chacune reçoit ses moyens (MTN, Orange, carte). */
     emoneyRegisterIds: string[];
     bankRegisterId: string;
+    /** Vendeur (vendeur et caissier séparés) : caisse qui reçoit ses factures. */
+    counterRegisterId: string;
     /** Dépôts de vente cochés ; null = selon le droit « vendre depuis un autre dépôt ». */
     saleWarehouses: string[] | null;
     active: boolean;
@@ -741,6 +743,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                   registerId: u.register_id ?? '',
                   emoneyRegisterIds: emoneyIds(u),
                   bankRegisterId: u.bank_register_id ?? '',
+                  counterRegisterId: u.counter_register_id ?? '',
                   saleWarehouses: u.sale_warehouses ? (JSON.parse(u.sale_warehouses) as string[]) : null,
                   active: u.active === 1,
                   badge: u.badge ?? null,
@@ -853,6 +856,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                 registerId: '',
                 emoneyRegisterIds: [],
                 bankRegisterId: '',
+                counterRegisterId: '',
                 saleWarehouses: null,
                 active: true,
                 badge: null,
@@ -880,6 +884,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     registerId: form.registerId || null,
                     emoneyRegisterIds: form.emoneyRegisterIds,
                     bankRegisterId: form.bankRegisterId || null,
+                    counterRegisterId: form.counterRegisterId || null,
                     saleWarehouses: form.saleWarehouses,
                     active: form.active,
                     pin: form.pin || undefined,
@@ -897,6 +902,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                       registerId: form.registerId || null,
                       emoneyRegisterIds: form.emoneyRegisterIds,
                       bankRegisterId: form.bankRegisterId || null,
+                      counterRegisterId: form.counterRegisterId || null,
                       saleWarehouses: form.saleWarehouses,
                     },
                     staff: form.staff
@@ -947,7 +953,7 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                 label="Caisse espèces"
                 hint={
                   sells(form.role)
-                    ? 'Il vend sur cette caisse depuis n’importe quel PC. Sans caisse, il ne peut pas vendre.'
+                    ? 'Il vend sur cette caisse depuis n’importe quel PC. Plusieurs caissiers peuvent partager la même caisse (relève d’équipe). Sans caisse, il ne peut pas vendre.'
                     : 'Facultatif : sans caisse, le gérant choisit la sienne au moment de vendre.'
                 }
               >
@@ -962,6 +968,20 @@ function Users({ currentRole, canManage, onPrivileges }: { currentRole: Role; ca
                     ))}
                 </select>
               </Field>
+              {form.role === 'seller' && (
+                <Field label="Envoie ses factures à" hint="Vendeur et caissier séparés : seule cette caisse voit et encaisse ses factures. Aucune : toutes les caisses.">
+                  <select value={form.counterRegisterId} onChange={(e) => setForm({ ...form, counterRegisterId: e.target.value })}>
+                    <option value="">Toutes les caisses</option>
+                    {(registers.data ?? [])
+                      .filter((r) => r.kind === 'cash' && (r.active || r.id === form.counterRegisterId) && (!form.storeId || r.store_id === form.storeId))
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {registerLabel(r.id)}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              )}
               <Field label="Caisse banque" hint="Reçoit ses virements et chèques.">
                 <select value={form.bankRegisterId} onChange={(e) => setForm({ ...form, bankRegisterId: e.target.value })}>
                   <option value="">Aucune (dans la caisse espèces)</option>

@@ -333,6 +333,35 @@ export interface ZReport {
   byCashier: { user_id: string; name: string; tickets: number; net: Fcfa; difference: Fcfa | null }[];
 }
 
+/** Une caisse vue du tableau du gérant (Caisses en direct). */
+export interface LiveRegister {
+  id: string;
+  number: number;
+  name: string;
+  kind: RegisterKind;
+  /** Journée ouverte, dernière journée clôturée, ou caisse jamais ouverte. */
+  status: 'open' | 'closed' | 'never';
+  /** Ouverte un jour précédent et pas clôturée. */
+  stale: boolean;
+  session: { id: string; opened_at: string; closed_at: string | null; z_number: number | null } | null;
+  cashier: string | null;
+  cashiers: string[];
+  tickets: number;
+  net: Fcfa;
+  /** Règlements clients reçus dans la journée. */
+  receipts: Fcfa;
+  /** Apports et autres entrées d'espèces. */
+  entries: Fcfa;
+  /** Prélèvements, dépenses et autres sorties d'espèces. */
+  exits: Fcfa;
+  /** Espèces attendues dans le tiroir (caisse espèces). */
+  expected: Fcfa | null;
+  /** Écart de la dernière clôture. */
+  difference: Fcfa | null;
+  lastAt: string | null;
+  byMethod: { method: PaymentMethod; label: string; amount: Fcfa }[];
+}
+
 /** Relève d'équipe : comptage du tiroir quand un caissier passe la main à un autre. */
 export interface CashHandover {
   id: string;
@@ -2109,8 +2138,9 @@ export class PosService extends Base {
     const rows = this.db
       .prepare(
         `SELECT e.id, e.at, e.number, e.direction, e.kind, e.amount, e.method, e.reference, e.piece, e.label,
-                COALESCE(s.name, c.name, e.party) AS party, u.name AS user_name, e.user_id
-         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN users u ON u.id = e.user_id
+                COALESCE(s.name, c.name, f.name, e.party) AS party, u.name AS user_name, e.user_id
+         FROM treasury_entries e LEFT JOIN staff s ON s.id = e.staff_id LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN suppliers f ON f.id = e.supplier_id
+         LEFT JOIN users u ON u.id = e.user_id
          WHERE e.session_id = ? AND e.status = 'active' AND ${method === 'CASH' ? "e.method = 'CASH'" : "e.method <> 'CASH'"} ORDER BY e.at`,
       )
       .all(sessionId) as { id: string; at: string; number: string; direction: 'IN' | 'OUT'; kind: EntryKind; amount: number; method: PaymentMethod; reference: string | null; piece: string | null; label: string; party: string | null; user_name: string | null; user_id: string | null }[];
@@ -2180,5 +2210,52 @@ export class PosService extends Base {
          WHERE s.store_id = ? AND (? IS NULL OR s.register_id = ?) ORDER BY s.opened_at DESC LIMIT ?`,
       )
       .all(storeId, registerId ?? null, registerId ?? null, limit) as CashSession[];
+  }
+
+  /**
+   * Caisses en direct, pour le gérant : chaque caisse du magasin avec sa journée en
+   * cours (ou la dernière clôturée), qui la tient, ses ventes, ses encaissements et
+   * ses sorties, l'attendu du tiroir et l'heure de la dernière opération.
+   */
+  liveRegisters(storeId: string): LiveRegister[] {
+    const registers = this.db
+      .prepare('SELECT id, number, name, kind FROM registers WHERE store_id = ? AND active = 1 ORDER BY number')
+      .all(storeId) as { id: string; number: number; name: string; kind: RegisterKind }[];
+    return registers.map((r) => {
+      const open = this.currentSession(r.id);
+      const session = open ?? this.listSessions(storeId, 1, r.id)[0] ?? null;
+      if (!session) return { ...r, status: 'never' as const, stale: false, session: null, cashier: null, cashiers: [], tickets: 0, net: 0, receipts: 0, entries: 0, exits: 0, expected: null, difference: null, lastAt: null, byMethod: [] };
+      const z = this.zReport(session.id);
+      const last = this.db
+        .prepare(
+          `SELECT MAX(at) FROM (
+             SELECT created_at AS at FROM sales WHERE session_id = @id
+             UNION ALL SELECT paid_at FROM customer_payments WHERE session_id = @id
+             UNION ALL SELECT at FROM treasury_entries WHERE session_id = @id
+             UNION ALL SELECT created_at FROM expenses WHERE session_id = @id)`,
+        )
+        .pluck()
+        .get({ id: session.id }) as string | null;
+      const handover = z.handovers.at(-1);
+      const cash = r.kind === 'cash';
+      return {
+        ...r,
+        status: session.status === 'open' ? ('open' as const) : ('closed' as const),
+        stale: open ? this.isStale(open) : false,
+        session: { id: session.id, opened_at: session.opened_at, closed_at: session.closed_at, z_number: session.z_number },
+        // Le caissier en place : celui qui a reçu la dernière relève, sinon celui qui a ouvert.
+        cashier: handover?.to_name ?? session.user_name,
+        cashiers: z.byCashier.map((c) => c.name),
+        tickets: z.ticketCount,
+        net: z.netTtc,
+        receipts: z.customerReceipts.reduce((t, x) => t + x.amount, 0),
+        entries: cash ? z.cash.cashIn + z.cash.otherIn : 0,
+        exits: cash ? z.cash.cashOut + z.cash.expenses + z.cash.otherOut : 0,
+        expected: cash ? z.cash.expected : null,
+        difference: session.status === 'closed' ? session.difference : null,
+        lastAt: last ?? session.opened_at,
+        byMethod: z.byMethod.filter((m) => m.amount),
+      };
+    });
   }
 }

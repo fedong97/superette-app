@@ -65,7 +65,19 @@ export interface EmoneyLedgerRow extends EmoneyRow {
 }
 
 /** Natures des pièces d'« Encaisser » et « Décaisser » qui ne sont ni vente, ni règlement, ni dépense. */
-export type EntryKind = 'staff_advance' | 'staff_salary' | 'staff_repayment' | 'customer_refund' | 'container_deposit' | 'container_refund' | 'agent_in' | 'agent_out' | 'voucher_sale' | 'other';
+export type EntryKind =
+  | 'staff_advance'
+  | 'staff_salary'
+  | 'staff_repayment'
+  | 'customer_refund'
+  | 'container_deposit'
+  | 'container_refund'
+  | 'agent_in'
+  | 'agent_out'
+  | 'voucher_sale'
+  | 'supplier_advance'
+  | 'supplier_refund'
+  | 'other';
 export const ENTRY_KINDS: Record<EntryKind, string> = {
   staff_advance: 'Avance au personnel',
   staff_salary: 'Salaire',
@@ -76,6 +88,8 @@ export const ENTRY_KINDS: Record<EntryKind, string> = {
   agent_in: 'Point Mobile Money (entrée)',
   agent_out: 'Point Mobile Money (sortie)',
   voucher_sale: "Bon d'achat vendu",
+  supplier_advance: 'Avance au fournisseur',
+  supplier_refund: 'Règlement fournisseur annulé',
   other: 'Autre',
 };
 
@@ -205,8 +219,9 @@ export class EmoneyService extends Base {
     const rows = this.db
       .prepare(
         `SELECT x.id, x.at, x.number, x.kind, x.method, x.amount, COALESCE(x.reference, x.piece) AS reference, x.label,
-                COALESCE(s.name, c.name, x.party) AS party, u.name AS user_name, x.user_id
-         FROM treasury_entries x LEFT JOIN staff s ON s.id = x.staff_id LEFT JOIN customers c ON c.id = x.customer_id LEFT JOIN users u ON u.id = x.user_id
+                COALESCE(s.name, c.name, f.name, x.party) AS party, u.name AS user_name, x.user_id
+         FROM treasury_entries x LEFT JOIN staff s ON s.id = x.staff_id LEFT JOIN customers c ON c.id = x.customer_id LEFT JOIN suppliers f ON f.id = x.supplier_id
+         LEFT JOIN users u ON u.id = x.user_id
          WHERE ${bySession ? 'x.session_id = @sessionId' : 'x.register_id = @registerId AND x.session_id IS NULL AND x.at > @after'}
            AND x.status = 'active' AND x.direction = @direction AND x.method <> 'CASH'`,
       )

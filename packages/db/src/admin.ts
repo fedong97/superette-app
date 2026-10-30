@@ -46,6 +46,8 @@ export interface User {
   emoney_register_ids?: string | null;
   /** Caisse banque (virements, chèques) qui reçoit ses paiements bancaires. */
   bank_register_id: string | null;
+  /** Vendeur et caissier séparés : la caisse où partent ses factures (null : n'importe quelle caisse). */
+  counter_register_id?: string | null;
   /** Dépôts où il vend et complète une ligne (JSON d'ids) ; null = selon son droit « vendre depuis un autre dépôt ». */
   sale_warehouses: string | null;
   active: number;
@@ -68,6 +70,8 @@ export interface UserRegisters {
   emoneyRegisterId?: string | null;
   emoneyRegisterIds?: string[] | null;
   bankRegisterId?: string | null;
+  /** Vendeur : caisse qui reçoit ses factures (vendeur et caissier séparés). */
+  counterRegisterId?: string | null;
 }
 
 /** Caisses électroniques d'un utilisateur, dans l'ordre choisi. */
@@ -661,6 +665,11 @@ export class AdminService extends Base {
       this.enqueue(null, 'user', u.id, 'upsert', this.getUser(u.id));
       names.push(u.name);
     }
+    // Vendeurs qui y envoyaient leurs factures : elles repartent vers toutes les caisses.
+    for (const id of this.db.prepare('SELECT id FROM users WHERE counter_register_id = ?').pluck().all(reg.id) as string[]) {
+      this.db.prepare('UPDATE users SET counter_register_id = NULL WHERE id = ?').run(id);
+      this.enqueue(null, 'user', id, 'upsert', this.getUser(id));
+    }
     return names;
   }
 
@@ -704,7 +713,7 @@ export class AdminService extends Base {
   /** Utilisateurs à qui une caisse est attribuée. */
   registerUsers(registerId: string): User[] {
     return this.db
-      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, sale_warehouses, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
+      .prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, counter_register_id, sale_warehouses, active FROM users WHERE register_id = ? AND active = 1 ORDER BY name')
       .all(registerId) as User[];
   }
 
@@ -721,6 +730,17 @@ export class AdminService extends Base {
     return this.getRegister(reg.id);
   }
 
+  /**
+   * PC qui a rejoint le magasin sans code de caisse (poste de vendeur, magasinier…) :
+   * il appartient au magasin sans caisse propre ; chacun y vend sur la caisse que
+   * l'administration lui attribue.
+   */
+  joinStation(storeId: string): void {
+    this.getStore(storeId);
+    this.setSetting('station.storeId', storeId);
+    this.setSetting('station.registerId', '');
+  }
+
   /** Magasin et caisse de ce PC. */
   station(): { store: Store; register: Register | null } | null {
     const storeId = this.getSetting('station.storeId');
@@ -732,11 +752,11 @@ export class AdminService extends Base {
   // --- Utilisateurs ---------------------------------------------------------
 
   listUsers(): User[] {
-    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, sale_warehouses, active, badge FROM users WHERE deleted_at IS NULL ORDER BY name').all() as User[];
+    return this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, counter_register_id, sale_warehouses, active, badge FROM users WHERE deleted_at IS NULL ORDER BY name').all() as User[];
   }
 
   getUser(id: string): User {
-    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, sale_warehouses, active, badge, deleted_at FROM users WHERE id = ?').get(id) as User | undefined;
+    const user = this.db.prepare('SELECT id, name, login, role, store_id, register_id, emoney_register_id, emoney_register_ids, bank_register_id, counter_register_id, sale_warehouses, active, badge, deleted_at FROM users WHERE id = ?').get(id) as User | undefined;
     if (!user) throw new AppError('Utilisateur introuvable', 'NOT_FOUND');
     return user;
   }
@@ -764,6 +784,7 @@ export class AdminService extends Base {
       throw e;
     }
     if (input.saleWarehouses) this.db.prepare('UPDATE users SET sale_warehouses = ? WHERE id = ?').run(JSON.stringify([...new Set(input.saleWarehouses)]), id);
+    if (input.counterRegisterId) this.db.prepare('UPDATE users SET counter_register_id = ? WHERE id = ?').run(this.checkRegister(input.counterRegisterId, 'cash'), id);
     const user = this.getUser(id);
     this.enqueue(null, 'user', id, 'upsert', user);
     this.audit(byUserId, 'user.create', 'user', id, { role: input.role });
@@ -811,6 +832,9 @@ export class AdminService extends Base {
         id,
       );
     if (patch.pin) this.db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(hashPin(patch.pin), id);
+    if (patch.counterRegisterId !== undefined) {
+      this.db.prepare('UPDATE users SET counter_register_id = ? WHERE id = ?').run(patch.counterRegisterId ? this.checkRegister(patch.counterRegisterId, 'cash') : null, id);
+    }
     const user = this.getUser(id);
     this.enqueue(null, 'user', id, 'upsert', user);
     this.audit(byUserId, 'user.update', 'user', id, { ...patch, pin: patch.pin ? '***' : undefined });

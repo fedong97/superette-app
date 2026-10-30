@@ -11,47 +11,120 @@ export function Setup({ onDone }: { onDone: () => void }) {
   return <NewStore onDone={onDone} onJoin={() => setMode('join')} />;
 }
 
-/** PC supplémentaire : rejoint un magasin déjà déclaré sur le serveur central. */
+/**
+ * PC supplémentaire : rejoint un magasin déjà déclaré sur le serveur central.
+ * Seule l'adresse du serveur est demandée, puis la connexion au magasin avec
+ * l'identifiant et le code d'un utilisateur déjà créé (vendeur, magasinier,
+ * caissier…). La caisse vient de l'utilisateur, pas du PC. L'ancien code
+ * d'activation d'une caisse reste possible pour un PC dédié à une caisse.
+ */
 function Join({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   const toast = useToast();
+  const [step, setStep] = useState<'server' | 'login' | 'code'>('server');
   const [url, setUrl] = useState('');
+  const [login, setLogin] = useState('');
+  const [pin, setPin] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const run = async (job: () => Promise<void>) => {
     setBusy(true);
     try {
-      const station = await call('setup.join', url, code);
-      toast.ok(`PC relié : ${station?.store.name}, ${station?.register?.name}`);
-      onDone();
+      await job();
     } catch (err) {
       toast.error(err);
     } finally {
       setBusy(false);
     }
   };
+  const back = (
+    <button type="button" onClick={() => (step === 'server' ? onBack() : setStep('server'))} disabled={busy}>
+      Retour
+    </button>
+  );
+  if (step === 'server') {
+    return (
+      <div className="center-page">
+        <form className="card setup" onSubmit={(e) => (e.preventDefault(), void run(async () => (await call('setup.ping', url), setStep('login'))))}>
+          <h1>Rejoindre un magasin</h1>
+          <p>Indiquez l'adresse du serveur central du magasin. Vous vous connecterez ensuite avec votre identifiant, quel que soit votre rôle (vendeur, caissier, magasinier…).</p>
+          <Field label="Adresse du serveur central" hint="ex. http://192.168.1.20:3000 (affichée dans ONIX 360 Serveur)">
+            <input value={url} onChange={(e) => setUrl(e.target.value)} required autoFocus />
+          </Field>
+          <div className="actions">
+            {back}
+            <button className="primary big" type="submit" disabled={busy || !url.trim()}>
+              {busy ? 'Recherche du serveur…' : 'Continuer'}
+            </button>
+          </div>
+          <p className="muted small">
+            PC réservé à une seule caisse ?{' '}
+            <button type="button" className="link" onClick={() => (url.trim() ? setStep('code') : toast.error("Indiquez d'abord l'adresse du serveur"))}>
+              J'ai un code d'activation de caisse
+            </button>
+          </p>
+        </form>
+      </div>
+    );
+  }
+  if (step === 'code') {
+    return (
+      <div className="center-page">
+        <form
+          className="card setup"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              const station = await call('setup.join', url, code);
+              toast.ok(`PC relié : ${station?.store.name}, ${station?.register?.name}`);
+              onDone();
+            });
+          }}
+        >
+          <h1>PC d'une caisse</h1>
+          <p>Sur le PC principal, dans Administration › Caisses, notez le code d'activation de la caisse : ce PC lui sera réservé.</p>
+          <Field label="Code d'activation de la caisse" hint="6 chiffres">
+            <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} inputMode="numeric" maxLength={6} required autoFocus />
+          </Field>
+          <div className="actions">
+            {back}
+            <button className="primary big" type="submit" disabled={busy || code.length !== 6}>
+              {busy ? 'Récupération des données…' : 'Rejoindre'}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
   return (
     <div className="center-page">
-      <form className="card setup" onSubmit={submit}>
-        <h1>Rejoindre un magasin</h1>
+      <form
+        className="card setup"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run(async () => {
+            const r = await call('setup.joinAsUser', url, login, pin);
+            toast.ok(`PC relié à ${r.store?.name ?? 'votre magasin'} : bienvenue ${r.user.name}`);
+            onDone();
+          });
+        }}
+      >
+        <h1>Connexion au magasin</h1>
         <p>
-          Sur le PC principal, dans Administration › Caisses, créez une caisse et notez son code d'activation. Ce PC récupère ensuite le
-          catalogue, les utilisateurs et le stock du magasin depuis le serveur central.
+          Serveur trouvé : <b>{url}</b>. Connectez-vous avec l'identifiant et le code créés pour vous dans Administration › Utilisateurs. Ce PC récupère
+          ensuite le catalogue, les utilisateurs et le stock du magasin.
         </p>
         <div className="grid2">
-          <Field label="Adresse du serveur central" hint="ex. http://192.168.1.20:3000 (affichée dans ONIX 360 Serveur)">
-            <input value={url} onChange={(e) => setUrl(e.target.value)} required />
+          <Field label="Identifiant">
+            <input value={login} onChange={(e) => setLogin(e.target.value)} autoCapitalize="none" required autoFocus />
           </Field>
-          <Field label="Code d'activation de la caisse" hint="6 chiffres">
-            <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} inputMode="numeric" maxLength={6} required />
+          <Field label="Code">
+            <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} required />
           </Field>
         </div>
         <div className="actions">
-          <button type="button" onClick={onBack} disabled={busy}>
-            Retour
-          </button>
-          <button className="primary big" type="submit" disabled={busy || code.length !== 6}>
-            {busy ? 'Récupération des données…' : 'Rejoindre'}
+          {back}
+          <button className="primary big" type="submit" disabled={busy || !login.trim() || pin.length < 4}>
+            {busy ? 'Récupération des données…' : 'Se connecter'}
           </button>
         </div>
       </form>

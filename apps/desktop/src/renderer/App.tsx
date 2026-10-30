@@ -40,7 +40,7 @@ import { AskHost, DRAFT_SCREENS, KeyHints, THEMES, type Theme, applyTheme, askCo
 import { hasVat, setVatOn } from './tax';
 import { ctrlJ } from './newShortcut';
 import { type ListPrefs, ListTools } from './listTools';
-import { DayTasks } from './screens/Floor';
+import { HomeOverview } from './screens/Home';
 import { type Area, type Geo, MdiWindow, defaultGeo, dialogGeo, tileGeos } from './mdi';
 import { type Lang, currentLang, setLang, storedLang } from './i18n';
 
@@ -1423,7 +1423,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 </button>
               )}
             </header>
-            {(can('cash') || can('credit')) && showHome && <MyDay />}
+            {showHome && <HomeOverview userId={user.id} myDay={(can('cash') || can('credit')) && <MyDay />} />}
             {Boolean(drafts.data?.length) && showHome && (
               <div className="home-drafts">
                 <h2>Saisies en cours retrouvées</h2>
@@ -1437,7 +1437,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                 })}
               </div>
             )}
-            {can('day_tasks') && showHome && <DayTasks compact />}
             <h2 className="home-section">Accès rapides</h2>
             <div className="role-tiles">
               {tiles.map((t) => (

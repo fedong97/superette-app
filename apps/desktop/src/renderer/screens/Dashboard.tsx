@@ -5,6 +5,7 @@ import { OwnerReport, PriceReview, TeamBoard } from './Floor';
 import { MonthClear } from './MonthClear';
 import { tx } from '../tax';
 import { LiveTills } from './LiveTills';
+import { DashboardTills } from './Home';
 import { type WinKind } from '../nav';
 
 export type DashboardTab = 'day' | 'attention' | 'tills' | 'month' | 'prices' | 'team' | 'owner';
@@ -13,7 +14,7 @@ type Item = Result<'attention.list'>[number];
 /** Fenêtre et onglet qui traitent chaque point d'attention. */
 export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales' | 'expenses', string];
 
-const TARGET: Record<Item['key'], AttentionTarget> = {
+export const ATTENTION_TARGET: Record<Item['key'], AttentionTarget> = {
   rupture: ['stock', 'critical'],
   alerte: ['stock', 'critical'],
   cash_gaps: ['treasury', 'history'],
@@ -86,7 +87,7 @@ function Attention({ onOpen }: { onOpen: (target: AttentionTarget) => void }) {
       {list.data && (
         <div className="attention">
           {sorted.map((i) => (
-            <button key={i.key} className={`tile ${i.count ? i.tone : 'calm'}`} onClick={() => onOpen(TARGET[i.key])}>
+            <button key={i.key} className={`tile ${i.count ? i.tone : 'calm'}`} onClick={() => onOpen(ATTENTION_TARGET[i.key])}>
               <span className="tile-count">{i.count}</span>
               <span className="tile-label">{i.label}</span>
               {i.amount ? <strong>{fcfa(i.amount)}</strong> : null}
@@ -160,6 +161,7 @@ function Day({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
         </div>
         <input type="date" aria-label="Jour affiché" value={date} onChange={(e) => setDate(e.target.value)} />
       </header>
+      {can('cash_live') && date === today() && <DashboardTills />}
       {d ? (
         <div className="kpis">
           <div>

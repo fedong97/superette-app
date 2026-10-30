@@ -22,9 +22,42 @@ export function DayTasks({ compact = false }: { compact?: boolean }) {
     const t = setInterval(tasks.reload, 120_000);
     return () => clearInterval(t);
   }, []);
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
   const list = tasks.data ?? [];
   if (compact && !list.length) return null;
   const left = list.filter((t) => !t.done).length;
+  // « Réception attendue : BC-… » × 8 se regroupe en une ligne « Réception attendue (8) » qui se déplie.
+  const kindOf = (label: string) => label.split(' : ')[0]!;
+  const groups: { kind: string; items: typeof list }[] = [];
+  for (const t of list) {
+    const g = groups.find((x) => x.kind === kindOf(t.label));
+    if (g) g.items.push(t);
+    else groups.push({ kind: kindOf(t.label), items: [t] });
+  }
+  const row = (t: (typeof list)[number]) => (
+    <li key={t.key} className={t.done ? 'done' : ''}>
+      <input
+        type="checkbox"
+        aria-label="Fait"
+        checked={t.done}
+        onChange={(e) =>
+          call('tasks.check', t.key, e.target.checked).then(
+            () => tasks.reload(),
+            (err) => toast.error(err),
+          )
+        }
+      />
+      <button type="button" className="task-open" onClick={() => openScreen(t.open[0], t.open[1])} title="Ouvrir l'écran de cette tâche">
+        <span>
+          {t.label}
+          {t.detail && <small className="muted"> · {t.detail}</small>}
+        </span>
+        <span className="go" aria-hidden>
+          Ouvrir ›
+        </span>
+      </button>
+    </li>
+  );
   return (
     <div className={compact ? 'day-tasks compact' : 'day-tasks'}>
       <h2>
@@ -32,29 +65,37 @@ export function DayTasks({ compact = false }: { compact?: boolean }) {
       </h2>
       {!list.length && <Empty>Rien d'attendu aujourd'hui : pas de réception prévue, pas de transfert en attente, rien à monter en rayon.</Empty>}
       <ul>
-        {list.map((t) => (
-          <li key={t.key} className={t.done ? 'done' : ''}>
-            <label>
-              <input
-                type="checkbox"
-                checked={t.done}
-                onChange={(e) =>
-                  call('tasks.check', t.key, e.target.checked).then(
-                    () => tasks.reload(),
-                    (err) => toast.error(err),
-                  )
+        {groups.map((g) => {
+          if (g.items.length < 3) return g.items.map(row);
+          const open = unfolded.has(g.kind);
+          const todo = g.items.filter((t) => !t.done).length;
+          return [
+            <li key={`groupe-${g.kind}`} className={`task-group ${todo === 0 ? 'done' : ''}`}>
+              <button
+                type="button"
+                className="task-open"
+                aria-expanded={open}
+                onClick={() =>
+                  setUnfolded((u) => {
+                    const next = new Set(u);
+                    if (open) next.delete(g.kind);
+                    else next.add(g.kind);
+                    return next;
+                  })
                 }
-              />
-              <span>
-                {t.label}
-                {t.detail && <small className="muted"> · {t.detail}</small>}
-              </span>
-            </label>
-            <button type="button" className="link" onClick={() => openScreen(t.open[0], t.open[1])}>
-              Ouvrir
-            </button>
-          </li>
-        ))}
+              >
+                <span>
+                  <b>{open ? '▾' : '▸'}</b> {g.kind} <span className="tag">{g.items.length}</span>
+                  {todo !== g.items.length && <small className="muted"> · {todo} à faire</small>}
+                </span>
+                <span className="go" aria-hidden>
+                  {open ? 'Replier' : 'Voir le détail'}
+                </span>
+              </button>
+            </li>,
+            ...(open ? g.items.map(row) : []),
+          ];
+        })}
       </ul>
     </div>
   );

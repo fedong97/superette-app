@@ -109,6 +109,16 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.103.0',
+    items: [
+      "Accueil du gérant « Mon magasin maintenant » : chiffres du jour qui s'animent et se comparent à hier à la même heure (ventes, tickets, panier moyen, marge, règlements, espèces en caisse), rafraîchis toutes les 30 secondes.",
+      "Sur l'accueil : caisses en direct (point vert quand la caisse est ouverte), points d'attention avec « Traiter », ventes heure par heure comparées à hier, activité en direct, meilleures ventes et stock critique. Chaque élément ouvre l'écran qui le traite.",
+      "Vendeur et caissier : « Ma caisse et mes factures » sur l'accueil (caisse ouverte, attendu dans le tiroir, factures envoyées en attente, renvoyées ou encaissées).",
+      "Tâches du jour : les tâches du même genre se regroupent (« Réception attendue 8 ») et toute la ligne ouvre l'écran de la tâche.",
+      "Tableau de bord › La journée : les caisses en direct en haut. « Personnaliser l'accueil » masque les blocs inutiles.",
+    ],
+  },
+  {
     version: '0.102.0',
     items: [
       "Clients et fournisseurs : « Solde d'ouverture » dès la création de la fiche (ce que le client vous doit, ou ce que vous devez au fournisseur), et « Ajuster le solde… » avec son motif. La pièce reste dans le relevé du compte.",

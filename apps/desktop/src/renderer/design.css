@@ -25,10 +25,10 @@
   --surface-soft: #f8faf9;
   --surface-head: #f1f5f3;
   --row-hover: #f7faf9;
-  /* Onglets rapides de la barre du haut : remplis d'un gris ardoise (pas de vert), l'onglet de devant en vert. */
-  --tab-bg: #e2e8f0;
-  --tab-line: #cbd5e1;
-  --tab-ink: #1e293b;
+  /* Onglets rapides de la barre du haut : remplis de bleu clair (pas de vert), l'onglet de devant en vert. */
+  --tab-bg: #dbeafe;
+  --tab-line: #bfdbfe;
+  --tab-ink: #1e3a8a;
 
   --text-primary: #16332d;
   --text-secondary: #60736e;

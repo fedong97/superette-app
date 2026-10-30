@@ -865,7 +865,7 @@ kbd { font-family: inherit; font-size: 10.5px; font-weight: 700; background: var
 
 /* Fenêtres à l'intérieur du logiciel : la page d'accueil est le fond, chaque écran est une fenêtre. */
 .windows { isolation: isolate; background: var(--bg); }
-.windows > .home { position: absolute; inset: 0; z-index: 0; }
+.windows > .home { position: absolute; inset: 0; z-index: 0; overflow-y: auto; }
 .windows > .home.front { z-index: 1000; }
 .mdi { position: absolute; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--brand-line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-md); }
 .mdi.active { box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14); }

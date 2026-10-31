@@ -8,6 +8,8 @@ import { CounterService } from './counter.service';
 import { ManagerService } from './manager.service';
 import { MobileController } from './mobile.controller';
 import { MobileService } from './mobile.service';
+import { ManagerActionsService } from './managerActions.service';
+import { PushService } from './push.service';
 import { ShopController } from './shop.controller';
 import { ShopService } from './shop.service';
 import { StationBackupService } from './stationBackup.service';
@@ -40,6 +42,8 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
         UpdatesService,
         ManagerService,
         MobileService,
+        ManagerActionsService,
+        PushService,
         AlertsService,
         ApprovalsService,
         CounterService,

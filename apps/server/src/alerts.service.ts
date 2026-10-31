@@ -1,10 +1,13 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type Db, PG } from './database';
+import { PushService } from './push.service';
 import { type VapidKeys, generateVapidKeys, sendPush } from './webpush';
 
 /** Sortes d'alertes que le gérant choisit de recevoir sur son téléphone. */
 export const ALERT_KINDS = {
   approval: 'Demandes d’accord des caisses',
+  request: 'Demandes à valider (modification de facture, correction de stock, dépense)',
+  closing: 'Caisses clôturées (montant versé)',
   gap: 'Écarts de caisse à la clôture',
   discount: 'Grosses remises',
   cancel: 'Tickets annulés',
@@ -46,7 +49,31 @@ export class AlertsService {
   private cursor: number | null = null;
   private readonly sent = new Set<string>();
 
-  constructor(@Inject(PG) private readonly pg: Db) {}
+  constructor(
+    @Inject(PG) private readonly pg: Db,
+    @Optional() @Inject(PushService) private readonly push?: PushService,
+  ) {}
+
+  /** Notifications Android (Firebase) : chaque alerte part aux téléphones du magasin qui ont le droit de la voir. */
+  private async toPhones(alerts: PhoneAlert[]): Promise<number> {
+    if (!this.push || !alerts.length) return 0;
+    const { rows } = await this.pg.query<{ entity_id: string; name: string | null }>(
+      "SELECT DISTINCT ON (entity_id) entity_id, payload->>'name' AS name FROM events WHERE entity = 'store' ORDER BY entity_id, seq DESC",
+    );
+    const byName = new Map(rows.map((r) => [String(r.name ?? ''), r.entity_id]));
+    return this.push
+      .send(
+        alerts.map((a) => ({
+          kind: a.kind,
+          title: a.store ? `${a.title} · ${a.store}` : a.title,
+          body: a.text,
+          tag: a.key,
+          storeId: a.store ? (byName.get(a.store) ?? null) : null,
+          screen: a.kind === 'approval' ? 'valider' : 'accueil',
+        })),
+      )
+      .catch(() => 0);
+  }
 
   start(intervalMs = 15_000) {
     this.timer = setInterval(() => void this.tick().catch(() => undefined), intervalMs);
@@ -89,13 +116,13 @@ export class AlertsService {
       `SELECT e.seq, e.entity, e.entity_id, e.store_id, e.payload, e.created_at,
          NOT EXISTS (SELECT 1 FROM events p WHERE p.entity = e.entity AND p.entity_id = e.entity_id AND p.seq < e.seq) AS first,
          (SELECT p.payload FROM events p WHERE p.entity = e.entity AND p.entity_id = e.entity_id AND p.seq < e.seq ORDER BY p.seq DESC LIMIT 1) AS was
-       FROM events e WHERE e.seq > $1 AND e.seq <= $2 AND e.op = 'upsert' AND e.entity IN ('cash_session', 'sale', 'stock_level', 'staff_alert', 'cash_alert', 'exit_check') ORDER BY e.seq LIMIT 2000`,
+       FROM events e WHERE e.seq > $1 AND e.seq <= $2 AND e.op = 'upsert' AND e.entity IN ('cash_session', 'sale', 'stock_level', 'staff_alert', 'cash_alert', 'exit_check', 'sale_edit_request', 'stock_request', 'expense') ORDER BY e.seq LIMIT 2000`,
       [since, upTo],
     );
     if (!rows.length) return [];
     const stores = await this.names('store', rows.map((r) => String(r.store_id ?? r.payload['store_id'] ?? '')));
     const registers = await this.names('register', rows.map((r) => String(r.payload['register_id'] ?? '')));
-    const users = await this.names('user', rows.flatMap((r) => [String(r.payload['user_id'] ?? ''), String(r.payload['closed_by'] ?? '')]));
+    const users = await this.names('user', rows.flatMap((r) => [String(r.payload['user_id'] ?? ''), String(r.payload['closed_by'] ?? ''), String(r.payload['requested_by'] ?? '')]));
     const articles = await this.names('article', rows.filter((r) => r.entity === 'stock_level').map((r) => String(r.payload['article_id'] ?? '')));
     const warehouses = await this.names('warehouse', rows.filter((r) => r.entity === 'stock_level').map((r) => String(r.payload['warehouse_id'] ?? '')));
     const name = (m: Map<string, Json>, id: unknown) => (id ? String(m.get(String(id))?.['name'] ?? '') : '');
@@ -107,6 +134,11 @@ export class AlertsService {
       if (r.entity === 'cash_session') {
         const closedNow = p['status'] === 'closed' && r.was?.['status'] !== 'closed';
         const diff = num(p['difference']);
+        if (closedNow) {
+          const who = name(users, p['closed_by'] ?? p['user_id']);
+          const counted = num(p['counted_cash']);
+          out.push({ key: `closing:${r.entity_id}`, kind: 'closing', store: storeName, title: 'Caisse clôturée', text: `${name(registers, p['register_id'])}${counted ? ` : ${fcfa(counted)} comptés` : ''}${who ? ` (${who})` : ''}`, at });
+        }
         if (closedNow && diff !== 0) {
           const who = name(users, p['closed_by'] ?? p['user_id']);
           out.push({ key: `gap:${r.entity_id}`, kind: 'gap', store: storeName, title: diff < 0 ? 'Manque en caisse' : 'Excédent en caisse', text: `${name(registers, p['register_id'])} : ${diff > 0 ? '+' : ''}${fcfa(diff)} à la clôture${who ? ` (${who})` : ''}`, at });
@@ -120,6 +152,19 @@ export class AlertsService {
         if (r.first && p['kind'] !== 'return' && discount > 0) {
           const pct = Math.round((discount / Math.max(1, num(p['total_ttc']) + discount)) * 100);
           out.push({ key: `discount:${r.entity_id}`, kind: 'discount', store: storeName, title: `Remise de ${pct} %`, text: `${String(p['number'] ?? '')} : ${fcfa(discount)} de remise sur ${fcfa(num(p['total_ttc']) + discount)}${who ? ` (${who})` : ''}`, at, pct });
+        }
+      } else if (r.entity === 'sale_edit_request' || r.entity === 'stock_request' || r.entity === 'expense') {
+        // Demande qui attend le gérant : elle se valide sur le téléphone (onglet « À valider »).
+        const pending = r.entity === 'expense' ? p['approval'] === 'pending' && r.was?.['approval'] !== 'pending' : p['status'] === 'pending' && r.first;
+        if (pending) {
+          const who = name(users, p['requested_by'] ?? p['user_id']);
+          const what =
+            r.entity === 'sale_edit_request'
+              ? `Modification de facture : ${String(p['reason'] ?? '')}`
+              : r.entity === 'stock_request'
+                ? `Correction de stock : ${String(p['reason'] ?? '')}`
+                : `Dépense de ${fcfa(num(p['amount']))} : ${String(p['label'] ?? '')}`;
+          out.push({ key: `request:${r.entity_id}`, kind: 'request', store: storeName, title: 'À valider', text: `${what}${who ? ` (${who})` : ''}`, at });
         }
       } else if (r.entity === 'staff_alert') {
         // Levée par le PC du magasin d'après l'horaire prévu ; une seule fois par personne, jour et sorte.
@@ -207,8 +252,9 @@ export class AlertsService {
     for (const a of fresh) this.sent.add(a.key);
     if (this.sent.size > 5000) this.sent.clear();
     if (!fresh.length) return 0;
+    const phones = await this.toPhones(fresh);
     const { rows } = await this.pg.query<{ endpoint: string; p256dh: string; auth: string; kinds: string[]; discount_pct: number; origin: string }>('SELECT * FROM push_subscriptions');
-    if (!rows.length) return 0;
+    if (!rows.length) return phones;
     const keys = await this.vapid();
     let count = 0;
     for (const s of rows) {
@@ -227,12 +273,12 @@ export class AlertsService {
         }
       }
     }
-    return count;
+    return count + phones;
   }
 
   /** Tour de veille : nouvelles alertes depuis le dernier tour, envoyées aux abonnés. */
   async tick() {
-    const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM push_subscriptions');
+    const { rows } = await this.pg.query<{ n: string }>('SELECT (SELECT COUNT(*) FROM push_subscriptions) + (SELECT COUNT(*) FROM push_tokens) AS n');
     if (this.cursor === null || Number(rows[0]?.n ?? 0) === 0) {
       this.cursor = await this.lastSeq();
       return 0;

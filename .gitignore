@@ -12,3 +12,6 @@ release/
 *.pem
 docs/manuel/*.pdf
 test-results/
+
+# Réglages Firebase des installateurs (écrits par GitHub Actions depuis les secrets du dépôt)
+apps/server/src/firebase.defaults.json

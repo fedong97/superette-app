@@ -51,6 +51,19 @@ export function parseGoogleServices(raw: unknown): FirebaseClient | null {
   return { appId, apiKey, projectId: j.project_info.project_id, senderId: j.project_info.project_number };
 }
 
+/**
+ * Réglages Firebase livrés avec l'installateur (secrets FIREBASE_* du dépôt GitHub) :
+ * un seul projet Firebase pour toutes les boutiques, rien à coller à l'installation.
+ */
+function bundled(): { serviceAccount?: unknown; googleServices?: unknown } {
+  try {
+    const file = join(__dirname, 'firebase.defaults.json');
+    return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as { serviceAccount?: unknown; googleServices?: unknown }) : {};
+  } catch {
+    return {};
+  }
+}
+
 const b64url = (v: string | Buffer) => Buffer.from(v).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 
 /**
@@ -77,11 +90,13 @@ export class PushService {
 
   /** Compte de service : réglé depuis la page Téléphones, sinon le fichier `firebase-service-account.json` du dossier du serveur. */
   private async account(): Promise<ServiceAccount | null> {
+    if ((await this.setting('firebase_off')) === '1') return null;
     let raw = await this.setting('firebase_service_account');
     if (!raw) {
       const file = process.env['FIREBASE_SERVICE_ACCOUNT'] || (this.config?.dataDir ? join(this.config.dataDir, 'firebase-service-account.json') : '');
       if (file && existsSync(file)) raw = readFileSync(file, 'utf8');
     }
+    if (!raw && bundled().serviceAccount) raw = JSON.stringify(bundled().serviceAccount);
     if (!raw) return null;
     try {
       const a = JSON.parse(raw) as Partial<ServiceAccount>;
@@ -93,7 +108,8 @@ export class PushService {
 
   /** Réglages Firebase de l'appli Android (google-services.json collé sur la page Téléphones). */
   async client(): Promise<FirebaseClient | null> {
-    const raw = await this.setting('firebase_client');
+    if ((await this.setting('firebase_off')) === '1') return null;
+    const raw = (await this.setting('firebase_client')) ?? (bundled().googleServices ? JSON.stringify(bundled().googleServices) : null);
     if (!raw) return null;
     try {
       return parseGoogleServices(JSON.parse(raw));
@@ -107,7 +123,15 @@ export class PushService {
     const a = await this.account();
     const c = await this.client();
     const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM push_tokens');
-    return { configured: Boolean(a && c), account: Boolean(a), app: Boolean(c), project: a?.project_id ?? c?.projectId ?? null, phones: Number(rows[0]?.n ?? 0) };
+    const b = bundled();
+    return {
+      configured: Boolean(a && c),
+      account: Boolean(a),
+      app: Boolean(c),
+      project: a?.project_id ?? c?.projectId ?? null,
+      phones: Number(rows[0]?.n ?? 0),
+      bundled: Boolean(b.serviceAccount && b.googleServices),
+    };
   }
 
   /**
@@ -119,10 +143,15 @@ export class PushService {
     const text = (json ?? '').trim();
     if (!text) {
       await this.pg.query("DELETE FROM settings WHERE key IN ('firebase_service_account', 'firebase_client')");
+      // Coupé exprès : même les réglages livrés avec l'installateur ne servent plus.
+      await this.pg.query("INSERT INTO settings (key, value) VALUES ('firebase_off', '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value");
       await this.pg.query('DELETE FROM push_tokens');
       this.token = null;
       return this.status();
     }
+    await this.pg.query("DELETE FROM settings WHERE key = 'firebase_off'");
+    // « Réactiver » : reprendre les réglages livrés avec l'installateur.
+    if (text === 'installateur') return this.status();
     let a: Partial<ServiceAccount> & { project_info?: unknown };
     try {
       a = JSON.parse(text) as Partial<ServiceAccount>;

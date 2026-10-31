@@ -226,6 +226,9 @@
           ${data.firebase && data.firebase.configured
             ? `<p>Notifications Android activées (projet Firebase <b>${esc(data.firebase.project)}</b>) : ${data.firebase.phones} téléphone(s) abonné(s). Le gérant, et ceux qui ont l’espace du gérant ou le droit Superviseur, reçoivent les demandes d’accord, les demandes à valider, les écarts, les grosses remises, les annulations et les ruptures, même appli fermée.</p>
                <button class="petit" id="fb-off">Couper les notifications</button>`
+            : data.firebase && data.firebase.bundled
+            ? `<p class="muted">Notifications coupées. Elles sont prêtes dans ce serveur (réglages livrés avec l’installateur).</p>
+               <button id="fb-on">Réactiver les notifications</button>`
             : `<p class="muted">Pour recevoir les alertes appli fermée, une seule fois : créez un projet gratuit sur <b>console.firebase.google.com</b> et ajoutez-y l’application Android <b>cm.fedonix.inventaire</b>. Collez ici, l’un après l’autre :</p>
                <p class="muted">1. le fichier <b>google-services.json</b> proposé à l’ajout de l’application ${data.firebase && data.firebase.app ? '<span class="pastille ok">reçu</span>' : ''}<br>
                2. le <b>compte de service</b> : Paramètres du projet › Comptes de service › « Générer une nouvelle clé privée » ${data.firebase && data.firebase.account ? '<span class="pastille ok">reçu</span>' : ''}</p>
@@ -293,6 +296,10 @@
     const fbSave = document.getElementById('fb-save');
     if (fbSave) fbSave.onclick = async () => {
       try { await api('/admin/api/mobile/firebase', { method: 'POST', body: JSON.stringify({ json: document.getElementById('fb-json').value }) }); load(); } catch (e) { alert(e.message); }
+    };
+    const fbOn = document.getElementById('fb-on');
+    if (fbOn) fbOn.onclick = async () => {
+      try { await api('/admin/api/mobile/firebase', { method: 'POST', body: JSON.stringify({ json: 'installateur' }) }); load(); } catch (e) { alert(e.message); }
     };
     const fbOff = document.getElementById('fb-off');
     if (fbOff) fbOff.onclick = async () => {

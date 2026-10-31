@@ -1,5 +1,7 @@
 import { ApiError, findServer, request } from './api';
 import { type Article, type Catalog, type FileLine, type Hit, type ParsedFile, type PlaceCount, type PriceLevel, type SaleLine, buildIndex, fileArticle, newId, placeKey } from './logic';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { FirebaseSetup, native } from './device';
 import { clearAll, load, save } from './storage';
 
 /** Téléphone relié à un magasin par le QR code du gérant. */
@@ -176,6 +178,8 @@ export interface Notice {
 
 export interface State {
   ready: boolean;
+  /** Écran à ouvrir après un toucher sur une notification (valider, ventes, accueil…). */
+  openScreen: string | null;
   config: Config | null;
   session: Session | null;
   catalog: Catalog | null;
@@ -216,6 +220,7 @@ const DEFAULT_LOCATIONS = ['Rayon', 'Réserve', 'Chambre froide'];
 
 let state: State = {
   ready: false,
+  openScreen: null,
   config: null,
   session: null,
   catalog: null,
@@ -335,6 +340,7 @@ export async function init() {
     cartPay: cart.pay ?? NO_PAY,
     cartEdit: cart.edit ?? null,
   });
+  if (session) void startPush();
   setInterval(() => void sync(), 20_000);
   window.addEventListener('online', () => void sync());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void sync());
@@ -386,6 +392,54 @@ async function startSession(session: Session) {
     online: true,
   });
   await sync();
+  void startPush();
+}
+
+// ——— Notifications (Firebase) ———
+
+let pushToken: string | null = null;
+let pushListening = false;
+
+/** Écran demandé par une notification touchée (lu puis effacé par l'espace du gérant). */
+export function setOpenScreen(screen: string | null) {
+  set({ openScreen: screen });
+}
+
+/**
+ * Abonne le téléphone aux alertes du magasin quand le serveur a ses réglages
+ * Firebase : Firebase démarre avec eux, Android donne un jeton, le serveur
+ * l'enregistre au nom de la personne connectée. Sans réglages : rien.
+ */
+async function startPush() {
+  const config = state.config;
+  const session = state.session;
+  if (!native || !config || !session || session.user.role === 'guest') return;
+  try {
+    const r = await call<{ firebase: { appId: string; apiKey: string; projectId: string; senderId: string } | null }>('/push');
+    if (!r.firebase) return;
+    await FirebaseSetup.init(r.firebase);
+    if (!pushListening) {
+      pushListening = true;
+      await PushNotifications.addListener('registration', (t) => {
+        pushToken = t.value;
+        void call('/push', { token: t.value }).catch(() => undefined);
+      });
+      await PushNotifications.addListener('pushNotificationActionPerformed', (a) => {
+        const screen = (a.notification.data as { screen?: string } | undefined)?.screen;
+        if (screen) setOpenScreen(screen);
+      });
+      await PushNotifications.addListener('pushNotificationReceived', (n) => {
+        // Appli ouverte : Android n'affiche pas la notification, on la montre dans l'appli.
+        if (n.title || n.body) notify([n.title, n.body].filter(Boolean).join(' : '));
+      });
+    }
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') perm = await PushNotifications.requestPermissions();
+    if (perm.receive !== 'granted') return;
+    await PushNotifications.register();
+  } catch {
+    // Serveur ancien ou Firebase indisponible : les alertes restent visibles dans l'appli ouverte.
+  }
 }
 
 /** Aide sans compte sur un téléphone déjà relié : le code à 6 chiffres donné par le gérant. */
@@ -420,6 +474,8 @@ export async function login(loginName: string, pin: string) {
 export async function logout() {
   const session = state.session;
   await sync();
+  // Plus de notifications pour la personne qui s'en va.
+  if (pushToken) await call('/push', { token: null }).catch(() => undefined);
   if (session && state.config && !outbox.some((o) => o.session === session.token) && !unknowns.some((u) => u.session === session.token)) {
     await request(state.config.url, '/api/v1/mobile/logout', { body: {}, auth: { token: state.config.token, session: session.token } }).catch(() => undefined);
   }

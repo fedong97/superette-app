@@ -89,6 +89,11 @@ export function App() {
     setManageMode(on);
     remember('gerant', on ? '1' : null);
   };
+  // Notification touchée : l'espace du gérant s'ouvre sur l'écran demandé.
+  useEffect(() => {
+    if (s.openScreen && s.session?.can?.manage && !manageMode) manageOn(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.openScreen, s.session]);
   // Contrôle des tickets à la sortie (vigile) : à la place des inventaires.
   const [exitMode, setExitMode] = useState(() => recall('sortie') === '1');
   const exitOn = (on: boolean) => {

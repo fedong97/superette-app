@@ -30,6 +30,27 @@ export interface PushMessage {
   screen?: string;
 }
 
+/** Réglages Firebase du téléphone, tirés du fichier google-services.json : l'appli démarre Firebase avec eux, sans être recompilée. */
+export interface FirebaseClient {
+  appId: string;
+  apiKey: string;
+  projectId: string;
+  senderId: string;
+}
+
+const ANDROID_PACKAGE = 'cm.fedonix.inventaire';
+
+/** Lit google-services.json (fichier de l'application Android dans la console Firebase). */
+export function parseGoogleServices(raw: unknown): FirebaseClient | null {
+  const j = raw as { project_info?: { project_id?: string; project_number?: string }; client?: { client_info?: { mobilesdk_app_id?: string; android_client_info?: { package_name?: string } }; api_key?: { current_key?: string }[] }[] };
+  if (!j?.project_info?.project_id || !j.project_info.project_number || !Array.isArray(j.client)) return null;
+  const c = j.client.find((x) => x.client_info?.android_client_info?.package_name === ANDROID_PACKAGE);
+  const appId = c?.client_info?.mobilesdk_app_id;
+  const apiKey = c?.api_key?.find((k) => k.current_key)?.current_key;
+  if (!appId || !apiKey) return null;
+  return { appId, apiKey, projectId: j.project_info.project_id, senderId: j.project_info.project_number };
+}
+
 const b64url = (v: string | Buffer) => Buffer.from(v).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 
 /**
@@ -70,28 +91,50 @@ export class PushService {
     }
   }
 
-  /** État pour la page Téléphones : réglé ou non, projet, téléphones abonnés. */
-  async status() {
-    const a = await this.account();
-    const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM push_tokens');
-    return { configured: Boolean(a), project: a?.project_id ?? null, phones: Number(rows[0]?.n ?? 0) };
+  /** Réglages Firebase de l'appli Android (google-services.json collé sur la page Téléphones). */
+  async client(): Promise<FirebaseClient | null> {
+    const raw = await this.setting('firebase_client');
+    if (!raw) return null;
+    try {
+      return parseGoogleServices(JSON.parse(raw));
+    } catch {
+      return null;
+    }
   }
 
-  /** Enregistre le compte de service Firebase (contenu du fichier JSON), ou l'efface (vide). */
+  /** État pour la page Téléphones : les deux fichiers reçus ou non, projet, téléphones abonnés. */
+  async status() {
+    const a = await this.account();
+    const c = await this.client();
+    const { rows } = await this.pg.query<{ n: string }>('SELECT COUNT(*) AS n FROM push_tokens');
+    return { configured: Boolean(a && c), account: Boolean(a), app: Boolean(c), project: a?.project_id ?? c?.projectId ?? null, phones: Number(rows[0]?.n ?? 0) };
+  }
+
+  /**
+   * Enregistre un des deux fichiers Firebase collés sur la page Téléphones :
+   * le compte de service (clé privée, pour envoyer) ou google-services.json
+   * (pour que l'appli reçoive). Vide : coupe les notifications.
+   */
   async configure(json: string | null) {
     const text = (json ?? '').trim();
     if (!text) {
-      await this.pg.query("DELETE FROM settings WHERE key = 'firebase_service_account'");
+      await this.pg.query("DELETE FROM settings WHERE key IN ('firebase_service_account', 'firebase_client')");
+      await this.pg.query('DELETE FROM push_tokens');
       this.token = null;
       return this.status();
     }
-    let a: Partial<ServiceAccount>;
+    let a: Partial<ServiceAccount> & { project_info?: unknown };
     try {
       a = JSON.parse(text) as Partial<ServiceAccount>;
     } catch {
-      throw new BadRequestException('Ce n’est pas le fichier JSON du compte de service Firebase');
+      throw new BadRequestException('Ce n’est pas un fichier JSON de Firebase : collez tout le contenu du fichier');
     }
-    if (!a.project_id || !a.client_email || !a.private_key) throw new BadRequestException('Fichier incomplet : il faut le fichier « Compte de service » (clé privée) du projet Firebase');
+    if (a.project_info) {
+      if (!parseGoogleServices(a)) throw new BadRequestException(`Ce google-services.json ne contient pas l’application Android ${ANDROID_PACKAGE} : ajoutez-la au projet Firebase puis retéléchargez le fichier`);
+      await this.pg.query("INSERT INTO settings (key, value) VALUES ('firebase_client', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [text]);
+      return this.status();
+    }
+    if (!a.project_id || !a.client_email || !a.private_key) throw new BadRequestException('Fichier incomplet : il faut le fichier « Compte de service » (clé privée) ou google-services.json du projet Firebase');
     await this.pg.query(
       "INSERT INTO settings (key, value) VALUES ('firebase_service_account', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
       [text],

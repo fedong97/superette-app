@@ -70,6 +70,15 @@ export class MobileController {
     return this.actions.push(caller, body);
   }
 
+  /** Réglages Firebase pour l'appli (null : notifications pas encore réglées sur ce serveur). */
+  @Get('api/v1/mobile/push')
+  async pushSetup(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    if (caller.guest) return { firebase: null };
+    const status = await this.push.status();
+    return { firebase: status.configured ? await this.push.client() : null };
+  }
+
   /** Téléphone Android abonné aux notifications (Firebase) : il les reçoit appli fermée. */
   @Post('api/v1/mobile/push')
   @HttpCode(200)

@@ -69,7 +69,7 @@ export class AlertsService {
           body: a.text,
           tag: a.key,
           storeId: a.store ? (byName.get(a.store) ?? null) : null,
-          screen: a.kind === 'approval' ? 'valider' : 'accueil',
+          screen: a.kind === 'approval' || a.kind === 'request' ? 'valider' : a.kind === 'gap' || a.kind === 'closing' || a.kind === 'cash' ? 'caisses' : a.kind === 'stockout' ? 'stock' : a.kind === 'discount' || a.kind === 'cancel' ? 'ventes' : 'accueil',
         })),
       )
       .catch(() => 0);

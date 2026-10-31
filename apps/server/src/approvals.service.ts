@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { AlertsService } from './alerts.service';
 import { type Db, PG } from './database';
 import { verifyPin } from './mobile.service';
+import { isSupervisor, storeUsers } from './rights';
 import type { Device } from './sync.service';
 
 /** Une demande sans réponse expire au bout de 3 minutes. */
@@ -115,13 +116,15 @@ export class ApprovalsService {
       await this.pg.query("UPDATE approvals SET status = 'refused', decided_at = now() WHERE id = $1", [id]);
       return { status: 'refused' };
     }
-    const { rows: users } = await this.pg.query<{ entity_id: string; payload: Json }>(
-      `SELECT entity_id, payload FROM (SELECT DISTINCT ON (entity_id) entity_id, op, payload FROM events WHERE entity = 'user' ORDER BY entity_id, seq DESC) u
-       WHERE op = 'upsert' AND payload->>'role' IN ('admin', 'manager') AND (payload->>'active')::int = 1 AND payload->>'deleted_at' IS NULL
-         AND (payload->>'store_id' IS NULL OR payload->>'store_id' = $1)`,
-      [a.store_id],
-    );
-    const match = users.find((u) => verifyPin(String(input.pin ?? ''), String(u.payload['pin_hash'] ?? '')));
+    // Gérant, administrateur, ou utilisateur à qui le droit « Superviseur » est donné ou délégué.
+    let match: { entity_id: string; payload: Json } | undefined;
+    for (const u of await storeUsers(this.pg, a.store_id)) {
+      if (!verifyPin(String(input.pin ?? ''), String(u.payload['pin_hash'] ?? ''))) continue;
+      if (await isSupervisor(this.pg, u.entity_id, String(u.payload['role'] ?? ''))) {
+        match = u;
+        break;
+      }
+    }
     if (!match) {
       const n = (this.tries.get(id) ?? 0) + 1;
       this.tries.set(id, n);

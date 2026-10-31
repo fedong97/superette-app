@@ -1,11 +1,14 @@
 import { BarcodeFormat, BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 
 /** Vrai dans l'application Android ; faux dans un navigateur (essais sur PC). */
 export const native = Capacitor.isNativePlatform();
+
+/** Démarre Firebase avec les réglages du serveur du magasin (FirebaseSetupPlugin.java). */
+export const FirebaseSetup = registerPlugin<{ init(options: { appId: string; apiKey: string; projectId: string; senderId: string }): Promise<{ ready: boolean }> }>('FirebaseSetup');
 
 let audio: AudioContext | null = null;
 

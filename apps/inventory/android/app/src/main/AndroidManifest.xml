@@ -43,5 +43,7 @@
     <!-- Scan des codes-barres et photo des produits inconnus. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Notifications des alertes du magasin (Android 13 et plus). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

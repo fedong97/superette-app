@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { REMOTE_BLOCKED } from './remoteBlocked';
 import {
   type DenominationCount,
   bookCodesTableHtml,
@@ -78,6 +80,8 @@ import {
   shelfCarts,
   type CounterInvoice,
   type CounterPayload,
+  type CounterPrint,
+  COUNTER_PRINTS,
   counterAction,
   counterGet,
   counterList,
@@ -95,6 +99,13 @@ import {
   type RecurringOrderInput,
   type OwnerReport,
   takeShelfCart,
+  claimManagerActions,
+  nextRemotePcCalls,
+  replyRemotePcCall,
+  type RemotePcCall,
+  type RemotePcReply,
+  finishManagerAction,
+  type ManagerAction,
   takeWebOrder,
   webOrders,
   type AssetInput,
@@ -372,17 +383,27 @@ const LOCAL_SETTINGS = [
  * caisse) sont tenus ici, côté processus principal : l'écran ne peut pas
  * se faire passer pour un autre utilisateur ni valider à la place d'un gérant.
  */
+/** Exécution d'un appel du téléphone du gérant, pour les tests (hors de portée de l'écran du PC). */
+export const remotePcRunners = new WeakMap<object, (c: RemotePcCall) => Promise<RemotePcReply>>();
+
 export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVersion: string, system: SystemHooks) {
-  let user: User | null = null;
-  /** Caisse choisie par un gérant ou l'administrateur qui n'a pas de caisse attribuée. */
-  let chosenRegisterId: string | null = null;
+  /**
+   * Session de ce PC : l'utilisateur connecté et la caisse choisie par un gérant
+   * ou l'administrateur sans caisse attribuée. Un appel venu du téléphone du
+   * gérant (« le PC sur le téléphone ») tourne dans sa propre session, sans
+   * toucher à celle de la personne assise devant ce PC.
+   */
+  const localSession: { user: User | null; chosenRegisterId: string | null } = { user: null, chosenRegisterId: null };
+  const remoteSession = new AsyncLocalStorage<{ user: User | null; chosenRegisterId: string | null }>();
+  const sess = () => remoteSession.getStore() ?? localSession;
 
   /** Droits réglés par rôle (Administration › Droits) : il suffit d'un des droits demandés. */
   const can = (u: User, need: readonly Permission[]) => need.some((p) => s.admin.hasRight(u, p));
   const requireUser = (need?: readonly Permission[]): User => {
-    if (!user) throw new AppError('Session expirée, reconnectez-vous', 'NOT_LOGGED_IN');
-    if (need && !can(user, need)) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
-    return user;
+    const u = sess().user;
+    if (!u) throw new AppError('Session expirée, reconnectez-vous', 'NOT_LOGGED_IN');
+    if (need && !can(u, need)) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
+    return u;
   };
   /** Réservé au rôle Administrateur (magasins, serveur, restauration). */
   const requireAdmin = (): User => {
@@ -403,7 +424,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return r.active && r.kind === 'cash' && r.store_id === storeId ? r : null;
     };
     // Le gérant qui intervient sur une autre caisse (Caisses en direct) y travaille jusqu'à ce qu'il revienne à la sienne.
-    if (isSupervisor(u) && chosenRegisterId) return usable(chosenRegisterId) ?? (assigned ? usable(assigned) : usable(station.register?.id ?? null));
+    if (isSupervisor(u) && sess().chosenRegisterId) return usable(sess().chosenRegisterId) ?? (assigned ? usable(assigned) : usable(station.register?.id ?? null));
     if (assigned) return usable(assigned);
     if (!isSupervisor(u)) return null;
     return usable(station.register?.id ?? null);
@@ -422,7 +443,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     const a = remoteApprovals.get(remote[1]!);
     if (!a || a.until < Date.now()) throw new AppError("L'accord du gérant a expiré : redemandez-le", 'SUPERVISOR_DENIED');
     const u = s.admin.getUser(a.userId);
-    if (!u.active || u.deleted_at || (u.role !== 'admin' && u.role !== 'manager')) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    if (!u.active || u.deleted_at || !s.admin.isSupervisor(u)) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
     return u;
   };
   /** Client choisi sur le téléphone : gardé s'il est connu de ce PC (sinon le panier passe en client comptoir). */
@@ -543,8 +564,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   const deskCtx = (sessionId: string): Context => {
     const c = ctx(['cash_desk']);
     const se = s.pos.getSession(sessionId);
-    const mine = se.register_id === c.registerId || s.pos.linkedRegisterIds(user!.id).includes(se.register_id);
-    if (!mine && !can(user!, ['cash_open'])) throw new AppError("Seuls le caissier de cette caisse et le gérant y encaissent ou décaissent", 'FORBIDDEN');
+    const mine = se.register_id === c.registerId || s.pos.linkedRegisterIds(sess().user!.id).includes(se.register_id);
+    if (!mine && !can(sess().user!, ['cash_open'])) throw new AppError("Seuls le caissier de cette caisse et le gérant y encaissent ou décaissent", 'FORBIDDEN');
     return { ...c, registerId: se.register_id };
   };
   const CUSTOMERS: Permission[] = ['customers', 'receivables'];
@@ -626,8 +647,19 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!system.chooseOpenFile) throw new AppError('Indisponible sur ce poste', 'UNAVAILABLE');
     return system.chooseOpenFile(title, name, extensions);
   };
-  /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
-  const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
+  /** Superviseur (gérant, administrateur, ou droit « Superviseur » donné) : sa présence vaut validation. */
+  const isSupervisor = (u: User) => s.admin.isSupervisor(u);
+  /**
+   * Sortie d'argent sans code : le droit « prélèvement et dépense sans code » et,
+   * s'il est fixé, le plafond de l'utilisateur ; au-delà, le code d'un superviseur.
+   */
+  const cashOutFree = (u: User, amount: Fcfa, pin?: string | null) => {
+    if (!can(u, ['cashout'])) return false;
+    const cap = s.admin.limits(u.id).cashOut ?? 0;
+    if (!cap || amount <= cap) return true;
+    if (!pin) throw new AppError(`Sortie au-delà de votre plafond de ${cap.toLocaleString('fr-FR')} FCFA : code du gérant nécessaire`, 'SUPERVISOR_REQUIRED');
+    return false;
+  };
   /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
   const attentionFor = (u: User, storeId: string) => {
     const rules: [AttentionKey, boolean][] = [
@@ -736,17 +768,21 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       total: totals.totalTtc,
       discount: totals.totalDiscount + totals.totalPromo,
       items: totals.itemCount,
+      // Impression proposée au caissier : celle demandée par le vendeur, sinon A4 pour un client professionnel (NIU), sinon le ticket.
+      printFormat: (p.printFormat ?? (customer?.taxpayer_number ? 'a4' : 'ticket')) as CounterPrint,
       payload: p,
     };
   };
-  return {
+  const api = {
     // --- Application et connexion -------------------------------------------
-    'app.state': () => ({
+    'app.state': () => {
+      const me = sess().user;
+      return {
       version: appVersion,
       initialized: s.admin.isInitialized(),
       station: s.admin.station(),
       /** Utilisateur connecté et ses droits : menus et boutons s'y règlent. */
-      user: user ? { ...user, rights: s.admin.userRights(user) } : null,
+      user: me ? { ...me, rights: s.admin.userRights(me) } : null,
       /** Paramètres du magasin utiles à l'écran (le logo reste à part : il est lourd). */
       storeSettings: (() => {
         const station = s.admin.station();
@@ -757,14 +793,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       /** Caisse sur laquelle l'utilisateur connecté vend (attribuée, ou choisie par le gérant). */
       register: (() => {
         const station = s.admin.station();
-        return user && station ? workRegister(user, station.store.id, station) : null;
+        return me && station ? workRegister(me, station.store.id, station) : null;
       })(),
       /** Le gérant ou l'administrateur sans caisse attribuée peut choisir sa caisse. */
-      canChooseRegister: Boolean(user && isSupervisor(user) && !s.admin.getUser(user.id).register_id),
+      canChooseRegister: Boolean(me && isSupervisor(me) && !s.admin.getUser(me.id).register_id),
       /** Caisses électronique et banque de l'utilisateur : leurs paiements y vont. */
       linkedRegisters: (() => {
-        if (!user) return { electronic: [], byMethod: {} as Record<string, { id: string; name: string } | null>, bank: null };
-        const u = user;
+        if (!me) return { electronic: [], byMethod: {} as Record<string, { id: string; name: string } | null>, bank: null };
+        const u = me;
         const ids = s.pos.linkedRegisters(u.id);
         const named = (id: string | null) => (id ? { id, name: s.admin.getRegister(id).name } : null);
         // Pour chaque moyen électronique, la caisse qui le reçoit.
@@ -772,7 +808,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         return { electronic: ids.electronic.map((id) => named(id)!), byMethod, bank: named(ids.bank) };
       })(),
       /** Préférences de l'utilisateur : onglets rapides épinglés, dernière version vue. */
-      prefs: user ? s.admin.prefs(user.id) : {},
+      prefs: me ? s.admin.prefs(me.id) : {},
       /** Licence de ce PC : essai, valable, à renouveler ou bloquée. */
       license: (() => {
         const { license, ...rest } = s.license.status();
@@ -795,18 +831,22 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         const station = s.admin.station();
         return station ? s.admin.storeSettings(station.store.id).posLayout : 'modern';
       })(),
-    }),
+      };
+    },
     'prefs.set': (key: string, value: unknown) => s.admin.setPref(requireUser().id, key, value),
     /** Plein écran du PC pour le mode « Caisse seule » ; on en sort aussi à la déconnexion (sans utilisateur). */
-    'window.fullScreen': (on: boolean) => system.fullScreen?.(Boolean(on) && Boolean(user)),
+    'window.fullScreen': (on: boolean) => system.fullScreen?.(Boolean(on) && Boolean(sess().user)),
     /** Langue de l'utilisateur connecté : celle de ses bons de caisse et rapports imprimés. */
-    'prefs.lang': (): DocLang => (user && s.admin.prefs(user.id).lang === 'en' ? 'en' : 'fr'),
+    'prefs.lang': (): DocLang => {
+      const me = sess().user;
+      return me && s.admin.prefs(me.id).lang === 'en' ? 'en' : 'fr';
+    },
     /** Première boutique, au besoin à partir d'un modèle de métier (id d'un modèle livré ou fichier). */
     'setup.bootstrap': (input: BootstrapInput & { template?: string | null; saleFlow?: SaleFlow | null }) => {
       const { template, saleFlow, ...rest } = input;
       const t = template ? findTemplate(template) : null;
       const result = s.admin.bootstrap(rest);
-      user = result.admin;
+      sess().user = result.admin;
       if (t) s.templates.apply(result.admin.id, result.store.id, t);
       // Organisation de la vente choisie à l'installation (vendeur et caissier séparés).
       if (saleFlow && saleFlow !== 'combined') s.admin.saveStoreSettings(result.admin.id, result.store.id, { saleFlow });
@@ -823,10 +863,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'setup.joinAsUser': async (url: string, login: string, pin: string) => {
       notInFiche();
       const station = await sync.joinAsUser(url, login, pin);
-      chosenRegisterId = null;
-      user = s.admin.login(login, pin);
-      if (station && !s.fiches.current()) s.attendance.arrive(user.id, station.store.id);
-      return { store: station?.store ?? null, user: { id: user.id, name: user.name } };
+      sess().chosenRegisterId = null;
+      sess().user = s.admin.login(login, pin);
+      if (station && !s.fiches.current()) s.attendance.arrive(sess().user!.id, station.store.id);
+      return { store: station?.store ?? null, user: { id: sess().user!.id, name: sess().user!.name } };
     },
     /** PC du client : installe la boutique préparée au bureau (fiche d'installation) à la place de la base vide. */
     'setup.installFiche': (file: string) => {
@@ -1104,12 +1144,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.relay.integrate(u.id, file);
     },
     'auth.login': (login: string, pin: string) => {
-      chosenRegisterId = null;
-      user = s.admin.login(login, pin);
+      sess().chosenRegisterId = null;
+      sess().user = s.admin.login(login, pin);
       // Pointage : la première connexion du jour note l'arrivée (pas dans une fiche emportée ni en formation).
       const station = s.admin.station();
-      if (station && !s.fiches.current()) s.attendance.arrive(user.id, station.store.id);
-      return user;
+      if (station && !s.fiches.current()) s.attendance.arrive(sess().user!.id, station.store.id);
+      return sess().user;
     },
     /** Accord du gérant demandé sur son téléphone (PC relié au serveur). */
     'approval.request': async (action: string) => {
@@ -1140,8 +1180,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const u = requireUser();
       const station = s.admin.station();
       const row = s.fiches.current() ? null : s.attendance.leave(u.id, station?.store.id ?? null);
-      user = null;
-      chosenRegisterId = null;
+      sess().user = null;
+      sess().chosenRegisterId = null;
       return row;
     },
     /** « Ma journée » sur l'accueil : seulement les chiffres de l'utilisateur connecté. */
@@ -1157,8 +1197,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'attendance.correct': (userId: string, day: string, input: { arrived: string | null; left: string | null; reason: string }) =>
       s.attendance.correct(requireUser(['staff_attendance']).id, userId, day, input),
     'auth.logout': () => {
-      user = null;
-      chosenRegisterId = null;
+      sess().user = null;
+      sess().chosenRegisterId = null;
     },
     /** Gérant ou administrateur sans caisse attribuée : caisse sur laquelle il travaille. */
     'pos.chooseRegister': (registerId: string | null) => {
@@ -1168,7 +1208,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         const r = s.admin.getRegister(registerId);
         if (!r.active || r.kind !== 'cash' || r.store_id !== ctx().storeId) throw new AppError('Caisse indisponible', 'INVALID');
       }
-      chosenRegisterId = registerId;
+      sess().chosenRegisterId = registerId;
       return ctx().registerId;
     },
     'pos.registers': () => s.admin.listRegisters(ctx().storeId).filter((r) => r.active && r.kind === 'cash').map(({ activation_code: _, ...r }) => r),
@@ -1316,15 +1356,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           requireAdmin();
           if (v && !(v in POS_LAYOUTS)) throw new AppError("Présentation de l'écran de caisse inconnue", 'INVALID');
         }
-        if (k === 'backup.autoTime') s.backups.configure(user!.id, { autoTime: v || null });
-        else if (k === 'backup.every') s.backups.configure(user!.id, { everyMinutes: Number(v) || 0 });
+        if (k === 'backup.autoTime') s.backups.configure(sess().user!.id, { autoTime: v || null });
+        else if (k === 'backup.every') s.backups.configure(sess().user!.id, { everyMinutes: Number(v) || 0 });
         else s.admin.setSetting(k, v);
       }
     },
     /** Afficheur client : l'écran de caisse envoie le ticket en cours, ce PC le dessine. Jamais d'erreur pour la vente. */
     'display.show': (state: CustomerDisplayState) => {
       const station = s.admin.station();
-      if (!system.customerDisplay || !user || !station) return;
+      if (!system.customerDisplay || !sess().user || !station) return;
       const mode = (s.admin.getSetting('display.customer') ?? 'off') as CustomerDisplayMode;
       if (!(mode in CUSTOMER_DISPLAY_MODES)) return;
       const storeId = station.store.id;
@@ -1357,6 +1397,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return { role: target.role, roleRights: s.admin.rights(target.role), ...s.admin.privileges(userId) };
     },
     'admin.savePrivileges': (userId: string, input: { grants: Permission[]; revokes: Permission[] }) => s.admin.savePrivileges(requireAdmin().id, userId, input),
+    /** Délégations en cours : qui tient les pouvoirs de quel gérant, jusqu'à quand. */
+    'admin.delegations': () => (requireUser(['delegate', 'user_limits', 'users_manage']), s.admin.delegations()),
+    /** Le gérant qui s'absente confie ses pouvoirs à un utilisateur jusqu'à une date. */
+    'admin.delegate': (toUserId: string, until: string) => {
+      const u = requireUser(['delegate']);
+      return s.admin.delegate(u.id, toUserId, until);
+    },
+    /** Fin de la délégation, tout de suite : par celui qui l'a donnée, par celui qui la tient, ou par qui gère les utilisateurs. */
+    'admin.endDelegation': (userId: string) => {
+      const u = requireUser();
+      const d = s.admin.privileges(userId).delegation;
+      if (!(u.role === 'admin' || u.id === userId || d?.by === u.id || can(u, ['users_manage']))) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
+      s.admin.endDelegation(u.id, userId);
+    },
+    /** Plafonds des utilisateurs quand ils agissent sans le code du gérant. */
+    'admin.userLimits': () => {
+      requireUser(['user_limits']);
+      return s.admin
+        .listUsers()
+        .filter((x) => x.active === 1 && x.role !== 'admin')
+        .map((x) => ({ id: x.id, name: x.name, role: x.role, limits: s.admin.limits(x.id), discount: s.admin.hasRight(x, 'discount'), cashout: s.admin.hasRight(x, 'cashout') }));
+    },
+    'admin.saveLimits': (userId: string, limits: { discountPct?: number; cashOut?: number }) => s.admin.saveLimits(requireUser(['user_limits']).id, userId, limits),
     /** Autres utilisateurs actifs qui ont ce droit. */
     'admin.holders': (permission: Permission) => (requireUser(ADMIN), s.admin.holders(permission)),
     /** Paramètres du magasin de ce poste (Administration › Paramètres). */
@@ -1584,7 +1647,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // Le gérant corrige directement ; le magasinier fait une demande que le gérant valide.
     'monitoring.request': (input: { articleId: string; warehouseId: string; newQty: Milli; reason: string }) => {
       const c = ctx(['stock_request', 'stock_adjust']);
-      return s.monitoring.request(c, input, can(user!, ['stock_adjust']));
+      return s.monitoring.request(c, input, can(sess().user!, ['stock_adjust']));
     },
     'monitoring.decide': (id: string, approve: boolean, note?: string | null) => s.monitoring.decide(ctx(['stock_decide']), id, approve, note ?? null),
     // --- Inventaires enregistrés -------------------------------------------------
@@ -1699,8 +1762,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // Facture directe : elle fait entrer la marchandise, il faut aussi le droit de réceptionner ; la payer tout de suite demande le droit de régler.
     'purchases.directInvoice': (input: Parameters<Services['purchases']['directInvoice']>[1]) => {
       const c = ctx(['purchase_invoices']);
-      if (!can(user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
-      if (input.payment && !can(user!, ['supplier_pay'])) throw new AppError("Vous n'avez pas le droit de régler les fournisseurs", 'FORBIDDEN');
+      if (!can(sess().user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
+      if (input.payment && !can(sess().user!, ['supplier_pay'])) throw new AppError("Vous n'avez pas le droit de régler les fournisseurs", 'FORBIDDEN');
       return s.purchases.directInvoice(c, input);
     },
     'purchases.correctReception': (id: string, input: Parameters<Services['purchases']['correctReception']>[2]) => s.purchases.correctReception(ctx(['reception_edit']), id, input),
@@ -1708,7 +1771,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Corriger les articles d'une facture directe refait aussi la réception : il faut le droit de réceptionner. */
     'purchases.correctDirectInvoice': (id: string, input: Parameters<Services['purchases']['correctDirectInvoice']>[2]) => {
       const c = ctx(['purchase_invoice_edit']);
-      if (!can(user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
+      if (!can(sess().user!, ['stock_receive'])) throw new AppError("Vous n'avez pas le droit de réceptionner la marchandise", 'FORBIDDEN');
       return s.purchases.correctDirectInvoice(c, id, input);
     },
     'purchases.printInvoice': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (
@@ -1734,11 +1797,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.cashOperation': (type: 'IN' | 'OUT', amount: Fcfa, reason: string, supervisorPin?: string) => {
       const c = ctx(type === 'IN' ? ['cash_in'] : ['cash_withdraw', 'cashout']);
       // Un prélèvement par un caissier doit être validé par le gérant.
-      if (type === 'OUT' && !can(user!, ['cashout'])) supervisor(supervisorPin ?? '');
+      if (type === 'OUT' && !cashOutFree(sess().user!, amount, supervisorPin)) supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
-      s.pos.searchForSale(ctx().storeId, query, { ...opts, userId: user?.id ?? null }),
+      s.pos.searchForSale(ctx().storeId, query, { ...opts, userId: sess().user?.id ?? null }),
     /** Dépôts où l'utilisateur vend sans code du gérant ; la vente s'y complète. */
     'pos.saleWarehouses': () => s.admin.saleWarehousesFor(ctx().storeId, ctx().userId).map((w) => w.id),
     'pos.priceLines': (lines: SaleLineInput[], level?: PriceLevel, customerId?: string | null) => s.pos.priceLines(ctx().storeId, lines, level ?? 'retail', customerId ?? null),
@@ -1777,7 +1840,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       outage?: { id: string; at?: string | null; number?: string | null } | null;
     }) => {
       const c = ctx(POS);
-      requireTill(user!);
+      requireTill(sess().user!);
       if (input.book || input.outage) requireUser(['sale_book']);
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
@@ -1786,12 +1849,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         Boolean(input.warehouseId) &&
         s.pos.saleWarehouse(c.storeId, input.warehouseId).is_sales_default !== 1 &&
         !s.admin.saleWarehousesFor(c.storeId, c.userId).some((w) => w.id === input.warehouseId);
-      if ((otherLevel && !can(user!, ['sale_tariff'])) || otherWarehouse) {
+      if ((otherLevel && !can(sess().user!, ['sale_tariff'])) || otherWarehouse) {
         if (!input.optionsPin) throw new AppError('Tarif ou dépôt soumis à validation du gérant', 'OPTIONS_SUPERVISOR');
         supervisor(input.optionsPin);
       }
-      if (input.lines.some((l) => l.price != null) && !can(user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
-      const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(user!, ['discount']) ? user!.id : null;
+      if (input.lines.some((l) => l.price != null) && !can(sess().user!, ['price'])) throw new AppError("Vous n'avez pas le droit de modifier les prix", 'FORBIDDEN');
+      const authorizedBy = input.supervisorPin ? supervisor(input.supervisorPin).id : can(sess().user!, ['discount']) ? sess().user!.id : null;
       const creditBy = input.creditPin ? supervisor(input.creditPin).id : null;
       const saleInput = {
         lines: input.lines,
@@ -1815,7 +1878,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       };
       if (input.replacesId) {
         const grant = editGrant(input.replacesId);
-        const replaced = s.pos.replaceSale(c, input.replacesId, saleInput, user!.id);
+        const replaced = s.pos.replaceSale(c, input.replacesId, saleInput, sess().user!.id);
         if (grant) s.editRequests.markUsed(c, grant.id, replaced.id);
         return replaced;
       }
@@ -1860,7 +1923,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Le gérant voit toutes les demandes du magasin ; les autres, les leurs. */
     'editRequests.list': (status?: EditRequestStatus | null) => {
       const c = ctx();
-      return s.editRequests.list(c.storeId, { status, requestedBy: can(user!, ['sale_edit_approve']) ? null : c.userId });
+      return s.editRequests.list(c.storeId, { status, requestedBy: can(sess().user!, ['sale_edit_approve']) ? null : c.userId });
     },
     /** Facture à recharger dans la caisse pour la modifier. */
     'sales.editable': (saleId: string) => {
@@ -1870,11 +1933,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const editable = s.pos.editableSale(saleId);
       // Le gérant intervient sur la caisse de la facture : il y travaille le temps de la modifier.
       const u = requireUser();
-      if (isSupervisor(u) && sale.register_id && sale.register_id !== ctx().registerId) chosenRegisterId = sale.register_id;
+      if (isSupervisor(u) && sale.register_id && sale.register_id !== ctx().registerId) sess().chosenRegisterId = sale.register_id;
       return { ...editable, number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
     },
-    'pos.return': async (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) => {
-      const ret = s.pos.returnSale(ctx(['sale_return']), { ...input, supervisorId: supervisor(input.supervisorPin).id });
+    'pos.return': async (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin?: string; reason: string }) => {
+      const c = ctx(['sale_return']);
+      // Droit « retour sans le code du gérant » : l'utilisateur valide lui-même son retour.
+      const free = !input.supervisorPin && sess().user!.role !== 'admin' && can(sess().user!, ['sale_return_free']);
+      const ret = s.pos.returnSale(c, { ...input, supervisorId: free ? sess().user!.id : supervisor(input.supervisorPin ?? '').id, byRight: free });
       // Remboursé en bon d'avoir : le bon s'imprime avec son code-barres.
       const code = input.refundMethod === 'VOUCHER' ? ret.payments.find((p) => p.method === 'VOUCHER')?.reference : null;
       const voucher = code ? s.vouchers.byCode(code) : null;
@@ -1885,7 +1951,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.sale': (id: string) => (requireSaleAccess(id), s.pos.getSale(id)),
     'pos.sales': (opts: { sessionId?: string; date?: string }) => {
       const c = ctx();
-      return can(user!, ['sales']) ? s.pos.listSales({ ...opts, storeId: c.storeId }) : ownRecent(user!);
+      return can(sess().user!, ['sales']) ? s.pos.listSales({ ...opts, storeId: c.storeId }) : ownRecent(sess().user!);
     },
     /**
      * Ticket envoyé au client par WhatsApp : le message rempli et le lien qui
@@ -1975,6 +2041,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         clientName: customerId ? null : (cart.customerName ?? null),
         priceLevel: cart.priceLevel ?? null,
         discountReason: cart.discountReason ?? null,
+        saleOptions: cart.saleOptions ?? null,
       };
     },
 
@@ -2007,9 +2074,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       optionsPin?: string;
       discountReason?: string | null;
       fieldRepId?: string | null;
+      printFormat?: CounterPrint | null;
     }) => {
       const c = ctx(POS);
-      const u = user!;
+      const u = sess().user!;
       if (splitPost(u) === 'cashier') throw new AppError('Vendeur et caissier séparés : le caissier encaisse les factures des vendeurs, il ne facture pas', 'FORBIDDEN');
       const previous = input.id && input.baseVersion ? await counterGet(s, input.id) : null;
       if (previous) ownCounter(u, previous);
@@ -2049,6 +2117,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         fieldRepId: input.fieldRepId ?? old?.fieldRepId ?? null,
         // La caisse choisie pour ce vendeur dans Administration › Utilisateurs.
         registerId: s.admin.getUser(u.id).counter_register_id ?? null,
+        printFormat: input.printFormat && COUNTER_PRINTS.includes(input.printFormat) ? input.printFormat : null,
       };
       const ready = s.counter.prepare(c.storeId, payload);
       // Remise : le droit du vendeur, le code du gérant, sous le maximum des paramètres, ou pas plus que la version validée.
@@ -2128,7 +2197,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx(POS);
       await flushCounterPaid(s).catch(() => undefined);
       // Chaque caisse ne voit que les factures qui lui sont destinées (et celles de vendeurs sans caisse fixée) ; le gérant les voit toutes.
-      const forHere = (i: CounterInvoice) => !i.registerId || i.registerId === c.registerId || isSupervisor(user!);
+      const forHere = (i: CounterInvoice) => !i.registerId || i.registerId === c.registerId || isSupervisor(sess().user!);
       const invoices = (await counterList(s)).filter(forHere).map((i) => ({ ...i, cart: false }));
       const carts = s.fiches.current() ? [] : await shelfCarts(s).catch(() => []);
       const fromPhones = carts.map((k) => {
@@ -2166,7 +2235,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Le caissier ouvre une facture pour l'encaisser (un panier du téléphone devient facture). */
     'counter.take': async (id: string) => {
       const c = ctx(POS);
-      const u = user!;
+      const u = sess().user!;
       requireTill(u);
       if (id.startsWith('cart:')) {
         const cart = await takeShelfCart(s, id.slice(5));
@@ -2192,6 +2261,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           priceBy: null,
           optionsBy: cart.priceLevel ? (cart.optionsBy ?? null) : null,
           cartNumber: cart.number,
+          printFormat: cart.saleOptions?.printFormat ?? null,
+          credit: cart.saleOptions?.credit && customerId ? { deposit: cart.saleOptions.deposit, by: cart.saleOptions.creditBy } : null,
         });
         const inv = await counterSend(s, {
           id: `fc-panier-${cart.id}`.slice(0, 64),
@@ -2255,7 +2326,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      */
     'counter.pay': async (input: { ids: string[]; payments: Payment[]; supervisorPin?: string; creditPin?: string; keepChange?: Fcfa | null; discountReason?: string | null; promoCode?: string | null }) => {
       const c = ctx(POS);
-      const u = user!;
+      const u = sess().user!;
       requireTill(u);
       s.license.assertCanSell();
       const ids = [...new Set(input.ids ?? [])];
@@ -2270,7 +2341,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ...base,
         payments: input.payments,
         discountAuthorizedBy: input.supervisorPin ? supervisor(input.supervisorPin).id : base.discountAuthorizedBy,
-        creditAuthorizedBy: input.creditPin ? supervisor(input.creditPin).id : null,
+        // Code tapé à la caisse, sinon l'accord donné sur le téléphone du vendeur (son droit ou le code du gérant).
+        creditAuthorizedBy: input.creditPin ? supervisor(input.creditPin).id : (invoices.find((i) => i.payload?.credit?.by)?.payload?.credit?.by ?? null),
         keepChange: input.keepChange ?? null,
         discountReason: input.discountReason?.trim() || base.discountReason || null,
         promoCode: input.promoCode ?? null,
@@ -2317,15 +2389,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       });
       return {
         registers,
-        canOpen: can(user!, ['cash_open']),
-        canChooseRegister: isSupervisor(user!),
-        canCentral: can(user!, ['central_cash']),
-        centralBalance: can(user!, ['central_cash', 'accounting']) ? s.treasury.balance(c.storeId) : null,
+        canOpen: can(sess().user!, ['cash_open']),
+        canChooseRegister: isSupervisor(sess().user!),
+        canCentral: can(sess().user!, ['central_cash']),
+        centralBalance: can(sess().user!, ['central_cash', 'accounting']) ? s.treasury.balance(c.storeId) : null,
         gapThreshold: s.admin.getStore(c.storeId).cash_gap_threshold,
-        canSeeAmounts: can(user!, AMOUNTS),
+        canSeeAmounts: can(sess().user!, AMOUNTS),
         /** Caisses électronique et banque de l'utilisateur, avec leur journée. */
         linked: s.pos
-          .linkedRegisterIds(user!.id)
+          .linkedRegisterIds(sess().user!.id)
           .map((id) => {
             const { activation_code: _, ...r } = s.admin.getRegister(id);
             const open = s.pos.currentSession(id);
@@ -2336,13 +2408,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Caisses en direct : toutes les caisses du magasin, leur journée et la caisse où travaille le gérant. */
     'treasury.live': () => {
       const c = ctx(['cash_live']);
-      const u = user!;
+      const u = sess().user!;
       const own = s.admin.getUser(u.id).register_id;
       return {
         registers: s.pos.liveRegisters(c.storeId),
         workRegisterId: c.registerId,
         /** Le gérant travaille sur une autre caisse que la sienne. */
-        intervening: Boolean(chosenRegisterId && chosenRegisterId !== own && c.registerId === chosenRegisterId),
+        intervening: Boolean(sess().chosenRegisterId && sess().chosenRegisterId !== own && c.registerId === sess().chosenRegisterId),
         canIntervene: isSupervisor(u),
         connected: Boolean(s.sync.credentials()),
       };
@@ -2359,7 +2431,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       opts?: { gapReason?: string | null; deposit?: Partial<Record<PaymentMethod, { amount: Fcfa; reference?: string | null }>> },
     ) => {
       const c = ctx(TREASURY);
-      const u = user!;
+      const u = sess().user!;
       const mine = s.pos.linkedRegisterIds(u.id).includes(registerId);
       if (!mine && !can(u, ['cash_close_other'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
       const z = s.pos.closeDeclared(c, registerId, declared, { gapReason: opts?.gapReason ?? null, gapApprovedBy: can(u, ['cash_open']) ? u.id : null, deposit: opts?.deposit });
@@ -2377,7 +2449,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      */
     'treasury.emoneyDay': (registerId: string) => {
       const c = ctx(TREASURY);
-      const u = user!;
+      const u = sess().user!;
       const mine = s.pos.linkedRegisterIds(u.id).includes(registerId);
       if (!mine && !can(u, ['cash_close_other'])) throw new AppError("Cette caisse n'est pas la vôtre", 'FORBIDDEN');
       const session = s.pos.currentSession(registerId);
@@ -2395,7 +2467,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx(TREASURY);
       requireAmounts();
       // Sans l'historique, seules les dernières journées de la caisse affichée.
-      return s.pos.listSessions(c.storeId, can(user!, ['cash_history']) ? 120 : 3, registerId ?? null);
+      return s.pos.listSessions(c.storeId, can(sess().user!, ['cash_history']) ? 120 : 3, registerId ?? null);
     },
     /**
      * Journée vue par le caissier sans le droit des montants : état de sa caisse,
@@ -2403,7 +2475,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      */
     'treasury.myDay': () => {
       const c = ctx(TREASURY);
-      const u = user!;
+      const u = sess().user!;
       const last = c.registerId ? s.pos.listSessions(c.storeId, 1, c.registerId)[0] : undefined;
       if (!last) return null;
       const closed = last.status === 'closed';
@@ -2457,7 +2529,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'treasury.open': (openingFloat: Fcfa, supervisorPin?: string, registerId?: string) => {
       const c = sameRegister(ctx(TREASURY), registerId);
       const carried = c.registerId ? s.pos.carriedFloat(c.registerId) : null;
-      if (carried !== null && openingFloat > carried && !can(user!, ['cash_open'])) supervisor(supervisorPin ?? '');
+      if (carried !== null && openingFloat > carried && !can(sess().user!, ['cash_open'])) supervisor(supervisorPin ?? '');
       const session = s.pos.openSession(c, openingFloat);
       // Complément ou retour de fond : bon à signer entre la caisse et la centrale.
       const voucher = s.treasury.sessionMovements(session.id).find((m) => !m.cash_operation_id);
@@ -2466,7 +2538,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Attendu et écart : avec le droit des montants, ou sur le code du gérant venu valider l'écart. */
     'treasury.countPreview': (counted: DenominationCount, registerId?: string, supervisorPin?: string) => {
       const c = sameRegister(ctx(TREASURY), registerId);
-      if (!can(user!, AMOUNTS)) supervisor(supervisorPin ?? '');
+      if (!can(sess().user!, AMOUNTS)) supervisor(supervisorPin ?? '');
       return s.pos.countPreview(c, counted);
     },
     /** Comptage à l'aveugle du caissier : il apprend seulement s'il faut appeler le gérant. */
@@ -2478,7 +2550,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = sameRegister(ctx(TREASURY), opts.registerId);
       requireAmounts();
       // Sans code du gérant : un motif saisi par un gérant à la clôture vaut justification, sinon l'écart reste à justifier.
-      const approvedBy = can(user!, ['cash_open']) ? user!.id : null;
+      const approvedBy = can(sess().user!, ['cash_open']) ? sess().user!.id : null;
       const closed = s.pos.closeSession(c, counted, { floatLeft: opts.floatLeft, gapReason: opts.gapReason ?? null, gapApprovedBy: approvedBy });
       if (!s.fiches.current()) s.attendance.leave(c.userId, c.storeId);
       return closed;
@@ -2513,8 +2585,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         s.attendance.leave(c.userId, c.storeId);
         s.attendance.arrive(next.id, station.store.id);
       }
-      user = next;
-      chosenRegisterId = own ? null : c.registerId;
+      sess().user = next;
+      sess().chosenRegisterId = own ? null : c.registerId;
       await printer.handover(h.id).catch(() => undefined);
       return { id: h.id, number: h.number, from: h.from_name, to: h.to_name, counted: h.counted };
     },
@@ -2527,7 +2599,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
     'treasury.justifyGap': (sessionId: string, reason: string) => {
       const c = ctx(AMOUNTS);
-      if (!can(user!, ['gap_justify'])) throw new AppError("Vous n'avez pas le droit de justifier un écart de caisse", 'FORBIDDEN');
+      if (!can(sess().user!, ['gap_justify'])) throw new AppError("Vous n'avez pas le droit de justifier un écart de caisse", 'FORBIDDEN');
       return s.pos.justifyGap(c, sessionId, reason);
     },
     'treasury.central': (opts?: { from?: string; to?: string }) => {
@@ -2570,7 +2642,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         })
         .sort((a, b) => Number(b.central) - Number(a.central) || a.name.localeCompare(b.name));
       const id = registerId || mode.centralId || registers[0]?.id || null;
-      return { mode: mode.mode, centralId: mode.centralId, registers, registerId: id, ledger: id ? s.emoney.ledger(id, opts ?? {}) : null, canRecord: can(user!, ['central_cash']) };
+      return { mode: mode.mode, centralId: mode.centralId, registers, registerId: id, ledger: id ? s.emoney.ledger(id, opts ?? {}) : null, canRecord: can(sess().user!, ['central_cash']) };
     },
     'emoney.record': (input: Parameters<Services['emoney']['record']>[1]) => s.emoney.record(ctx(['central_cash']), input),
     'emoney.print': (movementId: string) => (requireUser([...TREASURY, 'central_cash']), printer.emoneyVoucher(movementId)),
@@ -2586,10 +2658,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const desk = s.cashdesk.desk(sessionId);
       return {
         ...desk,
-        needsPin: !can(user!, ['cashout']),
-        canEdit: can(user!, ['cash_desk_edit']),
-        canReverse: can(user!, ['payment_cancel']),
-        canSupplierAdvance: can(user!, ['supplier_advance']),
+        needsPin: !can(sess().user!, ['cashout']),
+        canEdit: can(sess().user!, ['cash_desk_edit']),
+        canReverse: can(sess().user!, ['payment_cancel']),
+        canSupplierAdvance: can(sess().user!, ['supplier_advance']),
         suppliers: s.purchases.listSuppliers().map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
         // Tous les clients : un dépôt d'avance se fait aussi pour un client qui ne doit rien.
         customers: s.customers.listCustomers(c.storeId).map((x) => ({ id: x.id, code: x.code, name: x.name, balance: x.balance })),
@@ -2611,8 +2683,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'cashdesk.out': (sessionId: string, input: CashOutInput, supervisorPin?: string) => {
       const c = deskCtx(sessionId);
       // Le code saisi l'emporte : il sert aussi à dépasser le plafond des avances.
-      const by = supervisorPin ? supervisor(supervisorPin).id : can(user!, ['cashout']) ? user!.id : supervisor('').id;
-      if (input.type === 'supplier_advance' && !can(user!, ['supplier_advance']) && !can(s.admin.getUser(by), ['supplier_advance'])) {
+      const by = supervisorPin ? supervisor(supervisorPin).id : cashOutFree(sess().user!, input.amount, supervisorPin) ? sess().user!.id : supervisor('').id;
+      if (input.type === 'supplier_advance' && !can(sess().user!, ['supplier_advance']) && !can(s.admin.getUser(by), ['supplier_advance'])) {
         throw new AppError("Vous n'avez pas le droit de verser une avance à un fournisseur", 'FORBIDDEN');
       }
       return s.cashdesk.cashOut(c, sessionId, input, by);
@@ -2623,7 +2695,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      */
     'cashdesk.reverse': (source: 'customer_payment' | 'supplier_payment', id: string, reason: string, supervisorPin?: string) => {
       const c = ctx(TREASURY);
-      const by = can(user!, ['payment_cancel']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const by = can(sess().user!, ['payment_cancel']) ? sess().user!.id : supervisor(supervisorPin ?? '').id;
       return s.cashdesk.reversePayment(c, source, id, by, reason);
     },
     /** Reçu (entrée) ou bon (sortie) d'une ligne de la journée : ticket ou A4. Le reçu réimprimé porte « DUPLICATA ». */
@@ -2640,31 +2712,31 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'cashdesk.discharge': (sessionId: string, source: string, id: string) => (requireUser(TREASURY), printer.discharge(sessionId, source, id)),
     'cashdesk.unprint': (id: string, supervisorPin?: string) => {
       const c = ctx(TREASURY);
-      if (!can(user!, ['cash_desk_edit'])) supervisor(supervisorPin ?? '');
+      if (!can(sess().user!, ['cash_desk_edit'])) supervisor(supervisorPin ?? '');
       s.cashdesk.unprint(c, id);
     },
     /** Antidater ou supprimer : le gérant, ou son code. */
     'cashdesk.backdate': (source: 'entry' | 'expense', id: string, at: string, supervisorPin?: string) => {
       const c = ctx(TREASURY);
-      if (!can(user!, ['cash_desk_edit'])) supervisor(supervisorPin ?? '');
+      if (!can(sess().user!, ['cash_desk_edit'])) supervisor(supervisorPin ?? '');
       s.cashdesk.backdate(c, source, id, at);
     },
     'cashdesk.cancel': (source: 'entry' | 'expense', id: string, reason: string, supervisorPin?: string) => {
       const c = ctx(TREASURY);
-      const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const by = can(sess().user!, ['cash_desk_edit']) ? sess().user!.id : supervisor(supervisorPin ?? '').id;
       if (source === 'expense') return void s.expenses.cancel(c, id, by, reason);
       s.cashdesk.cancel(c, id, by, reason);
     },
     /** Modifier une entrée ou une sortie de la journée ouverte : le gérant, ou son code. */
     'cashdesk.update': (source: 'entry' | 'expense', id: string, patch: { amount?: Fcfa; label?: string; party?: string | null; reference?: string | null }, supervisorPin?: string) => {
       const c = ctx(TREASURY);
-      const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const by = can(sess().user!, ['cash_desk_edit']) ? sess().user!.id : supervisor(supervisorPin ?? '').id;
       if (source === 'expense') return void s.expenses.update(c, id, by, { amount: patch.amount, label: patch.label, beneficiary: patch.party, reference: patch.reference });
       s.cashdesk.update(c, id, by, patch);
     },
     'cashdesk.convert': (id: string, target: { type: 'supplier'; invoiceId: string } | { type: 'customer'; customerId: string }, supervisorPin?: string) => {
       const c = ctx(TREASURY);
-      const by = can(user!, ['cash_desk_edit']) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const by = can(sess().user!, ['cash_desk_edit']) ? sess().user!.id : supervisor(supervisorPin ?? '').id;
       return s.cashdesk.convert(c, id, target, by);
     },
 
@@ -2692,7 +2764,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Au bureau : salaire, avance ou remboursement en espèces (caisse centrale), MoMo/OM ou banque. */
     'staff.pay': (input: { kind: 'staff_salary' | 'staff_advance' | 'staff_repayment'; staffId?: string | null; salaryId?: string | null; amount: Fcfa; method: string; reference?: string | null; piece?: string | null; registerId?: string | null }) => {
       const c = ctx(['staff_salaries']);
-      if (input.method === 'CASH' && !can(user!, ['central_cash'])) throw new AppError('Payer en espèces au bureau demande le droit de la caisse centrale', 'FORBIDDEN');
+      if (input.method === 'CASH' && !can(sess().user!, ['central_cash'])) throw new AppError('Payer en espèces au bureau demande le droit de la caisse centrale', 'FORBIDDEN');
       return s.cashdesk.record(c, { ...input, direction: input.kind === 'staff_repayment' ? 'IN' : 'OUT', sessionId: null, authorizedBy: c.userId });
     },
     'staff.printEntry': (id: string) => (requireUser(STAFF), printer.officeVoucher(id)),
@@ -2982,7 +3054,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       advance?: boolean;
     }) => {
       const c = ctx(['customer_payment']);
-      if (input.allocations?.length && !can(user!, ['customer_lettering'])) throw new AppError("Vous n'avez pas le droit de lettrer un règlement", 'FORBIDDEN');
+      if (input.allocations?.length && !can(sess().user!, ['customer_lettering'])) throw new AppError("Vous n'avez pas le droit de lettrer un règlement", 'FORBIDDEN');
       // Encaissé à la caisse : rattaché à la session ouverte, les espèces vont dans le tiroir.
       const session = input.atRegister && c.registerId ? s.pos.currentSession(c.registerId) : null;
       if (input.atRegister && !session) throw new AppError("Ouvrez la caisse avant d'encaisser un règlement client", 'NO_SESSION');
@@ -3052,7 +3124,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'rebates.adjust': (customerId: string, amount: Fcfa, reason: string) => s.rebates.adjust(ctx(['rebates']), customerId, amount, reason),
     'rebates.grant': (customerId: string, amount: Fcfa, mode: 'credit' | 'cash', opts?: { method?: string | null; reference?: string | null; registerId?: string | null }) => {
       const c = ctx(['rebates']);
-      if (mode === 'cash' && !can(user!, ['central_cash'])) throw new AppError('Payer une ristourne demande le droit de la caisse centrale', 'FORBIDDEN');
+      if (mode === 'cash' && !can(sess().user!, ['central_cash'])) throw new AppError('Payer une ristourne demande le droit de la caisse centrale', 'FORBIDDEN');
       return s.rebates.grant(c, customerId, amount, mode, opts ?? {});
     },
     'rebates.entries': (opts?: { customerId?: string | null; from?: string | null; to?: string | null }) => s.rebates.entries(ctx(CUSTOMERS).storeId, opts ?? {}),
@@ -3122,18 +3194,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Le caissier ou le vendeur n'a pas la main sur la caisse centrale : ses dépenses en espèces sortent de sa caisse.
       const atRegister = Boolean(input.atRegister) || ((input.method === 'CASH' || isPayout(input.method)) && !can(u, ['central_cash']) && can(u, POS));
       const c = ctx(atRegister ? POS : ['expense_record']);
-      const authorizedBy = atRegister && !can(u, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
+      const authorizedBy = atRegister && !cashOutFree(u, input.amount, supervisorPin) ? supervisor(supervisorPin ?? '').id : null;
       return s.expenses.record(c, { ...rest, atRegister, date: atRegister ? null : rest.date, authorizedBy });
     },
     'expenses.cancel': (id: string, reason: string, supervisorPin?: string) => {
       const c = ctx(['expense_cancel']);
-      const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const sup = isSupervisor(sess().user!) || can(sess().user!, ['expense_cancel_free']) ? sess().user!.id : supervisor(supervisorPin ?? '').id;
       return s.expenses.cancel(c, id, sup, reason);
     },
     /** Modifier une dépense : mêmes droits que l'annuler (le gérant, ou son code). */
     'expenses.update': (id: string, patch: { amount?: Fcfa; label?: string; beneficiary?: string | null; reference?: string | null }, supervisorPin?: string) => {
       const c = ctx(['expense_cancel']);
-      const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const sup = isSupervisor(sess().user!) || can(sess().user!, ['expense_cancel_free']) ? sess().user!.id : supervisor(supervisorPin ?? '').id;
       return s.expenses.update(c, id, sup, patch);
     },
     'expenses.get': (id: string) => (requireUser(), s.expenses.get(id)),
@@ -3206,7 +3278,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'accounting.printVat': (month: string) => printer.vatReturn(ctx(['vat_return']).storeId, month),
     'patrimony.series': (scope?: { companyId?: string | null; allStores?: boolean }, months?: number) => {
       const c = ctx(['patrimony']);
-      if ((scope?.companyId || scope?.allStores) && !can(user!, ['companies'])) throw new AppError("Vous n'avez pas le droit de voir les chiffres des autres magasins", 'FORBIDDEN');
+      if ((scope?.companyId || scope?.allStores) && !can(sess().user!, ['companies'])) throw new AppError("Vous n'avez pas le droit de voir les chiffres des autres magasins", 'FORBIDDEN');
       return s.companies.patrimony(scope?.companyId ? { companyId: scope.companyId } : scope?.allStores ? {} : { storeId: c.storeId }, months);
     },
     'companies.list': (includeInactive?: boolean) => (requireUser(['companies', 'patrimony']), s.companies.list(includeInactive)),
@@ -3425,7 +3497,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'charges.savePlan': (input: ChargePlanInput, id?: string | null) => s.charges.savePlan(ctx(['charge_plans']), input, id),
     'charges.deletePlan': (id: string) => s.charges.deletePlan(ctx(['charge_plans']), id),
     'charges.schedule': (from: string, to: string) => s.charges.schedule(ctx(['charge_plans']).storeId, from, to),
-    'charges.late': () => (user && can(user, ['charge_plans']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 }),
+    'charges.late': () => {
+      const me = sess().user;
+      return me && can(me, ['charge_plans']) ? s.charges.late(ctx().storeId) : { count: 0, amount: 0 };
+    },
 
     'reports.daily': (date: string) => s.reports.daily(ctx(['dashboard']).storeId, date),
     /** Résumé du jour du magasin, à envoyer au gérant par WhatsApp ou par e-mail. */
@@ -3454,7 +3529,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
     'attention.list': () => {
       const c = ctx(['dashboard']);
-      return attentionFor(user!, c.storeId);
+      return attentionFor(sess().user!, c.storeId);
     },
     /**
      * Accueil (0.103.0) : en un appel rafraîchi toutes les 30 secondes, ce que la
@@ -3465,7 +3540,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
      */
     'home.overview': async () => {
       const c = ctx();
-      const u = user!;
+      const u = sess().user!;
       const now = new Date();
       const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const date = iso(now);
@@ -3706,7 +3781,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'anomalies.decide': (key: string, decision: 'fixed' | 'ignored', note?: string | null) => s.anomalies.decide(ctx(['stock_anomalies']), key, decision, note),
     'anomalies.decisions': () => s.anomalies.decisions(ctx(['stock_anomalies']).storeId),
     /** Commerciaux de terrain : liste pour la caisse et les fiches clients ; création par le gérant. */
-    'fieldReps.list': (includeInactive?: boolean) => (requireUser(), s.fieldReps.list(Boolean(includeInactive) && can(user!, ['field_reps']))),
+    'fieldReps.list': (includeInactive?: boolean) => (requireUser(), s.fieldReps.list(Boolean(includeInactive) && can(sess().user!, ['field_reps']))),
     'fieldReps.places': () => (requireUser(), s.fieldReps.places()),
     'fieldReps.save': (input: FieldRepInput, id?: string | null) => s.fieldReps.save(requireUser(['field_reps']).id, input, id),
     /** Codes de réduction : création, arrêt, utilisations ; contrôle à la caisse. */
@@ -3724,7 +3799,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'outages.current': () => (requireUser(), s.outages.openFor(ctx())),
     'outages.declare': (input: { startedAt: string; endedAt: string; declaredTotal: Fcfa; note?: string | null }) => {
       const c = ctx(['sale_book']);
-      requireTill(user!);
+      requireTill(sess().user!);
       return s.outages.declare(c, input);
     },
     /** Écart avec le cahier : il faut le droit de clôturer une coupure, ou le code du gérant. */
@@ -3732,7 +3807,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const c = ctx(['sale_book', 'outage_close']);
       const o = s.outages.get(id);
       let closedBy: string | null = null;
-      if (o.gap !== 0 && !can(user!, ['outage_close'])) {
+      if (o.gap !== 0 && !can(sess().user!, ['outage_close'])) {
         if (!opts?.supervisorPin) throw new AppError(`Écart de ${Math.abs(o.gap).toLocaleString('fr-FR')} FCFA avec le cahier : le code du gérant est nécessaire`, 'SUPERVISOR_REQUIRED');
         closedBy = supervisor(opts.supervisorPin).id;
       }
@@ -3762,16 +3837,165 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     /** Ventes d'une page relue : toutes ou aucune. Un prix du carnet différent du catalogue demande le droit « prix » ou le code du gérant. */
     'outages.enterSales': (id: string, sales: { at: string; number?: string | null; lines: SaleLineInput[] }[], opts?: { supervisorPin?: string }) => {
       const c = ctx(['sale_book']);
-      requireTill(user!);
+      requireTill(sess().user!);
       s.license.assertCanSell();
       const boss = opts?.supervisorPin ? supervisor(opts.supervisorPin) : null;
-      if (sales.some((v) => v.lines.some((l) => l.price != null)) && !can(user!, ['price']) && !boss) {
+      if (sales.some((v) => v.lines.some((l) => l.price != null)) && !can(sess().user!, ['price', 'outage_prices']) && !boss) {
         throw new AppError('Des prix du carnet diffèrent du catalogue : le code du gérant est nécessaire', 'SUPERVISOR_REQUIRED');
       }
-      const authorizedBy = boss ? boss.id : can(user!, ['discount']) ? user!.id : null;
+      const authorizedBy = boss ? boss.id : can(sess().user!, ['discount']) ? sess().user!.id : null;
       return s.pos.completeOutageSales(c, id, sales, { discountAuthorizedBy: authorizedBy });
     },
   };
+
+  // ——— Actions du gérant faites sur son téléphone ———————————————————————————————
+  /**
+   * Le téléphone passe par le serveur ; ce PC prend les actions en attente du
+   * magasin et les exécute au nom de la personne, avec ses droits et les mêmes
+   * contrôles qu'à son poste, puis rend la réponse (faite, ou la raison du refus).
+   * N'importe quel PC allumé du magasin le fait : pas besoin de celui du gérant.
+   */
+  const asUser = <T>(userId: string, fn: () => T): T => {
+    const who = s.admin.getUser(userId);
+    if (!who.active || who.deleted_at) throw new AppError(`${who.name} est désactivé`, 'FORBIDDEN');
+    return remoteSession.run({ user: who, chosenRegisterId: null }, fn);
+  };
+  const runManagerAction = (a: ManagerAction): string => {
+    const p = a.payload as Record<string, unknown>;
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
+    return asUser(a.userId, () => {
+      switch (a.kind) {
+        case 'edit.decide':
+          api['editRequests.decide'](text(p['id']), Boolean(p['approve']), text(p['note']) || null);
+          return p['approve'] ? 'Modification accordée' : 'Modification refusée';
+        case 'stock.decide':
+          api['monitoring.decide'](text(p['id']), Boolean(p['approve']), text(p['note']) || null);
+          return p['approve'] ? 'Correction de stock validée' : 'Correction refusée';
+        case 'expense.decide':
+          if (p['approve']) api['expenses.approve'](text(p['id']), text(p['note']) || null);
+          else api['expenses.reject'](text(p['id']), text(p['note']) || 'Refusée par le gérant');
+          return p['approve'] ? 'Dépense approuvée' : 'Dépense refusée';
+        case 'sale.cancel': {
+          const u = requireUser();
+          const saleId = text(p['saleId']);
+          const reason = text(p['reason']).trim();
+          if (!reason) throw new AppError("Le motif d'annulation est obligatoire", 'INVALID');
+          const sale = s.pos.getSale(saleId);
+          // Sur le téléphone, pas de code à taper : le superviseur, ou le droit d'annuler sans code (toutes les factures).
+          const free = isSupervisor(u) || (can(u, ['sale_cancel_free']) && can(u, ['sales']));
+          if (!free) throw new AppError("Vous n'avez pas le droit d'annuler une facture sans le code du gérant", 'FORBIDDEN');
+          s.pos.voidSale({ ...ctx(), registerId: sale.register_id }, saleId, u.id, reason, { byRight: true });
+          return `Facture ${sale.number} annulée`;
+        }
+        case 'customer.limit': {
+          const u = requireUser(['receivables']);
+          const c = s.customers.getCustomer(text(p['customerId']));
+          const limit = Math.round(Number(p['creditLimit']));
+          if (!Number.isSafeInteger(limit) || limit < 0) throw new AppError('Plafond invalide', 'INVALID');
+          s.customers.saveCustomer(
+            u.id,
+            {
+              name: c.name,
+              contact: c.contact,
+              phone: c.phone,
+              email: c.email,
+              address: c.address,
+              taxpayerNumber: c.taxpayer_number,
+              creditLimit: limit,
+              paymentTermsDays: c.payment_terms_days,
+              notes: c.notes,
+              active: c.active === 1,
+            },
+            c.id,
+          );
+          return `Plafond de ${c.name} : ${limit.toLocaleString('fr-FR')} FCFA`;
+        }
+        case 'delegate': {
+          const d = api['admin.delegate'](text(p['toUserId']), text(p['until']));
+          return `Pouvoirs confiés jusqu'au ${new Date(d.until).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
+        }
+        case 'delegate.end':
+          api['admin.endDelegation'](text(p['userId']));
+          return 'Délégation terminée';
+        default:
+          throw new AppError('Action inconnue de ce PC : mettez-le à jour', 'INVALID');
+      }
+    });
+  };
+  let managerBusy = false;
+  const pollManagerActions = async () => {
+    if (managerBusy || !s.sync.credentials() || s.fiches.current() || !s.admin.station()) return;
+    managerBusy = true;
+    try {
+      for (const a of await claimManagerActions(s)) {
+        let result: { ok: boolean; message: string };
+        try {
+          result = { ok: true, message: runManagerAction(a) };
+        } catch (e) {
+          result = { ok: false, message: e instanceof Error ? e.message : String(e) };
+        }
+        await finishManagerAction(s, a.id, result).catch(() => undefined);
+      }
+    } catch {
+      // Serveur injoignable : on réessaie au prochain tour.
+    } finally {
+      managerBusy = false;
+    }
+  };
+  const managerTimer = setInterval(() => void pollManagerActions(), 10_000);
+  managerTimer.unref?.();
+
+  /**
+   * « Le PC sur le téléphone » : le gérant gère la boutique depuis ONIX 360
+   * Mobile avec les écrans du PC. Ce PC attend ses appels (requête longue au
+   * serveur) et les exécute dans une session à part, à son nom et avec ses
+   * droits, sans toucher à la personne connectée devant ce PC. Les actions
+   * propres à ce poste (imprimante, fenêtres, fichiers, réglages du PC) restent refusées.
+   */
+  const runRemotePcCall = async (c: RemotePcCall): Promise<RemotePcReply> => {
+    const fail = (message: string, code: string): RemotePcReply => ({ ok: false, error: { message, code } });
+    if (REMOTE_BLOCKED.has(c.name)) return fail('Cette action se fait devant un PC du magasin (imprimante, fichiers ou réglages du poste).', 'PC_ONLY');
+    const fn = (api as Record<string, unknown>)[c.name];
+    if (typeof fn !== 'function') return fail('Action inconnue de ce PC : mettez-le à jour', 'UNKNOWN');
+    let who: User;
+    try {
+      who = s.admin.getUser(c.userId);
+    } catch {
+      return fail("Votre fiche n'est pas encore sur ce PC : attendez sa synchronisation", 'NOT_LOGGED_IN');
+    }
+    if (!who.active || who.deleted_at) return fail(`${who.name} est désactivé`, 'FORBIDDEN');
+    try {
+      const data = await remoteSession.run({ user: who, chosenRegisterId: null }, () => (fn as (...a: unknown[]) => unknown)(...(Array.isArray(c.args) ? c.args : [])));
+      return { ok: true, data: data === undefined ? null : JSON.parse(JSON.stringify(data)) };
+    } catch (e) {
+      if (e instanceof AppError) return fail(e.message, e.code);
+      return fail(e instanceof Error ? e.message : String(e), 'INTERNAL');
+    }
+  };
+  let remoteRunning = false;
+  const remotePcLoop = async () => {
+    if (remoteRunning) return;
+    remoteRunning = true;
+    try {
+      while (s.sync.credentials() && !s.fiches.current() && s.admin.station()) {
+        const asked = Date.now();
+        const calls = await nextRemotePcCalls(s);
+        // Réponse vide immédiate (serveur qui s'arrête, ou trop ancien) : on repasse au prochain tour.
+        if (!calls.length && Date.now() - asked < 2_000) break;
+        await Promise.all(calls.map(async (c) => replyRemotePcCall(s, c.id, await runRemotePcCall(c)).catch(() => undefined)));
+      }
+    } catch {
+      // Serveur injoignable ou trop ancien : on réessaie au prochain tour.
+    } finally {
+      remoteRunning = false;
+    }
+  };
+  remotePcRunners.set(api, runRemotePcCall);
+  const remoteTimer = setInterval(() => void remotePcLoop(), 15_000);
+  remoteTimer.unref?.();
+  void remotePcLoop();
+
+  return api;
 }
 
 export type Api = ReturnType<typeof createApi>;

@@ -5,6 +5,9 @@ import { AdminService } from './admin.service';
 import { ApprovalsService } from './approvals.service';
 import { ManagerService } from './manager.service';
 import { MobileService, type MobileCountInput } from './mobile.service';
+import { ManagerActionsService } from './managerActions.service';
+import { PushService } from './push.service';
+import { RemotePcService } from './remotePc.service';
 import { INVENTORY_PAGE } from './admin.page';
 
 const SESSION = 'x-fedonix-session';
@@ -26,7 +29,82 @@ export class MobileController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(ManagerService) private readonly manager: ManagerService,
     @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
+    @Inject(ManagerActionsService) private readonly actions: ManagerActionsService,
+    @Inject(PushService) private readonly push: PushService,
+    @Inject(RemotePcService) private readonly remote: RemotePcService,
   ) {}
+
+  // ——— Gérant sur le téléphone : à valider, ventes du jour, actions exécutées par un PC ———
+
+  @Get('api/v1/mobile/manager/inbox')
+  async managerInbox(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    return { ...(await this.actions.inbox(caller)), approvals: await this.approvals.pending(caller.device.store_id) };
+  }
+
+  @Get('api/v1/mobile/manager/sales')
+  async managerSales(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('day') day?: string) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    return this.actions.sales(caller, day);
+  }
+
+  @Get('api/v1/mobile/manager/team')
+  async managerTeam(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    return this.actions.team(caller);
+  }
+
+  @Get('api/v1/mobile/manager/actions')
+  async managerMyActions(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    return { actions: await this.actions.mine(caller) };
+  }
+
+  @Post('api/v1/mobile/manager/actions')
+  @HttpCode(200)
+  async managerAct(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: Parameters<ManagerActionsService['push']>[1]) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller, true);
+    return this.actions.push(caller, body);
+  }
+
+  /** Le PC sur le téléphone : un PC du magasin est-il là pour exécuter ? */
+  @Get('api/v1/mobile/pc/status')
+  async pcStatus(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller, true);
+    return { online: this.remote.online(caller.device.store_id) };
+  }
+
+  /** Le PC sur le téléphone : une action du logiciel du PC, exécutée par un PC du magasin au nom du gérant. */
+  @Post('api/v1/mobile/pc/call')
+  @HttpCode(200)
+  async pcCall(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: { name?: unknown; args?: unknown }) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller, true);
+    return this.remote.call(caller.device.store_id, caller.user.id, body?.name, body?.args);
+  }
+
+  /** Réglages Firebase pour l'appli (null : notifications pas encore réglées sur ce serveur). */
+  @Get('api/v1/mobile/push')
+  async pushSetup(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    if (caller.guest) return { firebase: null };
+    const status = await this.push.status();
+    return { firebase: status.configured ? await this.push.client() : null };
+  }
+
+  /** Téléphone Android abonné aux notifications (Firebase) : il les reçoit appli fermée. */
+  @Post('api/v1/mobile/push')
+  @HttpCode(200)
+  async pushToken(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: { token?: string | null }) {
+    const caller = await this.mobile.caller(auth, session);
+    return this.push.register(caller, body?.token ?? null);
+  }
 
   // ——— Téléphone ———
 
@@ -238,9 +316,9 @@ export class MobileController {
   }
 
   @Get('admin/api/mobile')
-  overview(@Req() req: Request) {
+  async overview(@Req() req: Request) {
     this.guard(req);
-    return this.mobile.overview();
+    return { ...(await this.mobile.overview()), firebase: await this.push.status().catch(() => null) };
   }
 
   /**
@@ -279,6 +357,20 @@ export class MobileController {
   assign(@Req() req: Request, @Body() body: { inventoryId: string; userId: string; departmentIds: string[] }) {
     this.guard(req);
     return this.mobile.assign(body);
+  }
+
+  /** Notifications Android (Firebase) : état, et compte de service collé depuis la page Téléphones. */
+  @Get('admin/api/mobile/firebase')
+  firebase(@Req() req: Request) {
+    this.guard(req);
+    return this.push.status();
+  }
+
+  @Post('admin/api/mobile/firebase')
+  @HttpCode(200)
+  setFirebase(@Req() req: Request, @Body() body: { json?: string | null }) {
+    this.guard(req);
+    return this.push.configure(body?.json ?? null);
   }
 
   @Post('admin/api/mobile/settings')

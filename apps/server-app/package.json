@@ -1,13 +1,13 @@
 {
   "name": "@superette/server-app",
   "productName": "ONIX 360 Serveur",
-  "version": "0.106.0",
+  "version": "0.108.0",
   "private": true,
   "description": "Serveur central ONIX 360 pour Windows : installateur, base intégrée et interface",
   "author": "FEDONG",
   "main": "out/main/index.js",
   "scripts": {
-    "build": "electron-vite build && node -e \"const fs = require('fs'); fs.copyFileSync('../server/src/admin.page.html', 'out/main/admin.page.html'); fs.copyFileSync('../server/src/manager.page.html', 'out/main/manager.page.html'); fs.copyFileSync('../server/src/inventory.page.html', 'out/main/inventory.page.html'); for (const f of ['icon.ico', 'icon.png']) fs.copyFileSync('build/' + f, 'out/main/' + f)\"",
+    "build": "electron-vite build && node -e \"const fs = require('fs'); fs.copyFileSync('../server/src/admin.page.html', 'out/main/admin.page.html'); fs.copyFileSync('../server/src/manager.page.html', 'out/main/manager.page.html'); fs.copyFileSync('../server/src/inventory.page.html', 'out/main/inventory.page.html'); for (const f of ['icon.ico', 'icon.png']) fs.copyFileSync('build/' + f, 'out/main/' + f); if (fs.existsSync('../server/src/firebase.defaults.json')) fs.copyFileSync('../server/src/firebase.defaults.json', 'out/main/firebase.defaults.json')\"",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:win": "npm run build && electron-builder --win --x64"

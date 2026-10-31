@@ -323,6 +323,8 @@ export interface ShelfCart {
   optionsBy?: string | null;
   /** Total indicatif calculé par le serveur. */
   total?: number | null;
+  /** Vente à crédit voulue par le vendeur (acompte à la caisse) et impression demandée par le client. */
+  saleOptions?: { credit: boolean; deposit: number; creditBy: string | null; printFormat: 'ticket' | 'listing' | 'a4' | null } | null;
   at: string;
 }
 
@@ -513,4 +515,51 @@ export async function flushCounterPaid(s: Services): Promise<void> {
       s.counter.markPaidSent(p.invoice_id);
     }
   }
+}
+
+/** Action du gérant faite sur son téléphone, que ce PC exécute en son nom. */
+export interface ManagerAction {
+  id: string;
+  kind: string;
+  userId: string;
+  label: string;
+  payload: Record<string, unknown>;
+}
+
+/** Prend les actions du gérant en attente pour ce magasin (une action n'est prise que par un PC à la fois). */
+export async function claimManagerActions(s: Services): Promise<ManagerAction[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ actions: ManagerAction[] }>(creds.url, '/api/v1/manager-actions', { token: creds.token })).actions;
+}
+
+/** Rend la réponse au téléphone : faite, ou refusée avec la raison. */
+export async function finishManagerAction(s: Services, id: string, result: { ok: boolean; message?: string | null }): Promise<void> {
+  const creds = s.sync.credentials();
+  if (!creds) return;
+  await request(creds.url, `/api/v1/manager-actions/${encodeURIComponent(id)}`, { token: creds.token, body: result });
+}
+
+/** Appel du logiciel du PC fait depuis le téléphone du gérant (« le PC sur le téléphone »). */
+export interface RemotePcCall {
+  id: string;
+  userId: string;
+  name: string;
+  args: unknown[];
+}
+
+export type RemotePcReply = { ok: true; data: unknown } | { ok: false; error: { message: string; code: string; fixes?: unknown[] } };
+
+/** Attend (jusqu'à 25 s) les appels du téléphone du gérant pour ce magasin. */
+export async function nextRemotePcCalls(s: Services): Promise<RemotePcCall[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ calls: RemotePcCall[] }>(creds.url, '/api/v1/remote-pc/next?wait=25000', { token: creds.token, timeoutMs: 40_000 })).calls ?? [];
+}
+
+/** Rend au téléphone la réponse du PC. */
+export async function replyRemotePcCall(s: Services, id: string, reply: RemotePcReply): Promise<void> {
+  const creds = s.sync.credentials();
+  if (!creds) return;
+  await request(creds.url, `/api/v1/remote-pc/${encodeURIComponent(id)}`, { token: creds.token, body: reply });
 }

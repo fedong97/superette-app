@@ -8,6 +8,9 @@ import { CounterService } from './counter.service';
 import { ManagerService } from './manager.service';
 import { MobileController } from './mobile.controller';
 import { MobileService } from './mobile.service';
+import { RemotePcService } from './remotePc.service';
+import { ManagerActionsService } from './managerActions.service';
+import { PushService } from './push.service';
 import { ShopController } from './shop.controller';
 import { ShopService } from './shop.service';
 import { StationBackupService } from './stationBackup.service';
@@ -35,11 +38,14 @@ export class AppModule implements OnApplicationBootstrap, OnApplicationShutdown 
         { provide: CONFIG, useValue: config },
         { provide: PG, useFactory: () => openDb(config) },
         SyncService,
+        RemotePcService,
         AdminService,
         BackupService,
         UpdatesService,
         ManagerService,
         MobileService,
+        ManagerActionsService,
+        PushService,
         AlertsService,
         ApprovalsService,
         CounterService,

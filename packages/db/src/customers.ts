@@ -470,11 +470,12 @@ export class CustomerService extends Base {
    * Vérifie qu'une vente à crédit est possible. Au-delà du plafond, il faut
    * l'accord d'un gérant (authorizedBy), tracé dans le journal d'audit.
    */
-  assertCredit(storeId: string, customerId: string, amount: Fcfa, authorizedBy: { id: string; role: string } | null, opts: { blockLate?: boolean } = {}): Customer {
+  assertCredit(storeId: string, customerId: string, amount: Fcfa, authorizedBy: { id: string; role: string; supervisor?: boolean } | null, opts: { blockLate?: boolean } = {}): Customer {
     const customer = this.getCustomer(customerId);
     if (!customer.active) throw new AppError(`Le client ${customer.name} est désactivé`, 'INVALID');
     const { balance, openItems } = this.ledger(storeId, customerId);
-    const manager = authorizedBy && (authorizedBy.role === 'admin' || authorizedBy.role === 'manager');
+    // Gérant, administrateur, ou superviseur et utilisateur à qui le droit « crédit au-delà du plafond » est donné.
+    const manager = authorizedBy && (authorizedBy.supervisor ?? (authorizedBy.role === 'admin' || authorizedBy.role === 'manager'));
     // Paramètre « bloquer les clients en retard » : une facture échue non payée bloque le crédit, sauf accord du gérant.
     const late = openItems.filter((i) => i.days_late > 0).reduce((t, i) => t + i.remaining, 0);
     if (opts.blockLate && late > 0) {

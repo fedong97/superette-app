@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { type Db, PG } from './database';
+import { isSupervisor, rightFrom, storeUsers } from './rights';
 
 type Json = Record<string, unknown>;
 
@@ -86,6 +87,20 @@ export interface MobileRights {
   tariff: boolean;
   /** Espace du gérant : consultation ou gestion. */
   manage: Exclude<ManagerMode, 'off'> | null;
+  /** Vente à crédit à un client du magasin (vendeur complet, droit « Vente à crédit »). */
+  credit?: boolean;
+  /** Crédit au-delà du plafond du client sans le code du gérant. */
+  creditOver?: boolean;
+}
+
+/** Vente préparée sur le téléphone : crédit (avec acompte payé à la caisse) et impression voulue. */
+export interface CartSaleOptions {
+  credit: boolean;
+  /** Acompte payé à la caisse (FCFA), le reste va au compte du client. */
+  deposit: number;
+  /** Qui permet de dépasser le plafond : le vendeur qui en a le droit, ou le gérant qui a tapé son code. */
+  creditBy: string | null;
+  printFormat: 'ticket' | 'listing' | 'a4' | null;
 }
 
 export interface MobileCaller {
@@ -117,6 +132,7 @@ interface CartRow {
   discount_reason: string | null;
   options_by: string | null;
   total: string | null;
+  sale_options: CartSaleOptions | null;
   created_at: Date;
   taken_at: Date | null;
   cancelled_at: Date | null;
@@ -321,12 +337,7 @@ export class MobileService {
   /** Un droit de l'utilisateur, comme sur les PC : rôle, réglages du rôle, privilèges personnels. */
   private async hasRight(userId: string, role: string, right: string, defaults: string[]): Promise<boolean> {
     if (role === 'admin') return true;
-    const ur = await this.one('user_rights', userId);
-    if (json<string[]>(ur?.['revokes'], []).includes(right)) return false;
-    if (json<string[]>(ur?.['grants'], []).includes(right)) return true;
-    const rr = await this.one('role_rights', role);
-    const saved = json<Record<string, boolean>>(rr?.['rights'], {})[right];
-    return saved ?? defaults.includes(role);
+    return rightFrom(role, await this.one('user_rights', userId), await this.one('role_rights', role), [right], defaults);
   }
 
   /** Droit « Saisir le stock physique dans un inventaire ». */
@@ -345,20 +356,12 @@ export class MobileService {
    */
   private async hasChainRight(userId: string, role: string, chain: string[], defaults: string[]): Promise<boolean> {
     if (role === 'admin') return true;
-    const ur = await this.one('user_rights', userId);
-    const rr = json<Record<string, boolean>>((await this.one('role_rights', role))?.['rights'], {});
-    const revokes = json<string[]>(ur?.['revokes'], []);
-    const grants = json<string[]>(ur?.['grants'], []);
-    const [right] = chain;
-    if (revokes.includes(right!)) return false;
-    if (grants.includes(right!)) return true;
-    for (const r of chain) if (rr[r] !== undefined) return rr[r]!;
-    return defaults.includes(role);
+    return rightFrom(role, await this.one('user_rights', userId), await this.one('role_rights', role), chain, defaults);
   }
 
   /** Ce que la personne connectée peut faire sur le téléphone. */
   async rights(caller: MobileCaller): Promise<MobileRights> {
-    if (caller.guest) return { count: true, cart: false, missed: false, receive: false, exit: false, sell: null, discount: false, tariff: false, manage: null };
+    if (caller.guest) return { count: true, cart: false, missed: false, receive: false, exit: false, sell: null, discount: false, tariff: false, manage: null, credit: false, creditOver: false };
     const { id, role } = caller.user;
     const settings = await this.settings();
     const cart = settings.seller !== 'off' && (await this.canCart(id, role));
@@ -373,18 +376,23 @@ export class MobileService {
       // Sans ces droits, le vendeur fait quand même la remise ou change le tarif : le gérant tape son code sur le téléphone.
       discount: full && (await this.hasRight(id, role, 'discount', ['manager'])),
       tariff: full && (await this.hasRight(id, role, 'sale_tariff', ['manager'])),
-      manage: settings.manager !== 'off' && (role === 'admin' || role === 'manager') ? settings.manager : null,
+      credit: full && (await this.hasRight(id, role, 'credit', ['manager', 'cashier', 'seller'])),
+      // Comme sur les PC : même l'administrateur confirme le dépassement, sauf droit donné explicitement.
+      creditOver: full && role !== 'admin' && (await this.hasRight(id, role, 'credit_over', [])),
+      // Espace du gérant : le gérant, ou tout utilisateur à qui ce droit est donné (rôle, privilège, délégation).
+      manage: settings.manager !== 'off' && (await this.hasRight(id, role, 'mobile_manager', ['manager'])) ? settings.manager : null,
     };
   }
 
   /** Code d'un gérant du magasin (ou d'un administrateur), vérifié sur les fiches reçues des PC. */
   private async supervisor(storeId: string, pin: string): Promise<{ id: string; name: string } | null> {
     if (!/^\d{4,8}$/.test(pin)) return null;
-    const users = await this.latest('user', "AND payload->>'role' IN ('admin', 'manager')");
-    const u = users.find(
-      (x) => x.payload['active'] !== 0 && !x.payload['deleted_at'] && (!x.payload['store_id'] || x.payload['store_id'] === storeId) && verifyPin(pin, str(x.payload['pin_hash'])),
-    );
-    return u ? { id: u.entity_id, name: str(u.payload['name']) } : null;
+    // Gérant, administrateur, ou utilisateur à qui le droit « Superviseur » est donné ou délégué.
+    for (const x of await storeUsers(this.pg, storeId)) {
+      if (!verifyPin(pin, str(x.payload['pin_hash']))) continue;
+      if (await isSupervisor(this.pg, x.entity_id, str(x.payload['role']))) return { id: x.entity_id, name: str(x.payload['name']) };
+    }
+    return null;
   }
 
   /** Le contrôle des tickets à la sortie n'existe que dans les magasins qui l'ont activé. */
@@ -642,6 +650,13 @@ export class MobileService {
       priceLevel?: string | null;
       discountReason?: string | null;
       supervisorPin?: string | null;
+      /** Vente à crédit (client du magasin) et acompte payé à la caisse. */
+      credit?: boolean | null;
+      deposit?: number | null;
+      /** Impression voulue par le client : ticket, facture listing ou A4. */
+      printFormat?: string | null;
+      /** Code du gérant pour dépasser le plafond de crédit (sinon la caisse le demandera). */
+      creditPin?: string | null;
     },
   ) {
     const can = await this.rights(caller);
@@ -705,13 +720,31 @@ export class MobileService {
     const optionsBy = level ? (can.tariff ? caller.user.id : await approve(`Tarif ${level === 'wholesale' ? 'gros' : 'super gros'}`)) : null;
     const total = await this.cartTotal(storeId, lines, level ?? usual);
 
-    const values = [label, JSON.stringify(lines), customerId, customer ? str(customer['name']) : null, level, discountBy, discountReason, optionsBy, total];
+    // Vente à crédit : un client du magasin, le droit « Vente à crédit » ; l'acompte se paie à la caisse.
+    const printFormat = full && ['ticket', 'listing', 'a4'].includes(str(input?.printFormat)) ? (str(input!.printFormat) as CartSaleOptions['printFormat']) : null;
+    let saleOptions: CartSaleOptions | null = printFormat ? { credit: false, deposit: 0, creditBy: null, printFormat } : null;
+    if (full && input?.credit) {
+      if (!can.credit) throw new ForbiddenException('Vous n’avez pas le droit de vendre à crédit. Demandez-le au gérant.');
+      if (!customer) throw new BadRequestException({ message: 'Choisissez le client de la vente à crédit (client enregistré du magasin)', code: 'CUSTOMER_REQUIRED' });
+      const deposit = Math.max(0, Math.round(Number(input.deposit ?? 0)) || 0);
+      if (deposit >= total) throw new BadRequestException('L’acompte couvre tout : envoyez une vente au comptant');
+      let creditBy: string | null = can.creditOver ? caller.user.id : null;
+      const creditPin = str(input.creditPin).trim();
+      if (!creditBy && creditPin) {
+        const b = await this.supervisor(storeId, creditPin);
+        if (!b) throw new ForbiddenException({ message: 'Code du gérant incorrect', code: 'SUPERVISOR_REQUIRED' });
+        creditBy = b.id;
+      }
+      saleOptions = { credit: true, deposit, creditBy, printFormat };
+    }
+
+    const values = [label, JSON.stringify(lines), customerId, customer ? str(customer['name']) : null, level, discountBy, discountReason, optionsBy, total, saleOptions ? JSON.stringify(saleOptions) : null];
     const { rows } = await this.pg.query<{ number: number }>(
-      `INSERT INTO shelf_carts (id, device_id, store_id, user_id, user_name, label, lines, customer_id, customer_name, price_level, discount_by, discount_reason, options_by, total, number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ${DAY_NUMBER('$3')})
+      `INSERT INTO shelf_carts (id, device_id, store_id, user_id, user_name, label, lines, customer_id, customer_name, price_level, discount_by, discount_reason, options_by, total, sale_options, number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ${DAY_NUMBER('$3')})
        ON CONFLICT (id) DO UPDATE SET label = excluded.label, lines = excluded.lines, customer_id = excluded.customer_id, customer_name = excluded.customer_name,
          price_level = excluded.price_level, discount_by = excluded.discount_by, discount_reason = excluded.discount_reason, options_by = excluded.options_by,
-         total = excluded.total, updated_at = now()
+         total = excluded.total, sale_options = excluded.sale_options, updated_at = now()
        WHERE shelf_carts.user_id = excluded.user_id AND shelf_carts.taken_at IS NULL AND shelf_carts.cancelled_at IS NULL
        RETURNING number`,
       [id, caller.device.id, storeId, caller.user.id, caller.user.name, ...values],
@@ -789,6 +822,7 @@ export class MobileService {
       discountReason: r.discount_reason,
       optionsBy: r.options_by,
       total: r.total === null ? null : Number(r.total),
+      saleOptions: r.sale_options ?? null,
       at: new Date(r.created_at).toISOString(),
     };
   }

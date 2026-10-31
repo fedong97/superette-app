@@ -222,6 +222,19 @@
           <label class="reglage"><span>Espace du gérant sur le téléphone<small>Gestion : changer un prix, valider une commande, répondre aux demandes de la caisse. Consultation : tableaux et listes seulement.</small>
             <select id="r-manager">${[['full', 'Gestion (conseillé)'], ['read', 'Consultation seule'], ['off', 'Désactivé']].map(([v, l]) => `<option value="${v}" ${data.settings.manager === v ? 'selected' : ''}>${l}</option>`).join('')}</select></span></label>
         </section>
+        <section><h2>Notifications sur les téléphones</h2>
+          ${data.firebase && data.firebase.configured
+            ? `<p>Notifications Android activées (projet Firebase <b>${esc(data.firebase.project)}</b>) : ${data.firebase.phones} téléphone(s) abonné(s). Le gérant, et ceux qui ont l’espace du gérant ou le droit Superviseur, reçoivent les demandes d’accord, les demandes à valider, les écarts, les grosses remises, les annulations et les ruptures, même appli fermée.</p>
+               <button class="petit" id="fb-off">Couper les notifications</button>`
+            : data.firebase && data.firebase.bundled
+            ? `<p class="muted">Notifications coupées. Elles sont prêtes dans ce serveur (réglages livrés avec l’installateur).</p>
+               <button id="fb-on">Réactiver les notifications</button>`
+            : `<p class="muted">Pour recevoir les alertes appli fermée, une seule fois : créez un projet gratuit sur <b>console.firebase.google.com</b> et ajoutez-y l’application Android <b>cm.fedonix.inventaire</b>. Collez ici, l’un après l’autre :</p>
+               <p class="muted">1. le fichier <b>google-services.json</b> proposé à l’ajout de l’application ${data.firebase && data.firebase.app ? '<span class="pastille ok">reçu</span>' : ''}<br>
+               2. le <b>compte de service</b> : Paramètres du projet › Comptes de service › « Générer une nouvelle clé privée » ${data.firebase && data.firebase.account ? '<span class="pastille ok">reçu</span>' : ''}</p>
+               <textarea id="fb-json" rows="4" style="width:100%" placeholder='Contenu du fichier JSON'></textarea>
+               <button id="fb-save">Enregistrer ce fichier</button>`}
+        </section>
         <section><h2>Téléphones reliés <span class="n">${active.length}</span></h2>
           ${data.devices.length ? `<div class="liste">${data.devices.map((d) => `<div><div class="g">${esc(d.name)} ${d.revoked ? '<span class="pastille non">Délié</span>' : d.online ? '<span class="pastille ok">En ligne</span>' : ''}<small>${esc(d.store)} · relié le ${date(d.createdAt)}${d.lastSeenAt ? ` · vu ${date(d.lastSeenAt)}` : ''}</small></div>${d.revoked ? '' : `<button class="petit" data-revoke="${esc(d.id)}">Délier</button>`}</div>`).join('')}</div>` : '<div class="vide">Aucun téléphone relié.</div>'}
         </section>
@@ -280,6 +293,19 @@
     document.getElementById('r-expected').onchange = save;
     document.getElementById('r-seller').onchange = save;
     document.getElementById('r-manager').onchange = save;
+    const fbSave = document.getElementById('fb-save');
+    if (fbSave) fbSave.onclick = async () => {
+      try { await api('/admin/api/mobile/firebase', { method: 'POST', body: JSON.stringify({ json: document.getElementById('fb-json').value }) }); load(); } catch (e) { alert(e.message); }
+    };
+    const fbOn = document.getElementById('fb-on');
+    if (fbOn) fbOn.onclick = async () => {
+      try { await api('/admin/api/mobile/firebase', { method: 'POST', body: JSON.stringify({ json: 'installateur' }) }); load(); } catch (e) { alert(e.message); }
+    };
+    const fbOff = document.getElementById('fb-off');
+    if (fbOff) fbOff.onclick = async () => {
+      if (!confirm('Couper les notifications des téléphones ? Les alertes resteront visibles dans l’appli ouverte.')) return;
+      try { await api('/admin/api/mobile/firebase', { method: 'POST', body: JSON.stringify({ json: null }) }); load(); } catch (e) { alert(e.message); }
+    };
   }
 
   load();

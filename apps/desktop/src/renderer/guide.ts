@@ -109,6 +109,24 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.108.0',
+    items: [
+      "ONIX 360 Mobile, gérant : « Gérer la boutique » ouvre les écrans de gestion du PC sur le téléphone : tableau de bord, ventes, trésorerie et caisses, clients, fournisseurs, achats et paiements, dépenses, comptabilité, produits et prix, stock, équipe et planning, caisses et utilisateurs. On y crée, modifie, encaisse et règle comme au PC.",
+      "Chaque action faite sur le téléphone est exécutée par un PC allumé du magasin (n'importe lequel), avec les droits de la personne connectée, sans déranger la personne assise devant ce PC. L'impression, les fichiers et les réglages propres à un poste restent sur les PC.",
+    ],
+  },
+  {
+    version: '0.107.0',
+    items: [
+      "Rien n'est réservé au seul gérant : nouveau groupe « Opérations sensibles » dans les droits, et droit « Superviseur » qui rend le code d'un employé valable comme celui du gérant (annulations, retours, remises, crédit au-delà du plafond, sorties de caisse, avances…).",
+      "Délégation temporaire : Administration › Délégation et plafonds, le gérant confie ses pouvoirs à un employé jusqu'à une date ; tout revient seul à la fin. Plafonds par personne : remise maximale et sortie de caisse maximale sans code.",
+      "Caisse séparée : à l'encaissement, le caissier choisit ticket (F2), listing (F7), A4 (F9) ou rien (F4) ; le vendeur peut demander le listing ou l'A4 en envoyant la facture.",
+      "ONIX 360 Mobile, vendeur : remise sur le total, facture à crédit pour un client de la liste avec acompte, format de facture voulu par le client ; la caisse valide à crédit en un geste.",
+      "ONIX 360 Mobile, gérant : nouvelles pages « À valider » (modifications de facture, corrections de stock, dépenses), « Ventes » du jour avec annulation, plafond de crédit d'un client et délégation. N'importe quel PC allumé du magasin applique ces actions en quelques secondes.",
+      "Notifications Android, appli fermée : demandes d'accord, demandes à valider, écarts et clôtures de caisse, grosses remises, annulations, ruptures. À régler une fois sur la page Téléphones du serveur avec un projet Firebase gratuit.",
+    ],
+  },
+  {
     version: '0.106.0',
     items: [
       'Remise à zéro des données d’essai dans une fiche d’intervention : faite au bureau dans la fiche, elle est refaite dans la boutique quand la fiche y est rapportée (sauvegarde juste avant), puis les modifications de la fiche sont ajoutées.',

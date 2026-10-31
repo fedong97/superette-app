@@ -5,7 +5,7 @@
   "description": "Serveur central : synchronisation des caisses et magasins",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"const fs = require('fs'); fs.copyFileSync('src/admin.page.html', 'dist/admin.page.html'); fs.copyFileSync('src/manager.page.html', 'dist/manager.page.html'); fs.copyFileSync('src/inventory.page.html', 'dist/inventory.page.html'); fs.copyFileSync('../server-app/build/icon.png', 'dist/icon.png')\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs = require('fs'); fs.copyFileSync('src/admin.page.html', 'dist/admin.page.html'); fs.copyFileSync('src/manager.page.html', 'dist/manager.page.html'); fs.copyFileSync('src/inventory.page.html', 'dist/inventory.page.html'); fs.copyFileSync('../server-app/build/icon.png', 'dist/icon.png'); if (fs.existsSync('src/firebase.defaults.json')) fs.copyFileSync('src/firebase.defaults.json', 'dist/firebase.defaults.json')\"",
     "start": "node dist/main.js",
     "dev": "npm run build && node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"

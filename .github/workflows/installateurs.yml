@@ -24,6 +24,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Notifications Android : un seul projet Firebase pour toutes les boutiques (secrets du dépôt).
+      - name: Réglages Firebase
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
+        run: |
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ] && [ -n "$FIREBASE_GOOGLE_SERVICES" ]; then
+            node -e "require('fs').writeFileSync('apps/server/src/firebase.defaults.json', JSON.stringify({ serviceAccount: JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT), googleServices: JSON.parse(process.env.FIREBASE_GOOGLE_SERVICES) }))"
+            echo "Notifications : réglages Firebase inclus"
+          else
+            echo "Notifications : pas de secrets FIREBASE_*, à coller sur la page Téléphones"
+          fi
       - name: ONIX 360
         working-directory: apps/desktop
         run: npx electron-vite build && npx electron-builder --win --x64 --publish never
@@ -58,8 +71,12 @@ jobs:
           java-version: 21
       - run: npm ci
       - name: Pages de l'application
-        working-directory: apps/inventory
-        run: npx vite build && npx cap sync android
+        run: |
+          (cd apps/inventory && npx vite build)
+          # Écrans de gestion du PC pour le téléphone du gérant (pc/mobile.html).
+          (cd apps/desktop && npx electron-vite build)
+          rm -rf apps/inventory/dist/pc && cp -r apps/desktop/out/renderer apps/inventory/dist/pc
+          (cd apps/inventory && npx cap sync android)
       # Clé de signature gardée dans les secrets du dépôt, si elle y est ; sinon celle du dépôt.
       - name: Clé de signature
         env:
@@ -93,6 +110,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # Notifications Android : un seul projet Firebase pour toutes les boutiques (secrets du dépôt).
+      - name: Réglages Firebase
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
+        run: |
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ] && [ -n "$FIREBASE_GOOGLE_SERVICES" ]; then
+            node -e "require('fs').writeFileSync('apps/server/src/firebase.defaults.json', JSON.stringify({ serviceAccount: JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT), googleServices: JSON.parse(process.env.FIREBASE_GOOGLE_SERVICES) }))"
+            echo "Notifications : réglages Firebase inclus"
+          else
+            echo "Notifications : pas de secrets FIREBASE_*, à coller sur la page Téléphones"
+          fi
       - name: Image du serveur
         run: |
           version=$(node -p "require('./package.json').version")

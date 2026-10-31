@@ -191,6 +191,16 @@ export function CounterDesk({
     }
   };
 
+  /** Vente à crédit préparée par le vendeur sur son téléphone : l'acompte en espèces, le reste au compte du client. */
+  const creditAsked = first?.payload?.credit && customerId ? first.payload.credit : null;
+  const payOnCredit = async () => {
+    if (!creditAsked || busy) return;
+    printRef.current = printChoice;
+    const deposit = Math.min(Math.max(0, creditAsked.deposit), total);
+    const payments: Payments = [...(deposit > 0 ? [{ method: 'CASH' as const, amount: deposit }] : []), { method: 'CUSTOMER_CREDIT' as const, amount: total - deposit }];
+    await pay(payments);
+  };
+
   /**
    * En espèces si le reçu couvre le total, sinon le choix du règlement. Entrée
    * imprime ce qui est choisi ; F2 le ticket, F7 la facture listing, F9 la
@@ -392,6 +402,15 @@ export function CounterDesk({
                   <b>{change ? amount(change) : '—'}</b>
                 </div>
               </div>
+              {creditAsked && (
+                <div className="cd-credit">
+                  <b>Vente à crédit</b> préparée par {first?.sellerName} pour {first?.customerName}
+                  {creditAsked.deposit > 0 ? ` : acompte de ${fcfa(Math.min(creditAsked.deposit, total))} à encaisser, ${fcfa(Math.max(0, total - creditAsked.deposit))} au compte du client.` : ' : tout va au compte du client.'}
+                  <button className="primary" disabled={busy} onClick={() => void payOnCredit()}>
+                    Valider à crédit
+                  </button>
+                </div>
+              )}
               <div className="cd-print" role="radiogroup" aria-label="Impression à l'encaissement">
                 <small>IMPRESSION</small>
                 {PRINTS.map((p) => (

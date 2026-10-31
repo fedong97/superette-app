@@ -1405,6 +1405,8 @@ ul.plain li { padding: 3px 0; }
 .cd-cash .pos-bills button { height: 46px; font-size: 16px; }
 .cd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cd-actions .big { grid-column: 1 / -1; font-size: 18px; padding: 14px; }
+.cd-credit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 8px; border-radius: 8px; background: var(--warn-bg, rgba(240, 160, 0, 0.12)); }
+.cd-credit button { margin-left: auto; }
 .cd-print { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
 .cd-print small { color: var(--muted); font-weight: 700; margin-right: 4px; }
 .cd-print button { padding: 6px 10px; font-size: 13px; }

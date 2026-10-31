@@ -758,6 +758,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       setDialog(null);
       carts.reload();
       toast.ok(`Panier n° ${c.number} de ${c.sellerName}${c.label ? ` (${c.label})` : ''}${c.missing ? ` : ${c.missing} article(s) inconnu(s) de ce PC laissé(s) de côté` : ''}`);
+      // Vente préparée sur le téléphone : crédit (acompte) et impression voulue par le client.
+      const o = c.saleOptions;
+      if (o?.credit) toast.ok(`Vente à crédit demandée par ${c.sellerName}${o.deposit ? ` : acompte de ${fcfa(o.deposit)} à encaisser` : ''}. Encaissez avec « Compte du client » (Ctrl+E).`);
+      if (o?.printFormat && o.printFormat !== 'ticket') toast.ok(`Le client veut une facture ${o.printFormat === 'a4' ? 'A4 (F9 après la vente)' : 'listing (F7)'}`);
     } catch (err) {
       toast.error(err);
       carts.reload();

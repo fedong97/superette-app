@@ -1349,7 +1349,7 @@ export class PosService extends Base {
   private creditAuthority(userId: string, authorizedBy: string | null | undefined): { id: string; role: string; supervisor: boolean } | null {
     if (authorizedBy) {
       const u = this.admin.getUser(authorizedBy);
-      return { id: u.id, role: u.role, supervisor: this.admin.isSupervisor(u) };
+      return { id: u.id, role: u.role, supervisor: this.admin.isSupervisor(u) || this.admin.hasRight(u, 'credit_over') };
     }
     const me = this.admin.getUser(userId);
     // L'administrateur confirme comme avant par son code : le droit ne joue que donné explicitement.

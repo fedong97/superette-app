@@ -35,6 +35,11 @@ export interface CounterPayload {
   registerId?: string | null;
   /** Impression demandée par le vendeur pour le client (le caissier peut changer). */
   printFormat?: CounterPrint | null;
+  /**
+   * Vente à crédit préparée par le vendeur (téléphone) : l'acompte se paie à la caisse,
+   * le reste va au compte du client ; `by` permet de dépasser le plafond (vérifié par le serveur).
+   */
+  credit?: { deposit: number; by: string | null } | null;
 }
 
 /** Impression à l'encaissement : ticket de caisse, facture listing, facture A4, ou rien. */

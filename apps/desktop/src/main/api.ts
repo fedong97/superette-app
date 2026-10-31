@@ -2016,6 +2016,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         clientName: customerId ? null : (cart.customerName ?? null),
         priceLevel: cart.priceLevel ?? null,
         discountReason: cart.discountReason ?? null,
+        saleOptions: cart.saleOptions ?? null,
       };
     },
 
@@ -2235,6 +2236,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
           priceBy: null,
           optionsBy: cart.priceLevel ? (cart.optionsBy ?? null) : null,
           cartNumber: cart.number,
+          printFormat: cart.saleOptions?.printFormat ?? null,
+          credit: cart.saleOptions?.credit && customerId ? { deposit: cart.saleOptions.deposit, by: cart.saleOptions.creditBy } : null,
         });
         const inv = await counterSend(s, {
           id: `fc-panier-${cart.id}`.slice(0, 64),
@@ -2313,7 +2316,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         ...base,
         payments: input.payments,
         discountAuthorizedBy: input.supervisorPin ? supervisor(input.supervisorPin).id : base.discountAuthorizedBy,
-        creditAuthorizedBy: input.creditPin ? supervisor(input.creditPin).id : null,
+        // Code tapé à la caisse, sinon l'accord donné sur le téléphone du vendeur (son droit ou le code du gérant).
+        creditAuthorizedBy: input.creditPin ? supervisor(input.creditPin).id : (invoices.find((i) => i.payload?.credit?.by)?.payload?.credit?.by ?? null),
         keepChange: input.keepChange ?? null,
         discountReason: input.discountReason?.trim() || base.discountReason || null,
         promoCode: input.promoCode ?? null,

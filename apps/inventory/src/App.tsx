@@ -666,6 +666,7 @@ function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => voi
   const [picking, setPicking] = useState(false);
   const [pin, setPin] = useState<string | null>(null);
   const [opened, setOpened] = useState<S.SentCart | null>(null);
+  const [globalDiscount, setGlobalDiscount] = useState<string | null>(null);
   const seen = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => {
@@ -739,8 +740,27 @@ function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => voi
   const needsReason = full && totals.discount > 0;
   const qtyLabel = (l: ShownLine) => (l.pack ? `${Math.round(l.line.qty / l.pack.units)} ${l.pack.name.toLowerCase()}` : formatQty(l.line.qty, l.article));
 
+  const pay = s.cartPay;
+  const canCredit = full && Boolean(s.session?.can?.credit);
+  const onCredit = canCredit && pay.credit;
+  /** Remise sur le total : en FCFA, ou en % (« 10 % »), répartie sur les lignes. */
+  const applyGlobal = () => {
+    const raw = (globalDiscount ?? '').trim();
+    const base = lines.reduce((t, l) => t + Math.max(0, l.gross - l.discount), 0);
+    const amount = parseDiscount(raw, base) ?? 0;
+    if (!(amount > 0)) return show('Tapez un montant (500) ou un pourcentage (10 %)', false);
+    S.spreadDiscount(
+      lines.map((l) => ({ articleId: l.line.articleId, packId: l.line.packId ?? null, net: l.gross - l.discount })),
+      amount,
+    );
+    setGlobalDiscount(null);
+    show(`Remise de ${fcfa(Math.min(amount, base))} répartie sur le panier`, true);
+  };
+
   const send = async (supervisorPin?: string) => {
     if (needsReason && !s.cartReason.trim()) return show('Choisissez le motif de la remise', false);
+    if (onCredit && !s.cartCustomer) return (setPicking(true), show('Choisissez le client de la vente à crédit', false));
+    if (onCredit && pay.deposit >= totals.total) return show('L’acompte couvre tout : choisissez « Comptant »', false);
     setBusy(true);
     try {
       setSent(await S.sendCart(supervisorPin));
@@ -933,13 +953,74 @@ function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => voi
                     {!s.session?.can?.discount ? <p className="muted small">Remise : le gérant donnera son code à l’envoi.</p> : null}
                   </>
                 ) : null}
+                {full ? (
+                  globalDiscount === null ? (
+                    <button className="link" onClick={() => setGlobalDiscount('')}>
+                      Remise sur le total…
+                    </button>
+                  ) : (
+                    <div className="row">
+                      <input className="grow" autoFocus inputMode="text" value={globalDiscount} onChange={(e) => setGlobalDiscount(e.target.value)} placeholder="500 ou 10 %" />
+                      <button onClick={applyGlobal}>Appliquer</button>
+                      <button className="link" onClick={() => setGlobalDiscount(null)}>
+                        Annuler
+                      </button>
+                    </div>
+                  )
+                ) : null}
                 <div className="row">
                   <b className="grow">Total indicatif</b>
                   <b>{fcfa(totals.total)}</b>
                 </div>
                 <p className="muted small">La caisse refait le prix exact (promotions, prix convenus du client).</p>
+                {full ? (
+                  <>
+                    {canCredit ? (
+                      <div className="tabs" role="radiogroup" aria-label="Règlement">
+                        <button className={!pay.credit ? 'on' : ''} onClick={() => S.setCartPay({ credit: false, deposit: 0 })}>
+                          Comptant à la caisse
+                        </button>
+                        <button className={pay.credit ? 'on' : ''} onClick={() => (S.setCartPay({ credit: true }), !s.cartCustomer && setPicking(true))}>
+                          À crédit
+                        </button>
+                      </div>
+                    ) : null}
+                    {onCredit ? (
+                      <>
+                        <p className="muted small">
+                          {s.cartCustomer
+                            ? `Facture à crédit au compte de ${s.cartCustomer.name}${s.cartCustomer.creditLimit ? ` (plafond ${fcfa(s.cartCustomer.creditLimit)})` : ' (pas de plafond fixé : la caisse demandera l’accord)'}.`
+                            : 'Choisissez le client enregistré du magasin.'}{' '}
+                          {s.session?.can?.creditOver ? 'Vous pouvez dépasser son plafond.' : 'Au-delà de son plafond, la caisse demandera le code du gérant.'}
+                        </p>
+                        <label className="field">
+                          Acompte payé à la caisse (FCFA)
+                          <input
+                            inputMode="numeric"
+                            value={pay.deposit ? String(pay.deposit) : ''}
+                            onChange={(e) => S.setCartPay({ deposit: Math.max(0, Number(e.target.value.replace(/\D/g, '')) || 0) })}
+                            placeholder="0 : tout à crédit"
+                          />
+                        </label>
+                        {pay.deposit > 0 && pay.deposit < totals.total ? (
+                          <p className="muted small">
+                            {fcfa(pay.deposit)} à la caisse, {fcfa(totals.total - pay.deposit)} au compte du client.
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <label className="field">
+                      Facture du client
+                      <select value={pay.print} onChange={(e) => S.setCartPay({ print: e.target.value as S.CartPay['print'] })}>
+                        <option value="ticket">Ticket de caisse</option>
+                        <option value="listing">Facture listing</option>
+                        <option value="a4">Facture A4</option>
+                      </select>
+                    </label>
+                  </>
+                ) : null}
                 <button className="big primary" disabled={busy} onClick={() => void send()}>
-                  {busy ? 'Envoi…' : s.cartEdit ? `Renvoyer le panier n° ${s.cartEdit.number}` : 'Envoyer à la caisse'}
+                  {busy ? 'Envoi…' : s.cartEdit ? `Renvoyer le panier n° ${s.cartEdit.number}` : onCredit ? 'Envoyer la facture à crédit' : 'Envoyer à la caisse'}
                 </button>
                 <button className="link" onClick={() => S.clearCart()}>
                   {s.cartEdit ? 'Abandonner la modification' : 'Vider le panier'}

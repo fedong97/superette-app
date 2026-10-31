@@ -323,6 +323,8 @@ export interface ShelfCart {
   optionsBy?: string | null;
   /** Total indicatif calculé par le serveur. */
   total?: number | null;
+  /** Vente à crédit voulue par le vendeur (acompte à la caisse) et impression demandée par le client. */
+  saleOptions?: { credit: boolean; deposit: number; creditBy: string | null; printFormat: 'ticket' | 'listing' | 'a4' | null } | null;
   at: string;
 }
 

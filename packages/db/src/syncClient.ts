@@ -516,3 +516,26 @@ export async function flushCounterPaid(s: Services): Promise<void> {
     }
   }
 }
+
+/** Action du gérant faite sur son téléphone, que ce PC exécute en son nom. */
+export interface ManagerAction {
+  id: string;
+  kind: string;
+  userId: string;
+  label: string;
+  payload: Record<string, unknown>;
+}
+
+/** Prend les actions du gérant en attente pour ce magasin (une action n'est prise que par un PC à la fois). */
+export async function claimManagerActions(s: Services): Promise<ManagerAction[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ actions: ManagerAction[] }>(creds.url, '/api/v1/manager-actions', { token: creds.token })).actions;
+}
+
+/** Rend la réponse au téléphone : faite, ou refusée avec la raison. */
+export async function finishManagerAction(s: Services, id: string, result: { ok: boolean; message?: string | null }): Promise<void> {
+  const creds = s.sync.credentials();
+  if (!creds) return;
+  await request(creds.url, `/api/v1/manager-actions/${encodeURIComponent(id)}`, { token: creds.token, body: result });
+}

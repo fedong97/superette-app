@@ -97,6 +97,9 @@ import {
   type RecurringOrderInput,
   type OwnerReport,
   takeShelfCart,
+  claimManagerActions,
+  finishManagerAction,
+  type ManagerAction,
   takeWebOrder,
   webOrders,
   type AssetInput,
@@ -754,7 +757,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       payload: p,
     };
   };
-  return {
+  const api = {
     // --- Application et connexion -------------------------------------------
     'app.state': () => ({
       version: appVersion,
@@ -3819,6 +3822,111 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.pos.completeOutageSales(c, id, sales, { discountAuthorizedBy: authorizedBy });
     },
   };
+
+  // ——— Actions du gérant faites sur son téléphone ———————————————————————————————
+  /**
+   * Le téléphone passe par le serveur ; ce PC prend les actions en attente du
+   * magasin et les exécute au nom de la personne, avec ses droits et les mêmes
+   * contrôles qu'à son poste, puis rend la réponse (faite, ou la raison du refus).
+   * N'importe quel PC allumé du magasin le fait : pas besoin de celui du gérant.
+   */
+  const asUser = <T>(userId: string, fn: () => T): T => {
+    const who = s.admin.getUser(userId);
+    if (!who.active || who.deleted_at) throw new AppError(`${who.name} est désactivé`, 'FORBIDDEN');
+    const previous = user;
+    user = who;
+    try {
+      return fn();
+    } finally {
+      user = previous;
+    }
+  };
+  const runManagerAction = (a: ManagerAction): string => {
+    const p = a.payload as Record<string, unknown>;
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
+    return asUser(a.userId, () => {
+      switch (a.kind) {
+        case 'edit.decide':
+          api['editRequests.decide'](text(p['id']), Boolean(p['approve']), text(p['note']) || null);
+          return p['approve'] ? 'Modification accordée' : 'Modification refusée';
+        case 'stock.decide':
+          api['monitoring.decide'](text(p['id']), Boolean(p['approve']), text(p['note']) || null);
+          return p['approve'] ? 'Correction de stock validée' : 'Correction refusée';
+        case 'expense.decide':
+          if (p['approve']) api['expenses.approve'](text(p['id']), text(p['note']) || null);
+          else api['expenses.reject'](text(p['id']), text(p['note']) || 'Refusée par le gérant');
+          return p['approve'] ? 'Dépense approuvée' : 'Dépense refusée';
+        case 'sale.cancel': {
+          const u = requireUser();
+          const saleId = text(p['saleId']);
+          const reason = text(p['reason']).trim();
+          if (!reason) throw new AppError("Le motif d'annulation est obligatoire", 'INVALID');
+          const sale = s.pos.getSale(saleId);
+          // Sur le téléphone, pas de code à taper : le superviseur, ou le droit d'annuler sans code (toutes les factures).
+          const free = isSupervisor(u) || (can(u, ['sale_cancel_free']) && can(u, ['sales']));
+          if (!free) throw new AppError("Vous n'avez pas le droit d'annuler une facture sans le code du gérant", 'FORBIDDEN');
+          s.pos.voidSale({ ...ctx(), registerId: sale.register_id }, saleId, u.id, reason, { byRight: true });
+          return `Facture ${sale.number} annulée`;
+        }
+        case 'customer.limit': {
+          const u = requireUser(['receivables']);
+          const c = s.customers.getCustomer(text(p['customerId']));
+          const limit = Math.round(Number(p['creditLimit']));
+          if (!Number.isSafeInteger(limit) || limit < 0) throw new AppError('Plafond invalide', 'INVALID');
+          s.customers.saveCustomer(
+            u.id,
+            {
+              name: c.name,
+              contact: c.contact,
+              phone: c.phone,
+              email: c.email,
+              address: c.address,
+              taxpayerNumber: c.taxpayer_number,
+              creditLimit: limit,
+              paymentTermsDays: c.payment_terms_days,
+              notes: c.notes,
+              active: c.active === 1,
+            },
+            c.id,
+          );
+          return `Plafond de ${c.name} : ${limit.toLocaleString('fr-FR')} FCFA`;
+        }
+        case 'delegate': {
+          const d = api['admin.delegate'](text(p['toUserId']), text(p['until']));
+          return `Pouvoirs confiés jusqu'au ${new Date(d.until).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
+        }
+        case 'delegate.end':
+          api['admin.endDelegation'](text(p['userId']));
+          return 'Délégation terminée';
+        default:
+          throw new AppError('Action inconnue de ce PC : mettez-le à jour', 'INVALID');
+      }
+    });
+  };
+  let managerBusy = false;
+  const pollManagerActions = async () => {
+    if (managerBusy || !s.sync.credentials() || s.fiches.current() || !s.admin.station()) return;
+    managerBusy = true;
+    try {
+      for (const a of await claimManagerActions(s)) {
+        let result: { ok: boolean; message: string };
+        try {
+          result = { ok: true, message: runManagerAction(a) };
+        } catch (e) {
+          result = { ok: false, message: e instanceof Error ? e.message : String(e) };
+        }
+        await finishManagerAction(s, a.id, result).catch(() => undefined);
+      }
+    } catch {
+      // Serveur injoignable : on réessaie au prochain tour.
+    } finally {
+      managerBusy = false;
+    }
+  };
+  const managerTimer = setInterval(() => void pollManagerActions(), 10_000);
+  managerTimer.unref?.();
+
+  return api;
 }
 
 export type Api = ReturnType<typeof createApi>;

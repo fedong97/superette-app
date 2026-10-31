@@ -275,6 +275,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const scanRef = useRef<HTMLInputElement>(null);
   /** Impression demandée à la validation : F2 ticket, F7 listing, F4 (VALIDER) aucune. */
   const printRef = useRef<PrintChoice>('none');
+  /** Vendeur séparé : facture demandée par le client (listing, A4), transmise au caissier avec la fiche. */
+  const counterFormat = useRef<'listing' | 'a4' | null>(null);
   /** Ctrl+Suppr : vide la fiche en cours (même action que le bouton « Vider »), défini plus bas. */
   const clearRef = useRef<() => void>(() => undefined);
   /** Promotions du jour : appliquées à l'écran comme elles le seront à l'encaissement. */
@@ -613,8 +615,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    * en caisse » s'imprime pour le client (F2, F7 : toujours ; F4 : si l'impression
    * automatique est réglée). Rien ne sort du stock avant l'encaissement.
    */
-  const sendToCounter = async (print: boolean, supervisorPin?: string) => {
+  const sendToCounter = async (print: boolean, supervisorPin?: string, format?: 'listing' | 'a4' | null) => {
     if (!lines.length) return;
+    // F7 (listing) ou Ctrl+F7 (A4) : le client veut une facture, la caisse la trouvera déjà cochée.
+    if (format !== undefined) counterFormat.current = format;
     try {
       const sent = await call('counter.send', {
         id: counterEdit?.id ?? null,
@@ -628,7 +632,9 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         supervisorPin,
         discountReason: discountReason || null,
         fieldRepId: fieldRepId || null,
+        printFormat: counterFormat.current,
       });
+      counterFormat.current = null;
       clear();
       setCustomer(null);
       setCounterPin(null);
@@ -687,7 +693,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    */
   const validate = async (print: PrintChoice = 'none') => {
     if (!lines.length) return;
-    if (sellerPost) return sendToCounter(print !== 'none');
+    if (sellerPost) return sendToCounter(print !== 'none', undefined, print === 'listing' ? 'listing' : null);
     printRef.current = print;
     if (credit) {
       if (!customer) {
@@ -863,7 +869,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         F6: () => selected !== null && setDialog('discount'),
         F7: () => (lines.length ? void validate('listing') : reprintListing()),
         F8: () => setDialog('customer'),
-        F9: printA4,
+        // Vendeur séparé : F9 envoie la fiche en demandant la facture A4 au caissier.
+        F9: () => (sellerPost && lines.length ? void sendToCounter(true, undefined, 'a4') : printA4()),
         F10: () => (sellerPost ? setDialog('counter') : can('sale_resume') && setDialog('held')),
       };
       // Ctrl+F4 ferme une fenêtre ailleurs : à la caisse il ne valide pas la fiche.
@@ -1385,7 +1392,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
 
   // --- Actions communes aux trois présentations ---------------------------------
   const openPay = () => {
-    if (sellerPost) return void sendToCounter(false);
+    if (sellerPost) return void sendToCounter(false, undefined, null);
     printRef.current = 'none';
     setDialog('pay');
   };
@@ -1814,6 +1821,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                 <button className="main" disabled={!lines.length} onClick={() => void validate('ticket')} title="Envoie la facture à la caisse et imprime le bon du client">
                   Envoyer à la caisse <kbd>F4</kbd>
                 </button>
+                <button disabled={!lines.length} onClick={() => void validate('listing')} title="Le client veut une facture listing : le caissier la trouvera cochée">
+                  Envoyer · listing <kbd>F7</kbd>
+                </button>
+                <button disabled={!lines.length} onClick={() => void sendToCounter(true, undefined, 'a4')} title="Le client veut une facture A4 : le caissier la trouvera cochée">
+                  Envoyer · A4 <kbd>F9</kbd>
+                </button>
                 <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon">
                   <span>
                     Mes factures envoyées
@@ -2161,6 +2174,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
             <>
               <button onClick={() => setDialog('counter')} title="Factures envoyées : les modifier, les annuler, réimprimer le bon">
                 Mes factures envoyées {returnedCount > 0 && <b className="held-count">{returnedCount}</b>} <kbd>F10</kbd>
+              </button>
+              <button disabled={!lines.length} onClick={() => void validate('listing')} title="Le client veut une facture listing : le caissier la trouvera cochée">
+                Envoyer · listing <kbd>F7</kbd>
+              </button>
+              <button disabled={!lines.length} onClick={() => void sendToCounter(true, undefined, 'a4')} title="Le client veut une facture A4 : le caissier la trouvera cochée">
+                Envoyer · A4 <kbd>F9</kbd>
               </button>
               <button className="g" disabled={!lines.length} onClick={() => void validate('ticket')} title="Envoie la facture à la caisse et imprime le bon du client">
                 Envoyer à la caisse <kbd>F4</kbd>

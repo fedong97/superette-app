@@ -11,6 +11,15 @@ type Row = Result<'counter.queue'>[number];
 type Recap = Result<'counter.take'>;
 type Payments = Parameters<Api['counter.pay']>[0]['payments'];
 
+type Print = Recap['printFormat'];
+/** Impressions au choix du caissier, comme à la caisse où vendeur et caissier ne font qu'un. */
+const PRINTS: { id: Print; label: string; key: string }[] = [
+  { id: 'ticket', label: 'Ticket de caisse', key: 'F2' },
+  { id: 'listing', label: 'Facture listing', key: 'F7' },
+  { id: 'a4', label: 'Facture A4', key: 'F9' },
+  { id: 'none', label: 'Sans impression', key: 'F4' },
+];
+
 const BILLS = [1000, 2000, 5000, 10000];
 const amount = (v: number) => formatFcfa(v, false);
 const hour = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -63,7 +72,9 @@ export function CounterDesk({
   const [pending, setPending] = useState<{ payments: Payments; supervisorPin?: string; reason: 'discount' | 'credit'; message: string; keepChange?: number | null } | null>(null);
   const [lastSale, setLastSale] = useState<Result<'counter.pay'> | null>(null);
   const [busy, setBusy] = useState(false);
-  const printRef = useRef<'none' | 'ticket'>('none');
+  const printRef = useRef<Print>('none');
+  /** Impression choisie pour la facture ouverte : celle demandée par le vendeur, A4 pour un client professionnel, sinon le ticket. */
+  const [printChoice, setPrintChoice] = useState<Print>('ticket');
   const scanRef = useRef<HTMLInputElement>(null);
 
   // La liste se relit toutes les 5 secondes : la facture du vendeur arrive sans rien toucher.
@@ -110,6 +121,7 @@ export function CounterDesk({
         await call('counter.release', recap.id).catch(() => undefined);
         toast.error(`La facture n° ${recap.number} n'est pas du même client ou du même vendeur : encaissez-la à part`);
       } else {
+        if (!open.length) setPrintChoice(recap.printFormat);
         setOpen((o) => [...o, recap]);
         setLastSale(null);
         setPaidShown(null);
@@ -126,7 +138,7 @@ export function CounterDesk({
     e.preventDefault();
     const n = scannedNumber(search);
     if (n === null) {
-      if (open.length && !search.trim()) return void validate('none');
+      if (open.length && !search.trim()) return void validate(printChoice);
       return toast.error('Tapez ou scannez le numéro de la facture (sur le bon du client)');
     }
     const row = rows.find((r) => r.number === n);
@@ -156,7 +168,12 @@ export function CounterDesk({
     const print = printRef.current;
     printRef.current = 'none';
     if (print === 'ticket') call('pos.printTicket', sale.id, { newSale: true, force: true }).catch((err) => toast.error(err));
-    else call('pos.saleDrawer', sale.id).catch((err) => toast.error(err));
+    else {
+      // Sans ticket, le tiroir s'ouvre quand même pour une vente en espèces (réglage du poste).
+      call('pos.saleDrawer', sale.id).catch((err) => toast.error(err));
+      if (print === 'listing') call('pos.printInvoice', sale.id, { format: 'listing' }).catch((err) => toast.error(err));
+      else if (print === 'a4') call('pos.printInvoice', sale.id).catch((err) => toast.error(err));
+    }
   };
 
   const pay = async (payments: Payments, pins: { supervisorPin?: string; creditPin?: string; keepChange?: number | null } = {}) => {
@@ -174,18 +191,23 @@ export function CounterDesk({
     }
   };
 
-  /** Entrée ou F4 : en espèces si le reçu couvre le total, sinon le choix du règlement. F2 imprime le ticket. */
-  const validate = async (print: 'none' | 'ticket') => {
+  /**
+   * En espèces si le reçu couvre le total, sinon le choix du règlement. Entrée
+   * imprime ce qui est choisi ; F2 le ticket, F7 la facture listing, F9 la
+   * facture A4, F4 rien.
+   */
+  const validate = async (print: Print) => {
     if (!open.length || busy) return;
     printRef.current = print;
     if (cashGiven >= cashDue) return pay(cashGiven > 0 ? [{ method: 'CASH', amount: cashGiven }] : []);
     setDialog('pay');
   };
 
-  const reprint = () => {
+  const reprint = (format: Print = 'ticket') => {
     if (!lastSale) return;
     if (!has(user, 'sale_reprint')) return toast.error("Vous n'avez pas le droit de réimprimer un ticket");
-    call('pos.printTicket', lastSale.id).catch(toast.error);
+    if (format === 'ticket') call('pos.printTicket', lastSale.id).catch(toast.error);
+    else call('pos.printInvoice', lastSale.id, format === 'listing' ? { format: 'listing' } : undefined).catch(toast.error);
   };
 
   useEffect(() => {
@@ -195,13 +217,14 @@ export function CounterDesk({
       if (e.key === 'F4') {
         e.preventDefault();
         void validate('none');
-      } else if (e.key === 'F2') {
+      } else if (e.key === 'F2' || e.key === 'F7' || e.key === 'F9') {
         e.preventDefault();
-        if (open.length) void validate('ticket');
-        else reprint();
+        const format: Print = e.key === 'F2' ? 'ticket' : e.key === 'F7' ? 'listing' : 'a4';
+        if (open.length) void validate(format);
+        else reprint(format);
       } else if (e.ctrlKey && e.key.toLowerCase() === 'e' && open.length) {
         e.preventDefault();
-        printRef.current = 'none';
+        printRef.current = printChoice;
         setDialog('pay');
       }
     };
@@ -369,17 +392,32 @@ export function CounterDesk({
                   <b>{change ? amount(change) : '—'}</b>
                 </div>
               </div>
+              <div className="cd-print" role="radiogroup" aria-label="Impression à l'encaissement">
+                <small>IMPRESSION</small>
+                {PRINTS.map((p) => (
+                  <button
+                    key={p.id}
+                    role="radio"
+                    aria-checked={printChoice === p.id}
+                    className={printChoice === p.id ? 'on' : ''}
+                    onClick={() => setPrintChoice(p.id)}
+                    title={`${p.label} (${p.key} : encaisser directement avec cette impression)`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
               <div className="cd-actions">
-                <button className="primary big" disabled={busy} onClick={() => void validate('ticket')}>
-                  Encaisser + ticket <kbd>F2</kbd>
+                <button className="primary big" disabled={busy} onClick={() => void validate(printChoice)} title="Entrée">
+                  {printChoice === 'none' ? 'Encaisser sans imprimer' : `Encaisser + ${PRINTS.find((p) => p.id === printChoice)!.label.toLowerCase()}`} <kbd>Entrée</kbd>
                 </button>
                 <button className="primary" disabled={busy} onClick={() => void validate('none')}>
-                  Encaisser <kbd>F4</kbd>
+                  Encaisser sans imprimer <kbd>F4</kbd>
                 </button>
                 <button
                   disabled={busy}
                   onClick={() => {
-                    printRef.current = 'none';
+                    printRef.current = printChoice;
                     setDialog('pay');
                   }}
                   title="Mobile Money, carte, bon d'achat, paiements mixtes, compte du client"
@@ -403,8 +441,14 @@ export function CounterDesk({
                   Dernière facture <b>{lastSale.number}</b> : {fcfa(lastSale.total_ttc)}
                   {lastSale.change_given > 0 ? `, rendu ${fcfa(lastSale.change_given)}` : ''}
                 </p>
-                <button disabled={!has(user, 'sale_reprint')} onClick={reprint}>
+                <button disabled={!has(user, 'sale_reprint')} onClick={() => reprint('ticket')}>
                   Réimprimer le ticket <kbd>F2</kbd>
+                </button>
+                <button disabled={!has(user, 'sale_reprint')} onClick={() => reprint('listing')}>
+                  Facture listing <kbd>F7</kbd>
+                </button>
+                <button disabled={!has(user, 'sale_reprint')} onClick={() => reprint('a4')}>
+                  Facture A4 <kbd>F9</kbd>
                 </button>
               </>
             ) : (

@@ -33,7 +33,13 @@ export interface CounterPayload {
   fieldRepId?: string | null;
   /** Caisse qui doit l'encaisser (celle du vendeur dans Administration › Utilisateurs) ; absente : n'importe quelle caisse. */
   registerId?: string | null;
+  /** Impression demandée par le vendeur pour le client (le caissier peut changer). */
+  printFormat?: CounterPrint | null;
 }
+
+/** Impression à l'encaissement : ticket de caisse, facture listing, facture A4, ou rien. */
+export type CounterPrint = 'ticket' | 'listing' | 'a4' | 'none';
+export const COUNTER_PRINTS: CounterPrint[] = ['ticket', 'listing', 'a4', 'none'];
 
 export type CounterStatus = 'waiting' | 'editing' | 'returned' | 'paying' | 'paid' | 'cancelled';
 

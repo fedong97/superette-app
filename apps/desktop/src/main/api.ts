@@ -78,6 +78,8 @@ import {
   shelfCarts,
   type CounterInvoice,
   type CounterPayload,
+  type CounterPrint,
+  COUNTER_PRINTS,
   counterAction,
   counterGet,
   counterList,
@@ -736,6 +738,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       total: totals.totalTtc,
       discount: totals.totalDiscount + totals.totalPromo,
       items: totals.itemCount,
+      // Impression proposée au caissier : celle demandée par le vendeur, sinon A4 pour un client professionnel (NIU), sinon le ticket.
+      printFormat: (p.printFormat ?? (customer?.taxpayer_number ? 'a4' : 'ticket')) as CounterPrint,
       payload: p,
     };
   };
@@ -2007,6 +2011,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       optionsPin?: string;
       discountReason?: string | null;
       fieldRepId?: string | null;
+      printFormat?: CounterPrint | null;
     }) => {
       const c = ctx(POS);
       const u = user!;
@@ -2049,6 +2054,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         fieldRepId: input.fieldRepId ?? old?.fieldRepId ?? null,
         // La caisse choisie pour ce vendeur dans Administration › Utilisateurs.
         registerId: s.admin.getUser(u.id).counter_register_id ?? null,
+        printFormat: input.printFormat && COUNTER_PRINTS.includes(input.printFormat) ? input.printFormat : null,
       };
       const ready = s.counter.prepare(c.storeId, payload);
       // Remise : le droit du vendeur, le code du gérant, sous le maximum des paramètres, ou pas plus que la version validée.

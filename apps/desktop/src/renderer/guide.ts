@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.108.0',
+    items: [
+      "ONIX 360 Mobile, gérant : « Gérer la boutique » ouvre les écrans de gestion du PC sur le téléphone : tableau de bord, ventes, trésorerie et caisses, clients, fournisseurs, achats et paiements, dépenses, comptabilité, produits et prix, stock, équipe et planning, caisses et utilisateurs. On y crée, modifie, encaisse et règle comme au PC.",
+      "Chaque action faite sur le téléphone est exécutée par un PC allumé du magasin (n'importe lequel), avec les droits de la personne connectée, sans déranger la personne assise devant ce PC. L'impression, les fichiers et les réglages propres à un poste restent sur les PC.",
+    ],
+  },
+  {
     version: '0.107.0',
     items: [
       "Rien n'est réservé au seul gérant : nouveau groupe « Opérations sensibles » dans les droits, et droit « Superviseur » qui rend le code d'un employé valable comme celui du gérant (annulations, retours, remises, crédit au-delà du plafond, sorties de caisse, avances…).",

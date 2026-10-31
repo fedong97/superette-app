@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 
@@ -12,5 +13,11 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        // mobile.html : les écrans de gestion du PC dans ONIX 360 Mobile (téléphone du gérant).
+        input: { index: resolve(__dirname, 'src/renderer/index.html'), mobile: resolve(__dirname, 'src/renderer/mobile.html') },
+      },
+    },
   },
 });

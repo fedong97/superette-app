@@ -153,6 +153,21 @@ interface DaySale {
   cancelReason: string | null;
 }
 
+/**
+ * Gestion complète : les écrans du PC (clients, trésorerie, caisses…) dans le
+ * téléphone ; un PC allumé du magasin exécute chaque action au nom du gérant.
+ */
+function openPcManagement() {
+  const st = S.getState();
+  if (!st.config || !st.session) return;
+  try {
+    localStorage.setItem('onix.pc', JSON.stringify({ url: st.config.url, token: st.config.token, session: st.session.token }));
+  } catch {
+    return;
+  }
+  location.href = './pc/mobile.html';
+}
+
 const ACTION_STATUS: Record<ManagerAction['status'], string> = { pending: 'en attente d’un PC', done: 'fait', failed: 'refusé', expired: 'abandonné' };
 
 /** Envoie une action du gérant au serveur ; un PC du magasin l'exécute en quelques secondes. */
@@ -227,6 +242,12 @@ export function Manager({ onBack }: { onBack: (() => void) | null }) {
           ))}
         </div>
         {error ? <div className="notice erreur">{error}</div> : null}
+        {home?.write && tab === 'jour' ? (
+          <button className="big primary" onClick={openPcManagement}>
+            Gérer la boutique
+            <small>Clients, fournisseurs, trésorerie, caisses, dépenses, produits, équipe…</small>
+          </button>
+        ) : null}
         {!home && !error ? <div className="card muted">Chargement…</div> : null}
         {home && home.approvals ? (
           <button className="big primary" onClick={() => setApprovals(true)}>

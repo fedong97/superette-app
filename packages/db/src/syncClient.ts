@@ -539,3 +539,27 @@ export async function finishManagerAction(s: Services, id: string, result: { ok:
   if (!creds) return;
   await request(creds.url, `/api/v1/manager-actions/${encodeURIComponent(id)}`, { token: creds.token, body: result });
 }
+
+/** Appel du logiciel du PC fait depuis le téléphone du gérant (« le PC sur le téléphone »). */
+export interface RemotePcCall {
+  id: string;
+  userId: string;
+  name: string;
+  args: unknown[];
+}
+
+export type RemotePcReply = { ok: true; data: unknown } | { ok: false; error: { message: string; code: string; fixes?: unknown[] } };
+
+/** Attend (jusqu'à 25 s) les appels du téléphone du gérant pour ce magasin. */
+export async function nextRemotePcCalls(s: Services): Promise<RemotePcCall[]> {
+  const creds = s.sync.credentials();
+  if (!creds) return [];
+  return (await request<{ calls: RemotePcCall[] }>(creds.url, '/api/v1/remote-pc/next?wait=25000', { token: creds.token, timeoutMs: 40_000 })).calls ?? [];
+}
+
+/** Rend au téléphone la réponse du PC. */
+export async function replyRemotePcCall(s: Services, id: string, reply: RemotePcReply): Promise<void> {
+  const creds = s.sync.credentials();
+  if (!creds) return;
+  await request(creds.url, `/api/v1/remote-pc/${encodeURIComponent(id)}`, { token: creds.token, body: reply });
+}

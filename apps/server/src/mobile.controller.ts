@@ -7,6 +7,7 @@ import { ManagerService } from './manager.service';
 import { MobileService, type MobileCountInput } from './mobile.service';
 import { ManagerActionsService } from './managerActions.service';
 import { PushService } from './push.service';
+import { RemotePcService } from './remotePc.service';
 import { INVENTORY_PAGE } from './admin.page';
 
 const SESSION = 'x-fedonix-session';
@@ -30,6 +31,7 @@ export class MobileController {
     @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
     @Inject(ManagerActionsService) private readonly actions: ManagerActionsService,
     @Inject(PushService) private readonly push: PushService,
+    @Inject(RemotePcService) private readonly remote: RemotePcService,
   ) {}
 
   // ——— Gérant sur le téléphone : à valider, ventes du jour, actions exécutées par un PC ———
@@ -68,6 +70,23 @@ export class MobileController {
     const caller = await this.mobile.caller(auth, session);
     await this.mobile.managerGuard(caller, true);
     return this.actions.push(caller, body);
+  }
+
+  /** Le PC sur le téléphone : un PC du magasin est-il là pour exécuter ? */
+  @Get('api/v1/mobile/pc/status')
+  async pcStatus(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller, true);
+    return { online: this.remote.online(caller.device.store_id) };
+  }
+
+  /** Le PC sur le téléphone : une action du logiciel du PC, exécutée par un PC du magasin au nom du gérant. */
+  @Post('api/v1/mobile/pc/call')
+  @HttpCode(200)
+  async pcCall(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Body() body: { name?: unknown; args?: unknown }) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller, true);
+    return this.remote.call(caller.device.store_id, caller.user.id, body?.name, body?.args);
   }
 
   /** Réglages Firebase pour l'appli (null : notifications pas encore réglées sur ce serveur). */

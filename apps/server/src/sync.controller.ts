@@ -3,6 +3,7 @@ import { ApprovalsService } from './approvals.service';
 import { CounterService } from './counter.service';
 import { MobileService } from './mobile.service';
 import { ManagerActionsService } from './managerActions.service';
+import { type RemoteReply, RemotePcService } from './remotePc.service';
 import { type SyncEvent, SyncService } from './sync.service';
 
 /** Limite les essais de code d'activation (6 chiffres) ou d'identifiant : 10 échecs par heure et par adresse. */
@@ -16,6 +17,7 @@ export class SyncController {
     @Inject(MobileService) private readonly mobile: MobileService,
     @Inject(CounterService) private readonly counter: CounterService,
     @Inject(ManagerActionsService) private readonly actions: ManagerActionsService,
+    @Inject(RemotePcService) private readonly remote: RemotePcService,
   ) {}
 
   // ——— Actions du gérant faites sur le téléphone, exécutées par un PC du magasin ———
@@ -29,6 +31,19 @@ export class SyncController {
   @HttpCode(200)
   async managerActionDone(@Headers('authorization') auth: string | undefined, @Param('id') id: string, @Body() body: { ok?: boolean; message?: string | null }) {
     return this.actions.finish(await this.sync.authenticate(auth), id, body ?? {});
+  }
+
+  // ——— Le PC sur le téléphone du gérant : le PC attend les appels et rend les réponses ———
+
+  @Get('remote-pc/next')
+  async remoteNext(@Headers('authorization') auth: string | undefined, @Query('wait') wait?: string) {
+    return this.remote.next(await this.sync.authenticate(auth), Number(wait) || undefined);
+  }
+
+  @Post('remote-pc/:id')
+  @HttpCode(200)
+  async remoteReply(@Headers('authorization') auth: string | undefined, @Param('id') id: string, @Body() body: RemoteReply) {
+    return this.remote.reply(await this.sync.authenticate(auth), id, body);
   }
 
   @Get('health')

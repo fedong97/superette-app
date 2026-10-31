@@ -71,8 +71,12 @@ jobs:
           java-version: 21
       - run: npm ci
       - name: Pages de l'application
-        working-directory: apps/inventory
-        run: npx vite build && npx cap sync android
+        run: |
+          (cd apps/inventory && npx vite build)
+          # Écrans de gestion du PC pour le téléphone du gérant (pc/mobile.html).
+          (cd apps/desktop && npx electron-vite build)
+          rm -rf apps/inventory/dist/pc && cp -r apps/desktop/out/renderer apps/inventory/dist/pc
+          (cd apps/inventory && npx cap sync android)
       # Clé de signature gardée dans les secrets du dépôt, si elle y est ; sinon celle du dépôt.
       - name: Clé de signature
         env:

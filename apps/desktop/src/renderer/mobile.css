@@ -1,0 +1,165 @@
+/* Écrans du PC sur le téléphone du gérant : une colonne, tout défile, rien ne déborde. */
+body.mobile-pc {
+  margin: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  font-size: 15px;
+}
+.mpc {
+  min-height: 100vh;
+  background: var(--bg, #f4f6f5);
+}
+.mpc-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+  background: var(--brand, #1f7a4d);
+  color: #fff;
+}
+.mpc-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+}
+.mpc-back {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 26px;
+  line-height: 1;
+  padding: 4px 10px;
+  min-width: 44px;
+  min-height: 44px;
+}
+.mpc-main {
+  padding: 12px;
+}
+.mpc-note {
+  color: var(--muted, #5b6560);
+  margin: 4px 0 12px;
+}
+.mpc-error {
+  background: #fdecea;
+  color: #8a1c13;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.mpc-group h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #5b6560);
+  margin: 16px 0 8px;
+}
+.mpc-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.mpc-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #dfe5e2);
+  background: #fff;
+  min-height: 96px;
+}
+.mpc-tile b {
+  font-size: 15px;
+}
+.mpc-tile small {
+  color: var(--muted, #5b6560);
+  font-size: 12px;
+}
+.mpc-icon {
+  font-size: 22px;
+}
+
+/* Écrans du PC : pages en une colonne, onglets qui défilent, tableaux qui glissent. */
+.mobile-pc .mpc-screen {
+  min-width: 0;
+}
+.mobile-pc .page {
+  padding: 0 !important;
+  min-width: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+.mobile-pc .page-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mobile-pc .page-head h1 {
+  display: none;
+}
+.mobile-pc [role='tablist'],
+.mobile-pc .tabs {
+  overflow-x: auto;
+  flex-wrap: nowrap !important;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile-pc [role='tab'] {
+  white-space: nowrap;
+}
+.mobile-pc table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile-pc .row,
+.mobile-pc .toolbar,
+.mobile-pc .form-row,
+.mobile-pc .grid2,
+.mobile-pc .grid3 {
+  flex-wrap: wrap;
+}
+.mobile-pc .grid2,
+.mobile-pc .grid3 {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.mobile-pc input,
+.mobile-pc select,
+.mobile-pc textarea {
+  max-width: 100%;
+  font-size: 16px; /* pas de zoom automatique au toucher */
+}
+.mobile-pc .modal,
+.mobile-pc [role='dialog'] {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  left: 0 !important;
+  border-radius: 0 !important;
+  overflow-y: auto;
+}
+.mobile-pc .btn,
+.mobile-pc button {
+  min-height: 40px;
+}
+.mobile-pc th,
+.mobile-pc td {
+  white-space: nowrap;
+}
+.mobile-pc label select,
+.mobile-pc label input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.mobile-pc .card,
+.mobile-pc .panel {
+  max-width: 100%;
+  overflow-x: auto;
+}

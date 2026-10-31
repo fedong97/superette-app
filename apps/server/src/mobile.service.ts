@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { type Db, PG } from './database';
+import { isSupervisor, rightFrom, storeUsers } from './rights';
 
 type Json = Record<string, unknown>;
 
@@ -321,12 +322,7 @@ export class MobileService {
   /** Un droit de l'utilisateur, comme sur les PC : rôle, réglages du rôle, privilèges personnels. */
   private async hasRight(userId: string, role: string, right: string, defaults: string[]): Promise<boolean> {
     if (role === 'admin') return true;
-    const ur = await this.one('user_rights', userId);
-    if (json<string[]>(ur?.['revokes'], []).includes(right)) return false;
-    if (json<string[]>(ur?.['grants'], []).includes(right)) return true;
-    const rr = await this.one('role_rights', role);
-    const saved = json<Record<string, boolean>>(rr?.['rights'], {})[right];
-    return saved ?? defaults.includes(role);
+    return rightFrom(role, await this.one('user_rights', userId), await this.one('role_rights', role), [right], defaults);
   }
 
   /** Droit « Saisir le stock physique dans un inventaire ». */
@@ -345,15 +341,7 @@ export class MobileService {
    */
   private async hasChainRight(userId: string, role: string, chain: string[], defaults: string[]): Promise<boolean> {
     if (role === 'admin') return true;
-    const ur = await this.one('user_rights', userId);
-    const rr = json<Record<string, boolean>>((await this.one('role_rights', role))?.['rights'], {});
-    const revokes = json<string[]>(ur?.['revokes'], []);
-    const grants = json<string[]>(ur?.['grants'], []);
-    const [right] = chain;
-    if (revokes.includes(right!)) return false;
-    if (grants.includes(right!)) return true;
-    for (const r of chain) if (rr[r] !== undefined) return rr[r]!;
-    return defaults.includes(role);
+    return rightFrom(role, await this.one('user_rights', userId), await this.one('role_rights', role), chain, defaults);
   }
 
   /** Ce que la personne connectée peut faire sur le téléphone. */
@@ -373,18 +361,20 @@ export class MobileService {
       // Sans ces droits, le vendeur fait quand même la remise ou change le tarif : le gérant tape son code sur le téléphone.
       discount: full && (await this.hasRight(id, role, 'discount', ['manager'])),
       tariff: full && (await this.hasRight(id, role, 'sale_tariff', ['manager'])),
-      manage: settings.manager !== 'off' && (role === 'admin' || role === 'manager') ? settings.manager : null,
+      // Espace du gérant : le gérant, ou tout utilisateur à qui ce droit est donné (rôle, privilège, délégation).
+      manage: settings.manager !== 'off' && (await this.hasRight(id, role, 'mobile_manager', ['manager'])) ? settings.manager : null,
     };
   }
 
   /** Code d'un gérant du magasin (ou d'un administrateur), vérifié sur les fiches reçues des PC. */
   private async supervisor(storeId: string, pin: string): Promise<{ id: string; name: string } | null> {
     if (!/^\d{4,8}$/.test(pin)) return null;
-    const users = await this.latest('user', "AND payload->>'role' IN ('admin', 'manager')");
-    const u = users.find(
-      (x) => x.payload['active'] !== 0 && !x.payload['deleted_at'] && (!x.payload['store_id'] || x.payload['store_id'] === storeId) && verifyPin(pin, str(x.payload['pin_hash'])),
-    );
-    return u ? { id: u.entity_id, name: str(u.payload['name']) } : null;
+    // Gérant, administrateur, ou utilisateur à qui le droit « Superviseur » est donné ou délégué.
+    for (const x of await storeUsers(this.pg, storeId)) {
+      if (!verifyPin(pin, str(x.payload['pin_hash']))) continue;
+      if (await isSupervisor(this.pg, x.entity_id, str(x.payload['role']))) return { id: x.entity_id, name: str(x.payload['name']) };
+    }
+    return null;
   }
 
   /** Le contrôle des tickets à la sortie n'existe que dans les magasins qui l'ont activé. */

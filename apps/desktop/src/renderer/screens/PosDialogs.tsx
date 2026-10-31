@@ -480,6 +480,9 @@ export function CancelDialog({ sessionId, onClose }: { sessionId: string; onClos
 }
 
 export function ReturnDialog({ onClose, initialSale = null }: { onClose: () => void; initialSale?: Result<'pos.sale'> | null }) {
+  // Droit « retour sans le code du gérant » : l'utilisateur valide lui-même.
+  const me = useLoad(() => call('app.state'), []);
+  const free = Boolean(me.data?.user && me.data.user.role !== 'admin' && me.data.user.rights.includes('sale_return_free'));
   const toast = useToast();
   const [number, setNumber] = useState('');
   const [sale, setSale] = useState<Result<'pos.sale'> | null>(initialSale && initialSale.kind === 'sale' && initialSale.status === 'completed' ? initialSale : null);
@@ -491,6 +494,24 @@ export function ReturnDialog({ onClose, initialSale = null }: { onClose: () => v
   const loyaltyOn = useStoreSettings().loyaltyEnabled;
   const selected = sale ? sale.lines.filter((l) => (qtys[l.id] ?? 0) > 0) : [];
   const amount = selected.reduce((s, l) => s + Math.round((l.total_ttc * qtys[l.id]!) / l.qty), 0);
+  const doReturn = async (pin?: string) => {
+    if (!sale) return;
+    try {
+      const ret = await call('pos.return', {
+        originalSaleId: sale.id,
+        lines: selected.map((l) => ({ lineId: l.id, qty: qtys[l.id]! })),
+        refundMethod: refund,
+        supervisorPin: pin,
+        reason,
+      });
+      toast.ok(`Retour ${ret.number} enregistré`);
+      call('pos.printTicket', ret.id, { newSale: true }).catch(toast.error);
+      onClose();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
   return (
     <Modal title="Retour client" onClose={onClose} wide>
       {!sale ? (
@@ -565,7 +586,7 @@ export function ReturnDialog({ onClose, initialSale = null }: { onClose: () => v
           </div>
           <div className="actions">
             <span className="big-total">{fcfa(amount)}</span>
-            <button className="primary" disabled={!selected.length || !reason.trim()} onClick={() => setAskPin(true)}>
+            <button className="primary" disabled={!selected.length || !reason.trim()} onClick={() => (free ? void doReturn() : setAskPin(true))}>
               Valider le retour
             </button>
           </div>
@@ -577,20 +598,7 @@ export function ReturnDialog({ onClose, initialSale = null }: { onClose: () => v
           onCancel={() => setAskPin(false)}
           onConfirm={async (pin) => {
             setAskPin(false);
-            try {
-              const ret = await call('pos.return', {
-                originalSaleId: sale.id,
-                lines: selected.map((l) => ({ lineId: l.id, qty: qtys[l.id]! })),
-                refundMethod: refund,
-                supervisorPin: pin,
-                reason,
-              });
-              toast.ok(`Retour ${ret.number} enregistré`);
-              call('pos.printTicket', ret.id, { newSale: true }).catch(toast.error);
-              onClose();
-            } catch (e) {
-              toast.error(e);
-            }
+            await doReturn(pin);
           }}
         />
       )}
@@ -630,7 +638,7 @@ export function ScannedTicketDialog({ sale, canReturn, canReprint, onReturn, onC
         <button type="button" onClick={() => call('pos.printInvoice', sale.id).then(onClose, toast.error)}>
           Facture A4
         </button>
-        <button type="button" className="primary" disabled={!canReturn || !returnable} onClick={onReturn} title="Le retour demande toujours le code du gérant">
+        <button type="button" className="primary" disabled={!canReturn || !returnable} onClick={onReturn} title="Le retour demande le code du gérant, sauf avec le droit « retour sans code »">
           Retour d'articles…
         </button>
       </div>

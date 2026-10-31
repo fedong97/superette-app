@@ -424,7 +424,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     const a = remoteApprovals.get(remote[1]!);
     if (!a || a.until < Date.now()) throw new AppError("L'accord du gérant a expiré : redemandez-le", 'SUPERVISOR_DENIED');
     const u = s.admin.getUser(a.userId);
-    if (!u.active || u.deleted_at || (u.role !== 'admin' && u.role !== 'manager')) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    if (!u.active || u.deleted_at || !s.admin.isSupervisor(u)) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
     return u;
   };
   /** Client choisi sur le téléphone : gardé s'il est connu de ce PC (sinon le panier passe en client comptoir). */
@@ -628,8 +628,19 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!system.chooseOpenFile) throw new AppError('Indisponible sur ce poste', 'UNAVAILABLE');
     return system.chooseOpenFile(title, name, extensions);
   };
-  /** Gérant ou administrateur : leur présence vaut validation (code superviseur). */
-  const isSupervisor = (u: User) => u.role === 'admin' || u.role === 'manager';
+  /** Superviseur (gérant, administrateur, ou droit « Superviseur » donné) : sa présence vaut validation. */
+  const isSupervisor = (u: User) => s.admin.isSupervisor(u);
+  /**
+   * Sortie d'argent sans code : le droit « prélèvement et dépense sans code » et,
+   * s'il est fixé, le plafond de l'utilisateur ; au-delà, le code d'un superviseur.
+   */
+  const cashOutFree = (u: User, amount: Fcfa, pin?: string | null) => {
+    if (!can(u, ['cashout'])) return false;
+    const cap = s.admin.limits(u.id).cashOut ?? 0;
+    if (!cap || amount <= cap) return true;
+    if (!pin) throw new AppError(`Sortie au-delà de votre plafond de ${cap.toLocaleString('fr-FR')} FCFA : code du gérant nécessaire`, 'SUPERVISOR_REQUIRED');
+    return false;
+  };
   /** Points d'attention du gérant : chaque point n'apparaît qu'avec le droit de la fenêtre qui le traite. */
   const attentionFor = (u: User, storeId: string) => {
     const rules: [AttentionKey, boolean][] = [
@@ -1361,6 +1372,29 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return { role: target.role, roleRights: s.admin.rights(target.role), ...s.admin.privileges(userId) };
     },
     'admin.savePrivileges': (userId: string, input: { grants: Permission[]; revokes: Permission[] }) => s.admin.savePrivileges(requireAdmin().id, userId, input),
+    /** Délégations en cours : qui tient les pouvoirs de quel gérant, jusqu'à quand. */
+    'admin.delegations': () => (requireUser(['delegate', 'user_limits', 'users_manage']), s.admin.delegations()),
+    /** Le gérant qui s'absente confie ses pouvoirs à un utilisateur jusqu'à une date. */
+    'admin.delegate': (toUserId: string, until: string) => {
+      const u = requireUser(['delegate']);
+      return s.admin.delegate(u.id, toUserId, until);
+    },
+    /** Fin de la délégation, tout de suite : par celui qui l'a donnée, par celui qui la tient, ou par qui gère les utilisateurs. */
+    'admin.endDelegation': (userId: string) => {
+      const u = requireUser();
+      const d = s.admin.privileges(userId).delegation;
+      if (!(u.role === 'admin' || u.id === userId || d?.by === u.id || can(u, ['users_manage']))) throw new AppError("Vous n'avez pas les droits pour cette action", 'FORBIDDEN');
+      s.admin.endDelegation(u.id, userId);
+    },
+    /** Plafonds des utilisateurs quand ils agissent sans le code du gérant. */
+    'admin.userLimits': () => {
+      requireUser(['user_limits']);
+      return s.admin
+        .listUsers()
+        .filter((x) => x.active === 1 && x.role !== 'admin')
+        .map((x) => ({ id: x.id, name: x.name, role: x.role, limits: s.admin.limits(x.id), discount: s.admin.hasRight(x, 'discount'), cashout: s.admin.hasRight(x, 'cashout') }));
+    },
+    'admin.saveLimits': (userId: string, limits: { discountPct?: number; cashOut?: number }) => s.admin.saveLimits(requireUser(['user_limits']).id, userId, limits),
     /** Autres utilisateurs actifs qui ont ce droit. */
     'admin.holders': (permission: Permission) => (requireUser(ADMIN), s.admin.holders(permission)),
     /** Paramètres du magasin de ce poste (Administration › Paramètres). */
@@ -1738,7 +1772,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'pos.cashOperation': (type: 'IN' | 'OUT', amount: Fcfa, reason: string, supervisorPin?: string) => {
       const c = ctx(type === 'IN' ? ['cash_in'] : ['cash_withdraw', 'cashout']);
       // Un prélèvement par un caissier doit être validé par le gérant.
-      if (type === 'OUT' && !can(user!, ['cashout'])) supervisor(supervisorPin ?? '');
+      if (type === 'OUT' && !cashOutFree(user!, amount, supervisorPin)) supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
     'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
@@ -1877,8 +1911,11 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (isSupervisor(u) && sale.register_id && sale.register_id !== ctx().registerId) chosenRegisterId = sale.register_id;
       return { ...editable, number: sale.number, credit: sale.payments.some((p) => p.method === 'CUSTOMER_CREDIT') };
     },
-    'pos.return': async (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin: string; reason: string }) => {
-      const ret = s.pos.returnSale(ctx(['sale_return']), { ...input, supervisorId: supervisor(input.supervisorPin).id });
+    'pos.return': async (input: { originalSaleId: string; lines: { lineId: string; qty: Milli }[]; refundMethod: PaymentMethod; supervisorPin?: string; reason: string }) => {
+      const c = ctx(['sale_return']);
+      // Droit « retour sans le code du gérant » : l'utilisateur valide lui-même son retour.
+      const free = !input.supervisorPin && user!.role !== 'admin' && can(user!, ['sale_return_free']);
+      const ret = s.pos.returnSale(c, { ...input, supervisorId: free ? user!.id : supervisor(input.supervisorPin ?? '').id, byRight: free });
       // Remboursé en bon d'avoir : le bon s'imprime avec son code-barres.
       const code = input.refundMethod === 'VOUCHER' ? ret.payments.find((p) => p.method === 'VOUCHER')?.reference : null;
       const voucher = code ? s.vouchers.byCode(code) : null;
@@ -2617,7 +2654,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'cashdesk.out': (sessionId: string, input: CashOutInput, supervisorPin?: string) => {
       const c = deskCtx(sessionId);
       // Le code saisi l'emporte : il sert aussi à dépasser le plafond des avances.
-      const by = supervisorPin ? supervisor(supervisorPin).id : can(user!, ['cashout']) ? user!.id : supervisor('').id;
+      const by = supervisorPin ? supervisor(supervisorPin).id : cashOutFree(user!, input.amount, supervisorPin) ? user!.id : supervisor('').id;
       if (input.type === 'supplier_advance' && !can(user!, ['supplier_advance']) && !can(s.admin.getUser(by), ['supplier_advance'])) {
         throw new AppError("Vous n'avez pas le droit de verser une avance à un fournisseur", 'FORBIDDEN');
       }
@@ -3128,18 +3165,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Le caissier ou le vendeur n'a pas la main sur la caisse centrale : ses dépenses en espèces sortent de sa caisse.
       const atRegister = Boolean(input.atRegister) || ((input.method === 'CASH' || isPayout(input.method)) && !can(u, ['central_cash']) && can(u, POS));
       const c = ctx(atRegister ? POS : ['expense_record']);
-      const authorizedBy = atRegister && !can(u, ['cashout']) ? supervisor(supervisorPin ?? '').id : null;
+      const authorizedBy = atRegister && !cashOutFree(u, input.amount, supervisorPin) ? supervisor(supervisorPin ?? '').id : null;
       return s.expenses.record(c, { ...rest, atRegister, date: atRegister ? null : rest.date, authorizedBy });
     },
     'expenses.cancel': (id: string, reason: string, supervisorPin?: string) => {
       const c = ctx(['expense_cancel']);
-      const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const sup = isSupervisor(user!) || can(user!, ['expense_cancel_free']) ? user!.id : supervisor(supervisorPin ?? '').id;
       return s.expenses.cancel(c, id, sup, reason);
     },
     /** Modifier une dépense : mêmes droits que l'annuler (le gérant, ou son code). */
     'expenses.update': (id: string, patch: { amount?: Fcfa; label?: string; beneficiary?: string | null; reference?: string | null }, supervisorPin?: string) => {
       const c = ctx(['expense_cancel']);
-      const sup = isSupervisor(user!) ? user!.id : supervisor(supervisorPin ?? '').id;
+      const sup = isSupervisor(user!) || can(user!, ['expense_cancel_free']) ? user!.id : supervisor(supervisorPin ?? '').id;
       return s.expenses.update(c, id, sup, patch);
     },
     'expenses.get': (id: string) => (requireUser(), s.expenses.get(id)),
@@ -3771,7 +3808,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       requireTill(user!);
       s.license.assertCanSell();
       const boss = opts?.supervisorPin ? supervisor(opts.supervisorPin) : null;
-      if (sales.some((v) => v.lines.some((l) => l.price != null)) && !can(user!, ['price']) && !boss) {
+      if (sales.some((v) => v.lines.some((l) => l.price != null)) && !can(user!, ['price', 'outage_prices']) && !boss) {
         throw new AppError('Des prix du carnet diffèrent du catalogue : le code du gérant est nécessaire', 'SUPERVISOR_REQUIRED');
       }
       const authorizedBy = boss ? boss.id : can(user!, ['discount']) ? user!.id : null;

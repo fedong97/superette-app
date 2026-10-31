@@ -12,6 +12,7 @@ export const EDITABLE_ROLES: UserRole[] = ['manager', 'cashier', 'seller', 'buye
 
 /** Groupes de droits, dans l'ordre de la liste de gauche. */
 export const PERMISSION_GROUPS = [
+  'Opérations sensibles',
   'Facturation',
   'Trésorerie',
   'Fichier des clients',
@@ -58,6 +59,21 @@ const BUYING: UserRole[] = ['manager', 'stock', 'buyer', 'accountant'];
 const COUNTER: UserRole[] = ['manager', 'cashier', 'seller', 'accountant'];
 
 export const PERMISSIONS = {
+  // --- Opérations sensibles ----------------------------------------------------
+  // Tout ce que le gérant fait seul peut être donné à un autre utilisateur, par son rôle
+  // ou à titre personnel : le magasin tourne quand le gérant n'est pas là.
+  supervisor: { label: 'Superviseur : son code vaut celui du gérant sur les autres postes, il accorde les demandes à distance', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  // Pas donnés par défaut : même le gérant confirme par son code ; à cocher pour qui doit le faire seul.
+  sale_return_free: { label: "Retour d'articles et facture d'avoir sans le code du gérant", group: 'Opérations sensibles', type: 'Fonction', roles: [] },
+  credit_over: { label: "Vendre à crédit au-delà du plafond du client (ou à un client en retard) sans le code du gérant", group: 'Opérations sensibles', type: 'Fonction', roles: [] },
+  advance_over: { label: 'Verser une avance sur salaire au-delà du maximum sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  outage_prices: { label: 'Saisir le carnet de coupure avec des prix différents du catalogue sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  expense_cancel_free: { label: 'Modifier ou annuler une dépense sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  quote_discount: { label: 'Accorder une remise sur un devis ou une proforma sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', parent: 'discount' },
+  mobile_manager: { label: "Espace du gérant sur l'application mobile (tableau de bord, validations, actions)", group: 'Opérations sensibles', type: 'Menu', roles: MANAGE },
+  delegate: { label: 'Confier temporairement ses pouvoirs à un autre utilisateur (absence, congé)', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  user_limits: { label: 'Fixer les plafonds d’un utilisateur (remise en %, sortie de caisse en FCFA)', group: 'Opérations sensibles', type: 'Fonction', parent: 'users_manage' },
+
   // --- Facturation -------------------------------------------------------------
   cash: { label: 'Facturation au comptant (caisse)', group: 'Facturation', type: 'Menu', roles: POS },
   credit: { label: 'Vente à crédit', group: 'Facturation', type: 'Menu', roles: POS },
@@ -70,20 +86,20 @@ export const PERMISSIONS = {
   customer_order_cancel: { label: 'Annuler une commande client', group: 'Facturation', type: 'Bouton', parent: 'customer_orders' },
   back_orders: { label: 'Commander au fournisseur ce qui manque pour une commande client (contremarque)', group: 'Facturation', type: 'Bouton', parent: 'customer_orders' },
   price: { label: 'Appliquer un prix négocié à la saisie (jamais sous le revient)', group: 'Facturation', type: 'Fonction', roles: POS },
-  discount: { label: 'Accorder une remise sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
+  discount: { label: 'Accorder une remise sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
   sale_hold: { label: 'Mettre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_resume: { label: 'Reprendre une facture en attente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_cancel: { label: 'Annuler une facture (avec le code du gérant)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_edit: { label: 'Modifier une facture de la journée (articles et quantités)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_edit_request: { label: 'Demander au gérant la modification d’une facture validée (avec motif)', group: 'Facturation', type: 'Bouton', parent: 'cash' },
-  sale_edit_approve: { label: 'Accorder ou refuser les demandes de modification de facture', group: 'Facturation', type: 'Fonction', roles: MANAGE },
-  sale_cancel_free: { label: 'Annuler ou supprimer une facture sans le code du gérant', group: 'Facturation', type: 'Bouton', parent: 'cash' },
+  sale_edit_approve: { label: 'Accorder ou refuser les demandes de modification de facture', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  sale_cancel_free: { label: 'Annuler ou supprimer une facture sans le code du gérant', group: 'Opérations sensibles', type: 'Bouton', parent: 'cash' },
   sale_return: { label: "Retour d'articles et facture d'avoir (avec le code du gérant)", group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_reprint: { label: 'Réimprimer un ticket ou une facture', group: 'Facturation', type: 'Bouton', parent: 'cash' },
   sale_new_article: { label: 'Créer un produit inexistant pendant la facturation', group: 'Facturation', type: 'Fonction', parent: 'articles' },
   drawer_open: { label: 'Ouvrir le tiroir-caisse sans vente', group: 'Facturation', type: 'Bouton', parent: 'cash' },
-  sale_tariff: { label: 'Changer le tarif d’une fiche à la caisse (détail, gros, super gros) sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
-  sale_warehouse: { label: 'Vendre depuis un autre dépôt que la surface de vente sans le code du gérant', group: 'Facturation', type: 'Fonction', roles: MANAGE },
+  sale_tariff: { label: 'Changer le tarif d’une fiche à la caisse (détail, gros, super gros) sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
+  sale_warehouse: { label: 'Vendre depuis un autre dépôt que la surface de vente sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
   deliveries: { label: 'Livraisons du jour (préparer, partir, livrée)', group: 'Facturation', type: 'Menu', parent: 'cash' },
   courier_returns: { label: 'Retour des livreurs : encaisser ce qu’ils rapportent, feuille de route', group: 'Facturation', type: 'Bouton', parent: 'deliveries' },
   containers_counter: { label: 'Encaisser ou rendre la consigne des emballages à la caisse', group: 'Facturation', type: 'Bouton', parent: 'cash' },
@@ -91,7 +107,7 @@ export const PERMISSIONS = {
   voucher_sell: { label: "Vendre un bon d'achat ou une carte cadeau en caisse", group: 'Facturation', type: 'Bouton', roles: POS },
   vouchers: { label: "Bons d'achat : liste, soldes et annulation", group: 'Facturation', type: 'Menu', roles: MANAGE },
   sale_book: { label: 'Saisir les ventes notées sur le carnet pendant une panne', group: 'Facturation', type: 'Bouton', roles: POS },
-  outage_close: { label: 'Clôturer une coupure dont les ventes saisies ne font pas le total noté', group: 'Facturation', type: 'Bouton', roles: MANAGE },
+  outage_close: { label: 'Clôturer une coupure dont les ventes saisies ne font pas le total noté', group: 'Opérations sensibles', type: 'Bouton', roles: MANAGE },
   exit_check: { label: 'Contrôle des tickets à la sortie du magasin (vigile)', group: 'Facturation', type: 'Menu', roles: ['manager', 'cashier', 'seller', 'stock'] },
   exit_report: { label: 'Contrôles de sortie : historique et anomalies', group: 'Facturation', type: 'Menu', roles: MANAGE },
   recurring_orders: { label: 'Commandes répétées des clients pros (chaque semaine)', group: 'Facturation', type: 'Menu', parent: 'customer_orders' },
@@ -102,12 +118,12 @@ export const PERMISSIONS = {
   cash_amounts: { label: 'Voir les montants de la caisse (attendu, entrées, ventes, journées)', group: 'Trésorerie', type: 'Fonction', roles: ACCOUNTING },
   cash_history: { label: "Consulter l'historique des journées de caisse", group: 'Trésorerie', type: 'Menu', parent: 'cash_amounts' },
   cash_z: { label: 'Consulter et imprimer le Z et la synthèse d’une journée', group: 'Trésorerie', type: 'Bouton', parent: 'cash_amounts' },
-  cash_open: { label: 'Compléter le fond de caisse depuis la centrale et valider un écart de clôture sans le code du gérant', group: 'Trésorerie', type: 'Fonction', roles: MANAGE },
+  cash_open: { label: 'Compléter le fond de caisse depuis la centrale et valider un écart de clôture sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
   cash_close_other: { label: "Clôturer la caisse électronique ou banque d'un autre utilisateur", group: 'Trésorerie', type: 'Fonction', parent: 'cash_open' },
   gap_justify: { label: 'Justifier un écart de caisse après la clôture', group: 'Trésorerie', type: 'Bouton', parent: 'cash_open' },
   cash_in: { label: "Faire une entrée d'espèces en caisse", group: 'Trésorerie', type: 'Bouton', parent: 'cash' },
   cash_withdraw: { label: 'Faire un prélèvement en caisse (avec le code du gérant)', group: 'Trésorerie', type: 'Bouton', parent: 'cash' },
-  cashout: { label: 'Prélèvement et dépense en caisse sans le code du gérant', group: 'Trésorerie', type: 'Fonction', roles: MANAGE },
+  cashout: { label: 'Prélèvement et dépense en caisse sans le code du gérant', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
   agent_point: { label: 'Point Mobile Money : dépôts, retraits, crédit, factures', group: 'Trésorerie', type: 'Menu', roles: POS },
   agent_accounts: { label: 'Comptes agent Mobile Money : créer, taux de commission', group: 'Trésorerie', type: 'Bouton', roles: MANAGE },
   agent_cancel: { label: 'Annuler une opération du point Mobile Money', group: 'Trésorerie', type: 'Bouton', parent: 'agent_accounts' },
@@ -234,7 +250,7 @@ export const PERMISSIONS = {
   expense_cancel: { label: 'Modifier ou annuler une dépense (avec le code du gérant)', group: 'Suivi des charges', type: 'Bouton', roles: COUNTER },
   expense_categories: { label: 'Fixer les types de charge', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
   charge_plans: { label: 'Définir les charges fixes et constater les charges', group: 'Suivi des charges', type: 'Menu', parent: 'expenses' },
-  expense_approve: { label: 'Approuver ou refuser les dépenses saisies par les autres', group: 'Suivi des charges', type: 'Fonction', roles: MANAGE },
+  expense_approve: { label: 'Approuver ou refuser les dépenses saisies par les autres', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
 
   // --- Personnel ---------------------------------------------------------------
   staff: { label: 'Collaborateurs : fiches et extraits de compte', group: 'Personnel', type: 'Menu', roles: ACCOUNTING },
@@ -320,6 +336,33 @@ export function roleRights(role: UserRole, saved: Partial<Record<Permission, boo
 export interface UserPrivileges {
   grants: Permission[];
   revokes: Permission[];
+  /** Pouvoirs confiés pour un temps par un gérant absent (droits copiés des siens). */
+  delegation?: Delegation | null;
+  /** Plafonds de l'utilisateur quand il agit sans le code du gérant. */
+  limits?: UserLimits | null;
+}
+
+/** Délégation temporaire : jusqu'à `until`, l'utilisateur a aussi les droits de celui qui la donne. */
+export interface Delegation {
+  by: string;
+  byName: string;
+  /** Date et heure de fin (ISO) : passé ce moment, plus rien n'est délégué. */
+  until: string;
+  rights: Permission[];
+  at: string;
+}
+
+/** Plafonds d'un utilisateur (0 ou absent : sans plafond au-delà de son droit). */
+export interface UserLimits {
+  /** Remise sans code jusqu'à ce pourcentage du ticket. */
+  discountPct?: number;
+  /** Sortie ou dépense de caisse sans code jusqu'à ce montant (FCFA). */
+  cashOut?: number;
+}
+
+/** La délégation court encore à cette date. */
+export function delegationActive(d: Delegation | null | undefined, now: Date = new Date()): d is Delegation {
+  return Boolean(d && d.until && new Date(d.until).getTime() > now.getTime());
 }
 
 /** Droits d'un utilisateur : ceux de son rôle, plus ses privilèges accordés, moins ceux qui lui sont retirés. */
@@ -328,5 +371,7 @@ export function userRights(role: UserRole, roleSet: readonly Permission[], privi
   const set = new Set(roleSet);
   for (const p of privileges.grants) set.add(p);
   for (const p of privileges.revokes) set.delete(p);
+  // Délégation en cours : les droits du gérant absent s'ajoutent, même ceux retirés à titre personnel.
+  if (delegationActive(privileges.delegation)) for (const p of privileges.delegation.rights) if (p !== 'delegate') set.add(p);
   return PERMISSION_KEYS.filter((k) => set.has(k));
 }

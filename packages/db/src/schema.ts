@@ -2899,4 +2899,14 @@ CREATE INDEX treasury_entries_payment ON treasury_entries(payment_id);
 CREATE INDEX treasury_entries_invoice ON treasury_entries(invoice_id);
 `,
   },
+  {
+    version: 67,
+    name: 'délégation temporaire des pouvoirs du gérant et plafonds par utilisateur',
+    sql: `
+-- Pouvoirs confiés pour un temps par un gérant absent (JSON : par qui, jusqu'à quand, droits).
+ALTER TABLE user_rights ADD COLUMN delegation TEXT;
+-- Plafonds de l'utilisateur quand il agit sans le code du gérant (JSON : remise en %, sortie en FCFA).
+ALTER TABLE user_rights ADD COLUMN limits TEXT;
+`,
+  },
 ];

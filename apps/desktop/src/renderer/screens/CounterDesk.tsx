@@ -550,7 +550,7 @@ function GiveBackDialog({ numbers, seller, onClose, onDone }: { numbers: number[
 export function CounterMineDialog({ user, onClose, onEdit }: { user: User; onClose: () => void; onEdit: (id: string) => void }) {
   const toast = useToast();
   const list = useLoad(() => call('counter.mine'), []);
-  const supervisor = user.role === 'admin' || user.role === 'manager';
+  const supervisor = user.role === 'admin' || user.rights.includes('supervisor');
   const act = async (fn: () => Promise<unknown>, done: string) => {
     try {
       await fn();

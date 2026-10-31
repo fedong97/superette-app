@@ -19,7 +19,8 @@ export const EXPENSE_METHODS = {
 } as const;
 type Method = keyof typeof EXPENSE_METHODS;
 
-const isManager = (u: User) => u.role === 'admin' || u.role === 'manager';
+/** Superviseur ou droit « dépense sans code » : il modifie ou annule sans demander le code du gérant. */
+const isManager = (u: User) => u.role === 'admin' || u.rights.includes('supervisor') || u.rights.includes('expense_cancel_free');
 const monthStart = () => `${today().slice(0, 7)}-01`;
 
 /** Dépenses courantes : loyer, ENEO, salaires, transport… Elles passent seules en comptabilité. */

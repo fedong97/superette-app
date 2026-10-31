@@ -960,11 +960,10 @@ export class PosService extends Base {
     const granted = totals.totalDiscount - rounding - promoAmount;
     const reason = cleanDiscountReason(input.discountReason);
     if (overMax.length && !quote) {
-      // Au-delà de la remise maxi d'un article, seul un administrateur ou un gérant décide (lui-même, ou son code).
+      // Au-delà de la remise maxi d'un article, seul un superviseur décide (lui-même, ou son code).
       const boss = (id: string | null | undefined) => {
         if (!id) return false;
-        const u = this.admin.getUser(id);
-        return u.role === 'admin' || u.role === 'manager';
+        return this.admin.isSupervisor(this.admin.getUser(id));
       };
       if (!boss(ctx.userId) && !boss(input.discountAuthorizedBy)) {
         const o = overMax[0]!;
@@ -976,9 +975,17 @@ export class PosService extends Base {
       const authorizer = input.discountAuthorizedBy ? this.admin.getUser(input.discountAuthorizedBy) : null;
       // Droit « remise sans code » du vendeur, code d'un gérant, ou remise sous le maximum fixé dans les paramètres.
       // Facture envoyée par un vendeur (vendeur et caissier séparés) : son droit de remise vaut accord.
-      const supervisor = authorizer !== null && (authorizer.role === 'admin' || authorizer.role === 'manager' || this.admin.hasRight(authorizer, 'discount'));
+      const supervisor = authorizer !== null && (this.admin.isSupervisor(authorizer) || this.admin.hasRight(authorizer, 'discount'));
       const underMax = set.maxDiscountPct > 0 && granted * 100 <= set.maxDiscountPct * (totals.totalTtc + totals.totalDiscount);
-      if (!this.admin.hasRight(user, 'discount') && !supervisor && !underMax) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
+      // Droit de remise sans code, dans la limite du plafond de l'utilisateur (Administration › Privilèges).
+      const ownCap = this.admin.limits(user.id).discountPct ?? 0;
+      const ownRight = this.admin.hasRight(user, 'discount') && (!ownCap || granted * 100 <= ownCap * (totals.totalTtc + totals.totalDiscount));
+      if (!ownRight && !supervisor && !underMax) {
+        throw new AppError(
+          this.admin.hasRight(user, 'discount') ? `Remise au-delà de votre plafond de ${ownCap} % : code du gérant nécessaire` : 'Remise soumise à validation du gérant',
+          'SUPERVISOR_REQUIRED',
+        );
+      }
       if (underMax && !supervisor) discountBy ??= ctx.userId;
     }
     // Le motif après l'accord : le caissier sait d'abord s'il peut faire la remise.
@@ -1011,7 +1018,7 @@ export class PosService extends Base {
     if (onCredit > 0 && !input.customerId) throw new AppError('Choisissez le client pour une vente à crédit', 'CUSTOMER_REQUIRED');
     const customer = input.customerId
       ? onCredit > 0
-        ? this.customers.assertCredit(ctx.storeId, input.customerId, onCredit, input.creditAuthorizedBy ? this.admin.getUser(input.creditAuthorizedBy) : null, {
+        ? this.customers.assertCredit(ctx.storeId, input.customerId, onCredit, this.creditAuthority(ctx.userId, input.creditAuthorizedBy), {
             blockLate: set.creditBlockLate,
           })
         : this.customers.getCustomer(input.customerId)
@@ -1336,12 +1343,26 @@ export class PosService extends Base {
   }
 
   /**
+   * Accord pour un crédit au-delà du plafond : le superviseur qui a donné son
+   * code, ou le vendeur lui-même s'il a le droit « crédit au-delà du plafond ».
+   */
+  private creditAuthority(userId: string, authorizedBy: string | null | undefined): { id: string; role: string; supervisor: boolean } | null {
+    if (authorizedBy) {
+      const u = this.admin.getUser(authorizedBy);
+      return { id: u.id, role: u.role, supervisor: this.admin.isSupervisor(u) };
+    }
+    const me = this.admin.getUser(userId);
+    // L'administrateur confirme comme avant par son code : le droit ne joue que donné explicitement.
+    return me.role !== 'admin' && this.admin.hasRight(me, 'credit_over') ? { id: me.id, role: me.role, supervisor: true } : null;
+  }
+
+  /**
    * Annule une vente de la journée en cours de sa caisse : le stock revient et elle sort des totaux.
    * `byRight` : l'auteur a le droit d'annuler sans le code du gérant (sinon il doit être gérant).
    */
   cancelSale(ctx: Context, saleId: string, supervisorId: string, reason: string, opts: { byRight?: boolean } = {}): Sale {
     const supervisor = this.admin.getUser(supervisorId);
-    if (!opts.byRight && supervisor.role !== 'admin' && supervisor.role !== 'manager') throw new AppError('Annulation réservée au gérant', 'SUPERVISOR_REQUIRED');
+    if (!opts.byRight && !this.admin.isSupervisor(supervisor)) throw new AppError('Annulation réservée au gérant', 'SUPERVISOR_REQUIRED');
     if (!reason.trim()) throw new AppError("Le motif d'annulation est obligatoire", 'INVALID');
     const sale = this.getSale(saleId);
     if (sale.status !== 'completed' || sale.kind !== 'sale') throw new AppError('Ce ticket ne peut pas être annulé', 'INVALID');
@@ -1501,7 +1522,7 @@ export class PosService extends Base {
   ): Sale {
     const session = this.requireOpenSession(ctx);
     const supervisor = this.admin.getUser(input.supervisorId);
-    if (!input.byRight && supervisor.role !== 'admin' && supervisor.role !== 'manager') throw new AppError('Retour réservé au gérant', 'SUPERVISOR_REQUIRED');
+    if (!input.byRight && !this.admin.isSupervisor(supervisor)) throw new AppError('Retour réservé au gérant', 'SUPERVISOR_REQUIRED');
     if (!input.reason.trim()) throw new AppError('Le motif du retour est obligatoire', 'INVALID');
     const original = this.getSale(input.originalSaleId);
     if (original.kind !== 'sale' || original.status !== 'completed') throw new AppError('Ce ticket ne peut pas faire l’objet d’un retour', 'INVALID');

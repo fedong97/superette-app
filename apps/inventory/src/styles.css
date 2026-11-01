@@ -1101,6 +1101,9 @@ a.small-btn {
   position: relative;
   animation: sheet 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+.sheet > * {
+  flex-shrink: 0;
+}
 .sheet::before {
   content: '';
   position: absolute;
@@ -1537,4 +1540,22 @@ button.greet > .icon {
   min-height: 34px;
   padding: 5px 12px;
   font-size: 13.5px;
+}
+
+/* Ventes : lignes de facture touchables, fiche de la facture. */
+.sale-row.cancelled .li-value {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.facts small {
+  font-weight: 400;
+  font-size: 12px;
+}
+.card.totals {
+  gap: 6px;
+}
+.danger-btn {
+  background: var(--danger-light);
+  border-color: transparent;
+  color: var(--danger);
 }

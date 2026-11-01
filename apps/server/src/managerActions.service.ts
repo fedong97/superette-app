@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { type Db, PG } from './database';
 import type { MobileCaller } from './mobile.service';
+import { METHODS } from './manager.service';
 import { activeDelegation } from './rights';
 
 type Json = Record<string, unknown>;
@@ -186,6 +187,54 @@ export class ManagerActionsService {
       more: Math.max(0, list.length - 300),
       total: kept.reduce((t, x) => t + (x.kind === 'return' ? -Math.abs(x.total) : x.total), 0),
       count: kept.filter((x) => x.kind === 'sale').length,
+    };
+  }
+
+  /** Détail d'une facture du magasin (lignes, paiements), tel que les PC l'ont envoyé. */
+  async sale(caller: MobileCaller, id: string) {
+    const { rows } = await this.pg.query<{ payload: Json }>(
+      `SELECT payload FROM events WHERE entity = 'sale' AND entity_id = $1 AND payload IS NOT NULL AND COALESCE(store_id, payload->>'store_id') = $2 ORDER BY seq DESC LIMIT 1`,
+      [id, caller.device.store_id],
+    );
+    const p = rows[0]?.payload;
+    if (!p) throw new BadRequestException('Facture introuvable sur le serveur');
+    const who = await this.names();
+    const ref = async (entity: string, key: unknown) => {
+      if (!key) return null;
+      const r = await this.pg.query<{ name: string | null }>(`SELECT payload->>'name' AS name FROM events WHERE entity = $1 AND entity_id = $2 ORDER BY seq DESC LIMIT 1`, [entity, String(key)]);
+      return r.rows[0]?.name ?? null;
+    };
+    const lines = Array.isArray(p['lines']) ? (p['lines'] as Json[]) : [];
+    const payments = Array.isArray(p['payments']) ? (p['payments'] as Json[]) : [];
+    return {
+      id,
+      number: str(p['number']),
+      kind: str(p['kind']) === 'return' ? ('return' as const) : ('sale' as const),
+      cancelled: p['status'] === 'cancelled',
+      cancelReason: (p['cancel_reason'] as string | null) ?? null,
+      at: str(p['created_at']),
+      register: await ref('register', p['register_id']),
+      seller: who.get(str(p['seller_id'] || p['user_id'])) ?? '',
+      cashier: who.get(str(p['user_id'])) ?? '',
+      customer: p['customer_id'] ? await ref('customer', p['customer_id']) : ((p['customer_name'] as string | null) ?? null),
+      total: num(p['total_ttc']),
+      totalHt: num(p['total_ht']),
+      vat: num(p['total_tva']),
+      discount: num(p['total_discount']),
+      change: num(p['change_given']),
+      lines: lines
+        .sort((a, b) => num(a['line_no']) - num(b['line_no']))
+        .map((l) => ({
+          label: str(l['label']),
+          qty: num(l['qty']),
+          pack: (l['pack_name'] as string | null) ?? null,
+          packUnits: num(l['pack_units']),
+          unitPrice: num(l['unit_price']),
+          discount: num(l['discount']),
+          total: num(l['total_ttc']),
+          promo: Boolean(l['promo']),
+        })),
+      payments: payments.map((x) => ({ method: str(x['method']), label: METHODS[str(x['method'])] ?? str(x['method']), amount: num(x['amount']), reference: (x['reference'] as string | null) ?? null })),
     };
   }
 

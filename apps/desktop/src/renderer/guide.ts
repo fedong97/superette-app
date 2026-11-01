@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.111.0',
+    items: [
+      "Ventes sur le téléphone : touchez une facture pour voir son détail : produits avec quantités, prix et remises, total et TVA, paiements, monnaie rendue, vendeur, caissier, caisse et client. L'annulation se fait depuis cette fiche.",
+    ],
+  },
+  {
     version: '0.110.0',
     items: [
       "ONIX 360 Mobile : menu latéral (☰) comme sur les maquettes, avec le profil, tous les écrans autorisés rangés par thème, les notifications, les paramètres et la déconnexion. Les écrans de gestion du PC (achats, produits, clients, fournisseurs, dépenses, comptabilité, administration…) y sont directement, seulement s'ils sont dans vos droits.",

@@ -4,7 +4,7 @@ import { type Db, PG } from './database';
 /** Un PC qui ne s'est pas synchronisé depuis 5 minutes alors qu'une caisse y est ouverte est signalé. */
 const SILENT_MS = 5 * 60_000;
 
-const METHODS: Record<string, string> = {
+export const METHODS: Record<string, string> = {
   CASH: 'Espèces',
   MTN_MOMO: 'MTN MoMo',
   ORANGE_MONEY: 'Orange Money',

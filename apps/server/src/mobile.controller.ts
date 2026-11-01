@@ -50,6 +50,13 @@ export class MobileController {
     return this.actions.sales(caller, day, to);
   }
 
+  @Get('api/v1/mobile/manager/sales/:id')
+  async managerSale(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Param('id') id: string) {
+    const caller = await this.mobile.caller(auth, session);
+    await this.mobile.managerGuard(caller);
+    return this.actions.sale(caller, id);
+  }
+
   @Get('api/v1/mobile/manager/team')
   async managerTeam(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
     const caller = await this.mobile.caller(auth, session);

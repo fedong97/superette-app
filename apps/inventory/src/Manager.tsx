@@ -1042,6 +1042,7 @@ function SalesTab({ write }: { write: boolean }) {
   const [period, setPeriod] = useState<Period>(() => periodOf('today'));
   const [kind, setKind] = useState<'all' | 'credit' | 'return' | 'cancelled'>('all');
   const [cancel, setCancel] = useState<DaySale | null>(null);
+  const [open, setOpen] = useState<DaySale | null>(null);
   const [reason, setReason] = useState('');
   const [done, setDone] = useState('');
   const load = () => {
@@ -1113,42 +1114,38 @@ function SalesTab({ write }: { write: boolean }) {
           <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Numéro, vendeur, client…" enterKeyHint="search" />
           <div className="list">
             {list.map((x) => (
-              <div key={x.id} className="card">
-                <div className="row">
-                  <b className="grow">
+              <button key={x.id} className={`li sale-row ${x.cancelled ? 'cancelled' : ''}`} onClick={() => setOpen(x)}>
+                <span className={`li-icon ${x.cancelled ? 'neutral' : x.kind === 'return' ? 'warning' : 'brand'}`}>
+                  <Icon name="receipt" size={20} />
+                </span>
+                <span className="grow">
+                  <span className="li-title">
                     {x.number}
                     {x.kind === 'return' ? ' · retour' : ''}
-                  </b>
-                  <b className={x.cancelled ? 'muted' : ''} style={x.cancelled ? { textDecoration: 'line-through' } : undefined}>
-                    {fcfa(x.total)}
-                  </b>
-                </div>
-                <small className="muted">
-                  {several ? `${new Date(x.at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} · ` : ''}
-                  {heure(x.at)} · {x.seller || x.cashier}
-                  {x.seller && x.cashier && x.seller !== x.cashier ? ` → ${x.cashier}` : ''}
-                  {x.customer ? ` · ${x.customer}` : ''}
-                </small>
-                {x.credit || x.discount ? (
-                  <small className="discount">
-                    {x.credit ? 'à crédit' : ''}
-                    {x.credit && x.discount ? ' · ' : ''}
-                    {x.discount ? `remise ${fcfa(x.discount)}` : ''}
+                  </span>
+                  <small>
+                    {several ? `${new Date(x.at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} · ` : ''}
+                    {heure(x.at)} · {x.seller || x.cashier}
+                    {x.customer ? ` · ${x.customer}` : ''}
                   </small>
-                ) : null}
-                {x.cancelled ? <small className="discount">Annulée{x.cancelReason ? ` : ${x.cancelReason}` : ''}</small> : null}
-                {write && !x.cancelled && x.kind === 'sale' ? (
-                  <button className="link" onClick={() => (setCancel(x), setDone(''))}>
-                    Annuler cette facture
-                  </button>
-                ) : null}
-              </div>
+                  {x.credit || x.discount || x.cancelled ? (
+                    <small className="discount">
+                      {[x.cancelled ? 'annulée' : '', x.credit ? 'à crédit' : '', x.discount ? `remise ${fcfa(x.discount)}` : ''].filter(Boolean).join(' · ')}
+                    </small>
+                  ) : null}
+                </span>
+                <span className="li-value">{fcfa(x.total)}</span>
+                <span className="chev">
+                  <Icon name="chevron" size={18} />
+                </span>
+              </button>
             ))}
             {!list.length ? <EmptyState icon="receipt" title="Aucune facture" text={q.trim() || kind !== 'all' ? 'Aucune facture ne correspond à ces filtres.' : 'Aucune facture encaissée sur cette période.'} /> : null}
             {data.more ? <p className="muted small center">Les {data.sales.length} factures les plus récentes sont affichées ({data.more} de plus sur la période, comptées dans le total).</p> : null}
           </div>
         </>
       ) : null}
+      {open ? <SaleSheet sale={open} onClose={() => setOpen(null)} onCancel={write && !open.cancelled && open.kind === 'sale' ? () => (setCancel(open), setOpen(null), setDone('')) : undefined} /> : null}
       {cancel ? (
         <div className="modal" onClick={(e) => e.target === e.currentTarget && setCancel(null)}>
           <div className="sheet">
@@ -1167,6 +1164,147 @@ function SalesTab({ write }: { write: boolean }) {
         </div>
       ) : null}
     </>
+  );
+}
+
+interface SaleDetail {
+  id: string;
+  number: string;
+  kind: 'sale' | 'return';
+  cancelled: boolean;
+  cancelReason: string | null;
+  at: string;
+  register: string | null;
+  seller: string;
+  cashier: string;
+  customer: string | null;
+  total: number;
+  totalHt: number;
+  vat: number;
+  discount: number;
+  change: number;
+  lines: { label: string; qty: number; pack: string | null; packUnits: number; unitPrice: number; discount: number; total: number; promo: boolean }[];
+  payments: { method: string; label: string; amount: number; reference: string | null }[];
+}
+
+/** Quantité vendue (millièmes d'unité), au carton quand la ligne est un carton. */
+const qtyText = (l: SaleDetail['lines'][number]) => {
+  if (l.pack && l.packUnits > 0) {
+    const packs = l.qty / l.packUnits;
+    if (Number.isInteger(packs)) return `${packs} ${l.pack.toLowerCase()}`;
+  }
+  return (l.qty / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+};
+
+/** Fiche d'une facture : produits, remises, paiements, qui l'a faite (lecture seule, comme envoyée par les PC). */
+function SaleSheet({ sale, onClose, onCancel }: { sale: DaySale; onClose: () => void; onCancel?: () => void }) {
+  const [d, setD] = useState<SaleDetail | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    S.call<SaleDetail>(`/manager/sales/${encodeURIComponent(sale.id)}`).then(setD, (e) => setError(message(e)));
+  }, [sale.id]);
+  const when = new Date(sale.at).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <div className="sheet-head">
+          <h2>
+            {sale.kind === 'return' ? 'Retour' : 'Facture'} {sale.number}
+          </h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Fermer">
+            <Icon name="x" />
+          </button>
+        </div>
+        <div className="row">
+          <span className="muted grow">{when}</span>
+          <span className={`pill ${sale.cancelled ? 'ko' : sale.credit ? 'wait' : 'ok'}`}>{sale.cancelled ? 'Annulée' : sale.credit ? 'À crédit' : 'Payée'}</span>
+        </div>
+        {sale.cancelled && sale.cancelReason ? <div className="notice erreur">Annulée : {sale.cancelReason}</div> : null}
+        <div className="facts">
+          <div>
+            <small>Vendeur</small>
+            {sale.seller || sale.cashier || '—'}
+          </div>
+          <div>
+            <small>Caissier</small>
+            {sale.cashier || '—'}
+          </div>
+          <div>
+            <small>Caisse</small>
+            {d?.register ?? '—'}
+          </div>
+          <div>
+            <small>Client</small>
+            {sale.customer ?? 'Comptoir'}
+          </div>
+        </div>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        {!d && !error ? <Skeleton rows={3} /> : null}
+        {d ? (
+          <>
+            <SectionTitle>Produits ({d.lines.length})</SectionTitle>
+            <div className="list grouped">
+              {d.lines.map((l, i) => (
+                <div key={i} className="li">
+                  <span className="grow">
+                    <span className="li-title">{l.label}</span>
+                    <small>
+                      {qtyText(l)} × {fcfa(l.pack && l.packUnits ? (l.unitPrice * l.packUnits) / 1000 : l.unitPrice)}
+                      {l.discount ? <span className="discount"> · remise {fcfa(l.discount)}</span> : null}
+                      {l.promo ? ' · promotion' : ''}
+                    </small>
+                  </span>
+                  <span className="li-value">{fcfa(l.total)}</span>
+                </div>
+              ))}
+              {!d.lines.length ? <div className="empty">Les produits de cette facture ne sont pas encore arrivés sur le serveur.</div> : null}
+            </div>
+            <div className="card totals">
+              {d.discount ? (
+                <div className="row">
+                  <span className="grow">Remises</span>
+                  <span className="discount">− {fcfa(d.discount)}</span>
+                </div>
+              ) : null}
+              {d.vat ? (
+                <div className="row">
+                  <span className="grow muted">dont TVA</span>
+                  <span className="muted">{fcfa(d.vat)}</span>
+                </div>
+              ) : null}
+              <div className="row">
+                <b className="grow">Total</b>
+                <b>{fcfa(d.total)}</b>
+              </div>
+            </div>
+            <SectionTitle>Paiement</SectionTitle>
+            <div className="list grouped">
+              {d.payments.map((p, i) => (
+                <div key={i} className="li">
+                  <span className="grow">
+                    <span className="li-title">{p.label}</span>
+                    {p.reference ? <small>Réf. {p.reference}</small> : null}
+                  </span>
+                  <span className="li-value">{fcfa(p.amount)}</span>
+                </div>
+              ))}
+              {d.change ? (
+                <div className="li">
+                  <span className="grow muted">Monnaie rendue</span>
+                  <span className="li-value">{fcfa(d.change)}</span>
+                </div>
+              ) : null}
+              {!d.payments.length ? <div className="empty">Aucun paiement enregistré.</div> : null}
+            </div>
+          </>
+        ) : null}
+        {onCancel ? (
+          <button className="big danger-btn" onClick={onCancel}>
+            Annuler cette facture
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

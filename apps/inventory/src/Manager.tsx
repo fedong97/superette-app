@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { type Article, formatQty, newId, search } from './logic';
 import * as S from './state';
+import type { ModuleId } from './modules';
+import { AppHeader, EmptyState, Icon, SectionTitle, Skeleton, StatCard } from './ui';
 
 /**
  * Espace du gérant sur le téléphone (ONIX 360 Mobile) : la journée du
@@ -108,17 +110,6 @@ interface ArticleFile {
   nextDelivery: { number: string; expectedDate: string; qty: number } | null;
 }
 
-type Tab = 'jour' | 'valider' | 'ventes' | 'stock' | 'plus';
-type More = 'caisses' | 'clients' | 'equipe';
-
-const TABS: [Tab, string][] = [
-  ['jour', 'Accueil'],
-  ['valider', 'À valider'],
-  ['ventes', 'Ventes'],
-  ['stock', 'Stock'],
-  ['plus', 'Plus'],
-];
-
 /** Action du gérant : enregistrée sur le serveur, exécutée par le premier PC allumé du magasin. */
 interface ManagerAction {
   id: string;
@@ -157,7 +148,7 @@ interface DaySale {
  * Gestion complète : les écrans du PC (clients, trésorerie, caisses…) dans le
  * téléphone ; un PC allumé du magasin exécute chaque action au nom du gérant.
  */
-function openPcManagement() {
+export function openPcManagement() {
   const st = S.getState();
   if (!st.config || !st.session) return;
   try {
@@ -177,24 +168,23 @@ const act = (kind: string, payload: Record<string, unknown>, label: string) =>
 const INVOICE_STATUS: Record<string, string> = { waiting: 'à encaisser', editing: 'en modification', returned: 'rendues au vendeur', paying: 'en cours d’encaissement' };
 const MISSED: Record<string, string> = { absent: 'pas en magasin', rupture: 'en rupture', prix: 'trop cher', autre: 'autre' };
 
-export function Manager({ onBack }: { onBack: (() => void) | null }) {
-  const s = useStore();
-  const [tab, setTab] = useState<Tab>('jour');
+interface ManagerCtx {
+  home: Home | null;
+  error: string;
+  yesterday: boolean;
+  setYesterday: (y: boolean) => void;
+  load: () => void;
+  openApprovals: () => void;
+}
+const Ctx = createContext<ManagerCtx | null>(null);
+export const useManager = () => useContext(Ctx);
+
+/** Données de l'espace du gérant, chargées une fois pour l'accueil et ses écrans. */
+export function ManagerProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
   const [yesterday, setYesterday] = useState(false);
   const [home, setHome] = useState<Home | null>(null);
   const [error, setError] = useState('');
   const [approvals, setApprovals] = useState(false);
-  const [more, setMore] = useState<More>('caisses');
-  // Notification touchée : ouvrir l'écran qu'elle concerne.
-  useEffect(() => {
-    const screen = s.openScreen;
-    if (!screen) return;
-    if (screen === 'valider' || screen === 'ventes' || screen === 'stock') setTab(screen);
-    else if (screen === 'caisses' || screen === 'clients') (setTab('plus'), setMore(screen));
-    else setTab('jour');
-    S.setOpenScreen(null);
-  }, [s.openScreen]);
-
   const load = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
@@ -205,87 +195,76 @@ export function Manager({ onBack }: { onBack: (() => void) | null }) {
     );
   };
   useEffect(() => {
+    if (!enabled) return;
     load();
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yesterday]);
+  }, [yesterday, enabled]);
+  if (!enabled) return <>{children}</>;
+  return (
+    <Ctx.Provider value={{ home, error, yesterday, setYesterday, load, openApprovals: () => setApprovals(true) }}>
+      {children}
+      {approvals ? <ApprovalsSheet write={Boolean(home?.write)} onClose={() => (setApprovals(false), load())} /> : null}
+    </Ctx.Provider>
+  );
+}
 
+/** Ce qui demande l'attention du gérant : demandes d'accord et alertes du magasin. */
+export function useManagerAttention(): { level: 'danger' | 'warning'; title: string; text?: string; action?: () => void }[] {
+  const m = useManager();
+  if (!m?.home) return m?.error ? [{ level: 'danger', title: 'Espace du gérant indisponible', text: m.error, action: m.load }] : [];
+  const out: { level: 'danger' | 'warning'; title: string; text?: string; action?: () => void }[] = [];
+  if (m.home.approvals) out.push({ level: 'danger', title: `${m.home.approvals} demande(s) d’accord des caisses`, text: 'Touchez pour répondre', action: m.openApprovals });
+  for (const a of m.home.alerts) out.push({ level: a.level === 'erreur' ? 'danger' : 'warning', title: a.text });
+  return out;
+}
+
+/** Accueil du gérant : la journée du magasin et ses vendeurs. */
+export function ManagerHome() {
+  const m = useManager();
+  const [full, setFull] = useState(false);
+  if (!m) return null;
+  const { home, error, yesterday, setYesterday } = m;
+  if (!home) return error ? null : <Skeleton rows={3} stats />;
+  const st = home.store;
+  if (!st) return <EmptyState icon="store" title="Pas encore de données" text="Les PC du magasin envoient la journée à leur prochaine synchronisation." />;
+  return (
+    <>
+      <DayTab home={home} st={st} yesterday={yesterday} onDay={setYesterday} full={full} onFull={() => setFull(!full)} />
+      {full ? <SellersTab home={home} st={st} /> : null}
+    </>
+  );
+}
+
+const MANAGER_TITLES: Partial<Record<ModuleId, string>> = { ventes: 'Ventes', valider: 'À valider', stock: 'Stock', caisses: 'Caisses', clients: 'Clients', equipe: 'Équipe' };
+
+/** Un écran de l'espace du gérant, avec son en-tête. */
+export function ManagerScreen({ id }: { id: ModuleId }) {
+  const s = useStore();
+  const m = useManager();
+  const home = m?.home ?? null;
   const st = home?.store ?? null;
   return (
     <div className="page">
-      <header className="bar">
-        {onBack ? (
-          <button className="ghost" onClick={onBack} aria-label="Retour">
-            ‹
-          </button>
-        ) : null}
-        <div className="grow">
-          <b>Gérant · {s.config?.storeName}</b>
-          <small>{home ? `${home.today ? 'Mis à jour' : 'Journée d’hier'} à ${heure(home.generatedAt)}` : s.session?.user.name}</small>
-        </div>
-        <button className="ghost" onClick={load} aria-label="Actualiser">
-          ⟳
+      <AppHeader title={MANAGER_TITLES[id] ?? ''} subtitle={home ? `${home.today ? 'Mis à jour' : 'Journée d’hier'} à ${heure(home.generatedAt)}` : s.config?.storeName}>
+        <button className="ghost" onClick={() => m?.load()} aria-label="Actualiser">
+          <Icon name="refresh" />
         </button>
-        {!onBack ? (
-          <button className="ghost" onClick={() => void S.logout()} aria-label="Changer d'utilisateur">
-            ⎋
-          </button>
+      </AppHeader>
+      <main className="enter" key={id}>
+        {m?.error ? <div className="notice erreur">{m.error}</div> : null}
+        {!home && !m?.error ? <Skeleton rows={4} stats /> : null}
+        {home && id === 'valider' ? <InboxTab write={home.write} /> : null}
+        {home && id === 'ventes' ? <SalesTab write={home.write} /> : null}
+        {home && st && id === 'stock' ? <StockTab home={home} st={st} /> : null}
+        {home && st && id === 'caisses' ? <RegistersTab st={st} /> : null}
+        {home && id === 'clients' ? <CustomersTab write={home.write} /> : null}
+        {home && id === 'equipe' ? <TeamTab write={home.write} /> : null}
+        {home && !st && (id === 'stock' || id === 'caisses') ? (
+          <EmptyState icon="store" title="Pas encore de données" text="Les PC du magasin envoient l’état du magasin à leur prochaine synchronisation." />
         ) : null}
-      </header>
-      <main>
-        <div className="tabs">
-          {TABS.map(([k, label]) => (
-            <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {error ? <div className="notice erreur">{error}</div> : null}
-        {home?.write && tab === 'jour' ? (
-          <button className="big primary" onClick={openPcManagement}>
-            Gérer la boutique
-            <small>Clients, fournisseurs, trésorerie, caisses, dépenses, produits, équipe…</small>
-          </button>
-        ) : null}
-        {!home && !error ? <div className="card muted">Chargement…</div> : null}
-        {home && home.approvals ? (
-          <button className="big primary" onClick={() => setApprovals(true)}>
-            {home.approvals} demande(s) d’accord des caisses
-          </button>
-        ) : null}
-        {home && st && tab === 'jour' ? (
-          <>
-            <DayTab home={home} st={st} yesterday={yesterday} onDay={setYesterday} />
-            <SellersTab home={home} st={st} />
-          </>
-        ) : null}
-        {home && tab === 'valider' ? <InboxTab write={home.write} /> : null}
-        {home && tab === 'ventes' ? <SalesTab write={home.write} /> : null}
-        {home && st && tab === 'stock' ? <StockTab home={home} st={st} /> : null}
-        {home && tab === 'plus' ? (
-          <>
-            <div className="tabs">
-              {(
-                [
-                  ['caisses', 'Caisses'],
-                  ['clients', 'Clients'],
-                  ['equipe', 'Équipe'],
-                ] as [More, string][]
-              ).map(([k, label]) => (
-                <button key={k} className={more === k ? 'on' : ''} onClick={() => setMore(k)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {st && more === 'caisses' ? <RegistersTab st={st} /> : null}
-            {more === 'clients' ? <CustomersTab write={home.write} /> : null}
-            {more === 'equipe' ? <TeamTab write={home.write} /> : null}
-          </>
-        ) : null}
-        {home && !st && (tab === 'jour' || tab === 'stock') ? <div className="card muted">Aucune donnée de ce magasin sur le serveur pour l’instant : les PC l’envoient à leur prochaine synchronisation.</div> : null}
       </main>
-      {approvals ? <ApprovalsSheet write={Boolean(home?.write)} onClose={() => (setApprovals(false), load())} /> : null}
     </div>
   );
 }
@@ -304,55 +283,49 @@ function Bars({ values, labels }: { values: number[]; labels: string[] }) {
   );
 }
 
-function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; yesterday: boolean; onDay: (y: boolean) => void }) {
+function DayTab({ home, st, yesterday, onDay, full, onFull }: { home: Home; st: StoreBoard; yesterday: boolean; onDay: (y: boolean) => void; full: boolean; onFull: () => void }) {
   const p = home.periods;
   const vsYesterday = pct(st.net, st.yesterday);
   const vsMonth = pct(p.month.total, p.lastMonth.total);
   const hours = st.byHour.map((v, h) => ({ v, h })).filter((x) => x.v > 0 || (x.h >= 7 && x.h <= 21));
   return (
     <>
-      <div className="segmented">
-        <button className={!yesterday ? 'on' : ''} onClick={() => onDay(false)}>
+      <div className="chips">
+        <button className={`chip ${!yesterday ? 'on' : ''}`} onClick={() => onDay(false)}>
           Aujourd’hui
         </button>
-        <button className={yesterday ? 'on' : ''} onClick={() => onDay(true)}>
+        <button className={`chip ${yesterday ? 'on' : ''}`} onClick={() => onDay(true)}>
           Hier
         </button>
       </div>
-      <div className="kpis">
-        <div>
-          <b>{fcfa(st.net)}</b>
-          <small>ventes nettes{vsYesterday !== null && !yesterday ? ` · ${vsYesterday >= 0 ? '+' : ''}${vsYesterday} % / hier` : ''}</small>
-        </div>
-        <div>
-          <b>{st.sales}</b>
-          <small>tickets · {fcfa(st.average)} en moyenne</small>
-        </div>
-        <div>
-          <b>{fcfa(p.month.total)}</b>
-          <small>
-            ce mois-ci{vsMonth !== null ? ` · ${vsMonth >= 0 ? '+' : ''}${vsMonth} % / mois dernier à la même date` : ''}
-          </small>
-        </div>
-        <div>
-          <b>{fcfa(st.returns)}</b>
-          <small>retours clients</small>
-        </div>
+      <div className="hero">
+        <span className="hero-label">Ventes nettes {yesterday ? 'd’hier' : 'du jour'}</span>
+        <b className="hero-value">{fcfa(st.net)}</b>
+        {vsYesterday !== null && !yesterday ? (
+          <span className={`trend ${vsYesterday >= 0 ? 'up' : 'down'}`}>
+            <Icon name={vsYesterday >= 0 ? 'trend-up' : 'trend-down'} size={14} />
+            {vsYesterday >= 0 ? '+' : ''}
+            {vsYesterday} % par rapport à hier
+          </span>
+        ) : null}
+        {st.returns ? <span className="hero-sub">dont {fcfa(st.returns)} de retours clients</span> : null}
       </div>
-      {home.alerts.length ? (
-        <div className="list">
-          {home.alerts.map((a, i) => (
-            <div key={i} className={`notice ${a.level === 'erreur' ? 'erreur' : 'attention'}`}>
-              {a.text}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <h3>Les 7 derniers jours</h3>
+      <div className="kpis">
+        <StatCard icon="receipt" label="Tickets" value={st.sales} hint={`${fcfa(st.average)} en moyenne`} />
+        <StatCard icon="trend-up" label="Ce mois-ci" value={fcfa(p.month.total)} trend={vsMonth} hint="par rapport au mois dernier à la même date" />
+        <StatCard icon="box" tone="danger" label="Ruptures" value={st.outOfStockCount} />
+        <StatCard icon="alert" tone="warning" label="Stock bas" value={st.lowStockCount} />
+      </div>
+      <SectionTitle>Les 7 derniers jours</SectionTitle>
       <Bars values={p.week.map((d) => d.total)} labels={p.week.map((d) => jour(d.day))} />
-      <h3>Par heure</h3>
+      <button className="big" onClick={onFull} aria-expanded={full}>
+        {full ? 'Masquer le détail de la journée' : 'Détail de la journée : heures, paiements, vendeurs…'}
+      </button>
+      {full ? (
+        <>
+      <SectionTitle>Par heure</SectionTitle>
       <Bars values={hours.map((x) => x.v)} labels={hours.map((x) => `${x.h}h`)} />
-      <h3>Paiements</h3>
+      <SectionTitle>Paiements</SectionTitle>
       <div className="list">
         {st.byMethod.map((m) => (
           <div key={m.method} className="row item">
@@ -362,7 +335,7 @@ function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; ye
         ))}
         {!st.byMethod.length ? <div className="empty">Aucun paiement.</div> : null}
       </div>
-      <h3>En ce moment au magasin</h3>
+      <SectionTitle>En ce moment au magasin</SectionTitle>
       <div className="list">
         {home.floor.carts.map((c) => (
           <div key={c.seller} className="row item">
@@ -385,7 +358,7 @@ function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; ye
         ))}
         {!home.floor.carts.length && !home.floor.invoices.length ? <div className="empty">Aucun panier ni facture en attente.</div> : null}
       </div>
-      <h3>Meilleures ventes</h3>
+      <SectionTitle>Meilleures ventes</SectionTitle>
       <div className="list">
         {st.top.map((t) => (
           <div key={t.label} className="row item">
@@ -395,6 +368,8 @@ function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; ye
         ))}
         {!st.top.length ? <div className="empty">Aucune vente.</div> : null}
       </div>
+        </>
+      ) : null}
     </>
   );
 }
@@ -404,6 +379,7 @@ function SellersTab({ home, st }: { home: Home; st: StoreBoard }) {
   const max = Math.max(1, ...sellers.map((x) => x.total));
   return (
     <>
+      <SectionTitle>Vendeurs</SectionTitle>
       <p className="muted small">Ventes encaissées {home.today ? 'aujourd’hui' : 'ce jour-là'} au nom de chaque vendeur (le vendeur du panier ou de la facture, sinon le caissier).</p>
       <div className="list">
         {sellers.map((x) => (
@@ -533,6 +509,10 @@ function StockTab({ home, st }: { home: Home; st: StoreBoard }) {
         </div>
       ) : (
         <>
+          <div className="kpis">
+            <StatCard icon="box" tone="danger" label="Ruptures" value={st.outOfStockCount} />
+            <StatCard icon="alert" tone="warning" label="Stock bas" value={st.lowStockCount} />
+          </div>
           <h3>Ruptures ({st.outOfStockCount})</h3>
           <div className="list">
             {st.outOfStock.slice(0, 40).map(row)}
@@ -570,7 +550,7 @@ function StockTab({ home, st }: { home: Home; st: StoreBoard }) {
               </div>
             ))}
             {orders && !orders.length ? <div className="empty">Aucune commande en attente de livraison.</div> : null}
-            {!orders ? <div className="empty">Chargement…</div> : null}
+            {!orders ? <Skeleton rows={2} /> : null}
           </div>
         </>
       )}
@@ -713,8 +693,8 @@ function CustomersTab({ write }: { write: boolean }) {
   return (
     <>
       {error ? <div className="notice erreur">{error}</div> : null}
-      {done ? <div className="notice">{done}</div> : null}
-      {!data && !error ? <div className="card muted">Chargement…</div> : null}
+      {done ? <div className="notice info">{done}</div> : null}
+      {!data && !error ? <Skeleton rows={4} /> : null}
       {data && !r ? <div className="card muted">Les crédits clients arrivent avec l’état des PC (toutes les 5 minutes). Mettez les PC du magasin en version 0.98.0 ou plus.</div> : null}
       {r ? (
         <>
@@ -939,7 +919,7 @@ function InboxTab({ write }: { write: boolean }) {
     <>
       {error ? <div className="notice erreur">{error}</div> : null}
       {!write ? <p className="muted small">Téléphone en consultation seule : demandez à passer ce téléphone en « Gestion » pour répondre.</p> : null}
-      {!inbox && !error ? <div className="card muted">Chargement…</div> : null}
+      {!inbox && !error ? <Skeleton rows={4} /> : null}
       {approvals.length ? (
         <button className="big primary" onClick={() => setSheet(true)}>
           {approvals.length} demande(s) d’accord des caisses
@@ -1053,30 +1033,25 @@ function SalesTab({ write }: { write: boolean }) {
   };
   return (
     <>
-      <div className="tabs">
-        <button className={!yesterday ? 'on' : ''} onClick={() => setYesterday(false)}>
+      <div className="chips">
+        <button className={`chip ${!yesterday ? 'on' : ''}`} onClick={() => setYesterday(false)}>
           Aujourd’hui
         </button>
-        <button className={yesterday ? 'on' : ''} onClick={() => setYesterday(true)}>
+        <button className={`chip ${yesterday ? 'on' : ''}`} onClick={() => setYesterday(true)}>
           Hier
         </button>
       </div>
       {error ? <div className="notice erreur">{error}</div> : null}
-      {done ? <div className="notice">{done}</div> : null}
-      {!data && !error ? <div className="card muted">Chargement…</div> : null}
+      {done ? <div className="notice info">{done}</div> : null}
+      {!data && !error ? <Skeleton rows={5} stats /> : null}
       {data ? (
         <>
-          <div className="kpis">
-            <div>
-              <b>{fcfa(data.total)}</b>
-              <small>net du jour</small>
-            </div>
-            <div>
-              <b>{data.count}</b>
-              <small>facture(s)</small>
-            </div>
+          <div className="hero">
+            <span className="hero-label">Total net {yesterday ? 'd’hier' : 'du jour'}</span>
+            <b className="hero-value">{fcfa(data.total)}</b>
+            <span className="hero-sub">{data.count} facture(s)</span>
           </div>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Numéro, vendeur, client…" />
+          <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Numéro, vendeur, client…" enterKeyHint="search" />
           <div className="list">
             {list.map((x) => (
               <div key={x.id} className="card">
@@ -1109,7 +1084,7 @@ function SalesTab({ write }: { write: boolean }) {
                 ) : null}
               </div>
             ))}
-            {!list.length ? <div className="empty">Aucune facture.</div> : null}
+            {!list.length ? <EmptyState icon="receipt" title="Aucune facture" text={q.trim() ? 'Aucune facture ne correspond à cette recherche.' : 'Aucune facture encaissée ce jour-là.'} /> : null}
           </div>
         </>
       ) : null}
@@ -1184,8 +1159,8 @@ function TeamTab({ write }: { write: boolean }) {
     <>
       <p className="muted small">Absent ? Confiez vos pouvoirs (codes, remises, annulations, validations) à un employé jusqu’à une date : tout revient seul à la fin.</p>
       {error ? <div className="notice erreur">{error}</div> : null}
-      {done ? <div className="notice">{done}</div> : null}
-      {!users && !error ? <div className="card muted">Chargement…</div> : null}
+      {done ? <div className="notice info">{done}</div> : null}
+      {!users && !error ? <Skeleton rows={4} /> : null}
       <div className="list">
         {(users ?? []).map((u) => (
           <div key={u.id} className="card">

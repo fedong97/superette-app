@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.109.0',
+    items: [
+      "ONIX 360 Mobile fait peau neuve : barre de navigation en bas, accueil, menu « Plus » et actions rapides construits selon les droits de la personne connectée. Chacun ne voit que ce qui sert à son travail (gérant, vendeur, magasinier, caissier…), sans rien perdre des fonctions existantes.",
+      "Accueil du téléphone : ce qui demande l'attention en premier (demandes d'accord, écarts de caisse, paniers rendus, produits à recompter, saisies à envoyer), puis les chiffres du jour selon le rôle. Nouvelles couleurs ONIX, cartes plus légères, chargements et écrans vides plus clairs.",
+    ],
+  },
+  {
     version: '0.108.0',
     items: [
       "ONIX 360 Mobile, gérant : « Gérer la boutique » ouvre les écrans de gestion du PC sur le téléphone : tableau de bord, ventes, trésorerie et caisses, clients, fournisseurs, achats et paiements, dépenses, comptabilité, produits et prix, stock, équipe et planning, caisses et utilisateurs. On y crée, modifie, encaisse et règle comme au PC.",

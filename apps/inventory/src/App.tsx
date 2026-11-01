@@ -32,7 +32,9 @@ import {
   recapCsv,
   search,
 } from './logic';
-import { Manager } from './Manager';
+import type { ModuleId } from './modules';
+import { type ShellNav, Shell } from './shell';
+import { AppHeader, EmptyState, Icon, Skeleton, recall, remember } from './ui';
 import * as S from './state';
 
 const VERSION = __APP_VERSION__;
@@ -41,102 +43,26 @@ const useStore = () => useSyncExternalStore(S.subscribe, S.getState);
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const heure = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
 
-const remember = (key: string, value: string | null) => {
-  try {
-    if (value) sessionStorage.setItem(key, value);
-    else sessionStorage.removeItem(key);
-  } catch {
-    /* rien */
-  }
-};
-const recall = (key: string) => {
-  try {
-    return sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
-};
-
 export function App() {
   const s = useStore();
-  const [inventoryId, setInventoryId] = useState<string | null>(() => recall('inventaire'));
-  const [recapId, setRecapId] = useState<string | null>(null);
   // Mode fichier : compter sans serveur ni connexion, à partir d'une fiche.
   const [fileMode, setFileMode] = useState(() => recall('mode-fichier') === '1');
-  const choose = (id: string | null) => {
-    setInventoryId(id);
-    remember('inventaire', id);
-  };
   const files = (on: boolean) => {
     setFileMode(on);
     remember('mode-fichier', on ? '1' : null);
   };
-  // Panier préparé au rayon (vendeur) : à la place des inventaires.
-  const [cartMode, setCartMode] = useState(() => recall('panier') === '1');
-  const cartOn = (on: boolean) => {
-    setCartMode(on);
-    remember('panier', on ? '1' : null);
-  };
-  // Réception d'une livraison (magasinier) : à la place des inventaires.
-  const [receiveMode, setReceiveMode] = useState(() => recall('reception') === '1');
-  const receiveOn = (on: boolean) => {
-    setReceiveMode(on);
-    remember('reception', on ? '1' : null);
-  };
-  // Espace du gérant : à la place des inventaires.
-  const [manageMode, setManageMode] = useState(() => recall('gerant') === '1');
-  const manageOn = (on: boolean) => {
-    setManageMode(on);
-    remember('gerant', on ? '1' : null);
-  };
-  // Notification touchée : l'espace du gérant s'ouvre sur l'écran demandé.
-  useEffect(() => {
-    if (s.openScreen && s.session?.can?.manage && !manageMode) manageOn(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.openScreen, s.session]);
-  // Contrôle des tickets à la sortie (vigile) : à la place des inventaires.
-  const [exitMode, setExitMode] = useState(() => recall('sortie') === '1');
-  const exitOn = (on: boolean) => {
-    setExitMode(on);
-    remember('sortie', on ? '1' : null);
-  };
-  if (!s.ready) return <div className="splash">ONIX 360 Mobile</div>;
+  if (!s.ready)
+    return (
+      <div className="splash">
+        <img src="./icon.png" alt="" />
+        <b>ONIX 360 Mobile</b>
+      </div>
+    );
   const connected = Boolean(s.config && s.session);
-  const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
-  const archive = s.archives.find((a) => a.inventory.id === recapId);
-  const recapFile = s.files.find((f) => f.id === recapId);
-  const can = s.session?.can;
-  const cartOnly = Boolean(connected && can && can.cart && !can.count);
-  const manageOnly = Boolean(connected && can?.manage && !can.count && !can.cart && !can.receive);
   let page: ReactNode;
-  if (connected && can?.manage && (manageOnly || manageMode)) page = <Manager onBack={manageOnly ? null : () => manageOn(false)} />;
-  else if (connected && can?.exit && exitMode) page = <ExitControl onBack={() => exitOn(false)} />;
-  else if (connected && can?.receive && receiveMode) page = <Receive onBack={() => receiveOn(false)} />;
-  else if (connected && can?.cart && (cartOnly || cartMode))
-    page = (
-      <ShelfCart
-        onBack={cartOnly ? null : () => cartOn(false)}
-        onReceive={can.receive ? () => receiveOn(true) : undefined}
-        onExit={can.exit ? () => exitOn(true) : undefined}
-        onManage={can.manage ? () => manageOn(true) : undefined}
-      />
-    );
-  else if (archive) page = <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
-  else if (recapFile) page = <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
-  else if (inventory && recapId === inventory.id) page = <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
-  else if (inventory && !(S.isFile(inventory) && inventory.closed)) page = <Count inventory={inventory} onBack={() => choose(null)} onRecap={() => setRecapId(inventory.id)} />;
-  else if (connected || fileMode)
-    page = (
-      <Inventories
-        onChoose={choose}
-        onRecap={setRecapId}
-        onLeaveFiles={connected ? undefined : () => files(false)}
-        onCart={connected && can?.cart ? () => cartOn(true) : undefined}
-        onReceive={connected && can?.receive ? () => receiveOn(true) : undefined}
-        onExit={connected && can?.exit ? () => exitOn(true) : undefined}
-        onManage={connected && can?.manage ? () => manageOn(true) : undefined}
-      />
-    );
+  // Connecté : le cadre commun, avec les seuls modules ouverts par les droits envoyés par le serveur.
+  if (connected) page = <Shell render={(id, nav) => <ModulePage id={id} nav={nav} />} settings={(onClose) => <Settings onClose={onClose} />} />;
+  else if (fileMode) page = <InventoryArea onLeaveFiles={() => files(false)} />;
   else if (!s.config) page = <Pairing onFiles={() => files(true)} />;
   else page = <Login onFiles={() => files(true)} />;
   return (
@@ -145,6 +71,35 @@ export function App() {
       {page}
     </div>
   );
+}
+
+/** Écran d'un module du téléphone (les écrans du gérant sont dans Manager.tsx). */
+function ModulePage({ id, nav }: { id: ModuleId; nav: ShellNav }) {
+  if (id === 'vente') return <ShelfCart onBack={nav.back} />;
+  if (id === 'inventaires') return <InventoryArea onBack={nav.back} />;
+  if (id === 'reception') return <Receive onBack={nav.back} />;
+  if (id === 'sortie') return <ExitControl onBack={nav.back} />;
+  return null;
+}
+
+/** Inventaires : la liste, le comptage d'un inventaire et son récapitulatif (connecté ou mode fichier). */
+function InventoryArea({ onLeaveFiles, onBack }: { onLeaveFiles?: () => void; onBack?: (() => void) | null }) {
+  const s = useStore();
+  const [inventoryId, setInventoryId] = useState<string | null>(() => recall('inventaire'));
+  const [recapId, setRecapId] = useState<string | null>(null);
+  const choose = (id: string | null) => {
+    setInventoryId(id);
+    remember('inventaire', id);
+  };
+  const connected = Boolean(s.config && s.session);
+  const inventory = [...(connected ? s.inventories : []), ...s.files].find((i) => i.id === inventoryId) ?? null;
+  const archive = s.archives.find((a) => a.inventory.id === recapId);
+  const recapFile = s.files.find((f) => f.id === recapId);
+  if (archive) return <Recap inventory={archive.inventory} counts={archive.counts} closed onClose={() => setRecapId(null)} />;
+  if (recapFile) return <Recap inventory={recapFile} counts={s.counts} closed={recapFile.closed} onClose={() => setRecapId(null)} />;
+  if (inventory && recapId === inventory.id) return <Recap inventory={inventory} counts={s.counts} closed={false} onClose={() => setRecapId(null)} />;
+  if (inventory && !(S.isFile(inventory) && inventory.closed)) return <Count inventory={inventory} onBack={() => choose(null)} onRecap={() => setRecapId(inventory.id)} />;
+  return <Inventories onChoose={choose} onRecap={setRecapId} onLeaveFiles={connected ? undefined : onLeaveFiles} onBack={onBack ?? null} />;
 }
 
 function Notices() {
@@ -472,18 +427,12 @@ function Inventories({
   onChoose,
   onRecap,
   onLeaveFiles,
-  onCart,
-  onReceive,
-  onExit,
-  onManage,
+  onBack,
 }: {
   onChoose: (id: string) => void;
   onRecap: (id: string) => void;
   onLeaveFiles?: () => void;
-  onCart?: () => void;
-  onReceive?: () => void;
-  onExit?: () => void;
-  onManage?: () => void;
+  onBack: (() => void) | null;
 }) {
   const s = useStore();
   const [menu, setMenu] = useState(false);
@@ -523,56 +472,32 @@ function Inventories({
   };
   return (
     <div className="page">
-      <header className="bar">
-        <div className="grow">
-          <b>{connected ? s.config!.storeName : 'Mode fichier'}</b>
-          <small>{connected ? s.session!.user.name : 'Sans serveur ni connexion'}</small>
-        </div>
-        {connected ? <Status /> : null}
-        <button className="ghost" onClick={() => setMenu(true)} aria-label="Menu">
-          ☰
-        </button>
-      </header>
-      <main>
-        {onManage ? (
-          <button className="big primary" onClick={onManage}>
-            Espace gérant : ventes, caisses, stock, clients
+      <AppHeader title={connected ? 'Inventaires' : 'Mode fichier'} subtitle={connected ? s.config!.storeName : 'Sans serveur ni connexion'} onBack={onBack}>
+        {connected ? <Status /> : (
+          <button className="ghost" onClick={() => setMenu(true)} aria-label="Réglages">
+            <Icon name="menu" />
           </button>
-        ) : null}
-        {onExit ? (
-          <button className="big" onClick={onExit}>
-            Contrôle des tickets à la sortie
-          </button>
-        ) : null}
-        {onReceive ? (
-          <button className="big" onClick={onReceive}>
-            Réceptionner une livraison
-          </button>
-        ) : null}
-        {onCart ? (
-          <button className="big primary" onClick={onCart}>
-            Préparer un panier pour un client
-          </button>
-        ) : null}
-        <div className="tabs">
-          <button className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>
+        )}
+      </AppHeader>
+      <main className="enter">
+        <div className="chips">
+          <button className={`chip ${filter === 'open' ? 'on' : ''}`} onClick={() => setFilter('open')}>
             En cours
           </button>
-          <button className={filter === 'closed' ? 'on' : ''} onClick={() => setFilter('closed')}>
+          <button className={`chip ${filter === 'closed' ? 'on' : ''}`} onClick={() => setFilter('closed')}>
             Clôturés{s.archives.length + closedFiles.length ? ` (${s.archives.length + closedFiles.length})` : ''}
           </button>
         </div>
         {filter === 'open' ? (
           <>
-            {connected && !s.catalog ? <div className="card muted">Téléchargement du catalogue…</div> : null}
+            {connected && !s.catalog ? <Skeleton rows={2} /> : null}
             {connected ? s.inventories.map((inv) => card(inv, () => onChoose(inv.id))) : null}
             {connected && !s.inventories.length ? (
-              <div className="card muted">
-                Aucun inventaire ouvert dans ce magasin. Le gérant le crée sur un PC (Stock › Inventaires), puis il apparaît ici.
+              <EmptyState icon="clipboard" title="Aucun inventaire en cours" text="Le gérant crée l’inventaire sur un PC (Stock › Inventaires), puis il apparaît ici.">
                 <button className="big" onClick={() => void S.sync()}>
                   Actualiser
                 </button>
-              </div>
+              </EmptyState>
             ) : null}
             {openFiles.map((f) => card(f, () => onChoose(f.id)))}
             {error ? <div className="notice erreur">{error}</div> : null}
@@ -607,7 +532,7 @@ function Inventories({
             {s.archives.map((a) => card(a.inventory, () => onRecap(a.inventory.id), `clôturé le ${new Date(a.closedAt).toLocaleDateString('fr-FR')}`))}
             {closedFiles.map((f) => card(f, () => onRecap(f.id), 'clôturé'))}
             {!s.archives.length && !closedFiles.length ? (
-              <div className="card muted">Aucun inventaire clôturé. Quand le gérant clôture un inventaire sur le PC, vos comptages restent consultables ici.</div>
+              <EmptyState icon="clipboard" title="Aucun inventaire clôturé" text="Quand le gérant clôture un inventaire sur le PC, vos comptages restent consultables ici." />
             ) : null}
           </>
         )}
@@ -656,7 +581,7 @@ interface ShownLine {
  * comme sur le PC, suivi de chaque panier (en caisse, encaissé, rendu) et
  * ventes du jour.
  */
-function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => void) | null; onReceive?: () => void; onExit?: () => void; onManage?: () => void }) {
+function ShelfCart({ onBack }: { onBack: (() => void) | null }) {
   const s = useStore();
   const full = s.session?.can?.sell === 'full';
   const [info, setInfo] = useState<Article | null>(null);
@@ -791,24 +716,10 @@ function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => voi
 
   return (
     <div className="page">
-      <header className="bar">
-        {onBack ? (
-          <button className="ghost" onClick={onBack} aria-label="Retour">
-            ‹
-          </button>
-        ) : null}
-        <div className="grow">
-          <b>{s.cartEdit ? `Panier n° ${s.cartEdit.number} (modification)` : 'Panier au rayon'}</b>
-          <small>{s.session?.user.name}</small>
-        </div>
+      <AppHeader title={s.cartEdit ? `Panier n° ${s.cartEdit.number} (modification)` : 'Panier au rayon'} subtitle={s.session?.user.name} onBack={onBack}>
         <Status />
-        {!onBack ? (
-          <button className="ghost" onClick={() => void S.logout()} aria-label="Changer d'utilisateur">
-            ⎋
-          </button>
-        ) : null}
-      </header>
-      <main>
+      </AppHeader>
+      <main className="enter">
         <CatalogState />
         {sent !== null ? (
           <div className="notice info">
@@ -838,7 +749,9 @@ function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => voi
           </div>
         ) : null}
         <button className="scan" onClick={() => setCamera(true)}>
-          <span className="scan-icon">▥</span>
+          <span className="scan-icon">
+            <Icon name="scan" size={34} />
+          </span>
           Scanner
           <small>chaque scan ajoute 1</small>
         </button>
@@ -847,21 +760,6 @@ function ShelfCart({ onBack, onReceive, onExit, onManage }: { onBack: (() => voi
         {canMissed && query.trim().length < 2 ? (
           <button className="big" onClick={() => setMissed({ article: null, label: '' })}>
             Le client voulait… (produit absent, en rupture, trop cher)
-          </button>
-        ) : null}
-        {onReceive ? (
-          <button className="link" onClick={onReceive}>
-            Réceptionner une livraison
-          </button>
-        ) : null}
-        {onExit ? (
-          <button className="link" onClick={onExit}>
-            Contrôle des tickets à la sortie
-          </button>
-        ) : null}
-        {onManage ? (
-          <button className="link" onClick={onManage}>
-            Espace gérant
           </button>
         ) : null}
         {query.trim().length >= 2 ? (
@@ -1519,7 +1417,7 @@ function MissedSheet({ article, label, onClose }: { article: Article | null; lab
  * le ticket est bon, déjà présenté, annulé ou rapporté, et liste ce que le
  * client emporte. Un problème noté alerte le gérant.
  */
-function ExitControl({ onBack }: { onBack: () => void }) {
+function ExitControl({ onBack }: { onBack: (() => void) | null }) {
   const [camera, setCamera] = useState(false);
   const [code, setCode] = useState('');
   const [ticket, setTicket] = useState<S.ExitTicket | null>(null);
@@ -1577,16 +1475,10 @@ function ExitControl({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="page">
-      <header className="bar">
-        <button className="ghost" onClick={onBack} aria-label="Retour">
-          ‹
-        </button>
-        <div className="grow">
-          <b>Contrôle sortie</b>
-        </div>
+      <AppHeader title="Contrôle sortie" subtitle="Tickets à la porte" onBack={onBack}>
         <Status />
-      </header>
-      <main>
+      </AppHeader>
+      <main className="enter">
         {flash ? <div className={`flash ${flash.ok ? 'ok' : 'ko'}`}>{flash.text}</div> : null}
         {ticket ? (
           <>
@@ -1634,7 +1526,9 @@ function ExitControl({ onBack }: { onBack: () => void }) {
         ) : (
           <>
             <button className="scan" onClick={() => setCamera(true)}>
-              <span className="scan-icon">▥</span>
+              <span className="scan-icon">
+            <Icon name="scan" size={34} />
+          </span>
               Scanner le ticket
               <small>code-barres en bas du ticket</small>
             </button>
@@ -1662,7 +1556,7 @@ function ExitControl({ onBack }: { onBack: () => void }) {
  * abîmés, le lot et la date limite, puis envoie. Un PC du magasin reprend ce
  * comptage, vérifie les prix et valide : le stock n'entre qu'à ce moment.
  */
-function Receive({ onBack }: { onBack: () => void }) {
+function Receive({ onBack }: { onBack: (() => void) | null }) {
   const s = useStore();
   const [orders, setOrders] = useState<S.ReceptionOrder[] | null>(null);
   const [draft, setDraftState] = useState<S.ReceptionDraft | null>(null);
@@ -1716,16 +1610,9 @@ function Receive({ onBack }: { onBack: () => void }) {
     );
 
   const header = (
-    <header className="bar">
-      <button className="ghost" onClick={onBack} aria-label="Retour">
-        ‹
-      </button>
-      <div className="grow">
-        <b>Réception</b>
-        <small>{draft ? `Bon ${draft.orderNumber} · ${draft.supplier}` : s.session?.user.name}</small>
-      </div>
+    <AppHeader title="Réception" subtitle={draft ? `Bon ${draft.orderNumber} · ${draft.supplier}` : s.session?.user.name} onBack={onBack}>
       <Status />
-    </header>
+    </AppHeader>
   );
 
   if (!draft || !order)
@@ -1736,7 +1623,7 @@ function Receive({ onBack }: { onBack: () => void }) {
           {sent ? <div className="notice info">{sent}</div> : null}
           {error ? <div className="notice erreur">{error}</div> : null}
           {draft && orders && !order ? <div className="notice erreur">Le bon {draft.orderNumber} n'est plus à réceptionner (déjà reçu ou annulé sur le PC).</div> : null}
-          {!orders && !error ? <div className="card muted">Chargement des bons de commande…</div> : null}
+          {!orders && !error ? <Skeleton rows={3} /> : null}
           {orders?.map((o) => (
             <button
               key={o.id}
@@ -1753,7 +1640,7 @@ function Receive({ onBack }: { onBack: () => void }) {
               </div>
             </button>
           ))}
-          {orders && !orders.length ? <div className="card muted">Aucun bon de commande à réceptionner. Le bon est créé et envoyé sur le PC (Achats › Bons de commande).</div> : null}
+          {orders && !orders.length ? <EmptyState icon="truck" title="Aucune livraison attendue" text="Le bon de commande est créé et envoyé sur le PC (Achats › Bons de commande), puis il apparaît ici." /> : null}
           <button className="link" onClick={() => void reload()}>
             Actualiser
           </button>
@@ -1769,7 +1656,9 @@ function Receive({ onBack }: { onBack: () => void }) {
       {header}
       <main>
         <button className="scan" onClick={() => setCamera(true)}>
-          <span className="scan-icon">▥</span>
+          <span className="scan-icon">
+            <Icon name="scan" size={34} />
+          </span>
           Scanner
           <small>un scan = un conditionnement</small>
         </button>
@@ -2071,7 +1960,7 @@ function Count({ inventory, onBack, onRecap }: { inventory: S.ServerInventory; o
     <div className="page">
       <header className="bar">
         <button className="ghost" onClick={onBack} aria-label="Retour">
-          ‹
+          <Icon name="back" />
         </button>
         <div className="grow">
           <b>{file ? inventory.number : `N° ${inventory.number}`}</b>
@@ -2081,7 +1970,7 @@ function Count({ inventory, onBack, onRecap }: { inventory: S.ServerInventory; o
         </div>
         {!file && s.session ? <Status /> : null}
         <button className="ghost" onClick={() => setMenu(true)} aria-label="Menu">
-          ☰
+          <Icon name="menu" />
         </button>
       </header>
       <main>
@@ -2097,7 +1986,9 @@ function Count({ inventory, onBack, onRecap }: { inventory: S.ServerInventory; o
           </button>
         </div>
         <button className="scan" onClick={() => setCamera(true)}>
-          <span className="scan-icon">▥</span>
+          <span className="scan-icon">
+            <Icon name="scan" size={34} />
+          </span>
           Scanner
           <small>
             {s.location}
@@ -2653,7 +2544,7 @@ function Recap({ inventory, counts, closed, onClose }: { inventory: S.ServerInve
     <div className="page">
       <header className="bar">
         <button className="ghost" onClick={onClose} aria-label="Retour">
-          ‹
+          <Icon name="back" />
         </button>
         <div className="grow">
           <b>Récapitulatif · {file ? file.number : `N° ${inventory.number}`}</b>

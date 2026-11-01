@@ -109,6 +109,13 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.110.0',
+    items: [
+      "ONIX 360 Mobile : menu latéral (☰) comme sur les maquettes, avec le profil, tous les écrans autorisés rangés par thème, les notifications, les paramètres et la déconnexion. Les écrans de gestion du PC (achats, produits, clients, fournisseurs, dépenses, comptabilité, administration…) y sont directement, seulement s'ils sont dans vos droits.",
+      "Ventes sur le téléphone : filtres Aujourd'hui, Hier, 7 jours, Ce mois ou une date au choix, et par type (à crédit, retours, annulées). Le tableau de bord s'affiche pour le jour de votre choix.",
+    ],
+  },
+  {
     version: '0.109.0',
     items: [
       "ONIX 360 Mobile fait peau neuve : barre de navigation en bas, accueil, menu « Plus » et actions rapides construits selon les droits de la personne connectée. Chacun ne voit que ce qui sert à son travail (gérant, vendeur, magasinier, caissier…), sans rien perdre des fonctions existantes.",

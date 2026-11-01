@@ -133,17 +133,22 @@ export class ManagerActionsService {
   }
 
   /** Factures du jour (ou d'une date) du magasin, les plus récentes d'abord. */
-  async sales(caller: MobileCaller, day?: string) {
+  async sales(caller: MobileCaller, day?: string, to?: string) {
     const storeId = caller.device.store_id;
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(day ?? '') ? new Date(`${day}T00:00:00`) : new Date();
+    const isDay = (x?: string) => /^\d{4}-\d{2}-\d{2}$/.test(x ?? '');
+    const d = isDay(day) ? new Date(`${day}T00:00:00`) : new Date();
     d.setHours(0, 0, 0, 0);
-    const end = new Date(d.getTime() + 86_400_000);
+    // Période (filtre du téléphone) : du jour `day` au jour `to` inclus, 31 jours au plus.
+    const last = isDay(to) ? new Date(`${to}T00:00:00`) : d;
+    last.setHours(0, 0, 0, 0);
+    const days = Math.min(31, Math.max(1, Math.round((last.getTime() - d.getTime()) / 86_400_000) + 1));
+    const end = new Date(d.getTime() + days * 86_400_000);
     const { rows } = await this.pg.query<{ entity_id: string; payload: Json }>(
       `SELECT entity_id, payload FROM (
          SELECT DISTINCT ON (entity_id) entity_id, payload FROM events
          WHERE entity = 'sale' AND payload IS NOT NULL AND COALESCE(store_id, payload->>'store_id') = $1 AND payload->>'created_at' >= $2 AND payload->>'created_at' < $3
          ORDER BY entity_id, seq DESC
-       ) s ORDER BY payload->>'created_at' DESC LIMIT 300`,
+       ) s ORDER BY payload->>'created_at' DESC`,
       [storeId, d.toISOString(), end.toISOString()],
     );
     const who = await this.names();
@@ -175,7 +180,10 @@ export class ManagerActionsService {
     const kept = list.filter((x) => !x.cancelled);
     return {
       day: d.toISOString().slice(0, 10),
-      sales: list,
+      days,
+      // Les totaux portent sur toute la période ; la liste s'arrête aux 300 plus récentes.
+      sales: list.slice(0, 300),
+      more: Math.max(0, list.length - 300),
       total: kept.reduce((t, x) => t + (x.kind === 'return' ? -Math.abs(x.total) : x.total), 0),
       count: kept.filter((x) => x.kind === 'sale').length,
     };

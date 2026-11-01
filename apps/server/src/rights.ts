@@ -36,6 +36,20 @@ export function rightFrom(role: string, userRights: Json | null, roleRights: Jso
   return defaults.includes(role);
 }
 
+/**
+ * Données de droits d'un utilisateur, telles que les PC les enregistrent : le
+ * téléphone en déduit les droits avec le même calcul que les PC (@superette/core),
+ * pour n'afficher que les écrans du PC ouverts à la personne.
+ */
+export function rightInputs(userRights: Json | null, roleRights: Json | null) {
+  return {
+    roleRights: parse<Record<string, boolean>>(roleRights?.['rights'], {}),
+    grants: parse<string[]>(userRights?.['grants'], []).map(String),
+    revokes: parse<string[]>(userRights?.['revokes'], []).map(String),
+    delegation: activeDelegation(userRights),
+  };
+}
+
 /** Dernière fiche reçue des PC pour une entité (null si supprimée ou inconnue). */
 async function latest(pg: Db, entity: string, id: string): Promise<Json | null> {
   const { rows } = await pg.query<{ op: string; payload: Json | null }>('SELECT op, payload FROM events WHERE entity = $1 AND entity_id = $2 ORDER BY seq DESC LIMIT 1', [entity, id]);

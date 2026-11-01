@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { type Db, PG } from './database';
-import { isSupervisor, rightFrom, storeUsers } from './rights';
+import { isSupervisor, rightFrom, rightInputs, storeUsers } from './rights';
 
 type Json = Record<string, unknown>;
 
@@ -332,6 +332,12 @@ export class MobileService {
       departments: new Map(d.map((r) => [r.entity_id, str(r.payload['name'])])),
       families: new Map(f.map((r) => [r.entity_id, str(r.payload['department_id'])])),
     };
+  }
+
+  /** Rôle et réglages de droits de la personne connectée (le téléphone fait le même calcul que les PC). */
+  async pcRights(caller: MobileCaller) {
+    const { id, role } = caller.user;
+    return { role, ...rightInputs(await this.one('user_rights', id), await this.one('role_rights', role)) };
   }
 
   /** Un droit de l'utilisateur, comme sur les PC : rôle, réglages du rôle, privilèges personnels. */

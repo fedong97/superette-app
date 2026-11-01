@@ -18,6 +18,47 @@ const fcfa = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
 const heure = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
 const jour = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
 const pct = (now: number, before: number) => (before > 0 ? Math.round(((now - before) / before) * 100) : null);
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** Jour décalé de `n` jours par rapport à aujourd'hui (AAAA-MM-JJ). */
+const shiftDay = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return isoDay(d);
+};
+const frDay = (day: string) => day.split('-').reverse().join('/');
+
+type PeriodKey = 'today' | 'yesterday' | 'week' | 'month' | 'day';
+interface Period {
+  key: PeriodKey;
+  from: string;
+  to: string;
+}
+const PERIODS: [Exclude<PeriodKey, 'day'>, string][] = [
+  ['today', 'Aujourd’hui'],
+  ['yesterday', 'Hier'],
+  ['week', '7 jours'],
+  ['month', 'Ce mois'],
+];
+function periodOf(key: Exclude<PeriodKey, 'day'>): Period {
+  const today = shiftDay(0);
+  if (key === 'yesterday') return { key, from: shiftDay(-1), to: shiftDay(-1) };
+  if (key === 'week') return { key, from: shiftDay(-6), to: today };
+  if (key === 'month') return { key, from: `${today.slice(0, 8)}01`, to: today };
+  return { key, from: today, to: today };
+}
+const periodLabel = (p: Period) =>
+  p.key === 'today' ? 'aujourd’hui' : p.key === 'yesterday' ? 'hier' : p.key === 'week' ? '7 derniers jours' : p.key === 'month' ? 'ce mois-ci' : frDay(p.from);
+
+/** Filtre « choisir une date » : un calendrier natif, sans date future. */
+function DateChip({ value, onPick, label = 'Date' }: { value: string; onPick: (day: string) => void; label?: string }) {
+  return (
+    <label className={`chip date ${value ? 'on' : ''}`}>
+      <Icon name="calendar" size={16} />
+      {value ? frDay(value) : label}
+      <input type="date" max={shiftDay(0)} value={value} onChange={(e) => e.target.value && onPick(e.target.value)} aria-label="Choisir une date" />
+    </label>
+  );
+}
 
 interface Register {
   id: string;
@@ -148,7 +189,7 @@ interface DaySale {
  * Gestion complète : les écrans du PC (clients, trésorerie, caisses…) dans le
  * téléphone ; un PC allumé du magasin exécute chaque action au nom du gérant.
  */
-export function openPcManagement() {
+export function openPcManagement(screen?: string) {
   const st = S.getState();
   if (!st.config || !st.session) return;
   try {
@@ -156,7 +197,7 @@ export function openPcManagement() {
   } catch {
     return;
   }
-  location.href = './pc/mobile.html';
+  location.href = `./pc/mobile.html${screen ? `#${encodeURIComponent(screen)}` : ''}`;
 }
 
 const ACTION_STATUS: Record<ManagerAction['status'], string> = { pending: 'en attente d’un PC', done: 'fait', failed: 'refusé', expired: 'abandonné' };
@@ -171,8 +212,9 @@ const MISSED: Record<string, string> = { absent: 'pas en magasin', rupture: 'en 
 interface ManagerCtx {
   home: Home | null;
   error: string;
-  yesterday: boolean;
-  setYesterday: (y: boolean) => void;
+  /** Jour affiché (AAAA-MM-JJ) ; vide : aujourd'hui. */
+  day: string;
+  setDay: (d: string) => void;
   load: () => void;
   openApprovals: () => void;
 }
@@ -181,14 +223,11 @@ export const useManager = () => useContext(Ctx);
 
 /** Données de l'espace du gérant, chargées une fois pour l'accueil et ses écrans. */
 export function ManagerProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
-  const [yesterday, setYesterday] = useState(false);
+  const [day, setDay] = useState('');
   const [home, setHome] = useState<Home | null>(null);
   const [error, setError] = useState('');
   const [approvals, setApprovals] = useState(false);
   const load = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    const day = yesterday ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
     S.call<Home>(`/manager${day ? `?day=${day}` : ''}`).then(
       (h) => (setHome(h), setError('')),
       (e) => setError(message(e)),
@@ -200,10 +239,10 @@ export function ManagerProvider({ enabled, children }: { enabled: boolean; child
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yesterday, enabled]);
+  }, [day, enabled]);
   if (!enabled) return <>{children}</>;
   return (
-    <Ctx.Provider value={{ home, error, yesterday, setYesterday, load, openApprovals: () => setApprovals(true) }}>
+    <Ctx.Provider value={{ home, error, day, setDay, load, openApprovals: () => setApprovals(true) }}>
       {children}
       {approvals ? <ApprovalsSheet write={Boolean(home?.write)} onClose={() => (setApprovals(false), load())} /> : null}
     </Ctx.Provider>
@@ -225,22 +264,22 @@ export function ManagerHome() {
   const m = useManager();
   const [full, setFull] = useState(false);
   if (!m) return null;
-  const { home, error, yesterday, setYesterday } = m;
+  const { home, error, day, setDay } = m;
   if (!home) return error ? null : <Skeleton rows={3} stats />;
   const st = home.store;
   if (!st) return <EmptyState icon="store" title="Pas encore de données" text="Les PC du magasin envoient la journée à leur prochaine synchronisation." />;
   return (
     <>
-      <DayTab home={home} st={st} yesterday={yesterday} onDay={setYesterday} full={full} onFull={() => setFull(!full)} />
+      <DayTab home={home} st={st} day={day} onDay={setDay} full={full} onFull={() => setFull(!full)} />
       {full ? <SellersTab home={home} st={st} /> : null}
     </>
   );
 }
 
-const MANAGER_TITLES: Partial<Record<ModuleId, string>> = { ventes: 'Ventes', valider: 'À valider', stock: 'Stock', caisses: 'Caisses', clients: 'Clients', equipe: 'Équipe' };
+const MANAGER_TITLES: Partial<Record<ModuleId, string>> = { ventes: 'Ventes', valider: 'À valider', stock: 'Stock', caisses: 'Caisses', clients: 'Crédits clients', equipe: 'Délégation' };
 
 /** Un écran de l'espace du gérant, avec son en-tête. */
-export function ManagerScreen({ id }: { id: ModuleId }) {
+export function ManagerScreen({ id, links }: { id: ModuleId; links?: ReactNode }) {
   const s = useStore();
   const m = useManager();
   const home = m?.home ?? null;
@@ -264,6 +303,7 @@ export function ManagerScreen({ id }: { id: ModuleId }) {
         {home && !st && (id === 'stock' || id === 'caisses') ? (
           <EmptyState icon="store" title="Pas encore de données" text="Les PC du magasin envoient l’état du magasin à leur prochaine synchronisation." />
         ) : null}
+        {links}
       </main>
     </div>
   );
@@ -283,7 +323,8 @@ function Bars({ values, labels }: { values: number[]; labels: string[] }) {
   );
 }
 
-function DayTab({ home, st, yesterday, onDay, full, onFull }: { home: Home; st: StoreBoard; yesterday: boolean; onDay: (y: boolean) => void; full: boolean; onFull: () => void }) {
+function DayTab({ home, st, day, onDay, full, onFull }: { home: Home; st: StoreBoard; day: string; onDay: (d: string) => void; full: boolean; onFull: () => void }) {
+  const yesterday = day === shiftDay(-1);
   const p = home.periods;
   const vsYesterday = pct(st.net, st.yesterday);
   const vsMonth = pct(p.month.total, p.lastMonth.total);
@@ -291,17 +332,18 @@ function DayTab({ home, st, yesterday, onDay, full, onFull }: { home: Home; st: 
   return (
     <>
       <div className="chips">
-        <button className={`chip ${!yesterday ? 'on' : ''}`} onClick={() => onDay(false)}>
+        <button className={`chip ${!day ? 'on' : ''}`} onClick={() => onDay('')}>
           Aujourd’hui
         </button>
-        <button className={`chip ${yesterday ? 'on' : ''}`} onClick={() => onDay(true)}>
+        <button className={`chip ${yesterday ? 'on' : ''}`} onClick={() => onDay(shiftDay(-1))}>
           Hier
         </button>
+        <DateChip value={day && !yesterday ? day : ''} onPick={onDay} />
       </div>
       <div className="hero">
-        <span className="hero-label">Ventes nettes {yesterday ? 'd’hier' : 'du jour'}</span>
+        <span className="hero-label">Ventes nettes {!day ? 'du jour' : yesterday ? 'd’hier' : `du ${frDay(day)}`}</span>
         <b className="hero-value">{fcfa(st.net)}</b>
-        {vsYesterday !== null && !yesterday ? (
+        {vsYesterday !== null && !day ? (
           <span className={`trend ${vsYesterday >= 0 ? 'up' : 'down'}`}>
             <Icon name={vsYesterday >= 0 ? 'trend-up' : 'trend-down'} size={14} />
             {vsYesterday >= 0 ? '+' : ''}
@@ -994,18 +1036,16 @@ function InboxTab({ write }: { write: boolean }) {
 
 /** Factures du jour : qui a vendu quoi, à crédit, remisées ; annulation avec motif. */
 function SalesTab({ write }: { write: boolean }) {
-  const [data, setData] = useState<{ day: string; sales: DaySale[]; total: number; count: number } | null>(null);
+  const [data, setData] = useState<{ day: string; days?: number; more?: number; sales: DaySale[]; total: number; count: number } | null>(null);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
-  const [yesterday, setYesterday] = useState(false);
+  const [period, setPeriod] = useState<Period>(() => periodOf('today'));
+  const [kind, setKind] = useState<'all' | 'credit' | 'return' | 'cancelled'>('all');
   const [cancel, setCancel] = useState<DaySale | null>(null);
   const [reason, setReason] = useState('');
   const [done, setDone] = useState('');
   const load = () => {
-    const d = new Date();
-    if (yesterday) d.setDate(d.getDate() - 1);
-    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    S.call<{ day: string; sales: DaySale[]; total: number; count: number }>(`/manager/sales?day=${day}`).then(
+    S.call<{ day: string; days?: number; more?: number; sales: DaySale[]; total: number; count: number }>(`/manager/sales?day=${period.from}${period.to !== period.from ? `&to=${period.to}` : ''}`).then(
       (r) => (setData(r), setError('')),
       (e) => setError(message(e)),
     );
@@ -1015,11 +1055,14 @@ function SalesTab({ write }: { write: boolean }) {
     const t = setInterval(load, 30_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yesterday]);
+  }, [period.from, period.to]);
   const list = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (data?.sales ?? []).filter((x) => !t || [x.number, x.seller, x.cashier, x.customer ?? ''].some((v) => v.toLowerCase().includes(t)));
-  }, [data, q]);
+    return (data?.sales ?? [])
+      .filter((x) => kind === 'all' || (kind === 'credit' ? x.credit && !x.cancelled : kind === 'return' ? x.kind === 'return' : x.cancelled))
+      .filter((x) => !t || [x.number, x.seller, x.cashier, x.customer ?? ''].some((v) => v.toLowerCase().includes(t)));
+  }, [data, q, kind]);
+  const several = period.from !== period.to;
   const confirm = async () => {
     if (!cancel || !reason.trim()) return;
     try {
@@ -1034,12 +1077,12 @@ function SalesTab({ write }: { write: boolean }) {
   return (
     <>
       <div className="chips">
-        <button className={`chip ${!yesterday ? 'on' : ''}`} onClick={() => setYesterday(false)}>
-          Aujourd’hui
-        </button>
-        <button className={`chip ${yesterday ? 'on' : ''}`} onClick={() => setYesterday(true)}>
-          Hier
-        </button>
+        {PERIODS.map(([k, label]) => (
+          <button key={k} className={`chip ${period.key === k ? 'on' : ''}`} onClick={() => setPeriod(periodOf(k))}>
+            {label}
+          </button>
+        ))}
+        <DateChip value={period.key === 'day' ? period.from : ''} onPick={(d) => setPeriod({ key: 'day', from: d, to: d })} />
       </div>
       {error ? <div className="notice erreur">{error}</div> : null}
       {done ? <div className="notice info">{done}</div> : null}
@@ -1047,9 +1090,25 @@ function SalesTab({ write }: { write: boolean }) {
       {data ? (
         <>
           <div className="hero">
-            <span className="hero-label">Total net {yesterday ? 'd’hier' : 'du jour'}</span>
+            <span className="hero-label">Total net · {periodLabel(period)}</span>
             <b className="hero-value">{fcfa(data.total)}</b>
-            <span className="hero-sub">{data.count} facture(s)</span>
+            <span className="hero-sub">
+              {data.count} facture(s){data.count ? ` · ${fcfa(data.total / data.count)} en moyenne` : ''}
+            </span>
+          </div>
+          <div className="chips">
+            {(
+              [
+                ['all', 'Toutes'],
+                ['credit', 'À crédit'],
+                ['return', 'Retours'],
+                ['cancelled', 'Annulées'],
+              ] as const
+            ).map(([k, label]) => (
+              <button key={k} className={`chip small-chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>
+                {label}
+              </button>
+            ))}
           </div>
           <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Numéro, vendeur, client…" enterKeyHint="search" />
           <div className="list">
@@ -1065,6 +1124,7 @@ function SalesTab({ write }: { write: boolean }) {
                   </b>
                 </div>
                 <small className="muted">
+                  {several ? `${new Date(x.at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} · ` : ''}
                   {heure(x.at)} · {x.seller || x.cashier}
                   {x.seller && x.cashier && x.seller !== x.cashier ? ` → ${x.cashier}` : ''}
                   {x.customer ? ` · ${x.customer}` : ''}
@@ -1084,7 +1144,8 @@ function SalesTab({ write }: { write: boolean }) {
                 ) : null}
               </div>
             ))}
-            {!list.length ? <EmptyState icon="receipt" title="Aucune facture" text={q.trim() ? 'Aucune facture ne correspond à cette recherche.' : 'Aucune facture encaissée ce jour-là.'} /> : null}
+            {!list.length ? <EmptyState icon="receipt" title="Aucune facture" text={q.trim() || kind !== 'all' ? 'Aucune facture ne correspond à ces filtres.' : 'Aucune facture encaissée sur cette période.'} /> : null}
+            {data.more ? <p className="muted small center">Les {data.sales.length} factures les plus récentes sont affichées ({data.more} de plus sur la période, comptées dans le total).</p> : null}
           </div>
         </>
       ) : null}

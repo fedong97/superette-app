@@ -1338,3 +1338,203 @@ b.warn {
 .card > small + .link {
   margin-top: -4px;
 }
+
+/* ——— Menu latéral ——— */
+.drawer-back {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(16, 32, 28, 0.45);
+  animation: fade 0.15s ease-out;
+}
+.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(86vw, 340px);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 8px 0 30px rgba(16, 32, 28, 0.18);
+  animation: slide 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+}
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--brand);
+  color: #fff;
+  padding: calc(18px + env(safe-area-inset-top)) 10px 18px 16px;
+}
+.drawer-head b {
+  display: block;
+  font-size: 17px;
+}
+.drawer-head .grow > span:not(.conn) {
+  display: block;
+  font-size: 14px;
+  opacity: 0.9;
+}
+.drawer-head small {
+  color: rgba(255, 255, 255, 0.8);
+}
+.drawer-head .avatar {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--brand-dark);
+}
+.pc-links {
+  margin-top: 6px;
+}
+.drawer-head .ghost {
+  color: #fff;
+  margin-top: -6px;
+}
+.conn.light {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 10px calc(16px + env(safe-area-inset-bottom));
+}
+.drawer-list section + section {
+  border-top: 1px solid var(--border-light);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.drawer-list h4 {
+  margin: 8px 12px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.drawer-note {
+  margin: 0 12px 6px;
+  font-size: 12.5px;
+  color: var(--warning);
+}
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 11px 12px;
+  min-height: 48px;
+  border-radius: var(--radius-sm);
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.drawer-item .icon {
+  color: var(--text-secondary);
+}
+.drawer-item.on {
+  background: var(--brand-light);
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+.drawer-item.on .icon {
+  color: var(--brand);
+}
+.drawer-item.logout {
+  color: var(--danger);
+  background: var(--danger-light);
+  margin-top: 6px;
+}
+.drawer-item.logout .icon {
+  color: var(--danger);
+}
+.drawer-item .count {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--danger);
+  color: #fff;
+  font: 700 12px/22px system-ui, sans-serif;
+  font-style: normal;
+  text-align: center;
+}
+
+/* Accueil : carte de bienvenue touchable, alertes en cartes colorées. */
+button.greet {
+  width: 100%;
+  text-align: left;
+  color: var(--text-primary);
+}
+button.greet .grow > * {
+  display: block;
+}
+button.greet .role {
+  display: flex;
+}
+button.greet > .icon {
+  color: var(--text-muted);
+}
+.list.alerts .li {
+  border: 0;
+  box-shadow: none;
+}
+.list.alerts .li-danger {
+  background: var(--danger-light);
+}
+.list.alerts .li-danger .li-title {
+  color: var(--danger);
+}
+.list.alerts .li-warning {
+  background: var(--warning-light);
+}
+.list.alerts .li-warning .li-title {
+  color: #b45309;
+}
+.list.alerts .li-info {
+  background: var(--info-light);
+}
+.list.alerts .li-info .li-title {
+  color: var(--info);
+}
+.list.alerts .li-icon {
+  background: var(--surface);
+}
+.quicks {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+/* Filtres : date au choix (calendrier du téléphone), filtres secondaires plus petits. */
+.chip.date {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.chip.date input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.chip.small-chip {
+  min-height: 34px;
+  padding: 5px 12px;
+  font-size: 13.5px;
+}

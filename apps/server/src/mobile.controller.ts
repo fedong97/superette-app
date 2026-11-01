@@ -44,10 +44,10 @@ export class MobileController {
   }
 
   @Get('api/v1/mobile/manager/sales')
-  async managerSales(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('day') day?: string) {
+  async managerSales(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined, @Query('day') day?: string, @Query('to') to?: string) {
     const caller = await this.mobile.caller(auth, session);
     await this.mobile.managerGuard(caller);
-    return this.actions.sales(caller, day);
+    return this.actions.sales(caller, day, to);
   }
 
   @Get('api/v1/mobile/manager/team')
@@ -77,7 +77,7 @@ export class MobileController {
   async pcStatus(@Headers('authorization') auth: string | undefined, @Headers(SESSION) session: string | undefined) {
     const caller = await this.mobile.caller(auth, session);
     await this.mobile.managerGuard(caller, true);
-    return { online: this.remote.online(caller.device.store_id) };
+    return { online: this.remote.online(caller.device.store_id), rights: await this.mobile.pcRights(caller) };
   }
 
   /** Le PC sur le téléphone : une action du logiciel du PC, exécutée par un PC du magasin au nom du gérant. */

@@ -1,4 +1,4 @@
-import { DEFAULT_STORE_SETTINGS, type Permission } from '@superette/core';
+import { DEFAULT_STORE_SETTINGS, type PcScreen, pcScreen, pcScreenAllowed } from '@superette/core';
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { type Result, call } from './api';
@@ -34,12 +34,8 @@ installRemote();
 type AppState = Result<'app.state'>;
 type User = NonNullable<AppState['user']>;
 
-interface Module {
-  id: string;
-  label: string;
-  hint: string;
+interface Module extends PcScreen {
   icon: string;
-  perm: Permission[];
   render: (user: User, state: AppState, refresh: () => void) => React.ReactNode;
 }
 
@@ -47,38 +43,35 @@ const GROUPS: [string, Module[]][] = [
   [
     'Suivi',
     [
-      { id: 'dashboard', label: 'Tableau de bord', hint: 'Journée, caisses, mois', icon: '📊', perm: ['dashboard', 'team_board', 'owner_report'], render: (u) => <Dashboard user={u} onOpen={() => undefined} /> },
-      { id: 'sales', label: 'Ventes', hint: 'Factures, retours, annulations', icon: '🧾', perm: ['sales', 'sale_edit_approve', 'vouchers'], render: (u) => <Sales rights={u.rights} /> },
+      { ...pcScreen('dashboard'), icon: '📊', render: (u) => <Dashboard user={u} onOpen={() => undefined} /> },
+      { ...pcScreen('sales'), icon: '🧾', render: (u) => <Sales rights={u.rights} /> },
     ],
   ],
   [
     'Argent',
     [
-      { id: 'treasury', label: 'Trésorerie et caisses', hint: 'Ouvrir, clôturer, verser, caisse centrale', icon: '💰', perm: ['treasury', 'cash_history', 'central_cash', 'cash_live'], render: (u, s, r) => <Treasury user={u} registerId={s.register?.id ?? null} onChanged={r} /> },
-      { id: 'customers', label: 'Clients', hint: 'Fiches, crédits, règlements', icon: '👥', perm: ['customers', 'receivables', 'customer_statement'], render: (u) => <Customers user={u} /> },
-      { id: 'suppliers', label: 'Fournisseurs', hint: 'Fiches, comptes, situation', icon: '🚚', perm: ['suppliers', 'supplier_statement'], render: (u) => <Suppliers user={u} /> },
-      { id: 'payments', label: 'Achats et paiements', hint: 'Commandes, factures, échéances', icon: '📦', perm: ['purchases', 'purchase_orders', 'purchase_invoices', 'supplier_pay', 'purchase_due'], render: (u) => <Purchases user={u} initialTab="due" /> },
-      { id: 'expenses', label: 'Dépenses', hint: 'Saisir, approuver, charges', icon: '💸', perm: ['expenses', 'expense_record', 'expense_approve'], render: (u) => <Expenses user={u} /> },
-      { id: 'accounting', label: 'Comptabilité', hint: 'Écritures, journaux, banque', icon: '📒', perm: ['accounting', 'journal_entry', 'bank_reconciliation'], render: (u) => <Accounting user={u} /> },
+      { ...pcScreen('treasury'), icon: '💰', render: (u, s, r) => <Treasury user={u} registerId={s.register?.id ?? null} onChanged={r} /> },
+      { ...pcScreen('customers'), icon: '👥', render: (u) => <Customers user={u} /> },
+      { ...pcScreen('suppliers'), icon: '🚚', render: (u) => <Suppliers user={u} /> },
+      { ...pcScreen('payments'), icon: '📦', render: (u) => <Purchases user={u} initialTab="due" /> },
+      { ...pcScreen('expenses'), icon: '💸', render: (u) => <Expenses user={u} /> },
+      { ...pcScreen('accounting'), icon: '📒', render: (u) => <Accounting user={u} /> },
     ],
   ],
   [
     'Boutique',
     [
-      { id: 'articles', label: 'Produits et prix', hint: 'Créer, modifier, changer un prix', icon: '🏷️', perm: ['articles', 'article_create'], render: (u) => <Articles user={u} /> },
-      { id: 'stock', label: 'Stock', hint: 'État, entrées, corrections', icon: '📋', perm: ['stock', 'stock_moves', 'stock_adjust', 'stock_decide', 'inventory'], render: (u) => <Stock user={u} /> },
+      { ...pcScreen('articles'), icon: '🏷️', render: (u) => <Articles user={u} /> },
+      { ...pcScreen('stock'), icon: '📋', render: (u) => <Stock user={u} /> },
     ],
   ],
   [
     'Équipe',
     [
-      { id: 'staff', label: 'Équipe et planning', hint: 'Personnel, présences, planning, congés', icon: '🗓️', perm: ['staff', 'staff_edit', 'staff_attendance', 'staff_leaves'], render: (u) => <Staff user={u} /> },
+      { ...pcScreen('staff'), icon: '🗓️', render: (u) => <Staff user={u} /> },
       {
-        id: 'admin',
-        label: 'Caisses et utilisateurs',
-        hint: 'Caisses, comptes, droits, délégation',
+        ...pcScreen('admin'),
         icon: '⚙️',
-        perm: ['admin', 'users_manage', 'delegate', 'user_limits'],
         render: (u, _s, r) => <Admin user={u} onChanged={r} only={['registers', 'warehouses', 'users', 'privileges', 'delegation', 'settings']} initialTab={u.rights.includes('admin') ? 'registers' : 'delegation'} />,
       },
     ],
@@ -89,6 +82,8 @@ function MobileApp() {
   const [state, setState] = useState<AppState | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<Module | null>(null);
+  // Écran demandé par le menu de l'appli (mobile.html#customers) : ouvert directement, le retour revient à l'appli.
+  const [deep] = useState(() => decodeURIComponent(location.hash.slice(1)));
   const [rev, setRev] = useState(0);
   const refresh = () =>
     call('app.state').then(
@@ -127,7 +122,22 @@ function MobileApp() {
   if (!state) return <Shell title="Gestion" onBack={backToApp}><p className="mpc-note">Connexion au PC du magasin…</p></Shell>;
   const user = state.user;
   if (!user) return <Shell title="Gestion" onBack={backToApp}><div className="mpc-error">Session refusée par le PC : reconnectez-vous dans l’appli.</div></Shell>;
-  const allowed = (m: Module) => m.perm.some((p) => user.rights.includes(p));
+  const allowed = (m: Module) => pcScreenAllowed(m, user.rights);
+  const direct = deep ? GROUPS.flatMap(([, mods]) => mods).find((m) => m.id === deep && allowed(m)) : undefined;
+  if (direct && !open)
+    return (
+      <RightsProvider value={user.rights}>
+        <StoreSettingsProvider value={state.storeSettings ?? DEFAULT_STORE_SETTINGS}>
+          <Shell title={direct.label} onBack={backToApp} onRefresh={() => setRev((r) => r + 1)}>
+            <RefreshCtx.Provider value={rev}>
+              <div className="mpc-screen" key={`${direct.id}:${rev}`}>
+                {direct.render(user, state, () => void refresh())}
+              </div>
+            </RefreshCtx.Provider>
+          </Shell>
+        </StoreSettingsProvider>
+      </RightsProvider>
+    );
 
   return (
     <RightsProvider value={user.rights}>

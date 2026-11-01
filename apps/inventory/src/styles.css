@@ -1193,10 +1193,8 @@ html.camera body,
 html.camera .app {
   background: transparent !important;
 }
-html.camera .app > *:not(.camera-ui) {
-  display: none;
-}
-html.camera .tabbar {
+/* La vue de la caméra est rendue à part (dans body) : toute l'application est masquée. */
+html.camera .app {
   display: none;
 }
 .camera-ui {

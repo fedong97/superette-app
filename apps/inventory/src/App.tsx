@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { ApiError } from './api';
 import { readXlsxRows } from '@superette/core/src/xlsxRead';
 import { beepError, beepOk, listenWedge, native, shareFile, shrinkPhoto, startCamera, toggleTorch } from './device';
@@ -135,7 +136,8 @@ function Status() {
 // ——— Caméra plein écran (QR du gérant ou codes-barres) ———
 
 function CameraOverlay({ title, hint, onStop, children }: { title: string; hint?: string; onStop: () => void; children?: ReactNode }) {
-  return (
+  // Rendu hors de l'application : pendant le scan, toute l'application est masquée pour laisser voir la caméra.
+  return createPortal(
     <div className="camera-ui">
       <div className="camera-top">
         <b>{title}</b>
@@ -151,7 +153,8 @@ function CameraOverlay({ title, hint, onStop, children }: { title: string; hint?
           Terminer
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

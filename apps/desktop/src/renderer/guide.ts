@@ -109,6 +109,12 @@ GETTING_STARTED.seller = GETTING_STARTED.cashier;
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.112.0',
+    items: [
+      "ONIX 360 Mobile : le scan avec l'appareil photo marche de nouveau (inventaire, panier au rayon, réception, contrôle sortie, QR code du gérant). Depuis la 0.109.0, l'image de la caméra restait cachée.",
+    ],
+  },
+  {
     version: '0.111.0',
     items: [
       "Ventes sur le téléphone : touchez une facture pour voir son détail : produits avec quantités, prix et remises, total et TVA, paiements, monnaie rendue, vendeur, caissier, caisse et client. L'annulation se fait depuis cette fiche.",

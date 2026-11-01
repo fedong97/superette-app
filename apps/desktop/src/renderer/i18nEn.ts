@@ -5763,6 +5763,8 @@ export const EN: Record<string, string> = {
   "gardé comme stock de départ": "kept as opening stock",
   "remis à zéro": "reset to zero",
   "), avec une sauvegarde juste avant. Ensuite, ce qui a été modifié dans la fiche est ajouté.": "), with a backup just before. Then what was changed in the copy is added.",
+  // 0.112.0 : scan avec la caméra
+  "ONIX 360 Mobile : le scan avec l'appareil photo marche de nouveau (inventaire, panier au rayon, réception, contrôle sortie, QR code du gérant). Depuis la 0.109.0, l'image de la caméra restait cachée.": "ONIX 360 Mobile: scanning with the camera works again (inventory, shelf basket, receiving, exit check, manager QR code). Since 0.109.0, the camera image stayed hidden.",
   // 0.111.0 : détail des factures sur le téléphone
   "Ventes sur le téléphone : touchez une facture pour voir son détail : produits avec quantités, prix et remises, total et TVA, paiements, monnaie rendue, vendeur, caissier, caisse et client. L'annulation se fait depuis cette fiche.": "Sales on the phone: tap an invoice to see its details: products with quantities, prices and discounts, total and VAT, payments, change given, seller, cashier, till and customer. Cancelling is done from this sheet.",
   // 0.110.0 : menu latéral du téléphone

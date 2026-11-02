@@ -641,3 +641,25 @@ ul.home-rank { list-style: none; padding-left: 0; }
 .role-tiles button, .role-tiles button:hover:not(:disabled) { background: var(--stat-bg); border: 1px solid var(--stat-line); }
 .role-tiles button:hover:not(:disabled) { border-color: var(--brand); }
 .role-tiles .tile-icon { background: var(--surface); box-shadow: inset 0 0 0 1px var(--stat-line); }
+
+/* ===== 0.107.0 : ergonomie au quotidien ================================================== */
+/* Barre d'état allégée : les alertes à gauche, la version discrète à droite. */
+.statusbar .sb-spacer { flex: 1; }
+/* Chiffres de l'accueil : le montant tient sur une ligne en 1366 × 768. */
+.home-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.home-kpis strong { font-size: clamp(17px, 1.45vw, 22px); white-space: nowrap; }
+/* Menu « Actions » de la caisse, rangé en groupes. */
+.pos-actions { position: relative; display: inline-block; }
+.pos-actions > button.opt.action { padding: 8px 14px; font-weight: 700; border: 1px solid var(--border); border-radius: var(--radius-md, 8px); background: var(--surface); cursor: pointer; }
+.pos-actions-back { position: fixed; inset: 0; z-index: 40; }
+.pos-actions-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 41; min-width: 330px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,.18)); display: grid; gap: 6px; }
+.pos-actions-group h4 { margin: 4px 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pos-actions-group button { display: flex; width: 100%; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: none; font-weight: 600; cursor: pointer; }
+.pos-actions-group button:hover, .pos-actions-group button:focus-visible { background: var(--brand-light); }
+.pos-actions-group button i { width: 22px; text-align: center; font-style: normal; }
+.pos-actions-group button small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
+/* Entrée / sortie d'argent : grandes cases à toucher. */
+.money-choice { display: grid; gap: 10px; }
+.money-choice button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; text-align: left; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.money-choice button:hover, .money-choice button:focus-visible { border-color: var(--brand); background: var(--brand-lighter); }
+.money-choice small { color: var(--text-secondary); }

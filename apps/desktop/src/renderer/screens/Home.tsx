@@ -329,7 +329,7 @@ function TopAndStock({ top, stock }: { top: Figures['top']; stock: Overview['sto
 
 // --- Ma caisse et mes factures (vendeur, caissier) -------------------------------------------------
 
-function MyTill({ mine, sent }: { mine: Overview['mine']; sent: Overview['sent'] }) {
+function MyTill({ mine, sent, amounts }: { mine: Overview['mine']; sent: Overview['sent']; amounts: boolean }) {
   return (
     <div className="home-mine">
       {mine && (
@@ -347,10 +347,10 @@ function MyTill({ mine, sent }: { mine: Overview['mine']; sent: Overview['sent']
                 ? 'Fermée'
                 : 'Pas encore ouverte'}
           </small>
-          {mine.status === 'open' && (
+          {mine.status === 'open' && amounts && (
             <span className="till-mini-figures">
               <span>
-                {fcfa(mine.net)} <small>· {mine.tickets} ticket{mine.tickets > 1 ? 's' : ''}</small>
+                {fcfa(mine.net)} <small>· {mine.tickets} ticket{mine.tickets > 1 ? 's' : ''} · toute la caisse</small>
               </span>
               {mine.kind === 'cash' && mine.expected !== null && <small>Attendu dans le tiroir {fcfa(mine.expected)}</small>}
             </span>
@@ -460,7 +460,7 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
       )}
       {show('mine') && (
         <Block index={i++} title="Ma caisse et mes factures">
-          <MyTill mine={d.mine} sent={d.sent} />
+          <MyTill mine={d.mine} sent={d.sent} amounts={d.mineAmounts} />
         </Block>
       )}
       {show('tasks') && <DayTasks compact />}

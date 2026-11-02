@@ -23,7 +23,7 @@ describe('sauvegardes', () => {
   it('fait une sauvegarde par jour, vérifiée, garde les plus récentes et copie vers la clé USB', async () => {
     const { root, s, ctx, sell, setNow } = setup();
     sell();
-    expect(s.backups.status()).toMatchObject({ dir: join(root, 'sauvegardes'), keep: 14, last_at: null, overdue: true });
+    expect(s.backups.status()).toMatchObject({ dir: join(root, 'sauvegardes'), keep: 14, last_at: null, overdue: false });
     const usb = join(root, 'usb');
     s.backups.configure(ctx.userId, { keep: 2, copyDir: usb });
 

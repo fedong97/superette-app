@@ -646,14 +646,14 @@ export function CashOpDialog({ type, needsSupervisor, onClose, initialAmount }: 
   const submit = async (pin?: string) => {
     try {
       await call('pos.cashOperation', type, parseAmount(amount) ?? 0, reason, pin);
-      toast.ok(type === 'IN' ? 'Apport enregistré' : 'Prélèvement enregistré');
+      toast.ok(type === 'IN' ? 'Entrée d’argent enregistrée' : 'Versement à la caisse centrale enregistré');
       onClose();
     } catch (e) {
       toast.error(e);
     }
   };
   return (
-    <Modal title={type === 'IN' ? 'Apport d’espèces' : 'Prélèvement d’espèces'} onClose={onClose}>
+    <Modal title={type === 'IN' ? 'Entrée d’argent (apport d’espèces)' : 'Versement à la caisse centrale'} onClose={onClose}>
       <Field label="Montant (FCFA)">
         <input autoFocus inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </Field>
@@ -661,7 +661,7 @@ export function CashOpDialog({ type, needsSupervisor, onClose, initialAmount }: 
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </Field>
       <p className="muted">
-        {type === 'OUT' ? 'Les espèces prélevées entrent dans la caisse centrale.' : 'Les espèces apportées sortent de la caisse centrale.'}
+        {type === 'OUT' ? 'Les espèces versées sortent du tiroir et entrent dans la caisse centrale.' : 'Les espèces apportées sortent de la caisse centrale et entrent dans le tiroir.'}
       </p>
       <div className="actions">
         <button className="primary" disabled={!parseAmount(amount)} onClick={() => (type === 'OUT' && needsSupervisor ? setAskPin(true) : submit())}>
@@ -670,7 +670,7 @@ export function CashOpDialog({ type, needsSupervisor, onClose, initialAmount }: 
       </div>
       {askPin && (
         <SupervisorPrompt
-          action={`Prélèvement de ${fcfa(parseAmount(amount) ?? 0)}`}
+          action={`Versement à la centrale de ${fcfa(parseAmount(amount) ?? 0)}`}
           onCancel={() => setAskPin(false)}
           onConfirm={(pin) => {
             setAskPin(false);
@@ -749,8 +749,8 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
             <tr><td>Fond de caisse</td><td className="r">{fcfa(z.cash.openingFloat)}</td></tr>
             <tr><td>Ventes espèces</td><td className="r">{fcfa(z.cash.cashSales)}</td></tr>
             <tr><td>Remboursements</td><td className="r">{fcfa(-z.cash.cashRefunds)}</td></tr>
-            <tr><td>Apports</td><td className="r">{fcfa(z.cash.cashIn)}</td></tr>
-            <tr><td>Prélèvements</td><td className="r">{fcfa(-z.cash.cashOut)}</td></tr>
+            <tr><td>Entrées d’argent (apports)</td><td className="r">{fcfa(z.cash.cashIn)}</td></tr>
+            <tr><td>Versements à la caisse centrale</td><td className="r">{fcfa(-z.cash.cashOut)}</td></tr>
             {z.cash.customerReceipts > 0 && <tr><td>Règlements clients</td><td className="r">{fcfa(z.cash.customerReceipts)}</td></tr>}
             {z.cash.expenses > 0 && (
               <tr title={z.expenses.map((e) => `${e.number} ${e.label}`).join('\n')}>
@@ -758,8 +758,8 @@ export function ZView({ z, compact = false }: { z: Result<'pos.zReport'>; compac
                 <td className="r">{fcfa(-z.cash.expenses)}</td>
               </tr>
             )}
-            {z.cash.otherIn > 0 && <tr><td>Autres entrées (Encaisser)</td><td className="r">{fcfa(z.cash.otherIn)}</td></tr>}
-            {z.cash.otherOut > 0 && <tr><td>Autres sorties (Décaisser)</td><td className="r">{fcfa(-z.cash.otherOut)}</td></tr>}
+            {z.cash.otherIn > 0 && <tr><td>Autres entrées d’argent</td><td className="r">{fcfa(z.cash.otherIn)}</td></tr>}
+            {z.cash.otherOut > 0 && <tr><td>Autres sorties d’argent</td><td className="r">{fcfa(-z.cash.otherOut)}</td></tr>}
             <tr><td>Compté</td><td className="r">{z.counted === null ? '—' : fcfa(z.counted)}</td></tr>
             {z.session.deposit !== null && <tr><td>Versé à la caisse centrale</td><td className="r">{fcfa(z.session.deposit)}</td></tr>}
             {z.session.float_left !== null && <tr><td>Fond laissé dans le tiroir</td><td className="r">{fcfa(z.session.float_left)}</td></tr>}

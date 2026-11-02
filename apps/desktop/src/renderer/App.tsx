@@ -149,7 +149,7 @@ const DIALOG_WINDOWS = new Set([
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
+  action?: 'logout' | 'lang' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
   /** Option du magasin (Administration › Paramètres) dont dépend l'écran : il suffit d'une seule. */
   /** `splitSale` : magasin où vendeur et caissier sont séparés. */
   setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint' | 'exitCheck' | 'splitSale')[];
@@ -246,6 +246,7 @@ const FILE_MENU: MenuItem[] = [
   { label: 'Personnaliser les onglets rapides', action: 'tabs' },
   { label: 'Personnaliser la barre latérale', action: 'rail' },
   { label: 'Thème : clair, sombre ou contraste fort', action: 'theme' },
+  { label: 'English / Français', action: 'lang' },
   SEP,
   { label: "Changer d'utilisateur", action: 'logout' },
   { label: 'Je pars (fin de journée)', action: 'leave' },
@@ -1065,6 +1066,12 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
       toast.error(e);
     }
   };
+  const switchLang = () => {
+    const next: Lang = lang === 'en' ? 'fr' : 'en';
+    setLang(next);
+    setLangState(next);
+    savePref('lang', next);
+  };
   const leave = async () => {
     if (!(await askConfirm('Noter votre départ (pointage) et vous déconnecter ?'))) return;
     try {
@@ -1082,6 +1089,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.open) return open(item.open[0], item.open[1], `${menuName} › ${item.label}`);
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'leave') return leave();
+    if (item.action === 'lang') return switchLang();
     if (item.action === 'kiosk') return setKiosk(true);
     if (item.action === 'training') return startTraining();
     if (item.action === 'dossiers') return setDossiers(true);
@@ -1576,8 +1584,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         )}
       </main>
       <footer className="statusbar">
-        <span title="Version du logiciel">ONIX 360 v{state.version}</span>
-        <span title="Magasin">{state.station?.store.name}</span>
         {state.canChooseRegister ? (
           <button className="link reg" title="Choisir la caisse sur laquelle vous vendez" onClick={() => setChooseRegister(true)}>
             {state.register?.name ?? 'Sans caisse'} · changer
@@ -1585,9 +1591,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         ) : (
           <span>{state.register?.name ?? 'Sans caisse'}</span>
         )}
-        <span title="Utilisateur connecté">
-          {user.name} ({ROLE_LABELS[user.role]})
-        </span>
         <span className={sync.data?.connected && !sync.data.lastError ? 'ok' : ''}>
           {sync.data?.connected && sync.data.checkOk !== null && (
             <span
@@ -1649,25 +1652,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {gaps.data!.length === 1 ? '1 écart à justifier' : `${gaps.data!.length} écarts à justifier`}
           </button>
         )}
-        <button
-          className="link"
-          translate="no"
-          title={lang === 'en' ? 'Afficher les écrans en français' : 'Show the screens in English'}
-          onClick={() => {
-            const next: Lang = lang === 'en' ? 'fr' : 'en';
-            setLang(next);
-            setLangState(next);
-            savePref('lang', next);
-          }}
-        >
-          {lang === 'en' ? 'Français' : 'English'}
-        </button>
-        <button className="link" onClick={() => call('auth.logout').then(refresh)}>
-          Changer d'utilisateur
-        </button>
-        <button className="link" title="Note votre départ pour le pointage, puis vous déconnecte" onClick={() => void leave()}>
-          Je pars
-        </button>
+        <span className="sb-spacer" />
+        <span className="muted" title={`${state.station?.store.name ?? ''} · ${user.name} (${ROLE_LABELS[user.role]})`}>v{state.version}</span>
         <Clock />
       </footer>
       {allMenus && (
@@ -1984,7 +1970,7 @@ function MyDay() {
     );
   return (
     <div className="myday">
-      <h2>Ma journée</h2>
+      <h2>Mes ventes du jour <small className="muted">(faites sous mon nom)</small></h2>
       <div className="myday-figures">
         <div>
           <b>{fcfa(d.net)}</b>

@@ -369,7 +369,23 @@ export class CatalogueService extends Base {
     const rows = this.db
       .prepare(`${ARTICLE_SELECT} WHERE a.quick_key = 1 AND a.active = 1 ORDER BY d.name, f.name, a.name`)
       .all({ storeId }) as Omit<Article, 'barcodes' | 'packs'>[];
-    return this.withBarcodes(rows);
+    if (rows.length) return this.withBarcodes(rows);
+    // 0.107.0 : sans touches rapides réglées, la caisse montre les 24 produits les plus vendus des 30 derniers jours.
+    const since = new Date(this.clock().getTime() - 30 * 86_400_000).toISOString();
+    const top = this.db
+      .prepare(
+        `SELECT l.article_id FROM sale_lines l JOIN sales s ON s.id = l.sale_id
+         WHERE s.store_id = ? AND s.status = 'completed' AND s.created_at >= ?
+         GROUP BY l.article_id ORDER BY COUNT(*) DESC LIMIT 24`,
+      )
+      .pluck()
+      .all(storeId, since) as string[];
+    if (!top.length) return [];
+    const order = new Map(top.map((id, i) => [id, i]));
+    const list = this.db
+      .prepare(`${ARTICLE_SELECT} WHERE a.active = 1 AND a.id IN (SELECT value FROM json_each(@ids))`)
+      .all({ storeId, ids: JSON.stringify(top) }) as Omit<Article, 'barcodes' | 'packs'>[];
+    return this.withBarcodes(list.sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0)));
   }
 
   /**

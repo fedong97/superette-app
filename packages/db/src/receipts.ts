@@ -462,7 +462,7 @@ export class ReceiptService extends Base {
     if (z.vat.some((v) => v.rate > 0)) r.push(title('TVA'), ...z.vat.map((v) => row(`${formatRate(v.rate)} HT ${money(v.ht)}`, v.tva)), { t: 'rule' });
     else r.push({ t: 'text', text: 'TVA non applicable' }, { t: 'rule' });
     r.push(title('Espèces'), row('Fond de caisse', z.cash.openingFloat), row('Ventes espèces', z.cash.cashSales));
-    r.push(row('Remboursements', -z.cash.cashRefunds), row('Apports', z.cash.cashIn), row('Prélèvements', -z.cash.cashOut));
+    r.push(row('Remboursements', -z.cash.cashRefunds), row('Entrées d’argent', z.cash.cashIn), row('Versements à la centrale', -z.cash.cashOut));
     if (z.cash.customerReceipts) r.push(row('Règlements clients', z.cash.customerReceipts));
     if (z.cash.expenses) r.push(row('Dépenses payées', -z.cash.expenses));
     if (z.cash.otherIn) r.push(row('Autres entrées (Encaisser)', z.cash.otherIn));

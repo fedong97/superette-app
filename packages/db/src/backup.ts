@@ -176,7 +176,9 @@ export class BackupService extends Base {
 
   status(): BackupStatus {
     const lastAt = this.setting('backup.lastAt');
-    const overdue = !lastAt || this.clock().getTime() - new Date(lastAt).getTime() > 2 * 86_400_000;
+    // 0.107.0 : sans aucune sauvegarde, le retard part de la création du magasin (pas d'alerte le premier jour).
+    const since = lastAt ?? (this.db.prepare('SELECT MIN(created_at) FROM stores').pluck().get() as string | null);
+    const overdue = !since || this.clock().getTime() - new Date(since).getTime() > 2 * 86_400_000;
     return {
       dir: this.setting('backup.dir') ?? this.defaultDir(),
       copy_dir: this.setting('backup.copyDir'),

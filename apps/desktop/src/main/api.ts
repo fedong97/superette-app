@@ -3483,7 +3483,10 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         return { count: rows.length, items: rows.slice(0, 5).map((r) => ({ id: r.article_id, name: r.name, qty: r.qty, unit: r.unit })) };
       };
       // La caisse de la personne : seulement si elle en a une (le gérant sans caisse n'en voit pas ici).
-      const mine = c.registerId ? (registers.length ? registers : s.pos.liveRegisters(c.storeId)).find((r) => r.id === c.registerId) ?? null : null;
+      const found = c.registerId ? (registers.length ? registers : s.pos.liveRegisters(c.storeId)).find((r) => r.id === c.registerId) ?? null : null;
+      // 0.107.0 : sans « Voir les montants de la caisse », ni ventes ni attendu (le comptage du soir reste à l'aveugle).
+      const mineAmounts = can(u, ['cash_amounts']);
+      const mine = found && !mineAmounts ? { ...found, tickets: 0, net: 0, receipts: 0, entries: 0, exits: 0, expected: null, difference: null, byMethod: [] } : found;
       let sent: { waiting: number; returned: number; paid: number } | null = null;
       if (can(u, POS) && u.role === 'seller') {
         const list = await counterList(s, u.id).catch(() => null);
@@ -3501,6 +3504,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         activity: dash ? s.reports.activity(c.storeId, 10) : [],
         stock: dash && can(u, STOCK) ? { rupture: stock('rupture'), alerte: stock('alerte') } : null,
         mine,
+        mineAmounts,
         sent,
       };
     },

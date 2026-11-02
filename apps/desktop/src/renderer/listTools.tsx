@@ -25,7 +25,19 @@ const SKIP = '.pos-screen, .modal, [data-lv-off]';
 function headers(table: HTMLTableElement): string[] {
   const row = table.tHead?.rows[0];
   if (!row) return [];
+  reindex(row);
   return [...row.cells].sort((a, b) => idx(a) - idx(b)).map((c, i) => c.textContent?.trim() || `Colonne ${i + 1}`);
+}
+
+/**
+ * 0.107.0 : une colonne ajoutée par React après coup (les dépôts de l'état du stock,
+ * chargés après la liste) n'a pas de position notée ; les autres en ont une, devenue
+ * fausse. On renumérote alors toute la ligne dans l'ordre de la page, sinon les
+ * en-têtes et les chiffres se décalent.
+ */
+function reindex(row: Element) {
+  const cells = [...row.children] as HTMLElement[];
+  if (cells.some((c) => c.dataset.lvI === undefined) && cells.some((c) => c.dataset.lvI !== undefined)) cells.forEach((c, i) => (c.dataset.lvI = String(i)));
 }
 
 /** Position d'origine d'une cellule, notée la première fois qu'on la voit. */
@@ -53,6 +65,7 @@ function sortValue(text: string): number | string {
 }
 
 function cellsOf(row: HTMLTableRowElement): HTMLTableCellElement[] {
+  reindex(row);
   return [...row.cells].sort((a, b) => idx(a) - idx(b));
 }
 

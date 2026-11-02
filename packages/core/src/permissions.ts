@@ -102,7 +102,7 @@ export const PERMISSIONS = {
   cash_amounts: { label: 'Voir les montants de la caisse (attendu, entrées, ventes, journées)', group: 'Trésorerie', type: 'Fonction', roles: ACCOUNTING },
   cash_history: { label: "Consulter l'historique des journées de caisse", group: 'Trésorerie', type: 'Menu', parent: 'cash_amounts' },
   cash_z: { label: 'Consulter et imprimer le Z et la synthèse d’une journée', group: 'Trésorerie', type: 'Bouton', parent: 'cash_amounts' },
-  cash_open: { label: 'Compléter le fond de caisse depuis la centrale et valider un écart de clôture sans le code du gérant', group: 'Trésorerie', type: 'Fonction', roles: MANAGE },
+  cash_open: { label: 'Compléter le fond de caisse depuis la centrale (sans le code du gérant)', group: 'Trésorerie', type: 'Fonction', roles: MANAGE },
   cash_close_other: { label: "Clôturer la caisse électronique ou banque d'un autre utilisateur", group: 'Trésorerie', type: 'Fonction', parent: 'cash_open' },
   gap_justify: { label: 'Justifier un écart de caisse après la clôture', group: 'Trésorerie', type: 'Bouton', parent: 'cash_open' },
   cash_in: { label: "Faire une entrée d'espèces en caisse", group: 'Trésorerie', type: 'Bouton', parent: 'cash' },

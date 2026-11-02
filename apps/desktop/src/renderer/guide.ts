@@ -14,6 +14,9 @@ const T = {
   vendre: { icon: '🛒', label: 'Vendre', desc: 'Fiche de facturation au comptant', open: ['cash1'] },
   credit: { icon: '📒', label: 'Vente à crédit', desc: 'Pour un client en compte', open: ['credit'] },
   caisse: { icon: '💰', label: 'Ma caisse', desc: 'Ouvrir ou clôturer la caisse', open: ['treasury', 'day'] },
+  envoyer: { icon: '📨', label: 'Préparer une facture', desc: 'Elle part à la caisse pour être encaissée', open: ['cash1'] },
+  envoyees: { icon: '🧾', label: 'Mes factures envoyées', desc: 'En attente, renvoyées, encaissées', open: ['sales', 'tickets'] },
+  majournee: { icon: '🎯', label: 'Ma journée', desc: 'Objectif, ventes et commission', open: ['staff', 'targets'] },
   factures: { icon: '🧾', label: 'Mes factures', desc: 'Retrouver et réimprimer un ticket', open: ['sales', 'tickets'] },
   devis: { icon: '📝', label: 'Devis', desc: 'Devis et factures proforma', open: ['quotes'] },
   clients: { icon: '👥', label: 'Clients', desc: 'Fiches, comptes et règlements', open: ['customers', 'list'] },
@@ -21,8 +24,8 @@ const T = {
   tabord: { icon: '📊', label: 'Tableau de bord', desc: 'Les chiffres du jour', open: ['dashboard', 'day'] },
   journees: { icon: '🗂️', label: 'Journées de caisse', desc: 'Z, écarts à justifier', open: ['treasury', 'history'] },
   stock: { icon: '📦', label: 'Stock', desc: 'Quantités par dépôt', open: ['stock', 'state'] },
-  reception: { icon: '🚚', label: 'Réception', desc: 'Entrer une livraison', open: ['stock', 'receive'] },
-  transfert: { icon: '🔁', label: 'Transfert', desc: 'Entre la réserve et la surface', open: ['stock', 'transfer'] },
+  reception: { icon: '🚚', label: 'Recevoir une livraison', desc: 'Le bon de commande du fournisseur est proposé', open: ['stock', 'receive'] },
+  transfert: { icon: '🔁', label: 'Nouveau transfert', desc: 'De la réserve vers la surface de vente', open: ['stock', 'transferNew'] },
   inventaire: { icon: '📋', label: 'Inventaire', desc: 'Compter le stock', open: ['stock', 'inventory'] },
   pertes: { icon: '🗑️', label: 'Pertes et casse', desc: 'Sortir un produit abîmé', open: ['stock', 'loss'] },
   peremption: { icon: '⏳', label: 'Péremptions', desc: 'Lots qui périment bientôt', open: ['stock', 'expiry'] },
@@ -45,7 +48,7 @@ const T = {
 /** Accueil par rôle : les gestes de tous les jours, dans l'ordre de la journée. */
 export const ROLE_TILES: Record<Role, Tile[]> = {
   cashier: [T.vendre, T.caisse, T.factures, T.credit, T.clients, T.devis],
-  seller: [T.vendre, T.caisse, T.factures, T.credit, T.clients, T.devis],
+  seller: [T.envoyer, T.envoyees, T.devis, T.clients, T.credit, T.majournee],
   manager: [T.attention, T.tabord, T.vendre, T.journees, T.stock, T.commandes, T.clients, T.depenses, T.rapports],
   admin: [T.attention, T.tabord, T.admin, T.journees, T.produits, T.stock, T.rapports, T.sauvegardes, T.vendre],
   stock: [T.reception, T.transfert, T.inventaire, T.stock, T.pertes, T.peremption, T.etiquettes],
@@ -69,13 +72,13 @@ export const GETTING_STARTED: Record<Role, GuideStep[]> = {
   ],
   manager: [
     { text: 'Le matin, regardez les Points d’attention : ruptures, écarts, factures en retard.', open: ['dashboard', 'attention'] },
-    { text: 'Recevez les livraisons et transférez la marchandise de la réserve vers la surface de vente.', open: ['stock', 'receive'] },
+    { text: 'Recevez les livraisons (le bon de commande du fournisseur est proposé) et transférez la marchandise vers la surface de vente.', open: ['stock', 'receive'] },
     { text: 'Pendant la journée, suivez le Tableau de bord : chiffre d’affaires et meilleures ventes.', open: ['dashboard', 'day'] },
     { text: 'Le soir, contrôlez les clôtures de caisse et justifiez les écarts.', open: ['treasury', 'history'] },
     { text: 'Chaque semaine, lancez la Proposition de commande pour les fournisseurs.', open: ['purchases', 'reorder'] },
   ],
   cashier: [
-    { text: 'Ouvrez votre caisse : le fond laissé la veille est proposé.', open: ['treasury', 'day'] },
+    { text: 'Ouvrez votre caisse depuis la fiche de vente (« Ouvrir ma caisse ») : le fond laissé la veille est proposé.', open: ['cash1'] },
     { text: 'Vendez : scannez ou tapez le nom du produit, puis Entrée pour valider en espèces.', open: ['cash1'] },
     { text: 'Pour MTN, Orange, carte ou chèque, appuyez sur Ctrl+E et notez la référence.' },
     { text: 'En cas de doute, le bouton « ? » en haut à droite explique la page affichée.' },
@@ -84,7 +87,7 @@ export const GETTING_STARTED: Record<Role, GuideStep[]> = {
   seller: [],
   stock: [
     { text: 'À chaque livraison, saisissez la réception avec la date limite des périssables.', open: ['stock', 'receive'] },
-    { text: 'Transférez la marchandise de la réserve vers la surface de vente.', open: ['stock', 'transfer'] },
+    { text: 'Transférez la marchandise de la réserve vers la surface de vente.', open: ['stock', 'transferNew'] },
     { text: 'Sortez la casse et les produits périmés en pertes.', open: ['stock', 'loss'] },
     { text: 'Comptez les inventaires ouverts par le gérant.', open: ['stock', 'inventory'] },
     { text: 'Imprimez les étiquettes des prix qui ont changé.', open: ['labels'] },
@@ -104,7 +107,13 @@ export const GETTING_STARTED: Record<Role, GuideStep[]> = {
     { text: 'En fin d’exercice, imprimez les états financiers et la DSF.', open: ['accounting', 'statements'] },
   ],
 };
-GETTING_STARTED.seller = GETTING_STARTED.cashier;
+GETTING_STARTED.seller = [
+  { text: 'Préparez la facture du client : scannez ou tapez le nom du produit.', open: ['cash1'] },
+  { text: '« Envoyer » (F4) la fait partir à la caisse et imprime le bon du client ; le client paie au caissier.' },
+  { text: 'Suivez vos factures envoyées : en attente, renvoyées par la caisse ou encaissées.', open: ['sales', 'tickets'] },
+  { text: 'Au rayon, vous pouvez préparer le panier du client sur le téléphone (ONIX 360 Mobile).' },
+  { text: 'Regardez votre journée : objectif, ventes et commission.', open: ['staff', 'targets'] },
+];
 
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
@@ -267,8 +276,8 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.91.0',
     items: [
-      'Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met V. cash 1, V. cash 2 et V. crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.',
-      'En plein écran, les boutons V. cash 1, V. cash 2 et V. crédit de la barre verte passent d’une fiche à l’autre. « Quitter le plein écran » (ou F11) ramène l’affichage habituel ; il revient aussi tout seul en allant à la trésorerie ou à la clôture.',
+      'Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met Vente 1, Vente 2 et Vente à crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.',
+      'En plein écran, les boutons Vente 1, Vente 2 et Vente à crédit de la barre verte passent d’une fiche à l’autre. « Quitter le plein écran » (ou F11) ramène l’affichage habituel ; il revient aussi tout seul en allant à la trésorerie ou à la clôture.',
       'Le logiciel se souvient du choix de chacun. Dans Paramètres › Écran de caisse, le gérant coche les rôles (caissier, vendeur, gérant, administrateur) qui arrivent directement en mode Caisse seule après la connexion.',
     ],
   },
@@ -297,7 +306,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     items: [
       'Menus rangés par métier : 10 menus au lieu de 15 (Vente, Trésorerie, Stock, Articles, Achats, Clients, Dépenses, Personnel, Suivi, Compta). Chaque écran n’y est plus qu’une fois, sous de petits titres (Commander, Recevoir, Payer…).',
       'Un menu ouvert s’affiche en entier, sur plusieurs colonnes si l’écran est trop bas : plus besoin de défiler.',
-      'Onglets du haut selon le rôle : le caissier a V. cash 1, V. cash 2, V. crédit, Mes factures et Ma caisse ; le magasinier ses tâches, la réception et le stock ; le gérant son tableau de bord. Chacun peut toujours les personnaliser.',
+      'Onglets du haut selon le rôle : le caissier a Vente 1, Vente 2, Vente à crédit, Mes factures et Ma caisse ; le magasinier ses tâches, la réception et le stock ; le gérant son tableau de bord. Chacun peut toujours les personnaliser.',
       'Ctrl+K « Rechercher une fonction » trouve aussi les mots du métier et les anciens noms : inventaire, réception fournisseur, facture, magasinier…',
       'Fichier devient « Mon compte », sous votre nom en haut à droite. Les barres déjà personnalisées sont gardées et suivent les nouveaux noms.',
     ],

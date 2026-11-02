@@ -663,3 +663,5 @@ ul.home-rank { list-style: none; padding-left: 0; }
 .money-choice button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; text-align: left; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; }
 .money-choice button:hover, .money-choice button:focus-visible { border-color: var(--brand); background: var(--brand-lighter); }
 .money-choice small { color: var(--text-secondary); }
+/* Réception : bons de commande en attente du fournisseur choisi. */
+.reception-orders { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--info-bg, #eef4ff); border: 1px solid var(--info, #2563eb); color: var(--text-primary); }

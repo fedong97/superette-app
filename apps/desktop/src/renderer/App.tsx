@@ -5,7 +5,7 @@ import logo from './assets/logo.png';
 import { MAX_QUICK_TABS, type QuickTab, type WinKind } from './nav';
 import { CounterDesk } from './screens/CounterDesk';
 import { applyBrand } from './theme';
-import { Ico, MenuIcon } from './icons';
+import { Ico, MenuIcon, TileIcon } from './icons';
 import { Accounting, type AccountingTab } from './screens/Accounting';
 import { Deliveries } from './screens/Deliveries';
 import { Orders } from './screens/Orders';
@@ -149,7 +149,7 @@ const DIALOG_WINDOWS = new Set([
 interface MenuItem {
   label: string;
   open?: [WinKind, string?];
-  action?: 'logout' | 'lang' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
+  action?: 'logout' | 'lang' | 'cascade' | 'leave' | 'training' | 'dossiers' | 'sync' | 'shortcuts' | 'about' | 'quit' | 'openInvoice' | 'help' | 'palette' | 'guide' | 'news' | 'tabs' | 'rail' | 'theme' | 'kiosk';
   /** Option du magasin (Administration › Paramètres) dont dépend l'écran : il suffit d'une seule. */
   /** `splitSale` : magasin où vendeur et caissier sont séparés. */
   setting?: ('punchKiosk' | 'staffTeams' | 'multiEntrances' | 'contractorStaff' | 'fingerprint' | 'exitCheck' | 'splitSale')[];
@@ -256,6 +256,7 @@ const FILE_MENU: MenuItem[] = [
   { label: 'Personnaliser la barre latérale', action: 'rail' },
   { label: 'Thème : clair, sombre ou contraste fort', action: 'theme' },
   { label: 'English / Français', action: 'lang' },
+  { label: 'Fenêtres : en plein ou en cascade', action: 'cascade' },
   SEP,
   { label: "Changer d'utilisateur", action: 'logout' },
   { label: 'Je pars (fin de journée)', action: 'leave' },
@@ -935,8 +936,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   // Place donnée à l'ouverture (en cascade) tant que la fenêtre n'a pas été déplacée.
   const [placed, setPlaced] = useState<Record<string, Geo>>({});
   const isDialog = (id: string) => DIALOG_WINDOWS.has(id);
+  // 0.107.0 : chaque écran s'ouvre en plein dans la zone de travail ; la cascade façon Sage reste au choix (Mon compte).
+  const cascade = prefs.winCascade === true;
+  const opensMax = (kind: WinKind) => isPosKind(kind) || !cascade;
   // Avant 0.90.0 la place était gardée par module (« admin ») : elle sert encore à son premier écran.
-  const geoOf = (w: Win): Geo => (isDialog(w.id) ? placed[w.id] ?? dialogGeo(area) : geos[w.id] ?? geos[w.kind] ?? placed[w.id] ?? defaultGeo(area, 0, isPosKind(w.kind)));
+  const geoOf = (w: Win): Geo => (isDialog(w.id) ? placed[w.id] ?? dialogGeo(area) : geos[w.id] ?? geos[w.kind] ?? placed[w.id] ?? defaultGeo(area, 0, opensMax(w.kind)));
   const saveGeo = (w: Win, g: Geo) => (isDialog(w.id) ? setPlaced((p) => ({ ...p, [w.id]: g })) : savePref('winGeo', { ...geos, [w.id]: g }));
   /** Met une fenêtre devant les autres (et la sort de la barre du bas si elle était réduite). */
   const focus = (id: string | null) => {
@@ -949,7 +953,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const open = (kind: WinKind, tab?: string, crumb?: string) => {
     if (!canWin(kind)) return toast.error("Vous n'avez pas les droits pour ouvrir cette fenêtre");
     const id = winId(kind, tab);
-    if (!wins.some((w) => w.id === id)) setPlaced((p) => ({ ...p, [id]: isDialog(id) ? dialogGeo(area) : defaultGeo(area, wins.filter((w) => !w.min).length, isPosKind(kind)) }));
+    if (!wins.some((w) => w.id === id)) setPlaced((p) => ({ ...p, [id]: isDialog(id) ? dialogGeo(area) : defaultGeo(area, wins.filter((w) => !w.min).length, opensMax(kind)) }));
     // Le titre vient du menu (« Administration › Paramètres ») ; à défaut, du libellé reçu.
     // Un chemin complet reçu (« Vente › Modifier la facture … ») remplace le titre d'une fenêtre déjà ouverte.
     // 0.107.0 : un chemin aux anciens noms de menus (« Trésorerie › … ») prend le chemin du menu actuel.
@@ -1088,6 +1092,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
     if (item.action === 'logout') return call('auth.logout').then(refresh);
     if (item.action === 'leave') return leave();
     if (item.action === 'lang') return switchLang();
+    if (item.action === 'cascade') {
+      savePref('winCascade', !cascade);
+      return toast.ok(cascade ? 'Les écrans s’ouvriront en plein' : 'Les écrans s’ouvriront en cascade, comme dans Sage');
+    }
     if (item.action === 'kiosk') return setKiosk(true);
     if (item.action === 'training') return startTraining();
     if (item.action === 'dossiers') return setDossiers(true);
@@ -1258,13 +1266,6 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             </div>
           ))}
         </div>
-        <button className="rail-link side-search" data-tip="Rechercher (Ctrl+K)" onClick={() => (setSideOpen(false), setHelp('palette'))}>
-          <i aria-hidden>
-            <Ico.Search size={18} strokeWidth={1.9} />
-          </i>
-          <span className="rail-label">Rechercher</span>
-          <kbd className="rail-kbd">Ctrl K</kbd>
-        </button>
         <button
           className={`rail-item ${allMenus ? 'open' : ''}`}
           data-tip="Tous les menus"
@@ -1453,7 +1454,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               {tiles.map((t) => (
                 <button key={t.label} onClick={() => open(t.open[0], t.open[1], t.label)}>
                   <span className="tile-icon" aria-hidden>
-                    {t.icon}
+                    <TileIcon label={t.label} fallback={t.icon} />
                   </span>
                   <span className="tile-text">
                     <strong>{t.label}</strong>
@@ -1572,7 +1573,9 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
               .map((w) => (
                 <div key={w.id} className="mdi-tray-item">
                   <button className="mdi-tray-open" title="Rouvrir cette fenêtre" onClick={() => focus(w.id)}>
-                    <i aria-hidden>{MENU_ICONS[(w.crumb ?? '').split(' › ')[0]!] ?? winIcon(w.kind)}</i>
+                    <i aria-hidden>
+                      <MenuIcon name={(w.crumb ?? '').split(' › ')[0]!} fallback={winIcon(w.kind)} size={14} />
+                    </i>
                     {(w.crumb ?? WINDOWS[w.kind].label).split(' › ').pop()}
                   </button>
                   <button className="mdi-tray-x" title="Fermer cette fenêtre" onClick={() => close(w.id)}>
@@ -1671,8 +1674,10 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
             {visibleMenus.map(([name, items]) => (
               <section key={name} className="menu-card" style={{ '--c': MENU_COLOR } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
                 <h2>
-                  <i aria-hidden>{MENU_ICONS[name]}</i>
-                  {name}
+                  <i aria-hidden>
+                    <MenuIcon name={name} fallback={MENU_ICONS[name]} size={20} />
+                  </i>
+                  {RAIL_LABELS[name] ?? name}
                 </h2>
                 {visibleItems(items)
                   .filter((i) => !i.sep || i.head)
@@ -1777,7 +1782,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
         <RailEditor
           menus={visibleMenus.map(([name]) => name).filter((n) => !RAIL_FIXED.includes(n))}
           current={railMenus.map(([name]) => name)}
-          label={(n) => `${MENU_ICONS[n] ?? ''} ${RAIL_LABELS[n] ?? n}`}
+          label={(n) => RAIL_LABELS[n] ?? n}
           onSave={(list) => {
             savePref('railMenus', list);
             savePref('railVersion', RAIL_VERSION);

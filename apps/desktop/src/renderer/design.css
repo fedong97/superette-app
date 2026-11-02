@@ -665,3 +665,11 @@ ul.home-rank { list-style: none; padding-left: 0; }
 .money-choice small { color: var(--text-secondary); }
 /* Réception : bons de commande en attente du fournisseur choisi. */
 .reception-orders { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--info-bg, #eef4ff); border: 1px solid var(--info, #2563eb); color: var(--text-primary); }
+/* Barre latérale : une ombre en haut ou en bas dit qu'il reste des menus à faire défiler (la barre de défilement est masquée). */
+.rail-scroll {
+  background:
+    linear-gradient(var(--brand-dark) 30%, transparent) top / 100% 28px no-repeat local,
+    linear-gradient(transparent, var(--brand-dark) 70%) bottom / 100% 28px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.45), transparent) top / 100% 12px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.45), transparent) bottom / 100% 12px no-repeat scroll;
+}

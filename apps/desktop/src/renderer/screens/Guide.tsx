@@ -177,7 +177,7 @@ export function CommandPalette({ entries, onClose }: { entries: PaletteEntry[]; 
         <input
           autoFocus
           aria-label="Rechercher un écran, un produit ou un client"
-          placeholder="Un écran, un produit, un client : vente, clôture, coca, Mballa…"
+          placeholder="Un écran, un produit, un client ou son téléphone : vente, clôture, coca, Mballa, 677…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {

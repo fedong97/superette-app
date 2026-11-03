@@ -1535,6 +1535,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     ) : null;
   const staleNote = (
     <>
+      <OfflineBanner />
       {(sellerPost || counterEdit) && (
         <div className="tre-warning counter-band">
           {counterEdit
@@ -2295,6 +2296,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           )}
         </div>
       )}
+      <OfflineBanner />
       {stale && (
         <div className="tre-warning">
           Cette caisse est ouverte depuis le {new Date(day!.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
@@ -3001,5 +3003,25 @@ function MoneyChoice<V extends string>({ title, options, onPick, onClose }: { ti
         ))}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * PC hors ligne (0.107.0) : bandeau visible à la caisse quand le serveur ne
+ * répond plus. La vente continue ; les opérations partent au retour du réseau.
+ */
+function OfflineBanner() {
+  const sync = useLoad(() => call('sync.state').catch(() => null), []);
+  useEffect(() => {
+    const t = setInterval(sync.reload, 30_000);
+    return () => clearInterval(t);
+  }, [sync.reload]);
+  const d = sync.data;
+  if (!d?.connected || !d.lastError) return null;
+  return (
+    <div className="pos-offline" role="status">
+      <strong>PC hors ligne</strong> : la vente continue normalement.{' '}
+      {d.pending ? `${d.pending} opération${d.pending > 1 ? 's' : ''} attend${d.pending > 1 ? 'ent' : ''} le retour du réseau.` : 'Tout partira au retour du réseau.'} L'accord par téléphone et les factures des autres postes sont indisponibles pendant ce temps.
+    </div>
   );
 }

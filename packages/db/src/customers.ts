@@ -174,11 +174,11 @@ export class CustomerService extends Base {
         `SELECT c.*, (SELECT MAX(s.created_at) FROM sales s WHERE s.customer_id = c.id AND s.store_id = @storeId) AS last_sale
          FROM customers c
          WHERE (@all = 1 OR c.active = 1)
-           AND (@search IS NULL OR c.name LIKE @search OR c.code LIKE @search OR c.phone LIKE @search OR c.zone LIKE @search)
+           AND (@search IS NULL OR c.name LIKE @search OR c.code LIKE @search OR c.phone LIKE @search OR (@digits IS NOT NULL AND REPLACE(REPLACE(REPLACE(c.phone, ' ', ''), '.', ''), '-', '') LIKE @digits) OR c.zone LIKE @search)
            AND (@zone IS NULL OR COALESCE(c.zone, '') = @zone)
          ORDER BY c.name`,
       )
-      .all({ storeId, all: opts.includeInactive ? 1 : 0, search: opts.search?.trim() ? `%${opts.search.trim()}%` : null, zone: opts.zone ?? null }) as (Customer & {
+      .all({ storeId, all: opts.includeInactive ? 1 : 0, search: opts.search?.trim() ? `%${opts.search.trim()}%` : null, digits: /^[\d\s.+-]{4,}$/.test(opts.search?.trim() ?? '') ? `%${opts.search!.replace(/\D/g, '')}%` : null, zone: opts.zone ?? null }) as (Customer & {
       last_sale: string | null;
     })[];
     const result = rows.map((c) => {

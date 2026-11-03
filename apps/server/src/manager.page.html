@@ -232,6 +232,10 @@
       </header>
       ${many ? `<div class="magasins"><button data-magasin="" class="${store ? '' : 'actif'}">Tous</button>${data.stores.map((s) => `<button data-magasin="${esc(s.id)}" class="${store === s.id ? 'actif' : ''}">${esc(s.name)}</button>`).join('')}</div>` : ''}
       <main>
+        <div class="message mobile-conseil" style="background:#eef4ff;border:1px solid #2563eb">
+          <b>Une seule appli gérant : ONIX 360 Mobile.</b> Elle montre tout ce que montre cette page, plus le stock, les prix, les commandes et les accords demandés par la caisse.
+          <a href="/gerant/inventaire">Relier ce téléphone à ONIX 360 Mobile</a>. Cette page reste pour les alertes 🔔 et pour un téléphone sans l’appli.
+        </div>
         ${showSettings ? settingsBlock() : ''}
         ${data.stores.length ? (shown ? storeBlock(shown, alerts) : overview()) : '<section class="vide">Aucun magasin n’a encore envoyé ses données à ce serveur.</section>'}
         <div class="maj">Mis à jour à ${heure(data.generatedAt)}${data.today ? ' · actualisé chaque minute' : ''}</div>

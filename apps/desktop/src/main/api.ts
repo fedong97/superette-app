@@ -1133,6 +1133,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return { status: r.status, code: null, name: r.decidedName ?? null };
     },
     'approval.available': () => Boolean(s.sync.credentials()) && !s.fiches.current(),
+    /** 0.107.0 : l'accord par téléphone est proposé d'office quand la personne connectée n'est pas gérant. */
+    'approval.offer': () => ({ available: Boolean(s.sync.credentials()) && !s.fiches.current(), managerHere: !!user && isSupervisor(user) }),
     /** Badge scanné sur l'écran de connexion : l'identifiant qu'il porte. */
     'auth.badge': (code: string) => s.admin.loginForBadge(code),
     /** « Je pars » : départ noté pour le pointage, puis déconnexion. */
@@ -3507,6 +3509,41 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         mineAmounts,
         sent,
       };
+    },
+    /**
+     * Ma fin de journée (0.107.0) : la liste de ce qui reste à faire avant de
+     * fermer le magasin, chaque ligne avec la fenêtre qui la traite. Une ligne
+     * n'apparaît qu'avec le droit de la traiter.
+     */
+    'home.endOfDay': () => {
+      const c = ctx(['dashboard']);
+      const u = user!;
+      const att = new Map(attentionFor(u, c.storeId).map((i) => [i.key, i]));
+      const day = new Date().toISOString().slice(0, 10);
+      const steps: { key: string; label: string; count: number; detail: string; target: [string, string]; ok: boolean }[] = [];
+      const push = (key: string, label: string, count: number, detail: string, target: [string, string]) => steps.push({ key, label, count, detail, target, ok: count === 0 });
+      if (can(u, ['cash_live', 'treasury'])) {
+        const open = s.pos.liveRegisters(c.storeId).filter((r) => r.status === 'open');
+        push('registers', 'Fermer les caisses encore ouvertes', open.length, open.length ? open.map((r) => r.name).join(', ') : 'Toutes les caisses sont fermées', ['treasury', 'day']);
+      }
+      const gaps = att.get('cash_gaps');
+      if (gaps) push('gaps', 'Justifier les écarts de caisse', gaps.count, gaps.detail, ['treasury', 'history']);
+      const exp = att.get('expenses_pending');
+      if (exp) push('expenses', 'Approuver les dépenses en attente', exp.count, exp.detail, ['expenses', 'approval']);
+      const tr = att.get('transfers');
+      if (tr) push('transfers', 'Recevoir les transferts arrivés', tr.count, tr.detail, ['stock', 'transfer']);
+      const inv = att.get('supplier_invoices');
+      if (inv) push('invoices', 'Saisir ou payer les factures fournisseurs', inv.count, inv.detail, ['purchases', 'due']);
+      const out = att.get('outages_open');
+      if (out) push('outages', 'Reporter les ventes notées pendant une panne', out.count, out.detail, ['sales', 'outages']);
+      if (can(u, ['backups'])) {
+        const b = s.backups.status();
+        const done = !!b.last_at && b.last_at.slice(0, 10) === day && !b.last_error;
+        push('backup', 'Faire la sauvegarde du jour', done ? 0 : 1, b.last_error ? `Dernière sauvegarde en échec : ${b.last_error}` : b.last_at ? `Dernière sauvegarde : ${b.last_at.slice(0, 16).replace('T', ' à ')}` : 'Aucune sauvegarde encore faite', ['admin', 'backups']);
+      }
+      const st = s.sync.state();
+      push('sync', 'Envoyer les opérations au serveur', st.pending, st.pending ? `${st.pending} opération(s) pas encore envoyée(s)${st.lastError ? ` : ${st.lastError}` : ''}` : 'Tout est envoyé', ['admin', 'server']);
+      return { date: day, steps, done: steps.every((x) => x.ok) };
     },
     // --- 0.81.0 : le magasin au quotidien -------------------------------------------
     /** « Le client voulait… » : produit absent, en rupture ou trop cher. */

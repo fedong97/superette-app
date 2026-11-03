@@ -677,3 +677,27 @@ ul.home-rank { list-style: none; padding-left: 0; }
 .rights-roles { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
 .rights-roles button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-weight: 600; cursor: pointer; }
 .rights-roles button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+/* 0.107.0 : Ma fin de journée */
+.endday { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; max-width: 760px; }
+.endday li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line, #d8dde3); border-radius: 8px; background: var(--panel, #fff); }
+.endday li.ok { opacity: 0.7; }
+.endday-mark { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: #fde8c8; color: #8a4b00; }
+.endday li.ok .endday-mark { background: #d9f2df; color: #1d6b34; }
+.endday-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.endday-text small { color: var(--muted, #667); }
+.banner { margin: 8px 0 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); font-weight: 600; max-width: 760px; }
+.banner.ok { background: #e6f6ea; border-color: #7cc48d; color: #1d6b34; }
+.banner.warn { background: var(--warn-soft, #fff3e0); border-color: var(--warn, #c77700); color: var(--warn, #8a4b00); }
+
+/* 0.107.0 : Règles de mon magasin */
+.store-rules .card { margin-bottom: 12px; }
+.rules-table td { vertical-align: middle; }
+.rules-table tr.rule-apart td:nth-child(2) { background: var(--warn-soft, #fff3e0); }
+
+/* 0.107.0 : accord par téléphone proposé d'office */
+.phone-approval.suggested { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--info-bg, #eef4ff); border: 1px solid var(--info, #2563eb); }
+.phone-approval.suggested > small { flex-basis: 100%; }
+
+/* 0.107.0 : PC hors ligne à la caisse */
+.pos-offline { margin: 4px 8px; padding: 8px 12px; border-radius: 8px; background: #fdecea; border: 1px solid #e0796d; color: #8a1c10; }

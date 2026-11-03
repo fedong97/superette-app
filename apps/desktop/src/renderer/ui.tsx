@@ -394,10 +394,18 @@ export function Field({ label, children, hint }: { label: string; children: Reac
  */
 export function PhoneApproval({ action, onCode }: { action: string; onCode: (code: string) => void }) {
   const [available, setAvailable] = useState(false);
+  // 0.107.0 : sans gérant connecté sur ce PC, l'accord par téléphone passe en premier.
+  const [suggest, setSuggest] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   useEffect(() => {
-    call('approval.available').then(setAvailable, () => setAvailable(false));
+    call('approval.offer').then(
+      (o) => {
+        setAvailable(o.available);
+        setSuggest(!o.managerHere);
+      },
+      () => setAvailable(false),
+    );
   }, []);
   useEffect(() => {
     if (!waiting) return;
@@ -430,7 +438,8 @@ export function PhoneApproval({ action, onCode }: { action: string; onCode: (cod
   }, [waiting]);
   if (!available) return null;
   return (
-    <div className="phone-approval">
+    <div className={`phone-approval${suggest ? ' suggested' : ''}`}>
+      {suggest && !waiting && <small>Le gérant n'est pas devant ce PC ? Il accepte depuis son téléphone.</small>}
       {waiting ? (
         <>
           <span className="spinner-dot" /> En attente de la réponse du gérant sur son téléphone…
@@ -441,6 +450,7 @@ export function PhoneApproval({ action, onCode }: { action: string; onCode: (cod
       ) : (
         <button
           type="button"
+          className={suggest ? 'primary' : undefined}
           onClick={async () => {
             setMessage(null);
             try {

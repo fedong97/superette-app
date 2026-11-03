@@ -445,6 +445,7 @@ const MENUS: [string, MenuItem[]][] = [
       H('Aujourd’hui'),
       { label: 'Tableau de bord', words: 'tabord chiffres du jour accueil', open: ['dashboard', 'day'], perm: 'dashboard' },
       { label: "Points d'attention", open: ['dashboard', 'attention'], perm: 'dashboard' },
+      { label: 'Ma fin de journée', words: 'fermeture soir clôture checklist fermer magasin', open: ['dashboard', 'endday'], perm: 'dashboard' },
       { label: 'Résumé du jour', open: ['admin', 'digest'], perm: 'dashboard' },
       { label: 'Alertes sur les ventes', open: ['sales', 'alerts'], perm: 'sales_alerts' },
       H('Ventes'),
@@ -493,6 +494,7 @@ const MENUS: [string, MenuItem[]][] = [
     'Administration',
     [
       H('Mon magasin'),
+      { label: 'Règles de mon magasin', words: 'remise plafond crédit dépense seuil conseil', open: ['admin', 'rules'] },
       { label: 'Paramètres', open: ['admin', 'settings'] },
       { label: 'Magasins', open: ['admin', 'stores'], adminOnly: true },
       { label: 'Sociétés et magasins', open: ['admin', 'companies'], perm: 'companies' },

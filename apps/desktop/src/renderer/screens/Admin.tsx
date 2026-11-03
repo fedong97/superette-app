@@ -8,6 +8,7 @@ import { Digest } from './AdminDigest';
 import { ResetData } from './AdminReset';
 import { MobilePay } from './AdminMobilePay';
 import { Settings } from './AdminSettings';
+import { StoreRules } from './StoreRules';
 import { BrandAndBadge, UserPhotoField } from './AdminBrand';
 import { PrintTemplates } from './PrintTemplates';
 import { FiscalYears } from './Accounting';
@@ -24,7 +25,7 @@ import serverLogo from '../assets/logo-serveur.png';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations';
+type Tab = 'rules' | 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations';
 
 export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -41,6 +42,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['users', 'Utilisateurs'],
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
+    ['rules', 'Règles de mon magasin'],
     ['settings', 'Paramètres'],
     ['brand', 'Couleurs et badges'],
     ...(can('accounting') || can('fiscal_years') ? ([['fiscal', 'Exercices comptables']] as [Tab, string][]) : []),
@@ -81,6 +83,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
       )}
       {tab === 'rights' && <RoleRights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'privileges' && <UserPrivileges key={privUser ?? ''} isAdmin={user.role === 'admin'} initialUserId={privUser} onChanged={onChanged} />}
+      {tab === 'rules' && <StoreRules canEdit={can('settings_edit')} onChanged={onChanged} />}
       {tab === 'settings' && (
         <Settings
           user={user}

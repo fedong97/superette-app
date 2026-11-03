@@ -8,7 +8,7 @@ import { LiveTills } from './LiveTills';
 import { DashboardTills } from './Home';
 import { type WinKind } from '../nav';
 
-export type DashboardTab = 'day' | 'attention' | 'tills' | 'month' | 'prices' | 'team' | 'owner';
+export type DashboardTab = 'day' | 'attention' | 'endday' | 'tills' | 'month' | 'prices' | 'team' | 'owner';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Item = Result<'attention.list'>[number];
 /** Fenêtre et onglet qui traitent chaque point d'attention. */
@@ -40,7 +40,7 @@ export function Dashboard({ user, initialTab = 'day', onOpen }: { user: User; in
   const can = useCan();
   // Sans le tableau de bord, seuls les onglets permis (prix, équipe, rapport) restent.
   const first: DashboardTab = can('dashboard') ? 'day' : can('price_review') ? 'prices' : can('team_board') ? 'team' : 'owner';
-  const [tab, setTab] = useState<DashboardTab>((initialTab === 'day' || initialTab === 'attention') && !can('dashboard') ? first : initialTab);
+  const [tab, setTab] = useState<DashboardTab>((initialTab === 'day' || initialTab === 'attention' || initialTab === 'endday') && !can('dashboard') ? first : initialTab);
   return (
     <div className="page">
       <Tabs
@@ -52,6 +52,7 @@ export function Dashboard({ user, initialTab = 'day', onOpen }: { user: User; in
             ? ([
                 ['day', 'La journée'],
                 ['attention', "Points d'attention"],
+                ['endday', 'Ma fin de journée'],
               ] as [DashboardTab, string][])
             : []),
           ...(can('owner_report') || can('dashboard') ? ([['month', 'Mon mois en clair']] as [DashboardTab, string][]) : []),
@@ -62,6 +63,7 @@ export function Dashboard({ user, initialTab = 'day', onOpen }: { user: User; in
       />
       {tab === 'day' && can('dashboard') && <Day onOpen={onOpen} />}
       {tab === 'attention' && can('dashboard') && <Attention onOpen={onOpen} />}
+      {tab === 'endday' && can('dashboard') && <EndOfDay onOpen={onOpen} />}
       {tab === 'tills' && can('cash_live') && <LiveTills user={user} />}
       {tab === 'month' && (can('owner_report') || can('dashboard')) && <MonthClear onOpen={onOpen} />}
       {tab === 'prices' && can('price_review') && <PriceReview />}
@@ -94,6 +96,43 @@ function Attention({ onOpen }: { onOpen: (target: AttentionTarget) => void }) {
             </button>
           ))}
         </div>
+      )}
+    </>
+  );
+}
+
+/** Ma fin de journée (0.107.0) : ce qui reste à faire avant de fermer, dans l'ordre. */
+function EndOfDay({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
+  const list = useLoad(() => call('home.endOfDay'), []);
+  const d = list.data;
+  const left = d ? d.steps.filter((x) => !x.ok).length : 0;
+  return (
+    <>
+      <header className="page-head">
+        <h1>Ma fin de journée</h1>
+        <button onClick={list.reload}>Actualiser</button>
+      </header>
+      <p className="muted">Avant de fermer le magasin : chaque ligne ouvre la fenêtre qui la traite. Revenez ici et actualisez une fois la tâche faite.</p>
+      {d && (
+        <>
+          <div className={`banner ${d.done ? 'ok' : 'warn'}`}>{d.done ? 'Tout est en ordre : vous pouvez fermer le magasin.' : `${left} tâche${left > 1 ? 's' : ''} avant de fermer.`}</div>
+          <ol className="endday">
+            {d.steps.map((x) => (
+              <li key={x.key} className={x.ok ? 'ok' : 'todo'}>
+                <span className="endday-mark" aria-hidden>{x.ok ? '✓' : x.count}</span>
+                <span className="endday-text">
+                  <strong>{x.label}</strong>
+                  <small>{x.detail}</small>
+                </span>
+                {!x.ok && (
+                  <button type="button" onClick={() => onOpen(x.target as [WinKind, string])}>
+                    Ouvrir
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+        </>
       )}
     </>
   );

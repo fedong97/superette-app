@@ -27,21 +27,21 @@ test('barre latérale personnalisable, barre du haut allégée, une imprimante p
     await expect(page.locator('nav.rail .side-user')).toBeVisible();
     expect((await page.locator('.topbar .top-search').boundingBox())!.width).toBeLessThan(40);
     await expect(page.locator('nav.rail .rail-item[title="Comptabilité"]')).toBeVisible();
-    await expect(page.locator('nav.rail .rail-item[title="Fiscalité"]')).toBeVisible();
-    await expect(page.locator('nav.rail .rail-item[title="Fournisseurs"]')).toBeVisible();
+    await expect(page.locator('nav.rail .rail-item[title="Pilotage"]')).toBeVisible();
+    await expect(page.locator('nav.rail .rail-item[title="Achats et fournisseurs"]')).toBeVisible();
     await shot(page, '093-01-accueil');
 
-    // « Personnaliser » en bas de la barre : masquer Fiscalité la retire de la barre.
+    // « Personnaliser » en bas de la barre : masquer Pilotage le retire de la barre.
     await page.locator('nav.rail .side-custom').click();
     const editor = page.locator('.modal', { hasText: 'Personnaliser la barre latérale' });
     await expect(editor).toBeVisible();
     await shot(page, '093-02-personnaliser-la-barre');
-    await editor.locator('tr', { hasText: 'Fiscalité' }).locator('input[type="checkbox"]').uncheck();
+    await editor.locator('tr', { hasText: 'Pilotage' }).locator('input[type="checkbox"]').uncheck();
     await editor.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.locator('nav.rail .rail-item[title="Fiscalité"]')).toHaveCount(0);
+    await expect(page.locator('nav.rail .rail-item[title="Pilotage"]')).toHaveCount(0);
     await page.reload();
     await page.waitForTimeout(1200);
-    await expect(page.locator('nav.rail .rail-item[title="Fiscalité"]')).toHaveCount(0);
+    await expect(page.locator('nav.rail .rail-item[title="Pilotage"]')).toHaveCount(0);
     await expect(page.locator('nav.rail .rail-item[title="Comptabilité"]')).toBeVisible();
 
     // Onglets rapides : 12 au plus, sur deux lignes.

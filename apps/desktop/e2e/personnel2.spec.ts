@@ -126,7 +126,7 @@ test('paie d’après le pointage, pointeuse à empreinte, alertes et avertissem
     expect(sal.attendance).toContain('Heures supplémentaires');
 
     // Fiche d'un journalier : tarif de la journée.
-    await openMenu(page, 'Personnel', /^Collaborateurs/);
+    await openMenu(page, 'Personnel', /^Fiches du personnel/);
     await page.getByRole('row', { name: /Marie NGO/ }).getByRole('button', { name: 'Modifier' }).click();
     await expect(page.getByLabel('Tarif d’une journée (FCFA)')).toHaveValue('3000');
     await shot(page, '06-fiche-journalier');

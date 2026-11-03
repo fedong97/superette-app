@@ -62,15 +62,15 @@ test('captures de l’interface (accueil, menus, tableau de bord, liste, caisse,
     await page.keyboard.press('Escape');
     await page.mouse.click(900, 500);
 
-    await page.locator('nav.rail .rail-item', { hasText: 'Suivi' }).first().click();
+    await page.locator('nav.rail .rail-item', { hasText: 'Pilotage' }).first().click();
     await page.locator('.menu-drop').getByRole('button', { name: 'Tableau de bord', exact: true }).click();
     await shot(page, '03-tableau-de-bord');
 
-    await page.locator('nav.rail .rail-item', { hasText: 'Articles' }).first().click();
+    await page.locator('nav.rail .rail-item', { hasText: 'Produits' }).first().click();
     await page.locator('.menu-drop button').first().click();
     await shot(page, '04-liste-articles');
 
-    await page.getByRole('button', { name: 'V. cash 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Vente 1', exact: true }).click();
     const scan = page.getByPlaceholder(/code-barres/).first();
     await scan.fill(ean('600123456780'));
     await scan.press('Enter');
@@ -92,7 +92,7 @@ test('captures de l’interface (accueil, menus, tableau de bord, liste, caisse,
     await page.locator('.side-toggle').click().catch(() => undefined);
 
     // Une fenêtre : nouvelle dépense.
-    await page.locator('nav.rail .rail-item', { hasText: 'Dépenses' }).first().click();
+    await page.locator('nav.rail .rail-item', { hasText: 'Caisse et argent' }).first().click();
     await page.locator('.menu-drop').getByRole('button', { name: 'Nouvelle dépense', exact: true }).click();
     await shot(page, '08-nouvelle-depense');
     await page.keyboard.press('Escape');

@@ -81,7 +81,7 @@ test('personnel sans accès au logiciel, borne de pointage, équipes et prestata
     // Le menu Personnel et la liste de tout le personnel.
     await page.locator('nav.rail .rail-item', { hasText: 'Personnel' }).first().click();
     await shot(page, '02-menu-personnel');
-    await page.locator('.menu-drop').getByRole('button', { name: /Collaborateurs/ }).click();
+    await page.locator('.menu-drop').getByRole('button', { name: /Fiches du personnel/ }).click();
     await maximize(page);
     await expect(page.getByRole('cell', { name: /Marie NGO/ })).toBeVisible();
     await shot(page, '03-tout-le-personnel');

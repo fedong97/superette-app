@@ -649,8 +649,8 @@ ul.home-rank { list-style: none; padding-left: 0; }
 .home-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .home-kpis strong { font-size: clamp(17px, 1.45vw, 22px); white-space: nowrap; }
 /* Menu « Actions » de la caisse, rangé en groupes. */
-.pos-actions { position: relative; display: inline-block; }
-.pos-actions > button.opt.action { padding: 8px 14px; font-weight: 700; border: 1px solid var(--border); border-radius: var(--radius-md, 8px); background: var(--surface); cursor: pointer; }
+.pos-actmenu { position: relative; display: inline-block; }
+.pos-actmenu > button.opt.action { padding: 8px 14px; font-weight: 700; border: 1px solid var(--border); border-radius: var(--radius-md, 8px); background: var(--surface); cursor: pointer; }
 .pos-actions-back { position: fixed; inset: 0; z-index: 40; }
 .pos-actions-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 41; min-width: 330px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,.18)); display: grid; gap: 6px; }
 .pos-actions-group h4 { margin: 4px 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
@@ -701,3 +701,5 @@ ul.home-rank { list-style: none; padding-left: 0; }
 
 /* 0.107.0 : PC hors ligne à la caisse */
 .pos-offline { margin: 4px 8px; padding: 8px 12px; border-radius: 8px; background: #fdecea; border: 1px solid #e0796d; color: #8a1c10; }
+.pos-bills { grid-template-columns: repeat(7, 1fr); }
+.pos-bills button { font-size: 17px; }

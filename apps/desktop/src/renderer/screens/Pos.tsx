@@ -1124,7 +1124,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         ],
       ];
   const actionsMenu = (
-    <div className="pos-actions">
+    <div className="pos-actmenu">
       <button type="button" className="opt action" aria-haspopup="menu" aria-expanded={actionsOpen} onClick={() => setActionsOpen((o) => !o)}>
         ⋯ Actions ▾
       </button>

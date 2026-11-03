@@ -197,7 +197,7 @@ export function SaleSearchDialog({
               <th>Réf.</th>
               <th>Produit</th>
               <th className="r">Stock</th>
-              <th>Cond.</th>
+              <th>Conditionnement</th>
               <th>Dépôt</th>
               <th className="r">{tx('PV TTC')}</th>
               <th className="r">Dernier prix</th>

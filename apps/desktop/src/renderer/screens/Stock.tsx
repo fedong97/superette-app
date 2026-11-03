@@ -154,7 +154,7 @@ function StockState({ critical = false }: { critical?: boolean }) {
           <option value="surstock">Surstocks</option>
         </select>
         <input className="search" placeholder="Rechercher" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <span className="muted">Valeur du stock (CMUP) : {fcfa(total)}</span>
+        <span className="muted">Valeur du stock (coût moyen) : {fcfa(total)}</span>
         <button disabled={!rows.data} onClick={exportXlsx}>
           Exporter vers Excel
         </button>
@@ -170,7 +170,7 @@ function StockState({ critical = false }: { critical?: boolean }) {
               </th>
             ))}
             <th className="r">{perWarehouse.length ? 'Total' : 'Quantité'}</th>
-            <th className="r">CMUP</th>
+            <th className="r" title="Coût moyen unitaire pondéré (CMUP)">Coût moyen</th>
             <th className="r">Valeur</th>
             <th>Prochaine DLC</th>
             <th>Niveau</th>

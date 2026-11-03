@@ -54,7 +54,6 @@ export function Dashboard({ user, initialTab = 'day', onOpen }: { user: User; in
                 ['attention', "Points d'attention"],
               ] as [DashboardTab, string][])
             : []),
-          ...(can('cash_live') ? ([['tills', 'Caisses en direct']] as [DashboardTab, string][]) : []),
           ...(can('owner_report') || can('dashboard') ? ([['month', 'Mon mois en clair']] as [DashboardTab, string][]) : []),
           ...(can('price_review') ? ([['prices', 'Prix à revoir']] as [DashboardTab, string][]) : []),
           ...(can('team_board') ? ([['team', 'Équipe de la semaine']] as [DashboardTab, string][]) : []),

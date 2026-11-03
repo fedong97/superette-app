@@ -111,9 +111,7 @@ function DayFigures({ today, yesterday, cashInDrawer, showCash }: { today: Figur
   const tiles: [string, ReactNode, ReactNode, () => void][] = [
     [tx("Chiffre d'affaires TTC"), <CountUp value={today.revenue} />, <Versus now={today.revenue} before={yesterday?.revenue} />, go],
     ['Tickets', <CountUp value={today.tickets} money={false} />, <Versus now={today.tickets} before={yesterday?.tickets} />, go],
-    ['Panier moyen', <CountUp value={today.average} />, <Versus now={today.average} before={yesterday?.average} />, go],
     [tx('Marge brute HT'), <CountUp value={today.margin} />, <span className="stat-trend flat">{rate === null ? 'taux —' : `taux ${rate} %`}</span>, go],
-    ['Règlements clients', <CountUp value={today.receipts} />, <Versus now={today.receipts} before={yesterday?.receipts} />, () => openScreen('customers', 'payments')],
   ];
   if (showCash) tiles.push(['Espèces en caisse', <CountUp value={cashInDrawer} />, <span className="stat-trend flat">caisses ouvertes</span>, () => openScreen('treasury', 'live')]);
   return (
@@ -420,6 +418,7 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
           <DayFigures today={d.today} yesterday={d.yesterday} cashInDrawer={d.cashInDrawer} showCash={d.registers.length > 0} />
         </Block>
       )}
+      <div className="home-grid">
       {show('tills') && (
         <Block index={i++} title="Caisses en direct" more={['Tout voir', () => openScreen('treasury', 'live')]}>
           <TillsStrip registers={d.registers} />
@@ -439,6 +438,7 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
           </div>
         </Block>
       )}
+      </div>
       {(show('hours') || show('activity')) && d.today && (
         <div className="home-grid">
           {show('hours') && (

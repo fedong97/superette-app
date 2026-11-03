@@ -406,7 +406,7 @@ function Day({
   return (
     <div className="tre-day">
       <div className="tre-head">
-        <Field label="Session">
+        <Field label="Journée">
           <select value={se.id} onChange={(e) => onSession(e.target.value)}>
             {sessions.map((x) => (
               <option key={x.id} value={x.id}>
@@ -423,7 +423,7 @@ function Day({
           <input readOnly value={se.closed_at ? `${dateTime(se.closed_at)} · ${se.closed_by_name ?? ''}` : ''} />
         </Field>
         {!declared && (
-          <Field label="Mnt. à l'ouverture" hint={se.carried_float !== null ? `dont ${fcfa(se.carried_float)} laissés la veille` : undefined}>
+          <Field label="Fond de caisse à l'ouverture" hint={se.carried_float !== null ? `dont ${fcfa(se.carried_float)} laissés la veille` : undefined}>
             <input readOnly className="r tre-amount" value={fcfa(se.opening_float)} />
           </Field>
         )}
@@ -494,8 +494,8 @@ function Day({
       {!declared && (
         <div className="tre-foot">
           <div>
-            <small>V. à crédit</small>
-            <strong className="tre-credit">{fcfa(cash.creditSales)}</strong>
+            <small>Ventes à crédit</small>
+            <strong className={cash.creditSales ? 'tre-credit' : 'tre-amount'}>{fcfa(cash.creditSales)}</strong>
           </div>
           <div>
             <small>Attendu à la clôture</small>
@@ -506,7 +506,7 @@ function Day({
             <strong className="tre-amount">{z.counted === null ? '—' : fcfa(z.counted)}</strong>
           </div>
           <div className={diffClass}>
-            <small>Différentiel</small>
+            <small>Écart</small>
             <strong className="tre-amount">{z.difference === null ? '—' : fcfa(z.difference)}</strong>
           </div>
           {se.deposit !== null && (
@@ -1004,7 +1004,7 @@ function CloseDialog({
               <strong>{fcfa(preview.counted)}</strong>
             </div>
             <div className={preview.difference < 0 ? 'neg' : preview.difference > 0 ? 'pos' : ''}>
-              <small>Différentiel</small>
+              <small>Écart</small>
               <strong>{fcfa(preview.difference)}</strong>
             </div>
           </div>

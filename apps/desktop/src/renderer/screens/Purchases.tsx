@@ -331,7 +331,7 @@ function OrderEditor({ order, onDone }: { order: Order | null; onDone: (id: stri
         </Field>
         <div className="actions">
           <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
-          <button onClick={() => onDone(order?.id ?? null)}>Retour</button>
+          <button onClick={() => onDone(order?.id ?? null)}>← Bons de commande</button>
           <button className={order?.status === 'sent' ? 'primary' : undefined} disabled={!lines.length} onClick={() => void save(false)}>
             {order?.status === 'sent' ? 'Enregistrer les modifications' : 'Enregistrer le brouillon'}
           </button>
@@ -620,7 +620,7 @@ function ReceiveOrder({ id, onDone, phone }: { id: string; onDone: () => void; p
       </table>
       <div className="actions">
         <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
-        <button onClick={onDone}>Retour</button>
+        <button onClick={onDone}>← Revenir à la liste</button>
         <button
           className="primary"
           onClick={async () => {
@@ -758,7 +758,7 @@ function ReceptionEditor({ reception: r, onDone }: { reception: Result<'purchase
       <PurchaseEntry lines={lines} setLines={setLines}>
         <div className="actions">
           <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
-          <button onClick={onDone}>Retour</button>
+          <button onClick={onDone}>← Revenir à la liste</button>
           <button
             className="primary"
             disabled={!lines.length}

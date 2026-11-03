@@ -1782,7 +1782,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                         <th className="ref">Réf.</th>
                         <th>Produit</th>
                         <th className="r">Qté</th>
-                        <th>Cond.</th>
+                        <th>Conditionnement</th>
                         <th className="r">{tx('PU TTC')}</th>
                         {withDiscount && <th className="r">Remise</th>}
                         <th className="r">{tx('Total TTC')}</th>
@@ -2148,7 +2148,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                     <th>Désignation</th>
                     <th className="r">{tx('P.U. TTC')}</th>
                     <th className="r">Quantité</th>
-                    <th>Cond.</th>
+                    <th>Conditionnement</th>
                     <th className="r">Remise</th>
                     <th className="r">{tx('Montant TTC')}</th>
                   </tr>

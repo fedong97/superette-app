@@ -209,7 +209,7 @@ export function PurchaseEntry({
             </h3>
             <p className="pe-info">
               Stock : {inStock ? inStock.in_packs || qtyFmt(inStock.qty, inStock.unit) : '…'}
-              {draft.article.purchase_price > 0 && ` · dernier P.A ${fcfa(parseAmount(newRecLine(draft.article).cost) ?? 0)} / ${packName(draft.article, newRecLine(draft.article).packUnits).toLowerCase()}`}
+              {draft.article.purchase_price > 0 && ` · dernier prix d'achat ${fcfa(parseAmount(newRecLine(draft.article).cost) ?? 0)} / ${packName(draft.article, newRecLine(draft.article).packUnits).toLowerCase()}`}
             </p>
             <div className="pe-grid">
               <label className="field">
@@ -275,7 +275,7 @@ export function PurchaseEntry({
             )}
             <div className="pe-grid">
               <label className="field">
-                <span>{vat ? (ttc ? 'P.A TTC' : 'P.A HT') : "Prix d'achat"} / {units}</span>
+                <span>{vat ? (ttc ? "Prix d'achat TTC" : "Prix d'achat HT") : "Prix d'achat"} / {units}</span>
                 {ttc ? (
                   <input
                     value={ttcText}
@@ -373,10 +373,10 @@ export function PurchaseEntry({
               <th>{order ? 'Réf. fourn.' : 'Réf.'}</th>
               <th>Produit</th>
               <th className="r">Qté</th>
-              <th>Cond.</th>
+              <th>Conditionnement</th>
               <th className="r">Bonus</th>
               <th className="r">Remise</th>
-              <th className="r">{tx('P.A HT')}</th>
+              <th className="r">{tx("Prix d'achat HT")}</th>
               {!order && <th className="r">Transp. + manut.</th>}
               {!order && <th className="r">P. revient</th>}
               {anyLot && <th>Lot</th>}

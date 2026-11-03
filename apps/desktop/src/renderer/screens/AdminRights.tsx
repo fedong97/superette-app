@@ -83,11 +83,14 @@ export function RoleRights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged
   const [group, setGroup] = useState<PermissionGroup>(PERMISSION_GROUPS[0]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Permission | null>(null);
+  // 0.107.0 : un rôle à la fois (lisible en 1366 × 768) ; « Tous les rôles » pour comparer.
+  const [only, setOnly] = useState<string>('manager');
   useEffect(() => {
     if (matrix.data) setDraft(Object.fromEntries(matrix.data.map((r) => [r.role, r.rights])));
   }, [matrix.data]);
   const rows = useMemo(() => visibleRights(group, search), [group, search]);
   if (!matrix.data || !draft) return null;
+  const shown = only === 'all' ? matrix.data : matrix.data.filter((r) => r.role === only);
   const changed = matrix.data.filter((r) => [...r.rights].sort().join() !== [...(draft[r.role] ?? [])].sort().join());
   const set = (role: string, perms: Permission[], on: boolean) => {
     const cur = new Set(draft[role] ?? []);
@@ -102,6 +105,16 @@ export function RoleRights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged
         Cochez ce que chaque rôle peut ouvrir et faire. L'administrateur a toujours tous les droits. Un changement vaut pour tous les utilisateurs du rôle, à leur
         prochaine connexion. Pour une seule personne, utilisez « Privilèges par utilisateur ».
       </p>
+      <div className="rights-roles" role="tablist" aria-label="Rôle">
+        {matrix.data.map((r) => (
+          <button key={r.role} type="button" className={only === r.role ? 'on' : ''} onClick={() => setOnly(r.role)}>
+            {r.label}
+          </button>
+        ))}
+        <button type="button" className={only === 'all' ? 'on' : ''} onClick={() => setOnly('all')}>
+          Tous les rôles (comparer)
+        </button>
+      </div>
       <div className="rights-layout">
         <GroupPicker group={group} onGroup={setGroup} search={search} onSearch={setSearch} count={changedIn} />
         <div className="rights-main">
@@ -110,8 +123,8 @@ export function RoleRights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged
               <tr>
                 <th>Privilège</th>
                 <th>Type</th>
-                <th className="c">Administrateur</th>
-                {matrix.data.map((r) => (
+                {only === 'all' && <th className="c">Administrateur</th>}
+                {shown.map((r) => (
                   <th key={r.role} className="c">
                     {r.label}
                   </th>
@@ -119,8 +132,8 @@ export function RoleRights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged
               </tr>
               {rows.length > 1 && (
                 <tr className="group">
-                  <th colSpan={3}>{search ? `${rows.length} privilège(s) trouvé(s)` : `Tout le groupe « ${group} »`}</th>
-                  {matrix.data.map((r) => {
+                  <th colSpan={only === 'all' ? 3 : 2}>{search ? `${rows.length} privilège(s) trouvé(s)` : `Tout le groupe « ${group} »`}</th>
+                  {shown.map((r) => {
                     const all = rows.every((k) => draft[r.role]?.includes(k));
                     return (
                       <th key={r.role} className="c">
@@ -139,10 +152,12 @@ export function RoleRights({ isAdmin, onChanged }: { isAdmin: boolean; onChanged
                     {search && <small className="muted"> · {PERMISSIONS[k].group}</small>}
                   </td>
                   <td>{PERMISSIONS[k].type}</td>
-                  <td className="c">
-                    <input type="checkbox" checked disabled />
-                  </td>
-                  {matrix.data!.map((r) => (
+                  {only === 'all' && (
+                    <td className="c">
+                      <input type="checkbox" checked disabled />
+                    </td>
+                  )}
+                  {shown.map((r) => (
                     <td key={r.role} className="c" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" disabled={!isAdmin} checked={draft[r.role]?.includes(k) ?? false} onChange={(e) => set(r.role, [k], e.target.checked)} />
                     </td>

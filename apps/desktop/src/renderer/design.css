@@ -673,3 +673,7 @@ ul.home-rank { list-style: none; padding-left: 0; }
     radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.45), transparent) top / 100% 12px no-repeat scroll,
     radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.45), transparent) bottom / 100% 12px no-repeat scroll;
 }
+/* Droits par rôle : un rôle à la fois. */
+.rights-roles { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.rights-roles button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-weight: 600; cursor: pointer; }
+.rights-roles button.on { background: var(--brand); border-color: var(--brand); color: #fff; }

@@ -118,6 +118,21 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.107.0',
+    items: [
+      'Correctif : sans le droit « Voir les montants de la caisse », l’accueil ne montre plus les ventes ni l’attendu de sa caisse (le comptage du soir reste à l’aveugle).',
+      'Correctif : les colonnes des listes restent alignées quand des colonnes de dépôts s’ajoutent ; les dates des champs sont en français ; la sauvegarde n’est plus « en retard » sur un PC neuf.',
+      'Caisse : ouverture de la caisse depuis l’écran de vente, menu Actions rangé par usage, « Encaisser » et « Décaisser » regroupés, remise sur tout le ticket, billet de 500 FCFA, A4 et WhatsApp proposés après la vente.',
+      'Menus regroupés par métier (Caisse et argent, Articles, Achats, Stock, Clients, Personnel, Pilotage, Comptabilité, Administration, Aide) et écrans renommés en mots simples (« Vente 1 », « Prix d’achat », « Fond de caisse », « Écart »…). Les anciens noms trouvent toujours l’écran avec Ctrl+K.',
+      'Fenêtres ouvertes en plein écran par défaut (ou en cascade, au choix dans Mon compte), icônes dans les menus et la barre latérale.',
+      'Liste des produits avec le stock ; accueil du gérant en 4 chiffres, caisses et points d’attention côte à côte ; droits par rôle affichés un rôle à la fois.',
+      'Nouveau : « Ma fin de journée » (Pilotage) liste ce qui reste à faire avant de fermer : caisses ouvertes, écarts, dépenses, transferts, factures, sauvegarde, envoi au serveur.',
+      'Nouveau : « Règles de mon magasin » (Administration) regroupe les 16 réglages qui changent la journée, avec la valeur conseillée.',
+      'L’accord par téléphone est proposé d’office quand le gérant n’est pas devant le PC ; un bandeau « PC hors ligne » s’affiche à la caisse quand le serveur ne répond plus.',
+      'Ctrl+K retrouve un client par son numéro de téléphone, même tapé sans espaces. La page gérant du serveur renvoie vers ONIX 360 Mobile. Les raccourcis clavier ne changent pas.',
+    ],
+  },
+  {
     version: '0.106.0',
     items: [
       'Remise à zéro des données d’essai dans une fiche d’intervention : faite au bureau dans la fiche, elle est refaite dans la boutique quand la fiche y est rapportée (sauvegarde juste avant), puis les modifications de la fiche sont ajoutées.',

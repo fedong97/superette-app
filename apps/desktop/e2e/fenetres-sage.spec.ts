@@ -60,7 +60,7 @@ test('chaque écran a sa fenêtre : réduire, agrandir, fermer ; les réglages n
     await shot(page, '04-reduite-dans-la-barre-du-bas');
 
     // Le menu Fenêtres liste les quatre, réduite comprise.
-    await openFrom(page, 'Achats et fournisseurs', 'Bons de commande');
+    await openFrom(page, 'Achats', 'Bons de commande');
     await page.locator('.win-btn').click();
     await expect(page.locator('.win-menu')).toContainText('Stock › État du stock');
     await expect(page.locator('.win-menu')).toContainText('réduite');

@@ -31,7 +31,7 @@ test('registre des achats : factures, avoirs et réceptions non facturées ; Ctr
     await invoke(page, 'stock.receive', { warehouseId: wh.id, supplierId: nestle.id, reference: '7781', lines: [{ articleId: art.id, qty: 20_000, unitCost: 4000 }] });
 
     // Le menu Achats › Payer ouvre le registre.
-    await page.locator('nav.rail .rail-item[title="Achats et fournisseurs"]').first().click();
+    await page.locator('nav.rail .rail-item[title="Achats"]').first().click();
     await page.locator('.menu-drop').getByText('Registre des achats', { exact: true }).click();
     const win = front(page);
     await expect(win.getByRole('cell', { name: 'SABC' })).toBeVisible();

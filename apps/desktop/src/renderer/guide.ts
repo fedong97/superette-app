@@ -118,6 +118,16 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.108.0',
+    items: [
+      'Les fenêtres comme « Nouvel article » s’ouvrent entières, à droite de la barre latérale.',
+      'Achats et Fournisseurs sont de nouveau deux menus séparés.',
+      'Caisse : le bandeau rouge « PC hors ligne » est retiré, la barre du bas affiche déjà « Serveur : hors ligne ». Le menu Actions s’ouvre entier, et chaque modèle d’écran de vente tient sur une page sans défiler.',
+      'Modèle conventionnel : « Nom du client sur le ticket » est à côté du client comptoir, en haut.',
+      'Listes : Filtrer, Colonnes, Excel et PDF ne s’affichent plus tout seuls ; cliquez sur le petit bouton ⋯ au-dessus de la liste.',
+    ],
+  },
+  {
     version: '0.107.0',
     items: [
       'Correctif : sans le droit « Voir les montants de la caisse », l’accueil ne montre plus les ventes ni l’attendu de sa caisse (le comptage du soir reste à l’aveugle).',
@@ -128,7 +138,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Liste des produits avec le stock ; accueil du gérant en 4 chiffres, caisses et points d’attention côte à côte ; droits par rôle affichés un rôle à la fois.',
       'Nouveau : « Ma fin de journée » (Pilotage) liste ce qui reste à faire avant de fermer : caisses ouvertes, écarts, dépenses, transferts, factures, sauvegarde, envoi au serveur.',
       'Nouveau : « Règles de mon magasin » (Administration) regroupe les 16 réglages qui changent la journée, avec la valeur conseillée.',
-      'L’accord par téléphone est proposé d’office quand le gérant n’est pas devant le PC ; un bandeau « PC hors ligne » s’affiche à la caisse quand le serveur ne répond plus.',
+      'L’accord par téléphone est proposé d’office quand le gérant n’est pas devant le PC.',
       'Ctrl+K retrouve un client par son numéro de téléphone, même tapé sans espaces. La page gérant du serveur renvoie vers ONIX 360 Mobile. Les raccourcis clavier ne changent pas.',
     ],
   },

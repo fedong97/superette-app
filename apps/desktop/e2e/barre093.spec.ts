@@ -28,7 +28,7 @@ test('barre latérale personnalisable, barre du haut allégée, une imprimante p
     expect((await page.locator('.topbar .top-search').boundingBox())!.width).toBeLessThan(40);
     await expect(page.locator('nav.rail .rail-item[title="Comptabilité"]')).toBeVisible();
     await expect(page.locator('nav.rail .rail-item[title="Pilotage"]')).toBeVisible();
-    await expect(page.locator('nav.rail .rail-item[title="Achats et fournisseurs"]')).toBeVisible();
+    await expect(page.locator('nav.rail .rail-item[title="Achats"]')).toBeVisible();
     await shot(page, '093-01-accueil');
 
     // « Personnaliser » en bas de la barre : masquer Pilotage le retire de la barre.

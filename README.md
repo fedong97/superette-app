@@ -189,6 +189,12 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - « Changer l'adresse » (Administration › Serveur central, `sync.changeUrl`) : même poste, même jeton, nouvelle adresse vérifiée auprès du serveur.
 - ONIX 360 Serveur : sauvegarde toutes les 1, 2, 4, 6 (par défaut), 12 ou 24 heures, 40 gardées, écrite sous un nom provisoire puis relue ; copie vers un second dossier (`backup_copy_dir`) relue et rattrapée toutes les 10 minutes ; dépôt d'une sauvegarde par l'interface (`POST /admin/api/backups/upload`, archive vérifiée) avant de la restaurer. « Serveur : sauvegarde à vérifier » dans la barre d'état des PC en cas d'échec, de retard ou de copie impossible.
 
+**Écrans de vente sur une page (0.108.0)**
+- Fenêtres (Nouvel article, saisies, réglages) : le fond s'arrête à la barre latérale (`.desk .modal-back { left: var(--side-w) }`), la fenêtre est donc entière ; les champs des grilles à trois colonnes se resserrent au lieu de faire défiler la fenêtre de côté.
+- Menus : « Achats » et « Fournisseurs » redeviennent deux menus ; une barre latérale enregistrée en 0.107 garde les deux (`RAIL_VERSION` 108).
+- Caisse : plus de bandeau « PC hors ligne » en haut de la vente, la barre d'état affiche déjà « Serveur : hors ligne ». Menu Actions placé d'après son bouton (vers la gauche quand le bouton est à droite, défilement s'il est plus haut que la place). Modèle conventionnel : « Nom du client sur le ticket » à côté du client comptoir, boutons de la barre qui passent à la ligne entre eux, Comptant / Crédit et Actions toujours en haut à droite. Modèle classique : boutons de droite resserrés pour tenir sans défilement. Lignes vides des fiches qui ne prennent plus le style des pages vides (`tr.empty`).
+- Listes : la barre Filtrer, Colonnes, Imprimer, Excel, PDF ne s'ouvre plus au survol ; un petit bouton ⋯ au-dessus de la liste l'ouvre, Échap ou un clic ailleurs la referme (« ⋯ Filtre actif » quand un filtre est en cours).
+
 **Le quotidien plus simple (0.107.0)**
 - Correctifs : sans le droit « Voir les montants de la caisse », l'accueil ne montre plus les ventes ni l'attendu de la caisse (`home.overview` vérifie `cash_amounts`) ; les colonnes des listes restent alignées quand React ajoute des colonnes de dépôts (`listTools.reindex`) ; les champs de date sont en français (`--lang=fr-FR`) ; la sauvegarde n'est plus « en retard » sur un PC neuf (le délai part de la création du magasin).
 - Caisse : ouverture de la caisse depuis l'écran de vente, menu Actions groupé par usage, « Encaisser » et « Décaisser » qui proposent le bon geste (entrée d'espèces, règlement client, avance, dépense…), remise sur tout le ticket, billet de 500 FCFA, A4 et WhatsApp après la vente, touches rapides remplies par les 24 produits les plus vendus quand rien n'est choisi.
@@ -198,7 +204,7 @@ Ce dépôt couvre la **phase 1 : caisse et stock**, et le **serveur central** qu
 - Accueil du gérant : 4 chiffres (CA, tickets, marge, espèces en caisse), caisses et points d'attention côte à côte. Droits par rôle : un rôle à la fois, avec un comparatif de tous les rôles à part.
 - Ma fin de journée (Pilotage, `home.endOfDay`) : caisses encore ouvertes, écarts à justifier, dépenses à approuver, transferts à recevoir, factures fournisseurs, ventes de coupure, sauvegarde du jour et envoi au serveur, chaque ligne avec la fenêtre qui la traite.
 - Règles de mon magasin (Administration) : 16 réglages qui changent la journée (remise sans code, délai d'annulation, plafond du tiroir, approbation des dépenses, crédit, péremption, transferts, sécurité), avec la valeur conseillée et « Prendre le conseil ».
-- Accord par téléphone proposé d'office quand la personne connectée n'est pas gérant (`approval.offer`) ; bandeau « PC hors ligne » à la caisse quand le serveur ne répond plus.
+- Accord par téléphone proposé d'office quand la personne connectée n'est pas gérant (`approval.offer`).
 - Ctrl+K retrouve un client par son téléphone, même tapé sans espaces ni points. La page `/gerant` du serveur renvoie vers ONIX 360 Mobile, seule appli gérant conseillée.
 - Les raccourcis clavier ne changent pas.
 

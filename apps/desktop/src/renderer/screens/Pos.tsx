@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type CartLine,
   type CustomerDisplayState,
@@ -178,6 +178,31 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const sellerPost = counterPost === 'seller';
   const session = useLoad(() => call('pos.session'), []);
   const [actionsOpen, setActionsOpen] = useState(false);
+  /**
+   * 0.108.0 : le menu Actions se place d'après son bouton, dans l'écran : il s'ouvre vers la gauche
+   * quand le bouton est à droite, et défile s'il est plus haut que la place qui reste.
+   */
+  const [actionsAt, setActionsAt] = useState<CSSProperties>({});
+  // Échap referme le menu Actions.
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setActionsOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [actionsOpen]);
+  const toggleActions = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const width = 330;
+    const below = window.innerHeight - r.bottom - 12;
+    const up = below < 260 && r.top > below;
+    setActionsAt({
+      position: 'fixed',
+      ...(r.left + width > window.innerWidth - 8 ? { right: Math.max(8, window.innerWidth - r.right), left: 'auto' } : { left: r.left }),
+      ...(up ? { bottom: window.innerHeight - r.top + 6, top: 'auto', maxHeight: r.top - 18 } : { top: r.bottom + 6, maxHeight: below }),
+      overflowY: 'auto',
+    });
+    setActionsOpen((o) => !o);
+  };
   // Vente du carnet à souches (panne) : la prochaine vente porte le numéro de la souche et l'heure écrite.
   const [book, setBook] = useState<{ number: string; at: string } | null>(null);
   // Espèces du tiroir au-dessus du plafond : bandeau et versement proposé.
@@ -1125,13 +1150,13 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
       ];
   const actionsMenu = (
     <div className="pos-actmenu">
-      <button type="button" className="opt action" aria-haspopup="menu" aria-expanded={actionsOpen} onClick={() => setActionsOpen((o) => !o)}>
+      <button type="button" className="opt action" aria-haspopup="menu" aria-expanded={actionsOpen} onClick={toggleActions}>
         ⋯ Actions ▾
       </button>
       {actionsOpen && (
         <>
           <div className="pos-actions-back" onClick={() => setActionsOpen(false)} aria-hidden />
-          <div className="pos-actions-menu" role="menu">
+          <div className="pos-actions-menu" role="menu" style={actionsAt}>
             {actionGroups.map(([group, items]) => (
               <div key={group} className="pos-actions-group">
                 <h4>{group}</h4>
@@ -1535,7 +1560,6 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     ) : null;
   const staleNote = (
     <>
-      <OfflineBanner />
       {(sellerPost || counterEdit) && (
         <div className="tre-warning counter-band">
           {counterEdit
@@ -1995,6 +2019,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
     return (
       <div className={`pv ${credit ? 'credit' : ''} ${sellerPost ? 'counter-seller' : ''}`}>
         <div className="pv-tool">
+          {/* 0.108.0 : les boutons passent à la ligne entre eux ; Comptant / Crédit et Actions restent en haut à droite. */}
+          <div className="pv-btns">
           <button onClick={() => void askClear()} disabled={!lines.length} title="Vider la fiche et en commencer une nouvelle (Ctrl+Suppr)">
             <i>＋</i>Nouveau
           </button>
@@ -2047,7 +2073,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           <button className={pane === 'delivery' ? 'on' : ''} onClick={() => setPane(pane === 'delivery' ? 'lines' : 'delivery')}>
             <i>🚚</i>Livraison{delivery.on ? ' ✓' : ''}
           </button>
-          <span className="pv-spacer" />
+          </div>
           <div className="pv-mode" role="group" aria-label="Type de vente">
             <button className={credit ? '' : 'on'} disabled={!credit} onClick={switchMode}>
               Comptant
@@ -2078,6 +2104,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                 </button>
               )}
               {balanceChip}
+              {/* 0.108.0 : le nom du client sur le ticket, juste à côté du client comptoir. */}
+              {!customer && !credit && nameInput}
             </div>
             <label>Tarif</label>
             {tariffSelect}
@@ -2184,7 +2212,6 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <div className="pv-low">
           <div className="pv-pan">
             <h4>Informations</h4>
-            {!customer && !credit && nameInput}
             <div className="pv-line">
               {optionChips}
               {delivery.on && <span className="tag info">À livrer{delivery.courier ? ` · ${delivery.courier}` : ''}</span>}
@@ -2296,7 +2323,6 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           )}
         </div>
       )}
-      <OfflineBanner />
       {stale && (
         <div className="tre-warning">
           Cette caisse est ouverte depuis le {new Date(day!.opened_at).toLocaleDateString('fr-FR')} : clôturez la journée précédente dans{' '}
@@ -3003,25 +3029,5 @@ function MoneyChoice<V extends string>({ title, options, onPick, onClose }: { ti
         ))}
       </div>
     </Modal>
-  );
-}
-
-/**
- * PC hors ligne (0.107.0) : bandeau visible à la caisse quand le serveur ne
- * répond plus. La vente continue ; les opérations partent au retour du réseau.
- */
-function OfflineBanner() {
-  const sync = useLoad(() => call('sync.state').catch(() => null), []);
-  useEffect(() => {
-    const t = setInterval(sync.reload, 30_000);
-    return () => clearInterval(t);
-  }, [sync.reload]);
-  const d = sync.data;
-  if (!d?.connected || !d.lastError) return null;
-  return (
-    <div className="pos-offline" role="status">
-      <strong>PC hors ligne</strong> : la vente continue normalement.{' '}
-      {d.pending ? `${d.pending} opération${d.pending > 1 ? 's' : ''} attend${d.pending > 1 ? 'ent' : ''} le retour du réseau.` : 'Tout partira au retour du réseau.'} L'accord par téléphone et les factures des autres postes sont indisponibles pendant ce temps.
-    </div>
   );
 }

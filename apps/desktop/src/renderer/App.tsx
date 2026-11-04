@@ -182,7 +182,8 @@ const MENU_ICONS: Record<string, string> = {
   'Caisse et argent': '💰',
   Stock: '🗄️',
   Produits: '📦',
-  'Achats et fournisseurs': '🛒',
+  Achats: '🛒',
+  Fournisseurs: '🚚',
   Clients: '👥',
   Personnel: '🪪',
   Pilotage: '📈',
@@ -200,7 +201,8 @@ const MENU_COLORS: Record<string, string> = {
   'Caisse et argent': '#e0a800',
   Stock: '#65a30d',
   Produits: '#0891b2',
-  'Achats et fournisseurs': '#2563eb',
+  Achats: '#2563eb',
+  Fournisseurs: '#0d9488',
   Clients: '#db2777',
   Personnel: '#ea580c',
   Pilotage: 'var(--brand2)',
@@ -236,8 +238,8 @@ const OLD_MENUS: Record<string, string[]> = {
 const MENUS_107: Record<string, string[]> = {
   Trésorerie: ['Caisse et argent'],
   Articles: ['Produits'],
-  Achats: ['Achats et fournisseurs'],
-  Fournisseurs: ['Achats et fournisseurs'],
+  /** 0.108.0 : Achats et Fournisseurs redeviennent deux menus. */
+  'Achats et fournisseurs': ['Achats', 'Fournisseurs'],
   Dépenses: ['Caisse et argent'],
   Suivi: ['Pilotage'],
   Fiscalité: ['Comptabilité'],
@@ -246,7 +248,7 @@ const MENUS_107: Record<string, string[]> = {
 const railNames = (n: string, version: number | undefined): string[] =>
   version === RAIL_VERSION ? [n] : (version === 93 ? [n] : (OLD_MENUS[n] ?? [n])).flatMap((m) => MENUS_107[m] ?? [m]);
 /** Version des noms de menus d'une barre latérale enregistrée : à jour, les anciens noms ne sont plus convertis. */
-const RAIL_VERSION = 107;
+const RAIL_VERSION = 108;
 
 /** Menu du nom de l'utilisateur (en haut à droite) : son compte et ses réglages à lui. */
 const FILE_MENU: MenuItem[] = [
@@ -375,7 +377,7 @@ const MENUS: [string, MenuItem[]][] = [
     ],
   ],
   [
-    'Achats et fournisseurs',
+    'Achats',
     [
       H('Commander'),
       { label: 'Proposition de commande', open: ['purchases', 'reorder'], perm: 'reorder' },
@@ -396,7 +398,11 @@ const MENUS: [string, MenuItem[]][] = [
       { label: 'Échéancier fournisseurs', words: 'dettes fournisseurs payer échéances', open: ['purchases', 'due'], perm: 'purchase_due' },
       { label: 'Retours fournisseur et avoirs attendus', open: ['purchases', 'returns'], perm: 'supplier_returns' },
       { label: 'Achats par produit', open: ['purchases', 'byproduct'] },
-      H('Fournisseurs'),
+    ],
+  ],
+  [
+    'Fournisseurs',
+    [
       { label: 'Liste des fournisseurs', words: 'fournisseur nouveau fournisseur', open: ['suppliers', 'list'], perm: 'suppliers' },
       { label: 'Extrait de compte fournisseur', open: ['suppliers', 'statement'], perm: 'supplier_statement' },
       { label: 'Situation des fournisseurs', open: ['suppliers', 'situation'], perm: 'supplier_statement' },

@@ -306,7 +306,7 @@ const MENUS: [string, MenuItem[]][] = [
     [
       H('Ma caisse'),
       { label: 'Ma caisse : ouverture et clôture', words: 'opérations de trésorerie ouvrir fermer clôturer caisse fond de caisse', open: ['treasury', 'day'], perm: 'treasury' },
-      { label: 'Registre de caisse (Z)', words: 'z clôture journal de caisse registre', open: ['sales', 'z'], perm: 'cash_z' },
+      { label: 'Registre de caisse (clôtures)', words: 'z clôture bilan journal de caisse registre', open: ['sales', 'z'], perm: 'cash_z' },
       { label: 'Historique des journées de caisse', words: 'écarts journées z', open: ['treasury', 'history'], perm: 'cash_history', badge: 'gaps' },
       H('Toutes les caisses'),
       { label: 'Caisses en direct', words: 'temps réel suivi des caisses gérant intervenir journée en cours', open: ['treasury', 'live'], perm: 'cash_live' },

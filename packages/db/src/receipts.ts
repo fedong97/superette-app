@@ -411,7 +411,7 @@ export class ReceiptService extends Base {
     const title = (text: string) => ({ t: 'text' as const, text, bold: true });
     const r: Receipt = this.header();
     r.push(
-      { t: 'text', text: `RAPPORT Z${z.session.z_number ? ` N° ${z.session.z_number}` : ' (provisoire)'}`, align: 'center', bold: true },
+      { t: 'text', text: `BILAN DE CLÔTURE${z.session.z_number ? ` N° ${z.session.z_number}` : ' (provisoire)'}`, align: 'center', bold: true },
       { t: 'text', text: `${z.registerName} · ${z.session.user_name}` },
       { t: 'text', text: `Ouverture ${dateFr(z.session.opened_at)}` },
     );
@@ -534,7 +534,7 @@ export class ReceiptService extends Base {
       row('Espèces attendues', h.expected),
       row('Espèces comptées', h.counted),
       row(`Écart de ${h.from_name}`.slice(0, 32), h.difference, true),
-      { t: 'text', text: 'La journée continue : même fond, même Z.' },
+      { t: 'text', text: 'La journée continue : même fond, même clôture.' },
       { t: 'rule' },
       { t: 'feed' },
       { t: 'row', left: 'Remis par', right: 'Reçu par' },
@@ -558,7 +558,7 @@ export class ReceiptService extends Base {
     ];
     if (m.register_name) r.push({ t: 'text', text: m.kind === 'FLOAT' ? `De : caisse centrale · À : ${m.register_name}` : `De : ${m.register_name} · À : caisse centrale` });
     if (session?.z_number && m.kind === 'DEPOSIT' && !m.cash_operation_id) {
-      r.push({ t: 'row', left: `Espèces comptées (Z${session.z_number})`, right: money(session.counted_cash ?? 0) });
+      r.push({ t: 'row', left: `Espèces comptées (clôture n° ${session.z_number})`, right: money(session.counted_cash ?? 0) });
       r.push({ t: 'row', left: 'Fond laissé dans le tiroir', right: money(session.float_left ?? 0) });
     }
     r.push(

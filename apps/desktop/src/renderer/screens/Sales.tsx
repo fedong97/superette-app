@@ -29,7 +29,7 @@ function AllSales({ initialTab, rights }: { initialTab: SalesTab; rights: string
     ...(can('sales') ? ([['register', 'Registre des ventes']] as [ShownTab, string][]) : []),
     ...(can('sales_alerts') ? ([['alerts', 'Alertes sur les ventes']] as [ShownTab, string][]) : []),
     ...(can('cash_operations') ? ([['cashops', 'Opérations de caisse']] as [ShownTab, string][]) : []),
-    ...(can('cash_amounts') && can('cash_z') ? ([['z', 'Clôtures Z']] as [ShownTab, string][]) : []),
+    ...(can('cash_amounts') && can('cash_z') ? ([['z', 'Clôtures de caisse']] as [ShownTab, string][]) : []),
     ...(can('accounting_export', 'report_export') ? ([['export', 'Export comptable']] as [ShownTab, string][]) : []),
     ...(can('sale_edit_approve', 'sale_edit_request') ? ([['requests', 'Demandes de modification']] as [ShownTab, string][]) : []),
     ...(can('vouchers') ? ([['vouchers', "Bons d'achat"]] as [ShownTab, string][]) : []),
@@ -307,9 +307,9 @@ function Sessions() {
       <table className="list">
         <thead>
           <tr>
-            <th>Z n°</th>
-            <th>Ouverture</th>
-            <th>Clôture</th>
+            <th>Clôture n°</th>
+            <th>Ouverte le</th>
+            <th>Fermée le</th>
             <th>Caissier</th>
             <th className="r">Théorique</th>
             <th className="r">Compté</th>
@@ -331,7 +331,7 @@ function Sessions() {
         </tbody>
       </table>
       {z && (
-        <Modal title={z.session.z_number ? `Rapport Z n° ${z.session.z_number}` : 'Rapport X (caisse ouverte)'} onClose={() => setZ(null)} wide>
+        <Modal title={z.session.z_number ? `Bilan de clôture n° ${z.session.z_number}` : 'Bilan provisoire (caisse ouverte)'} onClose={() => setZ(null)} wide>
           <ZView z={z} />
           <div className="actions">
             <button onClick={() => call('pos.printZ', z.session.id).then(() => toast.ok('Rapport imprimé'), toast.error)}>Imprimer</button>

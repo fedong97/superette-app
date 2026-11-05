@@ -18,7 +18,7 @@ const row = (action: string, details: unknown, entity_name: string | null = null
 describe('phrases du journal', () => {
   it("clôture avec manque : en rouge, avec l'écart et l'absence de motif", () => {
     const v = describeAuditPlain(row('cash.close', { zNumber: 5, kind: 'electronic', expected: 1350, counted: 0, difference: -1350, gapReason: null, deposited: {} }, 'Caisse électronique'));
-    expect(v.text).toBe('ANGE a fermé la caisse « Caisse électronique » (Z n° 5).');
+    expect(v.text).toBe('ANGE a fermé la caisse « Caisse électronique » (clôture n° 5).');
     expect(v.note).toBe('Manque de 1 350 FCFA (attendu 1 350 FCFA, compté 0 FCFA) · aucun motif saisi');
     expect(v.level).toBe('alert');
     expect(v.theme).toBe('cash');
@@ -27,7 +27,7 @@ describe('phrases du journal', () => {
 
   it('clôture juste : normale', () => {
     const v = describeAuditPlain(row('cash.close', { zNumber: 26, expected: 0, counted: 0, difference: 0, floatLeft: 0, deposit: 0, gapReason: null, gapApprovedBy: null }, 'Caisse 1'));
-    expect(v.text).toBe('ANGE a fermé la caisse « Caisse 1 » (Z n° 26).');
+    expect(v.text).toBe('ANGE a fermé la caisse « Caisse 1 » (clôture n° 26).');
     expect(v.note).toBe('Tout est juste');
     expect(v.level).toBe('normal');
   });

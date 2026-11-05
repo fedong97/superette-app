@@ -533,7 +533,7 @@ export function CustomerPaymentDialog({
             )}
           </div>
         )}
-        {atRegister && method === 'CASH' && <p className="muted">Les espèces entrent dans le tiroir et apparaissent sur le Z.</p>}
+        {atRegister && method === 'CASH' && <p className="muted">Les espèces entrent dans le tiroir et apparaissent sur le bilan de clôture.</p>}
         <div className="actions">
           <button type="submit" className="primary" disabled={!chosen || (!advance && balance <= 0)}>
             {advance ? "Valider le dépôt d'avance" : 'Valider le règlement'}

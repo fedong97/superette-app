@@ -353,7 +353,7 @@ export function ExpenseDialog({
                   : method !== 'CASH'
                   ? undefined
                   : fromDrawer
-                    ? 'Payée avec les espèces du tiroir de votre caisse : elle apparaît dans vos sorties de caisse et sur le Z'
+                    ? 'Payée avec les espèces du tiroir de votre caisse : elle apparaît dans vos sorties de caisse et sur le bilan de clôture'
                     : 'Payée avec les espèces de la caisse centrale : le tiroir de la caisse ne bouge pas'
               }
             >
@@ -380,7 +380,7 @@ export function ExpenseDialog({
         {fromPos && (
           <p className="muted">
             {posMethod === 'CASH'
-              ? "Le montant sort du tiroir : il apparaît sur le Z et diminue les espèces attendues. Un bon de sortie s'imprime pour signature."
+              ? "Le montant sort du tiroir : il apparaît sur le bilan de clôture et diminue les espèces attendues. Un bon de sortie s'imprime pour signature."
               : 'Le montant sort de votre caisse électronique : il apparaît dans vos sorties à sa clôture et diminue le solde attendu. Un bon de sortie s’imprime pour signature.'}
           </p>
         )}

@@ -107,7 +107,7 @@ describe('tickets de caisse', () => {
     // Écart de 5 100 au-delà du seuil (500), justifié par le gérant à la clôture.
     s.pos.closeSession(ctx, { 10000: 3, 500: 1 }, { floatLeft: 10_000, gapReason: 'Recomptage demandé', gapApprovedBy: ctx.userId });
     const z = receiptToText(s.receipts.zReport(session.id), 48);
-    expect(z).toContain('RAPPORT Z N° 1');
+    expect(z).toContain('BILAN DE CLÔTURE N° 1');
     expect(z).toMatch(/Ventes espèces\s+5 400/);
     expect(z).toMatch(/Théorique\s+25 400/);
     expect(z).toMatch(/Écart\s+5 100/);

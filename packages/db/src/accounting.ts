@@ -305,7 +305,7 @@ export class AccountingService extends Base {
       });
     }
     for (const c of closings.filter((x) => inRange(x.d, opts.from, opts.to))) {
-      const label = `${c.difference < 0 ? 'Manquant' : 'Excédent'} de caisse ${c.register}, Z${c.z_number}`;
+      const label = `${c.difference < 0 ? 'Manquant' : 'Excédent'} de caisse ${c.register}, clôture n° ${c.z_number}`;
       out.push({
         journal: 'CA',
         date: c.d,

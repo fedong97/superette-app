@@ -117,7 +117,7 @@ export const PERMISSIONS = {
   treasury: { label: 'Opérations de trésorerie (ouverture et clôture des caisses)', group: 'Trésorerie', type: 'Menu', roles: POS },
   cash_amounts: { label: 'Voir les montants de la caisse (attendu, entrées, ventes, journées)', group: 'Trésorerie', type: 'Fonction', roles: ACCOUNTING },
   cash_history: { label: "Consulter l'historique des journées de caisse", group: 'Trésorerie', type: 'Menu', parent: 'cash_amounts' },
-  cash_z: { label: 'Consulter et imprimer le Z et la synthèse d’une journée', group: 'Trésorerie', type: 'Bouton', parent: 'cash_amounts' },
+  cash_z: { label: 'Consulter et imprimer le bilan de clôture et la synthèse d’une journée', group: 'Trésorerie', type: 'Bouton', parent: 'cash_amounts' },
   cash_open: { label: 'Compléter le fond de caisse depuis la centrale (sans le code du gérant)', group: 'Opérations sensibles', type: 'Fonction', roles: MANAGE },
   cash_close_other: { label: "Clôturer la caisse électronique ou banque d'un autre utilisateur", group: 'Trésorerie', type: 'Fonction', parent: 'cash_open' },
   gap_justify: { label: 'Justifier un écart de caisse après la clôture', group: 'Trésorerie', type: 'Bouton', parent: 'cash_open' },

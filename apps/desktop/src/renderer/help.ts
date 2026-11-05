@@ -56,7 +56,7 @@ const POS: PageHelp = {
         "« Bon d'achat » : vendez un bon cadeau payé en espèces ou Mobile Money. Il s'imprime avec un code-barres et vaut jusqu'à sa date de fin.",
         "Pour payer avec un bon : choisissez « Bon d'achat » à l'encaissement et scannez son code. Le solde est vérifié ; le reste du bon sert une autre fois.",
         "Pas de monnaie : cochez « Pas de monnaie » à l'encaissement. Le montant va sur le compte du client choisi, ou devient un bon de monnaie imprimé pour un client de passage.",
-        "Panne de courant : écrivez les ventes sur le carnet à souches. Ensuite, « Carnet » : tapez le numéro de la souche et l'heure notée, puis saisissez la vente. Le Z montre ces ventes à part.",
+        "Panne de courant : écrivez les ventes sur le carnet à souches. Ensuite, « Carnet » : tapez le numéro de la souche et l'heure notée, puis saisissez la vente. Le bilan de clôture montre ces ventes à part.",
         "Bandeau « Trop d'espèces dans le tiroir » : le plafond réglé est dépassé, le gérant est prévenu sur son téléphone. Cliquez « Verser » pour faire le prélèvement vers la caisse centrale.",
       ],
     },
@@ -176,7 +176,7 @@ export const HELP: Record<WinKind, PageHelp> = {
   },
   sales: {
     title: 'Factures et registre des ventes',
-    intro: 'Retrouver une vente, la réimprimer, voir les clôtures Z et les opérations de caisse.',
+    intro: 'Retrouver une vente, la réimprimer, voir les clôtures de caisse et les opérations de caisse.',
     sections: [
     {
       tab: "outages",
@@ -206,7 +206,7 @@ export const HELP: Record<WinKind, PageHelp> = {
       },
       { tab: 'register', title: 'Registre des ventes', perm: 'sales', steps: ['Filtrez par date, caisse, caissier ou client ; cliquez une ligne pour le détail.'] },
       { tab: 'returns', title: 'Retours et annulations', perm: 'sales', steps: ['Liste des retours d’articles et des tickets annulés, avec le motif et le gérant qui a validé.'] },
-      { tab: 'z', title: 'Clôtures Z', steps: ['Chaque journée de caisse clôturée, avec son numéro de Z. Cliquez pour revoir ou réimprimer le Z.'] },
+      { tab: 'z', title: 'Clôtures de caisse', steps: ['Chaque journée de caisse clôturée, avec son numéro de clôture. Cliquez pour revoir ou réimprimer le bilan de clôture.'] },
       { tab: 'cashops', title: 'Opérations de caisse', perm: 'sales', steps: ['Apports, prélèvements et dépenses payées au tiroir, par caisse et par jour.'] },
       { tab: 'export', title: 'Export comptable', perm: 'sales', steps: ['Choisissez la période puis « Télécharger le CSV » : le fichier s’ouvre dans Excel.'] },
       {
@@ -897,7 +897,7 @@ export const HELP: Record<WinKind, PageHelp> = {
           '« Relève d’équipe… » quand un caissier en remplace un autre sans fermer la caisse.',
           'Le caissier qui part compte le tiroir par coupure, sans voir l’attendu. Celui qui arrive tape son identifiant (ou scanne son badge) et son code.',
           'Le bon de passation s’imprime avec l’attendu, le compté et l’écart de celui qui part : signez-le tous les deux.',
-          'La journée continue : même fond, même Z. Le Z donne les ventes et l’écart de chaque caissier.',
+          'La journée continue : même fond, même clôture. Le bilan de clôture donne les ventes et l’écart de chaque caissier.',
         ],
       },
       { tab: 'history', title: 'Historique et écarts', perm: 'cash_amounts', steps: ['Le filtre « Type » montre les caisses espèces, électroniques ou banque.', 'Un écart au-delà du seuil se justifie avec « Justifier l’écart… ».'] },
@@ -1177,7 +1177,7 @@ export const HELP: Record<WinKind, PageHelp> = {
         title: 'Comptoir',
         perm: 'agent_point',
         steps: [
-          'La caisse doit être ouverte : les espèces reçues ou données passent par sa journée et comptent dans le Z.',
+          'La caisse doit être ouverte : les espèces reçues ou données passent par sa journée et comptent dans le bilan de clôture.',
           'Choisissez le compte agent (sa flotte s’affiche), puis Dépôt, Retrait, Crédit de communication ou Paiement de facture.',
           'Tapez le montant, le téléphone du client et la référence du SMS. Pour une facture : ENEO, CAMWATER, Canal+… et les frais payés par le client.',
           'La commission de l’opérateur s’affiche avant de valider. Après « Valider l’opération », le reçu du client peut s’imprimer.',

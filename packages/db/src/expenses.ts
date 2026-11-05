@@ -300,7 +300,7 @@ export class ExpenseService extends Base {
     if (!reason.trim()) throw new AppError("Le motif de l'annulation est obligatoire", 'INVALID');
     if (e.session_id) {
       const status = this.db.prepare('SELECT status FROM cash_sessions WHERE id = ?').pluck().get(e.session_id);
-      if (status !== 'open') throw new AppError("Le Z de cette caisse est clôturé : la sortie de caisse ne peut plus être annulée", 'SESSION_CLOSED');
+      if (status !== 'open') throw new AppError("Cette caisse est déjà clôturée : la sortie de caisse ne peut plus être annulée", 'SESSION_CLOSED');
     }
     if (e.method !== 'CASH') new EmoneyService(this.db, this.clock).assertNotCarried(e.register_id, e.session_id, e.created_at);
     this.tx(() => {

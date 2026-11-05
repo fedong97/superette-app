@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Field, dateTime, fcfa, useLoad, useToast } from '../ui';
+import { Empty, Field, askText, dateTime, fcfa, useLoad, useToast } from '../ui';
 
 type Config = Result<'mobilepay.config'>;
 type Method = 'MTN_MOMO' | 'ORANGE_MONEY';
@@ -19,6 +19,19 @@ const STATUS: Record<string, [string, string]> = {
 export function MobilePay() {
   const config = useLoad(() => call('mobilepay.config'), []);
   const list = useLoad(() => call('mobilepay.list'), []);
+  const toast = useToast();
+  /** Paiement reçu après l'abandon à la caisse : le gérant note ce qu'il a fait. */
+  const handleLate = async (p: { id: string; phone: string; amount: number }) => {
+    const note = await askText(`Le client ${p.phone} a payé ${fcfa(p.amount)} après l'abandon à la caisse. Qu'avez-vous fait (remboursé, rattaché au ticket n°…) ?`);
+    if (!note) return;
+    try {
+      await call('mobilepay.handleLate', p.id, note);
+      toast.ok('Paiement noté comme traité');
+      list.reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
   if (!config.data) return null;
   return (
     <div className="settings">
@@ -57,7 +70,14 @@ export function MobilePay() {
                     <span className={STATUS[p.status]?.[1]}>{STATUS[p.status]?.[0] ?? p.status}</span>
                     {p.reason && <small className="muted"> {p.reason}</small>}
                   </td>
-                  <td>{p.transaction_id ?? ''}</td>
+                  <td>
+                    {p.transaction_id ?? ''}
+                    {p.status === 'cancelled' && p.transaction_id && !p.late_handled && (
+                      <button className="small" onClick={() => void handleLate(p)}>
+                        Traité…
+                      </button>
+                    )}
+                  </td>
                   <td>{p.user_name ?? ''}</td>
                 </tr>
               ))}

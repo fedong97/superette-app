@@ -12,7 +12,7 @@ export type DashboardTab = 'day' | 'attention' | 'endday' | 'tills' | 'month' | 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Item = Result<'attention.list'>[number];
 /** Fenêtre et onglet qui traitent chaque point d'attention. */
-export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales' | 'expenses', string];
+export type AttentionTarget = ['stock' | 'treasury' | 'purchases' | 'customers' | 'production' | 'sales' | 'expenses' | 'admin', string];
 
 export const ATTENTION_TARGET: Record<Item['key'], AttentionTarget> = {
   rupture: ['stock', 'critical'],
@@ -33,6 +33,7 @@ export const ATTENTION_TARGET: Record<Item['key'], AttentionTarget> = {
   stock_anomalies: ['stock', 'anomalies'],
   expenses_pending: ['expenses', 'approval'],
   outages_open: ['sales', 'outages'],
+  mobile_late: ['admin', 'mobilepay'],
 };
 
 /** Tableau de bord : la journée en chiffres, et les points d'attention du gérant. */

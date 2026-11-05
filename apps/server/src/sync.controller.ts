@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Ip, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Param, Post, Query } from '@nestjs/common';
+import { ClientIp } from './clientIp';
 import { ApprovalsService } from './approvals.service';
 import { CounterService } from './counter.service';
 import { MobileService } from './mobile.service';
@@ -57,7 +58,7 @@ export class SyncController {
   }
 
   @Post('devices/activate')
-  async activate(@Body() body: { activationCode: string; name?: string }, @Ip() ip: string) {
+  async activate(@Body() body: { activationCode: string; name?: string }, @ClientIp() ip: string) {
     const now = Date.now();
     const f = failures.get(ip);
     if (f && f.until > now && f.count >= 10) throw new HttpException('Trop de tentatives, réessayez dans une heure', HttpStatus.TOO_MANY_REQUESTS);
@@ -74,7 +75,7 @@ export class SyncController {
 
   /** Nouveau PC sans code de caisse : identifiant et code d'un utilisateur du magasin. Mêmes limites d'essais. */
   @Post('devices/join')
-  async join(@Body() body: { login: string; pin: string; name?: string }, @Ip() ip: string) {
+  async join(@Body() body: { login: string; pin: string; name?: string }, @ClientIp() ip: string) {
     const now = Date.now();
     const f = failures.get(ip);
     if (f && f.until > now && f.count >= 10) throw new HttpException('Trop de tentatives, réessayez dans une heure', HttpStatus.TOO_MANY_REQUESTS);

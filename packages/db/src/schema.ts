@@ -2909,4 +2909,14 @@ ALTER TABLE user_rights ADD COLUMN delegation TEXT;
 ALTER TABLE user_rights ADD COLUMN limits TEXT;
 `,
   },
+  {
+    version: 68,
+    name: 'paiement mobile reçu après un abandon',
+    sql: `
+-- Demande abandonnée à la caisse encore vérifiée chez l'opérateur pendant 24 h : réponse définitive reçue,
+-- et, si le client a payé quand même, quand le gérant l'a traité (remboursé, rattaché à une vente).
+ALTER TABLE mobile_payments ADD COLUMN late_checked TEXT;
+ALTER TABLE mobile_payments ADD COLUMN late_handled TEXT;
+`,
+  },
 ];

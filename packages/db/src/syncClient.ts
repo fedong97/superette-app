@@ -85,15 +85,18 @@ export async function syncOnce(s: Services, restarted = false): Promise<{ sent: 
       }
     }
     // Opérations refusées par un serveur plus ancien : elles restent en attente, les autres partent quand même.
-    let refused: { id: string; reason: string }[] = [];
+    // Un lot entièrement refusé ne bloque plus ceux qui suivent : la lecture reprend après lui.
+    const refused: { id: string; reason: string }[] = [];
+    let after = 0;
     for (;;) {
-      const batch = s.sync.pending(500);
+      const { events: batch, lastSeq } = s.sync.pendingAfter(500, after);
       if (batch.length === 0) break;
       const r = await request<{ accepted: string[]; rejected?: { id: string; reason: string }[] }>(creds.url, '/api/v1/sync/push', { token: creds.token, body: { events: batch } });
       s.sync.markSent(r.accepted);
       sent += r.accepted.length;
-      refused = r.rejected ?? [];
-      if (r.accepted.length === 0 || r.accepted.length + refused.length < batch.length || batch.length < 500) break;
+      refused.push(...(r.rejected ?? []));
+      after = lastSeq;
+      if (r.accepted.length + (r.rejected?.length ?? 0) < batch.length || batch.length < 500) break;
     }
     // Licence activée sur ce PC : le serveur la garde et la donne aux autres PC du magasin.
     const key = s.license.pendingUpload();

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Ip, Param, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { ClientIp } from './clientIp';
 import type { Request, Response } from 'express';
 import { AdminService } from './admin.service';
 import { PRICE_PAGE, SHOP_PAGE, closedPage } from './shop.page';
@@ -45,7 +46,7 @@ export class ShopController {
   }
 
   @Get('api/v1/shop/:code/catalog')
-  catalog(@Param('code') code: string, @Ip() ip: string) {
+  catalog(@Param('code') code: string, @ClientIp() ip: string) {
     this.shop.catalogLimit.take(ip);
     return this.shop.catalog(code);
   }
@@ -61,7 +62,7 @@ export class ShopController {
 
   @Post('api/v1/shop/:code/orders')
   @HttpCode(200)
-  order(@Param('code') code: string, @Body() body: unknown, @Ip() ip: string) {
+  order(@Param('code') code: string, @Body() body: unknown, @ClientIp() ip: string) {
     return this.shop.createOrder(code, body, ip);
   }
 
@@ -83,7 +84,7 @@ export class ShopController {
   }
 
   @Get('api/v1/shop/:code/price')
-  price(@Param('code') code: string, @Query('code') q: string | undefined, @Ip() ip: string) {
+  price(@Param('code') code: string, @Query('code') q: string | undefined, @ClientIp() ip: string) {
     this.shop.priceLimit.take(ip);
     return this.shop.price(code, q ?? '');
   }

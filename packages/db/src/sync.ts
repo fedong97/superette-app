@@ -442,9 +442,21 @@ export class SyncService extends Base {
 
   /** Opérations à envoyer, dans l'ordre où elles ont été faites. */
   pending(limit = 500): SyncEvent[] {
+    return this.pendingAfter(limit, 0).events;
+  }
+
+  /**
+   * Opérations à envoyer après `afterSeq` : l'envoi continue derrière un lot que le
+   * serveur a entièrement refusé, au lieu de rester bloqué dessus.
+   */
+  pendingAfter(limit: number, afterSeq: number): { events: SyncEvent[]; lastSeq: number } {
     const rows = this.db
-      .prepare('SELECT id, entity, entity_id, op, store_id, register_id, created_at FROM outbox WHERE sent_at IS NULL ORDER BY seq LIMIT ?')
-      .all(limit) as { id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[];
+      .prepare('SELECT seq, id, entity, entity_id, op, store_id, register_id, created_at FROM outbox WHERE sent_at IS NULL AND seq > ? ORDER BY seq LIMIT ?')
+      .all(afterSeq, limit) as { seq: number; id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[];
+    return { events: this.toEvents(rows), lastSeq: rows.length ? rows[rows.length - 1]!.seq : afterSeq };
+  }
+
+  private toEvents(rows: { id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[]): SyncEvent[] {
     return rows.map((r) => {
       const payload = r.op === 'delete' ? null : this.serialize(r.entity, r.entity_id);
       return {

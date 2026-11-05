@@ -26,7 +26,8 @@ export type AttentionKey =
   | 'store_requests'
   | 'stock_anomalies'
   | 'expenses_pending'
-  | 'outages_open';
+  | 'outages_open'
+  | 'mobile_late';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -331,6 +332,21 @@ export class AttentionService extends Base {
         amount: rows.length ? rows.reduce((t, r) => t + r.declared_total, 0) : null,
         detail: rows.length ? `Coupure${rows.length > 1 ? 's' : ''} n° ${firstNames(rows.map((r) => r.number))} : saisissez les ventes du cahier puis clôturez` : 'Aucune coupure en cours',
         tone: 'info',
+      });
+    }
+
+    if (want('mobile_late')) {
+      // Mobile Money payé par le client après l'abandon à la caisse : argent reçu sans vente.
+      const rows = this.db
+        .prepare("SELECT phone, amount FROM mobile_payments WHERE store_id = ? AND status = 'cancelled' AND transaction_id IS NOT NULL AND late_handled IS NULL ORDER BY created_at")
+        .all(storeId) as { phone: string; amount: Fcfa }[];
+      items.push({
+        key: 'mobile_late',
+        label: 'Mobile Money payé après un abandon',
+        count: rows.length,
+        amount: rows.length ? rows.reduce((t, r) => t + r.amount, 0) : null,
+        detail: rows.length ? `Client${rows.length > 1 ? 's' : ''} ${firstNames(rows.map((r) => r.phone))} : remboursez ou rattachez le paiement à une vente` : 'Aucun paiement reçu après un abandon',
+        tone: 'danger',
       });
     }
 

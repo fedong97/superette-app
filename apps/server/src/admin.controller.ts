@@ -7,6 +7,8 @@ import { ApprovalsService } from './approvals.service';
 import { BackupService } from './backup.service';
 import { ManagerService } from './manager.service';
 import { UpdatesService } from './updates.service';
+import { clientIp, isLocalRequest } from './clientIp';
+import { RateLimit } from './shop.service';
 
 const COOKIE = 'fedo_admin';
 
@@ -16,10 +18,18 @@ const cookieOf = (req: Request): string | undefined =>
     .map((c) => c.trim().split('='))
     .find(([k]) => k === COOKIE)?.[1];
 
-const isLocal = (req: Request) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+// Derrière un proxy sur le même PC, les demandes venues d'Internet ne comptent pas comme locales.
+const isLocal = isLocalRequest;
 
+/** Mot de passe de l'administration : 10 essais faux par quart d'heure et par adresse. */
+const loginFailures = new RateLimit(10, 15 * 60_000, 'Trop de mots de passe faux : réessayez dans un quart d’heure.');
+
+/** Derrière HTTPS (Caddy l'indique), le cookie ne part jamais en clair. */
 const setCookie = (res: Response, token: string, maxAgeMs = 12 * 3_600_000) =>
-  res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.round(maxAgeMs / 1000)}`);
+  res.setHeader(
+    'Set-Cookie',
+    `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.round(maxAgeMs / 1000)}${String(res.req?.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim() === 'https' ? '; Secure' : ''}`,
+  );
 
 /** Le téléphone du gérant installe la page comme une application. */
 const MANIFEST = {
@@ -175,9 +185,19 @@ export class AdminController {
 
   @Post('admin/api/login')
   @HttpCode(200)
-  async login(@Body() body: { password: string; remember?: boolean }, @Res({ passthrough: true }) res: Response) {
+  async login(@Body() body: { password: string; remember?: boolean }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const remember = body?.remember === true;
-    setCookie(res, await this.admin.login(body?.password, remember), remember ? LONG_SESSION_MS : undefined);
+    const ip = clientIp(req);
+    loginFailures.check(ip);
+    let token: string;
+    try {
+      token = await this.admin.login(body?.password, remember);
+    } catch (e) {
+      if (e instanceof UnauthorizedException && String(body?.password ?? '') !== '') loginFailures.hit(ip);
+      throw e;
+    }
+    loginFailures.reset(ip);
+    setCookie(res, token, remember ? LONG_SESSION_MS : undefined);
     return { ok: true };
   }
 

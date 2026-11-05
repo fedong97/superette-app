@@ -690,6 +690,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       ['stock_anomalies', can(u, ['stock_anomalies'])],
       ['expenses_pending', can(u, ['expense_approve'])],
       ['outages_open', can(u, ['outage_close', 'sale_book'])],
+      ['mobile_late', can(u, ['settings_edit'])],
     ];
     return s.attention.list(storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
   };
@@ -3047,6 +3048,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'mobilepay.status': (id: string) => (requireUser(), s.mobilePay.status(id)),
     'mobilepay.cancel': (id: string) => s.mobilePay.cancel(ctx(), id),
     'mobilepay.list': () => s.mobilePay.list(ctx(['settings_edit']).storeId),
+    'mobilepay.handleLate': (id: string, note: string) => s.mobilePay.handleLate(ctx(['settings_edit']), id, note),
     'loyalty.status': (customerId: string) => (requireUser(), s.loyalty.status(ctx().storeId, customerId)),
     'loyalty.history': (customerId: string) => (requireUser(['customers']), s.loyalty.history(customerId)),
     'loyalty.balances': () => (requireUser(['customers']), Object.fromEntries(s.loyalty.balances())),
@@ -4006,6 +4008,18 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   };
   const managerTimer = setInterval(() => void pollManagerActions(), 10_000);
   managerTimer.unref?.();
+
+  // Mobile Money abandonné à la caisse : l'opérateur est encore interrogé pendant 24 h, au cas où le client paie quand même.
+  let lateBusy = false;
+  const lateTimer = setInterval(() => {
+    if (lateBusy) return;
+    lateBusy = true;
+    void s.mobilePay
+      .recheckAbandoned()
+      .catch(() => undefined)
+      .finally(() => (lateBusy = false));
+  }, 120_000);
+  lateTimer.unref?.();
 
   /**
    * « Le PC sur le téléphone » : le gérant gère la boutique depuis ONIX 360

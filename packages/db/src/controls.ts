@@ -406,7 +406,7 @@ export class ControlService extends Base {
          JOIN customers c ON c.id = cp.customer_id LEFT JOIN users u ON u.id = cp.user_id
          WHERE ${session} AND cp.method = 'CASH' AND date(cp.paid_at, 'localtime') BETWEEN @from AND @to
          UNION ALL
-         SELECT 'gap:' || cs.id, 'gap', cs.closed_at, r.name, u.name, 'Clôture Z n° ' || cs.z_number, cs.difference, NULL
+         SELECT 'gap:' || cs.id, 'gap', cs.closed_at, r.name, u.name, 'Clôture n° ' || cs.z_number, cs.difference, NULL
          FROM cash_sessions cs JOIN registers r ON r.id = cs.register_id LEFT JOIN users u ON u.id = cs.closed_by
          WHERE ${session} AND cs.status = 'closed' AND cs.difference <> 0 AND date(cs.closed_at, 'localtime') BETWEEN @from AND @to
          ORDER BY at DESC`,

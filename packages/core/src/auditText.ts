@@ -24,7 +24,7 @@ export interface AuditEventInput {
 export interface AuditText {
   /** Nom court de l'action (« Clôture de caisse »). */
   label: string;
-  /** La phrase complète (« ANGE a fermé la caisse « Caisse 1 » (Z n° 26). »). */
+  /** La phrase complète (« ANGE a fermé la caisse « Caisse 1 » (clôture n° 26). »). */
   text: string;
   /** Précision sous la phrase (écart, motif…), ou null. */
   note: string | null;
@@ -143,7 +143,7 @@ const R: Record<string, Rule> = {
   'cash.count': { l: 'Comptage de caisse', t: (c) => `a compté ${reg(c)}`, n: (c) => gapNote(c), lv: gapLevel() },
   'cash.close': {
     l: 'Clôture de caisse',
-    t: (c) => `a fermé ${reg(c)}${num(c.d['zNumber']) !== null ? ` (Z n° ${num(c.d['zNumber'])})` : ''}`,
+    t: (c) => `a fermé ${reg(c)}${num(c.d['zNumber']) !== null ? ` (clôture n° ${num(c.d['zNumber'])})` : ''}`,
     n: (c) =>
       join(
         (num(c.d['difference']) ?? 0) === 0 ? 'Tout est juste' : gapNote(c),
@@ -575,7 +575,7 @@ const KEY_LABELS: Record<string, string> = {
   fees: 'Frais', balance: 'Solde', limit: 'Plafond', gross: 'Brut', debit: 'Montant', declared: 'Déclaré', entered: 'Saisi', gap: 'Écart', cash: 'Espèces',
   ceiling: 'Plafond', collected: 'Rapporté', countedValue: 'Valeur comptée', gapValue: 'Écart', totalValue: 'Valeur', discount: 'Remise', baseSalary: 'Salaire de base',
   deducted: 'Retenues', commission: 'Commission', cnps: 'CNPS', tax: 'Impôt', result: 'Résultat', before: 'Avant', after: 'Après', from: 'Avant', to: 'Après',
-  zNumber: 'N° de Z', number: 'Numéro', reason: 'Motif', gapReason: "Motif de l'écart", note: 'Note', kind: 'Type', type: 'Type', method: 'Moyen de paiement',
+  zNumber: 'N° de clôture', number: 'Numéro', reason: 'Motif', gapReason: "Motif de l'écart", note: 'Note', kind: 'Type', type: 'Type', method: 'Moyen de paiement',
   qty: 'Quantité', lines: 'Lignes', count: 'Nombre', reference: 'Référence', login: 'Identifiant', name: 'Nom', label: 'Libellé', code: 'Code', customer: 'Client',
   supplier: 'Fournisseur', warehouse: 'Dépôt', store: 'Magasin', invoices: 'Factures', invoice: 'Facture', original: 'Ticket d’origine', replaces: 'Remplace',
   phone: 'Téléphone', minutes: 'Durée (min)', failures: 'Essais', days: 'Jours', day: 'Jour', period: 'Période', role: 'Rôle', location: 'Emplacement',

@@ -769,7 +769,7 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         const head = '<thead><tr><th>Heure</th><th>Nature</th><th>N° de pièce</th><th>Tiers</th><th>Moyen</th><th>Référence</th><th>Par</th><th class="r">Montant</th></tr></thead>';
         const j = z.emoneyJournal;
         await printA4(`${a4Head(store)}
-          <h1>Bon de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
+          <h1>Bon de clôture ${esc(z.registerName)}${se.z_number ? ` · clôture n° ${se.z_number}` : ' (journée en cours)'}</h1>
           <p>Ouverture le ${dateFr(se.opened_at)} par ${esc(se.user_name)}${se.closed_at ? ` · clôture le ${dateFr(se.closed_at)}${se.closed_by_name ? ` par ${esc(se.closed_by_name)}` : ''}` : ''}</p>
           <table><thead><tr><th>Moyen</th>${shown.map((c) => `<th class="r">${c.th}</th>`).join('')}</tr></thead>
           <tbody>${lines}<tr class="total"><td>Total</td>${totals}</tr></tbody></table>
@@ -802,7 +802,7 @@ export function createPrinter(s: Services, userLang: () => DocLang = () => 'fr')
         .join('');
       const row = (label: string, v: number | null, bold = false) => `<tr${bold ? ' class="total"' : ''}><td>${label}</td><td class="r">${v === null ? '' : money(v)}</td></tr>`;
       await printA4(`${a4Head(store)}
-        <h1>Rapport de clôture ${esc(z.registerName)}${se.z_number ? ` · Z n° ${se.z_number}` : ' (journée en cours)'}</h1>
+        <h1>Rapport de clôture ${esc(z.registerName)}${se.z_number ? ` · clôture n° ${se.z_number}` : ' (journée en cours)'}</h1>
         <p>Ouverture le ${dateFr(se.opened_at)} par ${esc(se.user_name)}${se.closed_at ? ` · clôture le ${dateFr(se.closed_at)}${se.closed_by_name ? ` par ${esc(se.closed_by_name)}` : ''}` : ''}</p>
         <div style="display:flex;gap:16px"><table class="totals" style="width:50%;margin:0">
           ${row('Fond à l’ouverture', z.cash.openingFloat)}${se.carried_float !== null ? row('dont fond laissé la veille', se.carried_float) : ''}

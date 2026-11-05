@@ -1982,7 +1982,7 @@ export class PosService extends Base {
           amount: deposited[m]!,
           reference: references[m]!,
           nature: 'deposit',
-          label: `Recette de ${register.name}, Z${zNumber}`,
+          label: `Recette de ${register.name}, clôture n° ${zNumber}`,
           fromSessionId: session.id,
           number: depositNumber,
         });
@@ -2067,7 +2067,7 @@ export class PosService extends Base {
           kind: 'DEPOSIT',
           nature: 'register',
           amount: deposit,
-          label: `Recette de ${register.name}, Z${zNumber}`,
+          label: `Recette de ${register.name}, clôture n° ${zNumber}`,
           registerId: session.register_id,
           sessionId: session.id,
         });

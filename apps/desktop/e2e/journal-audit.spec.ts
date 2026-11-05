@@ -41,6 +41,14 @@ test("le journal d'audit se lit en phrases, par jour, avec le détail en clair",
     await expect(log.locator('.audit-ev.normal, .audit-ev.login')).toHaveCount(0);
     await expect(log).not.toContainText('a enregistré la réception');
     await page.screenshot({ path: 'test-results/ecrans/journal-audit-a-surveiller.png' });
+
+    // Plus de « Z » : la liste s'appelle « Clôtures de caisse » et le rapport « Bilan de clôture ».
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('fedonix:open', { detail: ['sales', 'z'] })));
+    await expect(page.locator('th', { hasText: 'Clôture n°' })).toBeVisible({ timeout: 20_000 });
+    await page.locator('tr.clickable').first().click();
+    await expect(page.getByText('Bilan de clôture n° 1')).toBeVisible();
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: 'test-results/ecrans/bilan-de-cloture.png' });
     expect(errors).toEqual([]);
   } finally {
     await app.close();

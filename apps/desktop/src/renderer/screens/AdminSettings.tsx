@@ -912,7 +912,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
           : [
               {
                 label: 'Imprimante ticket',
-                hint: 'Tickets de caisse, rapports Z et bons de caisse.',
+                hint: 'Tickets de caisse, bilans de clôture et bons de caisse.',
                 render: () => (
                   <select disabled={!canEdit} value={v('printer.name')} onChange={set('printer.name')}>
                     <option value="">Imprimante par défaut de Windows</option>

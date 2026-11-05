@@ -163,7 +163,7 @@ export class FiscalYearService extends Base {
       .pluck()
       .get(storeId, fy.end_date) as number;
     // Les ventes sont comptées au jour le jour ; seul l'écart de caisse attend le Z.
-    add('cash', 'Journées de caisse', open === 0, false, open ? `${open} journée(s) de caisse ouverte(s) avant la fin de l'exercice : leur écart de caisse ne sera compté qu'au Z.` : 'Toutes clôturées.');
+    add('cash', 'Journées de caisse', open === 0, false, open ? `${open} journée(s) de caisse ouverte(s) avant la fin de l'exercice : leur écart de caisse ne sera compté qu'à la clôture.` : 'Toutes clôturées.');
     const fiches = this.db.prepare("SELECT COUNT(*) FROM fiche_log WHERE kind = 'intervention' AND returned_at IS NULL AND created_at <= ?").pluck().get(`${fy.end_date}T23:59:59`) as number;
     add('fiches', "Fiches d'intervention", fiches === 0, false, fiches ? `${fiches} fiche(s) d'intervention sortie(s) et pas encore rapportée(s) : leurs écritures manqueraient.` : 'Toutes rapportées.');
     const linked = this.db.prepare("SELECT 1 FROM settings WHERE key = 'sync.token'").get();

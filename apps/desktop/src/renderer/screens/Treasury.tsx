@@ -256,7 +256,7 @@ export function FullTreasury({
                   {gaps.data!.map((g) => (
                     <tr key={g.id} className="clickable" onClick={() => openGap(g)}>
                       <td>{registers.find((r) => r.id === g.register_id)?.name ?? ''}</td>
-                      <td>Z{g.z_number}</td>
+                      <td>Clôture n° {g.z_number}</td>
                       <td>{g.closed_at ? dateTime(g.closed_at) : ''}</td>
                       <td>{g.closed_by_name ?? g.user_name}</td>
                       <td className={`r ${(g.difference ?? 0) < 0 ? 'neg' : 'pos'}`}>{fcfa(g.difference ?? 0)}</td>
@@ -411,7 +411,7 @@ function Day({
             {sessions.map((x) => (
               <option key={x.id} value={x.id}>
                 {dayTime(x.opened_at)} – {x.closed_at ? dayTime(x.closed_at) : 'en cours'}
-                {x.z_number ? ` (Z${x.z_number})` : ''}
+                {x.z_number ? ` (clôture n° ${x.z_number})` : ''}
               </option>
             ))}
           </select>
@@ -428,7 +428,7 @@ function Day({
           </Field>
         )}
         <div className="tre-print">
-          {can('cash_z') && <button onClick={() => call('pos.printZ', se.id).catch(toast.error)}>Imprimer le Z</button>}
+          {can('cash_z') && <button onClick={() => call('pos.printZ', se.id).catch(toast.error)}>Imprimer le bilan de clôture</button>}
           <button onClick={() => call('treasury.printReport', se.id).catch(toast.error)}>{declared ? 'Bon de clôture (A4)' : 'Rapport de clôture (A4)'}</button>
           {vouchers.map((m) => (
             <button key={m.id} onClick={() => call('treasury.printVoucher', m.id).catch(toast.error)}>
@@ -452,7 +452,7 @@ function Day({
               Entrées et sorties du compte
             </button>
             <button className={eview === 'z' ? 'active' : ''} onClick={() => setEview('z')}>
-              Vue détaillée (Z)
+              Vue détaillée (bilan)
             </button>
           </div>
           {eview === 'journal' && (
@@ -477,7 +477,7 @@ function Day({
               Historique des ventes ({sales.length})
             </button>
             <button className={view === 'z' ? 'active' : ''} onClick={() => setView('z')}>
-              Vue détaillée (Z)
+              Vue détaillée (bilan)
             </button>
           </div>
           {view === 'cash' && (
@@ -755,7 +755,7 @@ function History({ sessions, threshold, onOpen }: { sessions: Result<'treasury.s
     <table className="list">
       <thead>
         <tr>
-          <th>Z</th>
+          <th>Clôture n°</th>
           <th>Ouverture</th>
           <th>Clôture</th>
           <th>Ouverte par</th>
@@ -923,7 +923,7 @@ function CloseDialog({
   if (done) {
     const deposits = done.session.deposit ?? 0;
     return (
-      <Modal title={`Caisse fermée · Z n° ${done.session.z_number}`} onClose={() => onDone(done.session.id)} wide>
+      <Modal title={`Caisse fermée · clôture n° ${done.session.z_number}`} onClose={() => onDone(done.session.id)} wide>
         <div className="mascotte-bulle">
           <Mascot mood="dort" size={70} />
           <div>Caisse fermée. Bon repos, à demain !</div>

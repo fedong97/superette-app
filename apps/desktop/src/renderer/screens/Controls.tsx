@@ -375,7 +375,7 @@ export function CashOperations() {
           </tbody>
         </table>
       )}
-      <p className="muted small">Les ventes ne figurent pas ici : voyez le registre des ventes ou les rapports Z.</p>
+      <p className="muted small">Les ventes ne figurent pas ici : voyez le registre des ventes ou les bilans de clôture.</p>
     </>
   );
 }

@@ -22,7 +22,7 @@ const T = {
   clients: { icon: '👥', label: 'Clients', desc: 'Fiches, comptes et règlements', open: ['customers', 'list'] },
   attention: { icon: '⚠️', label: 'Points d’attention', desc: 'Ce qui attend une action', open: ['dashboard', 'attention'] },
   tabord: { icon: '📊', label: 'Tableau de bord', desc: 'Les chiffres du jour', open: ['dashboard', 'day'] },
-  journees: { icon: '🗂️', label: 'Journées de caisse', desc: 'Z, écarts à justifier', open: ['treasury', 'history'] },
+  journees: { icon: '🗂️', label: 'Journées de caisse', desc: 'Clôtures, écarts à justifier', open: ['treasury', 'history'] },
   stock: { icon: '📦', label: 'Stock', desc: 'Quantités par dépôt', open: ['stock', 'state'] },
   reception: { icon: '🚚', label: 'Recevoir une livraison', desc: 'Le bon de commande du fournisseur est proposé', open: ['stock', 'receive'] },
   transfert: { icon: '🔁', label: 'Nouveau transfert', desc: 'De la réserve vers la surface de vente', open: ['stock', 'transferNew'] },
@@ -118,9 +118,15 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.115.0',
+    items: [
+      "Plus de « Z » à l'écran ni sur les tickets : on parle de « clôture n° 5 » pour la 5e fermeture d'une caisse, de « bilan de clôture » pour le rapport imprimé le soir, et de « Clôtures de caisse » pour leur liste. Le numéro se suit toujours sans trou.",
+    ],
+  },
+  {
     version: '0.114.0',
     items: [
-      "Journal d'audit en clair : chaque action se lit comme une phrase (« ANGE a fermé la caisse électronique (Z n° 5) avec un manque de 1 350 FCFA »), avec le nom de la caisse. Plus de codes ni de données techniques à l'écran.",
+      "Journal d'audit en clair : chaque action se lit comme une phrase (« ANGE a fermé la caisse électronique (clôture n° 5) avec un manque de 1 350 FCFA »), avec le nom de la caisse. Plus de codes ni de données techniques à l'écran.",
       "Journal d'audit : en rouge ce qui doit alerter (écart de caisse, annulation, suppression, code faux), en orange ce qui mérite un coup d'œil (remise, prix changé). Les lignes sont groupées par jour et un clic montre le détail, montant par montant.",
       "Journal d'audit : filtres par thème (Caisse et argent, Ventes, Prix et articles…) et « À surveiller » pour ne voir que le rouge et l'orange. Les connexions sont masquées au départ ; les codes faux restent toujours visibles.",
     ],
@@ -272,7 +278,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.99.2',
     items: [
       "Trésorerie › Opérations de trésorerie : « Encaisser » › Client propose « Dépôt d'avance » (tous les clients), avec le reçu de dépôt imprimé.",
-      "« Décaisser » › « Rendre l'avance d'un client » : on lui rend tout ou partie de son avance, sans dépasser ce qui reste. La sortie compte dans le tiroir, le Z, son relevé et la comptabilité.",
+      "« Décaisser » › « Rendre l'avance d'un client » : on lui rend tout ou partie de son avance, sans dépasser ce qui reste. La sortie compte dans le tiroir, le bilan de clôture, son relevé et la comptabilité.",
       "Entrées et sorties de caisse : seulement « Encaisser » ou « Décaisser » et « Plus ▾ ». Imprimer, Décharge, Modifier et Supprimer sont dans « Plus ».",
     ],
   },
@@ -487,7 +493,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.76.0',
     items: [
       'Emballages consignés : Vente › Emballages consignés. La consigne des casiers et bouteilles s’encaisse et se rend à la caisse (au compte 4194, pas comme une vente) ; le logiciel suit les vides au magasin, ce que gardent les clients et ce qu’il faut rendre aux brasseries.',
-      'Point Mobile Money : dépôts, retraits, crédit de communication et factures (ENEO, CAMWATER…) pour les clients, avec la flotte de chaque compte agent, les espèces dans le Z et les commissions en comptabilité.',
+      'Point Mobile Money : dépôts, retraits, crédit de communication et factures (ENEO, CAMWATER…) pour les clients, avec la flotte de chaque compte agent, les espèces dans le bilan de clôture et les commissions en comptabilité.',
       'Contrôle des caissiers : annulations, retours, remises, prix modifiés, tiroir ouvert sans vente et manquants de chaque caissier, comparés à la moyenne de l’équipe.',
       'Boutique en ligne et vérificateur de prix : une page internet du magasin sur le serveur (les commandes arrivent dans Commandes clients) et une page de prix à ouvrir sur un téléphone ou une tablette au rayon. À activer dans Administration › Paramètres.',
       'Proposition de commande « saison » : elle tient compte des ventes de l’an dernier à la même période et de la tendance, avec une majoration au choix. Commandes groupées : un fournisseur, plusieurs magasins, un bon par magasin.',
@@ -534,7 +540,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.71.0',
     items: [
-      'Trésorerie › « Relève d’équipe… » : le caissier qui part compte le tiroir sans voir l’attendu, celui qui arrive se connecte, et un bon de passation s’imprime avec l’écart de celui qui part. La journée et le Z restent les mêmes ; le Z détaille les ventes et l’écart de chaque caissier.',
+      'Trésorerie › « Relève d’équipe… » : le caissier qui part compte le tiroir sans voir l’attendu, celui qui arrive se connecte, et un bon de passation s’imprime avec l’écart de celui qui part. La journée et la clôture restent les mêmes ; le bilan de clôture détaille les ventes et l’écart de chaque caissier.',
     ],
   },
   {
@@ -564,7 +570,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     version: '0.67.0',
     items: [
       'Version anglaise : le bouton « English » en bas de l’écran (et sur l’écran de connexion) passe les écrans en anglais pour l’utilisateur connecté ; « Français » revient au français. La caisse, la trésorerie, les clients, les ventes, les commandes et les livraisons sont entièrement traduits, avec les messages d’erreur ; pour les autres écrans, les menus et les titres.',
-      'Fiche client › « Langue des tickets et factures » : un client en anglais reçoit ses tickets, factures, devis, bons de livraison, reçus de règlement et relevés en anglais, montant en lettres compris. Les bons de caisse et le rapport Z suivent la langue de l’utilisateur.',
+      'Fiche client › « Langue des tickets et factures » : un client en anglais reçoit ses tickets, factures, devis, bons de livraison, reçus de règlement et relevés en anglais, montant en lettres compris. Les bons de caisse et le bilan de clôture suivent la langue de l’utilisateur.',
     ],
   },
   {

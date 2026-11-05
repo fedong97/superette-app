@@ -88,7 +88,7 @@ export function Accounting({ user, initialTab = 'journals' }: { user: User; init
     <div className="page">
       <header className="page-head">
         <h1>Comptabilité</h1>
-        <span className="muted">Plan SYSCOHADA révisé · les écritures se passent toutes seules à partir des Z, factures et règlements</span>
+        <span className="muted">Plan SYSCOHADA révisé · les écritures se passent toutes seules à partir des clôtures de caisse, factures et règlements</span>
       </header>
       <Tabs
         main
@@ -366,7 +366,7 @@ function Journals() {
       {list.error ? (
         <Empty>{String((list.error as Error).message ?? list.error)}</Empty>
       ) : entries.length === 0 ? (
-        <Empty>Aucune écriture sur la période. Changez les dates : les ventes sont passées à chaque clôture Z, les achats et dépenses à leur saisie.</Empty>
+        <Empty>Aucune écriture sur la période. Changez les dates : les ventes sont passées à chaque clôture de caisse, les achats et dépenses à leur saisie.</Empty>
       ) : (
         <table className="list compact journal">
           <thead>

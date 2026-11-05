@@ -1557,3 +1557,31 @@ button.greet > .icon {
   border-color: transparent;
   color: var(--danger);
 }
+
+/* Saisies refusées par le serveur, gardées à vérifier (Réglages). */
+.rejected {
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.rejected h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+.rejected ul {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.rejected li {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+.rejected li .link {
+  min-height: 44px;
+}

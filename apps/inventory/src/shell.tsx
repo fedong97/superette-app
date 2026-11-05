@@ -97,7 +97,7 @@ function ShellBody({ render, settings }: { render: Render; settings: (onClose: (
     remember('onglet', id);
     window.scrollTo(0, 0);
   };
-  const attention = useAttention(mods, go);
+  const attention = useAttention(mods, go, () => setMenu(true));
   // Un droit retiré pendant que l'écran est ouvert : retour à l'accueil.
   useEffect(() => {
     if (current !== 'plus' && !mods.some((m) => m.id === current)) go('accueil');
@@ -287,7 +287,7 @@ interface Attention {
 }
 
 /** Points d'attention de la personne, tirés de ses vraies données (rien d'inventé). */
-function useAttention(mods: readonly ModuleDef[], go: (id: ModuleId) => void): Attention[] {
+function useAttention(mods: readonly ModuleDef[], go: (id: ModuleId) => void, openSettings: () => void): Attention[] {
   const s = useStore();
   const manager = useManagerAttention();
   const has = (id: ModuleId) => mods.some((m) => m.id === id);
@@ -295,6 +295,7 @@ function useAttention(mods: readonly ModuleDef[], go: (id: ModuleId) => void): A
   if (s.online === false) out.push({ level: 'warning', title: 'Hors ligne', text: 'Vos saisies restent sur le téléphone et partiront au retour du réseau.' });
   if (s.catalogError) out.push({ level: 'danger', title: 'Catalogue non téléchargé', text: s.catalogError, action: () => void S.refreshCatalog() });
   if (s.pending) out.push({ level: 'info', title: `${s.pending} saisie(s) à envoyer`, text: 'Touchez pour envoyer maintenant', action: () => void S.sync() });
+  if (s.rejected.length) out.push({ level: 'danger', title: `${s.rejected.length} saisie(s) refusée(s) à vérifier`, text: 'Elles sont gardées dans les Réglages (☰ › Réglages) avec leur motif.', action: openSettings });
   out.push(...manager.map((m) => ({ ...m, action: m.action })));
   if (has('vente')) {
     for (const c of s.sentCarts.filter((x) => x.status === 'returned'))

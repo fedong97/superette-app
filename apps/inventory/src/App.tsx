@@ -2661,6 +2661,7 @@ function Settings({ onClose }: { onClose: () => void }) {
           {s.lastSync ? ` · dernier échange à ${heure(s.lastSync)}` : ''}
         </div>
         {info ? <div className="notice info">{info}</div> : null}
+        <RejectedList />
         {s.session ? (
           <>
             <button className="big" disabled={Boolean(busy)} onClick={() => run('sync', () => S.sync())}>
@@ -2705,7 +2706,9 @@ function Settings({ onClose }: { onClose: () => void }) {
         <button
           className="link danger"
           onClick={() => {
-            const warn = s.pending ? `${s.pending} saisie(s) ne sont pas encore envoyées et seront perdues. ` : '';
+            const warn =
+              (s.pending ? `${s.pending} saisie(s) ne sont pas encore envoyées et seront perdues. ` : '') +
+              (s.rejected.length ? `${s.rejected.length} saisie(s) refusée(s) à vérifier seront effacées. ` : '');
             if (confirm(`${warn}Délier ce téléphone du magasin ?`)) void S.unpair().then(onClose);
           }}
         >
@@ -2716,6 +2719,42 @@ function Settings({ onClose }: { onClose: () => void }) {
           Fermer
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Saisies refusées par le serveur : elles restent ici, avec leur motif, jusqu'à ce que la personne
+ * les ait ressaisies au PC (ou jugées inutiles). « Partager » les envoie au gérant en texte.
+ */
+export function RejectedList() {
+  const s = useStore();
+  const [error, setError] = useState('');
+  if (!s.rejected.length) return null;
+  const share = () => shareFile('saisies-a-verifier.txt', S.rejectedText(), 'Saisies à vérifier').catch((e: unknown) => setError(message(e)));
+  return (
+    <div className="rejected">
+      <h3>Saisies à vérifier ({s.rejected.length})</h3>
+      <p className="muted small">Le serveur ne les a pas acceptées. Ressaisissez-les au PC si besoin, puis retirez-les de la liste.</p>
+      <ul>
+        {s.rejected.map((r) => (
+          <li key={r.id}>
+            <div>
+              <b>{r.what}</b>
+              <div className="small">{r.detail}</div>
+              <div className="small danger">{r.reason}</div>
+              <div className="muted small">Saisi à {heure(r.at)}</div>
+            </div>
+            <button className="link" onClick={() => void S.dropRejected(r.id)}>
+              Retirer
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error ? <div className="notice erreur">{error}</div> : null}
+      <button className="big" onClick={() => void share()}>
+        Partager la liste avec le gérant
+      </button>
     </div>
   );
 }

@@ -90,3 +90,29 @@ describe('accueil du caissier sans les montants de la caisse', () => {
     expect(home.mine!.net).toBe(0);
   });
 });
+
+describe('lectures réservées aux écrans qui les montrent', () => {
+  const forbidden = (fn: () => unknown) => expect(fn).toThrow("Vous n'avez pas les droits");
+
+  it('un caissier ne lit pas les achats ; il garde la recherche des clients et leurs soldes', () => {
+    forbidden(() => api['purchases.orders']!());
+    forbidden(() => api['purchases.receptions']!());
+    forbidden(() => api['purchases.order']!('x'));
+    forbidden(() => api['purchases.reception']!('x'));
+    expect(api['customers.list']!({ search: 'x' })).toEqual([]);
+    expect(api['customers.list']!({ withBalance: true })).toEqual([]);
+    expect(api['customers.payments']!({ limit: 5 })).toEqual([]);
+  });
+
+  it('un magasinier lit les achats mais pas l’argent des clients', () => {
+    const storeId = s.admin.station()!.store.id;
+    s.admin.createUser(s.admin.listUsers().find((u) => u.login === 'steve')!.id, { name: 'Jo', login: 'jo', pin: '7777', role: 'stock', storeId });
+    api['auth.logout']!();
+    login('jo', '7777');
+    expect(api['purchases.orders']!()).toEqual([]);
+    expect(api['purchases.receptions']!()).toEqual(expect.any(Array));
+    forbidden(() => api['customers.payments']!({ limit: 5 }));
+    forbidden(() => api['customers.list']!({ withBalance: true }));
+    forbidden(() => api['customers.receiptHtml']!('x'));
+  });
+});

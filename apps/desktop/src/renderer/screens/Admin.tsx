@@ -1259,6 +1259,13 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   );
 }
 
+/** « En retard de 5 min » / « En avance de 2 h 10 min » par rapport au serveur. */
+const clockGap = (seconds: number) => {
+  const m = Math.round(Math.abs(seconds) / 60);
+  const span = m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+  return `${seconds > 0 ? 'En retard' : 'En avance'} de ${span} sur le serveur`;
+};
+
 function CentralServer({ isAdmin }: { isAdmin: boolean }) {
   const toast = useToast();
   const state = useLoad(() => call('sync.state'));
@@ -1312,6 +1319,14 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 <th>État</th>
                 <td className={st.lastError ? 'neg' : 'pos'}>{st.lastError ?? 'Connecté'}</td>
               </tr>
+              {st.clockSkewSeconds !== null && (
+                <tr>
+                  <th>Heure du PC</th>
+                  <td className="neg">
+                    {clockGap(st.clockSkewSeconds)} : réglez la date et l'heure de Windows (Douala). Une heure fausse peut faire gagner une modification plus ancienne entre deux PC.
+                  </td>
+                </tr>
+              )}
               {st.untrusted && (
                 <tr>
                   <th>Non partagé</th>

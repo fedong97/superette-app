@@ -472,6 +472,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
   };
 
   const ADMIN: Permission[] = ['admin'];
+  /** Lecture des achats (bons de commande, réceptions) : un des droits du menu Achats ou des fournisseurs. */
+  const PURCHASE_READ: Permission[] = [
+    'purchases', 'purchase_orders', 'order_receive', 'reorder', 'purchase_invoices', 'supplier_pay', 'purchase_due', 'supplier_returns',
+    'group_orders', 'supplier_calendar', 'missed_report', 'mobile_reception', 'reception_edit', 'suppliers', 'supplier_statement', 'stock_receive',
+  ];
+  /** Argent des clients (soldes, règlements) : un des droits du menu Clients, ou encaisser un règlement. */
+  const CUSTOMER_MONEY: Permission[] = ['customers', 'customer_payment', 'receivables', 'customer_statement', 'account_offsets', 'summary_invoices', 'rebates', 'consignment', 'field_reps'];
   const ACCOUNTING: Permission[] = ['accounting'];
   const BANK: Permission[] = ['bank_reconciliation'];
   const STOCK: Permission[] = ['articles', 'stock', 'labels'];
@@ -692,6 +699,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       ['outages_open', can(u, ['outage_close', 'sale_book'])],
       ['mobile_late', can(u, ['settings_edit'])],
       ['sync_conflicts', u.role === 'admin'],
+      ['clock_skew', can(u, ['settings_edit'])],
     ];
     return s.attention.list(storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
   };
@@ -1733,8 +1741,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'suppliers.setArticle': (input: Parameters<Services['purchases']['setSupplierArticle']>[1]) =>
       s.purchases.setSupplierArticle(requireUser(['supplier_articles']).id, input),
     'suppliers.removeArticle': (id: string) => s.purchases.removeSupplierArticle(requireUser(['supplier_articles']).id, id),
-    'purchases.orders': (opts?: { supplierId?: string; open?: boolean }) => s.purchases.listOrders(ctx().storeId, opts),
-    'purchases.order': (id: string) => (requireUser(), s.purchases.getOrder(id)),
+    'purchases.orders': (opts?: { supplierId?: string; open?: boolean }) => s.purchases.listOrders(ctx(PURCHASE_READ).storeId, opts),
+    'purchases.order': (id: string) => (requireUser(PURCHASE_READ), s.purchases.getOrder(id)),
     'purchases.createOrder': (input: { supplierId: string; warehouseId: string; expectedDate?: string | null; notes?: string | null; lines: PurchaseOrderLineInput[] }) =>
       s.purchases.createOrder(ctx(['purchase_orders']), input),
     'purchases.updateOrder': (
@@ -1762,13 +1770,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!link) throw new AppError('Tapez le numéro WhatsApp du fournisseur (9 chiffres)', 'NO_PHONE');
       return { link, text, phone: phone?.trim() || supplier.phone };
     },
-    'purchases.printOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (requireUser(), printer.purchaseOrder(id, opts)),
+    'purchases.printOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null; output?: 'print' | 'pdf' }) => (requireUser(PURCHASE_READ), printer.purchaseOrder(id, opts)),
     'purchases.previewOrder': (id: string, opts?: { templateId?: string | null; format?: DocFormat | null }) => (
-      requireUser(), { ...printer.previewPurchaseOrder(id, opts), doc: 'purchaseOrder' as const, variant: 'order' as DocVariant }
+      requireUser(PURCHASE_READ), { ...printer.previewPurchaseOrder(id, opts), doc: 'purchaseOrder' as const, variant: 'order' as DocVariant }
     ),
-    'purchases.receptions': (opts?: { supplierId?: string; uninvoiced?: boolean; limit?: number }) => s.purchases.listReceptions(ctx().storeId, opts),
-    'purchases.reception': (id: string) => (requireUser(), s.purchases.getReception(id)),
-    'purchases.invoicePreview': (receptionIds: string[]) => (requireUser(), s.purchases.invoicePreview(receptionIds)),
+    'purchases.receptions': (opts?: { supplierId?: string; uninvoiced?: boolean; limit?: number }) => s.purchases.listReceptions(ctx(PURCHASE_READ).storeId, opts),
+    'purchases.reception': (id: string) => (requireUser(PURCHASE_READ), s.purchases.getReception(id)),
+    'purchases.invoicePreview': (receptionIds: string[]) => (requireUser(PURCHASE_READ), s.purchases.invoicePreview(receptionIds)),
     'purchases.createInvoice': (input: Parameters<Services['purchases']['createInvoice']>[1]) => s.purchases.createInvoice(ctx(['purchase_invoices']), input),
     'supplierReturns.list': (opts?: { supplierId?: string | null; open?: boolean }) => s.supplierReturns.list(ctx(['supplier_returns']).storeId, opts),
     'supplierReturns.pending': () => s.supplierReturns.pending(ctx(['supplier_returns']).storeId),
@@ -3010,7 +3018,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     },
 
     // --- Clients et crédit ----------------------------------------------------
-    'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean; zone?: string | null }) => s.customers.listCustomers(ctx().storeId, opts),
+    // Les soldes ne sont donnés qu'à qui gère l'argent des clients ; la simple recherche (caisse, devis, commandes) reste ouverte.
+    'customers.list': (opts?: { search?: string; includeInactive?: boolean; withBalance?: boolean; zone?: string | null }) =>
+      s.customers.listCustomers(ctx(opts?.withBalance ? CUSTOMER_MONEY : undefined).storeId, opts),
     'customers.zones': () => (requireUser(), s.customers.zones()),
     'customers.get': (id: string) => (requireUser(), s.customers.getCustomer(id)),
     /** Solde d'ouverture (à la création) ou ajustement du solde d'un client. */
@@ -3095,7 +3105,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       // Mobile Money et carte vont à la caisse électronique du caissier, virement et chèque à sa caisse banque.
       return s.customers.receivePayment(c, { ...input, sessionId: session ? s.pos.sessionFor(c, input.method, session.id) : null });
     },
-    'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx().storeId, opts),
+    'customers.payments': (opts?: { customerId?: string; limit?: number }) => s.customers.listPayments(ctx(CUSTOMER_MONEY).storeId, opts),
     'customers.receivables': () => s.customers.receivables(ctx(SALES).storeId),
     'customers.allocations': (paymentId: string) => (requireUser(['customer_payment', 'customer_lettering', 'receivables']), s.customers.allocations(paymentId)),
     'customers.setAllocations': (paymentId: string, allocations: { saleId: string; amount: Fcfa }[]) => s.customers.setAllocations(ctx(['customer_lettering']), paymentId, allocations),
@@ -3143,8 +3153,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (saved) s.customers.recordReminder(c, id, 'pdf');
       return saved;
     },
-    'customers.printReceipt': (paymentId: string) => (requireUser(), printer.customerReceipt(paymentId)),
-    'customers.receiptHtml': (paymentId: string) => (requireUser(), printer.customerReceiptHtml(paymentId)),
+    'customers.printReceipt': (paymentId: string) => (requireUser(CUSTOMER_MONEY), printer.customerReceipt(paymentId)),
+    'customers.receiptHtml': (paymentId: string) => (requireUser(CUSTOMER_MONEY), printer.customerReceiptHtml(paymentId)),
 
     // --- Ristournes des clients spécifiques ------------------------------------
     'rebates.rules': (customerId?: string | null) => (requireUser(CUSTOMERS), s.rebates.rules({ customerId: customerId ?? null })),

@@ -127,6 +127,8 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       "ONIX 360 Mobile : un comptage ou un relevé refusé par le serveur ne disparaît plus. Il est gardé dans Réglages › « Saisies à vérifier », avec son motif, et se partage avec le gérant.",
       "Synchronisation : des opérations refusées par un serveur pas encore à jour ne bloquent plus les ventes faites après elles.",
       "PC de confiance : dans l'administration du serveur (Postes), cochez les PC du siège. Dès qu'un PC est coché, eux seuls envoient l'administration du réseau (magasins, TVA, droits des rôles) et les données des autres magasins (achats groupés…). Chaque PC continue de vendre et de gérer son propre magasin. Tant qu'aucun PC n'est coché, rien ne change.",
+      "Heure du PC : quand l'horloge d'un PC s'écarte de plus de 2 minutes de celle du serveur, le gérant le voit dans « À traiter » et dans Administration › Serveur central.",
+      "Droits : un caissier ne lit plus les bons de commande ni les réceptions, et les soldes et règlements des clients sont réservés aux droits du menu Clients.",
       "Administration › Serveur central : chaque conflit de synchronisation se réessaie après correction, ou s'ignore avec un motif. Les conflits ouverts sont dans « À traiter ». Le bouton « Exporter le diagnostic » prépare un fichier pour le support, sans jeton ni code.",
     ],
   },

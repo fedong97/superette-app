@@ -57,6 +57,8 @@ describe('PC de confiance', () => {
     await both();
     expect(stores(siege)).toContain('BFS1');
     expect(caisse.sync.state().untrusted).toBeNull();
+    // Même machine que le serveur : l'heure est juste, rien n'est signalé.
+    expect(caisse.sync.state().clockSkewSeconds).toBeNull();
   });
 
   it('un PC de confiance désigné : les autres PC ne créent plus de magasin ni d’utilisateur ailleurs, mais gèrent le leur', async () => {

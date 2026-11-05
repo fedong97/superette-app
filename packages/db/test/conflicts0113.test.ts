@@ -67,3 +67,19 @@ describe('conflits de synchronisation', () => {
     expect(JSON.parse(text)).toMatchObject({ server: 'http://serveur:3000', connected: true, conflicts: { open: 1 }, pendingByEntity: expect.any(Array) });
   });
 });
+
+describe("heure du PC comparée au serveur", () => {
+  it('signale un écart de plus de 2 minutes, et l’oublie quand l’heure est juste', () => {
+    const s = createServices(openDatabase(':memory:'));
+    const storeId = s.admin.bootstrap({ storeCode: 'DLA1', storeName: 'Superette Akwa', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' }).store.id;
+    const item = () => s.attention.list(storeId, new Set(['clock_skew']))[0]!;
+    s.sync.setClockSkew(90_000);
+    expect(s.sync.state().clockSkewSeconds).toBeNull();
+    expect(item().count).toBe(0);
+    s.sync.setClockSkew(-7 * 60_000);
+    expect(s.sync.state().clockSkewSeconds).toBe(-420);
+    expect(item()).toMatchObject({ count: 1, detail: expect.stringContaining('en avance de 7 min') });
+    s.sync.setClockSkew(5_000);
+    expect(item().count).toBe(0);
+  });
+});

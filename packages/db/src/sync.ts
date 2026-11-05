@@ -31,6 +31,8 @@ export interface SyncState {
   serverBackupProblem: string | null;
   /** Dernière sauvegarde réussie du serveur central (null : inconnue). */
   serverBackupAt: string | null;
+  /** L'horloge de ce PC s'écarte de celle du serveur de plus de 2 minutes : écart en secondes (positif : le PC retarde). */
+  clockSkewSeconds: number | null;
   /** Modifications que le serveur réserve aux PC de confiance : pas partagées (null : aucune). */
   untrusted: { count: number; entity: string; reason: string; at: string } | null;
 }
@@ -328,8 +330,20 @@ export class SyncService extends Base {
       checkAt: this.lastCheck()?.at ?? null,
       serverBackupProblem: this.serverBackup()?.problem ?? null,
       serverBackupAt: this.serverBackup()?.at ?? null,
+      clockSkewSeconds: this.clockSkew(),
       untrusted: this.untrusted(),
     };
+  }
+
+  /** Écart retenu au-delà de 2 minutes seulement ; en dessous, rien n'est signalé. */
+  setClockSkew(ms: number): void {
+    if (!Number.isFinite(ms)) return;
+    this.set('sync.clockSkew', Math.abs(ms) > 2 * 60_000 ? String(Math.round(ms / 1000)) : null);
+  }
+
+  private clockSkew(): number | null {
+    const v = this.get('sync.clockSkew');
+    return v === null ? null : Number(v);
   }
 
   private untrusted(): SyncState['untrusted'] {
@@ -424,7 +438,7 @@ export class SyncService extends Base {
   }
 
   disconnect(): void {
-    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup', 'sync.untrusted']) this.set(k, null);
+    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup', 'sync.untrusted', 'sync.clockSkew']) this.set(k, null);
   }
 
   setCursor(cursor: number): void {

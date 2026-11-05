@@ -35,6 +35,7 @@ export const ATTENTION_TARGET: Record<Item['key'], AttentionTarget> = {
   outages_open: ['sales', 'outages'],
   mobile_late: ['admin', 'mobilepay'],
   sync_conflicts: ['admin', 'server'],
+  clock_skew: ['admin', 'server'],
 };
 
 /** Tableau de bord : la journée en chiffres, et les points d'attention du gérant. */

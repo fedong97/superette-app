@@ -5931,6 +5931,11 @@ export const EN: Record<string, string> = {
   "PC de confiance : dans l'administration du serveur (Postes), cochez les PC du siège. Dès qu'un PC est coché, eux seuls envoient l'administration du réseau (magasins, TVA, droits des rôles) et les données des autres magasins (achats groupés…). Chaque PC continue de vendre et de gérer son propre magasin. Tant qu'aucun PC n'est coché, rien ne change.": "Trusted PCs: in the server administration (Stations), tick the head-office PCs. Once a PC is ticked, only those PCs send network administration (stores, VAT, role rights) and other stores' data (group purchases…). Every PC still sells and manages its own store. As long as no PC is ticked, nothing changes.",
   "Non partagé": "Not shared",
   ") : elles restent sur ce PC. Faites-les depuis un PC de confiance.": "): they stay on this PC. Make them from a trusted PC.",
+  "Heure du PC : quand l'horloge d'un PC s'écarte de plus de 2 minutes de celle du serveur, le gérant le voit dans « À traiter » et dans Administration › Serveur central.": "PC clock: when a PC's clock is more than 2 minutes off the server's, the manager sees it in \"To do\" and in Administration › Central server.",
+  "Droits : un caissier ne lit plus les bons de commande ni les réceptions, et les soldes et règlements des clients sont réservés aux droits du menu Clients.": "Rights: a cashier can no longer read purchase orders or receipts, and customer balances and payments are reserved for the Customers menu rights.",
+  "En avance": "Ahead",
+  "Heure du PC": "PC clock",
+  ": réglez la date et l'heure de Windows (Douala). Une heure fausse peut faire gagner une modification plus ancienne entre deux PC.": ": set the Windows date and time (Douala). A wrong clock can let an older change win between two PCs.",
   // 0.112.0 : scan avec la caméra
   "ONIX 360 Mobile : le scan avec l'appareil photo marche de nouveau (inventaire, panier au rayon, réception, contrôle sortie, QR code du gérant). Depuis la 0.109.0, l'image de la caméra restait cachée.": "ONIX 360 Mobile: scanning with the camera works again (inventory, shelf basket, receiving, exit check, manager QR code). Since 0.109.0, the camera image stayed hidden.",
   // 0.111.0 : détail des factures sur le téléphone

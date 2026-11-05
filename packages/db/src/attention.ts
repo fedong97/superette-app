@@ -28,7 +28,8 @@ export type AttentionKey =
   | 'expenses_pending'
   | 'outages_open'
   | 'mobile_late'
-  | 'sync_conflicts';
+  | 'sync_conflicts'
+  | 'clock_skew';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -360,6 +361,21 @@ export class AttentionService extends Base {
         count: rows.length,
         amount: null,
         detail: rows.length ? `${rows.length} opération(s) reçue(s) d'autres PC non appliquée(s) (${firstNames([...new Set(rows)])}) : réessayez ou ignorez-les` : 'Aucun conflit',
+        tone: 'warning',
+      });
+    }
+
+    if (want('clock_skew')) {
+      // Heure de ce PC trop loin de celle du serveur (vue à la dernière synchronisation).
+      const raw = this.db.prepare("SELECT value FROM settings WHERE key = 'sync.clockSkew'").pluck().get() as string | undefined;
+      const sec = raw === undefined ? 0 : Number(raw);
+      const min = Math.round(Math.abs(sec) / 60);
+      items.push({
+        key: 'clock_skew',
+        label: 'Heure du PC à régler',
+        count: sec ? 1 : 0,
+        amount: null,
+        detail: sec ? `Ce PC est ${sec > 0 ? 'en retard' : 'en avance'} de ${min} min sur le serveur : réglez la date et l'heure de Windows` : "L'heure du PC est juste",
         tone: 'warning',
       });
     }

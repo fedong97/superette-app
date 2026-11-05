@@ -370,6 +370,8 @@ export class SyncService {
     /** Dernier numéro d'opération du serveur : un curseur plus grand vient d'une autre base. */
     lastSeq: number;
     serverBackup: ServerBackupState | null;
+    /** Heure du serveur : le PC dont l'horloge s'en écarte le signale. */
+    serverTime: string;
   }> {
     const max = Math.min(Math.max(limit || 1000, 1), 5000);
     const { rows } = await this.pg.query<{
@@ -416,6 +418,7 @@ export class SyncService {
       epochFrom: epoch.from,
       lastSeq: Number(last[0]?.seq ?? 0),
       serverBackup: await this.backups.state().catch(() => null),
+      serverTime: new Date().toISOString(),
     };
   }
 }

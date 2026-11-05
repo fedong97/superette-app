@@ -58,6 +58,7 @@ interface PullPage {
   epochFrom?: string | null;
   lastSeq?: number;
   serverBackup?: { at: string | null; problem: string | null } | null;
+  serverTime?: string;
 }
 
 /**
@@ -114,9 +115,12 @@ export async function syncOnce(s: Services, restarted = false): Promise<{ sent: 
     }
     for (;;) {
       const since = s.sync.state().cursor;
+      const asked = Date.now();
       const page = await request<PullPage>(creds.url, `/api/v1/sync/pull?since=${since}&limit=1000`, {
         token: creds.token,
       });
+      // Écart d'horloge avec le serveur (milieu de l'aller-retour) : une heure fausse fait gagner la mauvaise version entre deux PC.
+      if (page.serverTime) s.sync.setClockSkew(Date.parse(page.serverTime) - (asked + Date.now()) / 2);
       if (page.serverBackup !== undefined) s.sync.setServerBackup(page.serverBackup ?? null);
       // Base du serveur changée (serveur neuf, sauvegarde restaurée) : la lecture reprend au début
       // de la nouvelle époque, et ce que le serveur a pu perdre repart avant (une seule fois).

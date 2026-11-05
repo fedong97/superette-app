@@ -1,5 +1,18 @@
-import { BACKUP_FREQUENCIES, ELECTRONIC_METHODS, PAYMENT_METHODS, type Permission, type RegisterKind, registerMethods } from '@superette/core';
-import { useEffect, useState } from 'react';
+import {
+  AUDIT_THEMES,
+  AUDIT_WATCH_ACTIONS,
+  type AuditText,
+  type AuditTheme,
+  BACKUP_FREQUENCIES,
+  ELECTRONIC_METHODS,
+  PAYMENT_METHODS,
+  type Permission,
+  type RegisterKind,
+  auditActionsMatching,
+  describeAudit,
+  registerMethods,
+} from '@superette/core';
+import { Fragment, useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
 import { askConfirm, askText, downloadText, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
@@ -1728,48 +1741,88 @@ function SoftwareUpdates({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-const ACTION_LABELS: Record<string, string> = {
-  'auth.login': 'Connexion',
-  'auth.failed': 'Échec de connexion',
-  'sale.cancel': 'Annulation de ticket',
-  'sale.return': 'Retour client',
-  'sale.discount': 'Remise',
-  'cash.open': 'Ouverture de caisse',
-  'cash.close': 'Clôture Z',
-  'cash.in': 'Apport espèces',
-  'cash.out': 'Prélèvement',
-  'stock.receive': 'Réception',
-  'stock.loss': 'Sortie en perte',
-  'stock.transfer': 'Transfert',
-  'stock.inventory': 'Inventaire',
-  'article.create': 'Création article',
-  'article.update': 'Modification article',
-  'price.store': 'Prix magasin',
-  'user.create': 'Création utilisateur',
-  'user.update': 'Modification utilisateur',
-  'store.create': 'Création magasin',
-  'warehouse.update': 'Modification dépôt',
-  'warehouse.disable': 'Dépôt désactivé',
-  'warehouse.enable': 'Dépôt réactivé',
-  'warehouse.sales_default': 'Dépôt des ventes changé',
-  'store.update': 'Modification magasin',
-  'register.create': 'Création caisse',
-};
+type AuditFilter = 'all' | 'watch' | AuditTheme;
+type AuditLine = { row: Result<'admin.audit'>[number]; view: AuditText; times: number };
 
+const AUDIT_FILTERS: [AuditFilter, string][] = [
+  ['all', 'Tout'],
+  ['watch', 'À surveiller'],
+  ...(Object.entries(AUDIT_THEMES) as [AuditTheme, { label: string }][]).filter(([t]) => t !== 'logins').map(([t, d]) => [t, d.label] as [AuditFilter, string]),
+];
+const AUDIT_ICON: Record<AuditText['level'], string> = { alert: '!', watch: '•', normal: '✓', login: '→' };
+
+/** « Aujourd'hui », « Hier » ou « jeudi 5 novembre 2026 ». */
+function auditDay(iso: string): string {
+  const d = new Date(iso);
+  const key = (x: Date) => x.toDateString();
+  const now = new Date();
+  if (key(d) === key(now)) return "Aujourd'hui";
+  if (key(d) === key(new Date(now.getTime() - 86_400_000))) return 'Hier';
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/**
+ * Journal d'audit en clair : une phrase par action, en rouge ce qui doit
+ * alerter, en orange ce qui mérite un coup d'œil, regroupé par jour.
+ * Les données brutes restent visibles au besoin, derrière un lien.
+ */
 function Audit() {
   const users = useLoad(() => call('admin.users'));
   const [userId, setUserId] = useState('');
   const [text, setText] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [filter, setFilter] = useState<AuditFilter>('all');
+  const [hideLogins, setHideLogins] = useState(true);
+  const [open, setOpen] = useState<string | null>(null);
+  const [raw, setRaw] = useState<string | null>(null);
   const [entity, setEntity] = useState<{ id: string; name: string } | null>(null);
+  const patterns = filter === 'all' ? null : filter === 'watch' ? AUDIT_WATCH_ACTIONS : AUDIT_THEMES[filter].patterns;
   const log = useLoad(
-    () => call('admin.audit', { userId: userId || null, entityId: entity?.id ?? null, text: text.trim() || null, from: from || null, to: to || null, limit: 500 }),
-    [userId, entity?.id, text, from, to],
+    () =>
+      call('admin.audit', {
+        userId: userId || null,
+        entityId: entity?.id ?? null,
+        text: text.trim() || null,
+        textActions: auditActionsMatching(text),
+        from: from || null,
+        to: to || null,
+        patterns,
+        hideLogins,
+        limit: 500,
+      }),
+    [userId, entity?.id, text, from, to, filter, hideLogins],
   );
+  const names = new Map((users.data ?? []).map((u) => [u.id, u.name]));
+  const lines: AuditLine[] = [];
+  for (const row of log.data ?? []) {
+    const view = describeAudit(row, (id) => names.get(id) ?? null);
+    if (filter === 'watch' && view.level !== 'alert' && view.level !== 'watch') continue;
+    // Deux fois la même chose à la même minute (comptage vérifié deux fois) : une seule ligne « 2 fois ».
+    const last = lines[lines.length - 1];
+    if (last && last.row.action === row.action && last.row.user_id === row.user_id && last.row.entity_id === row.entity_id && last.row.details === row.details && last.row.at.slice(0, 16) === row.at.slice(0, 16)) {
+      last.times++;
+      continue;
+    }
+    lines.push({ row, view, times: 1 });
+  }
+  const days: [string, AuditLine[]][] = [];
+  for (const line of lines) {
+    const day = auditDay(line.row.at);
+    if (days[days.length - 1]?.[0] !== day) days.push([day, []]);
+    days[days.length - 1]![1].push(line);
+  }
+  const time = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   return (
     <>
-      <p className="muted">Cherchez qui a fait quoi : « qui a changé le prix de la Mutzig ? » → choisissez le produit, ou tapez « prix ».</p>
+      <p className="muted">Cherchez qui a fait quoi : « qui a changé le prix de la Mutzig ? » → choisissez le produit, ou tapez « prix ». En rouge ce qui doit alerter, en orange ce qui mérite un coup d'œil.</p>
+      <div className="audit-chips" role="group" aria-label="Thème">
+        {AUDIT_FILTERS.map(([key, label]) => (
+          <button key={key} className={`audit-chip${filter === key ? ' on' : ''}${key === 'watch' ? ' watch' : ''}`} aria-pressed={filter === key} onClick={() => setFilter(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="filters">
         <select value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Personne">
           <option value="">Toutes les personnes</option>
@@ -1779,7 +1832,7 @@ function Audit() {
             </option>
           ))}
         </select>
-        <input placeholder="Mot cherché (prix, suppression, n° de facture…)" value={text} onChange={(e) => setText(e.target.value)} style={{ minWidth: 260 }} />
+        <input placeholder="Mot cherché (prix, remise, n° de facture…)" value={text} onChange={(e) => setText(e.target.value)} style={{ minWidth: 260 }} />
         <label>
           Du <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </label>
@@ -1798,40 +1851,76 @@ function Audit() {
             <ArticlePicker placeholder="Un produit précis" onPick={(a) => setEntity({ id: a.id, name: a.name })} />
           </div>
         )}
+        <label title="Les codes faux et les comptes bloqués restent toujours affichés">
+          <input type="checkbox" checked={hideLogins} onChange={(e) => setHideLogins(e.target.checked)} /> Masquer les connexions
+        </label>
       </div>
-      {log.data?.length === 0 ? (
+      {log.data && lines.length === 0 ? (
         <Empty>Aucune action ne correspond à cette recherche.</Empty>
       ) : (
-        <table className="list">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Utilisateur</th>
-              <th>Action</th>
-              <th>Fiche</th>
-              <th>Détails</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(log.data ?? []).map((a) => (
-              <tr key={a.id}>
-                <td>{dateTime(a.at)}</td>
-                <td>{a.user_name ?? '—'}</td>
-                <td>{ACTION_LABELS[a.action] ?? a.action}</td>
-                <td>
-                  {a.entity_name && a.entity_id ? (
-                    <button className="link" title="Toutes les actions sur cette fiche" onClick={() => setEntity({ id: a.entity_id!, name: a.entity_name! })}>
-                      {a.entity_name}
-                    </button>
-                  ) : (
-                    ''
+        <div className="audit-log">
+          {days.map(([day, items]) => (
+            <section key={day} className="audit-day">
+              <h3>{day}</h3>
+              {items.map(({ row, view, times }) => (
+                <div key={row.id} className={`audit-ev ${view.level}${open === row.id ? ' open' : ''}`}>
+                  <button className="audit-line" aria-expanded={open === row.id} onClick={() => (setOpen(open === row.id ? null : row.id), setRaw(null))} title={view.label}>
+                    <span className="audit-time">{time(row.at)}</span>
+                    <span className={`audit-dot ${view.level}`} aria-hidden>
+                      {AUDIT_ICON[view.level]}
+                    </span>
+                    <span className="audit-text">
+                      {times > 1 ? view.text.replace(/\.$/, '') : view.text}
+                      {times > 1 && <span className="muted"> ({times} fois).</span>}
+                      {view.note && <small>{view.note}</small>}
+                    </span>
+                    <span className="audit-more">{open === row.id ? 'Masquer ▴' : 'Détails ▾'}</span>
+                  </button>
+                  {open === row.id && (
+                    <div className="audit-detail">
+                      <dl>
+                        <dt>Quand</dt>
+                        <dd>{dateTime(row.at)}</dd>
+                        <dt>Qui</dt>
+                        <dd>{row.user_name ?? '—'}</dd>
+                        <dt>Action</dt>
+                        <dd>{view.label}</dd>
+                        {row.entity_name && (
+                          <>
+                            <dt>Fiche</dt>
+                            <dd>
+                              {row.entity_id && ['article', 'customer', 'supplier', 'user', 'sale', 'warehouse'].includes(row.entity ?? '') ? (
+                                <button className="link" title="Toutes les actions sur cette fiche" onClick={() => setEntity({ id: row.entity_id!, name: row.entity_name! })}>
+                                  {row.entity_name}
+                                </button>
+                              ) : (
+                                row.entity_name
+                              )}
+                            </dd>
+                          </>
+                        )}
+                        {view.fields.map(([label, value]) => (
+                          <Fragment key={label}>
+                            <dt>{label}</dt>
+                            <dd>{value}</dd>
+                          </Fragment>
+                        ))}
+                      </dl>
+                      {row.details &&
+                        (raw === row.id ? (
+                          <pre className="audit-raw">{`${row.action}\n${row.details}`}</pre>
+                        ) : (
+                          <button className="link audit-rawlink" onClick={() => setRaw(row.id)}>
+                            Voir les données techniques
+                          </button>
+                        ))}
+                    </div>
                   )}
-                </td>
-                <td className="details">{a.details}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              ))}
+            </section>
+          ))}
+        </div>
       )}
     </>
   );

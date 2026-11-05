@@ -22,6 +22,8 @@ import { AppError, Base, hashPin, newId, verifyPin } from './util';
 
 /** Durée du blocage après trop de codes faux. */
 const LOCK_MINUTES = 15;
+/** Codes du gérant faux acceptés sur un PC avant blocage, quand « Blocage après des codes faux » est à 0. */
+const SUPERVISOR_MAX_FAILURES = 10;
 
 export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
 
@@ -1228,12 +1230,54 @@ export class AdminService extends Base {
   }
 
   /** Code d'un administrateur ou d'un gérant pour valider une action. */
+  /**
+   * Code du gérant tapé à la caisse (remise, annulation, crédit…). Les codes faux sont comptés sur
+   * ce PC : au-delà du nombre réglé dans « Blocage après des codes faux » (10 si le réglage est à 0),
+   * plus aucun code superviseur n'est accepté sur ce PC pendant 15 minutes, même le bon. L'accord
+   * par téléphone reste possible. Chaque code faux et chaque blocage vont au journal d'audit.
+   */
   authorizeSupervisor(pin: string): User {
+    const now = this.now();
+    const state = this.supervisorAttempts();
+    if (state.lockedUntil && state.lockedUntil > now) {
+      const minutes = Math.max(1, Math.ceil((Date.parse(state.lockedUntil) - Date.parse(now)) / 60000));
+      throw new AppError(`Trop de codes du gérant faux sur ce PC : codes refusés encore ${minutes} min. Le gérant peut accepter depuis son téléphone.`, 'SUPERVISOR_LOCKED');
+    }
     // Gérant, administrateur, ou tout utilisateur à qui le droit « Superviseur » est donné (rôle, privilège, délégation).
     const rows = this.db.prepare('SELECT id, role, pin_hash FROM users WHERE active = 1 AND deleted_at IS NULL').all() as { id: string; role: Role; pin_hash: string }[];
     const match = rows.find((r) => this.isSupervisor(r) && verifyPin(pin, r.pin_hash));
-    if (!match) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    if (!match) {
+      // Rien de tapé (le caissier n'a pas encore donné de code) : ce n'est pas un essai.
+      if (/^\d{4,8}$/.test(String(pin ?? ''))) {
+        const sid = this.getSetting('station.storeId');
+        const setting = sid ? this.storeSettings(sid).maxLoginAttempts : 0;
+        const max = setting > 0 ? setting : SUPERVISOR_MAX_FAILURES;
+        const failures = state.failures + 1;
+        const lock = failures >= max;
+        this.audit(null, 'supervisor.failed', undefined, undefined, { failures });
+        this.saveSupervisorAttempts(lock ? { failures: 0, lockedUntil: new Date(Date.parse(now) + LOCK_MINUTES * 60000).toISOString() } : { failures, lockedUntil: null });
+        if (lock) {
+          this.audit(null, 'supervisor.locked', undefined, undefined, { minutes: LOCK_MINUTES });
+          throw new AppError(`Trop de codes du gérant faux : codes refusés sur ce PC pendant ${LOCK_MINUTES} minutes. Le gérant peut accepter depuis son téléphone.`, 'SUPERVISOR_LOCKED');
+        }
+      }
+      throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    }
+    if (state.failures) this.saveSupervisorAttempts({ failures: 0, lockedUntil: null });
     return this.getUser(match.id);
+  }
+
+  private supervisorAttempts(): { failures: number; lockedUntil: string | null } {
+    try {
+      const raw = JSON.parse(this.getSetting('supervisor.attempts') ?? 'null') as { failures?: number; lockedUntil?: string | null } | null;
+      return { failures: Number(raw?.failures ?? 0) || 0, lockedUntil: raw?.lockedUntil ?? null };
+    } catch {
+      return { failures: 0, lockedUntil: null };
+    }
+  }
+
+  private saveSupervisorAttempts(state: { failures: number; lockedUntil: string | null }): void {
+    this.setSetting('supervisor.attempts', JSON.stringify(state));
   }
 
   listVatRates(): { id: string; label: string; rate_bp: number }[] {

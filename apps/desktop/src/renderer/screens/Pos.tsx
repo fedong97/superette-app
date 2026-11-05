@@ -307,6 +307,10 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const scanRef = useRef<HTMLInputElement>(null);
   /** Impression demandée à la validation : F2 ticket, F7 listing, F4 (VALIDER) aucune. */
   const printRef = useRef<PrintChoice>('none');
+  /** Une vente ou un envoi à la caisse en cours : les validations suivantes attendent qu'il réponde. */
+  const sending = useRef(false);
+  /** Identifiant de la validation de la fiche en cours (voir `pos.sell`). */
+  const saleRequest = useRef<string | null>(null);
   /** Vendeur séparé : facture demandée par le client (listing, A4), transmise au caissier avec la fiche. */
   const counterFormat = useRef<'listing' | 'a4' | null>(null);
   /** Ctrl+Suppr : vide la fiche en cours (même action que le bouton « Vider »), défini plus bas. */
@@ -596,33 +600,39 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    * caissier, plafond de crédit dépassé), on demande son code puis on relance.
    */
   const sell = async (payments: SellPayments, pins: { supervisorPin?: string; creditPin?: string; keepChange?: number | null } = {}, reasonNow: string = discountReason) => {
+    // Une validation à la fois : un second F4 pendant l'enregistrement ne crée pas une seconde vente.
+    if (sending.current) return;
+    sending.current = true;
+    // Même identifiant tant que la fiche n'est pas enregistrée : la caisse reconnaît une validation reçue deux fois.
+    saleRequest.current ??= crypto.randomUUID();
     try {
       if (delivery.on && !delivery.address.trim()) {
         setPane('delivery');
         return toast.error("Indiquez l'adresse de livraison (onglet Livraison)");
       }
-      finish(
-        await call('pos.sell', {
-          lines: saleInput(),
-          payments: payments as never,
-          customerId: customer?.id ?? null,
-          clientName: customer ? null : clientName.trim() || null,
-          quoteId: quote?.id ?? null,
-          orderId: order?.id ?? null,
-          priceLevel: levelChoice,
-          warehouseId: warehouseChoice,
-          optionsPin,
-          delivery: deliveryInput(),
-          replacesId: replacing?.id ?? null,
-          sellerId: seller?.id ?? null,
-          book: outage ? null : book,
-          discountReason: reasonNow || null,
-          promoCode: promo?.code ?? null,
-          fieldRepId: fieldRepId || null,
-          outage: outage ? { id: outage.id, at: outageAt ? new Date(outageAt).toISOString() : null, number: book?.number ?? null } : null,
-          ...pins,
-        }),
-      );
+      const sale = await call('pos.sell', {
+        lines: saleInput(),
+        payments: payments as never,
+        customerId: customer?.id ?? null,
+        clientName: customer ? null : clientName.trim() || null,
+        quoteId: quote?.id ?? null,
+        orderId: order?.id ?? null,
+        priceLevel: levelChoice,
+        warehouseId: warehouseChoice,
+        optionsPin,
+        delivery: deliveryInput(),
+        replacesId: replacing?.id ?? null,
+        sellerId: seller?.id ?? null,
+        book: outage ? null : book,
+        discountReason: reasonNow || null,
+        promoCode: promo?.code ?? null,
+        fieldRepId: fieldRepId || null,
+        outage: outage ? { id: outage.id, at: outageAt ? new Date(outageAt).toISOString() : null, number: book?.number ?? null } : null,
+        requestId: saleRequest.current,
+        ...pins,
+      });
+      saleRequest.current = null;
+      finish(sale);
       setBook(null);
       setDiscountReason('');
       setPromo(null);
@@ -639,6 +649,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         setReasonFor({ payments, pins });
         setDialog('reason');
       } else toast.error(err);
+    } finally {
+      sending.current = false;
     }
   };
 
@@ -648,7 +660,15 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
    * automatique est réglée). Rien ne sort du stock avant l'encaissement.
    */
   const sendToCounter = async (print: boolean, supervisorPin?: string, format?: 'listing' | 'a4' | null) => {
-    if (!lines.length) return;
+    if (!lines.length || sending.current) return;
+    sending.current = true;
+    try {
+      await sendToCounterNow(print, supervisorPin, format);
+    } finally {
+      sending.current = false;
+    }
+  };
+  const sendToCounterNow = async (print: boolean, supervisorPin?: string, format?: 'listing' | 'a4' | null) => {
     // F7 (listing) ou Ctrl+F7 (A4) : le client veut une facture, la caisse la trouvera déjà cochée.
     if (format !== undefined) counterFormat.current = format;
     try {

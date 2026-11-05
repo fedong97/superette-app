@@ -435,6 +435,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     if (!station) throw new AppError("Ce poste n'est pas configuré", 'NO_STATION');
     return { storeId: station.store.id, registerId: workRegister(u, station.store.id, station)?.id ?? null, userId: u.id };
   };
+  /** Validations de vente déjà enregistrées (`pos.sell` avec `requestId`) : les 500 dernières, pendant une heure. */
+  const soldRequests = new Map<string, { userId: string; saleId: string; at: number }>();
+  const rememberSale = (requestId: string, userId: string, saleId: string) => {
+    const now = Date.now();
+    soldRequests.set(requestId, { userId, saleId, at: now });
+    for (const [k, v] of soldRequests) {
+      if (soldRequests.size <= 500 && now - v.at < 3_600_000) break;
+      soldRequests.delete(k);
+    }
+  };
   /** Accords donnés à distance par le gérant (téléphone) : valables 2 minutes sur ce PC. */
   const remoteApprovals = new Map<string, { userId: string; until: number }>();
   const supervisor = (pin: string): User => {
@@ -1840,9 +1850,16 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       fieldRepId?: string | null;
       /** Vente faite pendant une coupure déclarée. */
       outage?: { id: string; at?: string | null; number?: string | null } | null;
+      /**
+       * Identifiant de la validation, créé par la caisse une fois par fiche : la même validation
+       * reçue deux fois (F4 appuyé deux fois, touche maintenue) rend la vente déjà faite au lieu d'en créer une seconde.
+       */
+      requestId?: string | null;
     }) => {
       const c = ctx(POS);
       requireTill(sess().user!);
+      const done = input.requestId ? soldRequests.get(input.requestId) : undefined;
+      if (done && done.userId === c.userId) return s.pos.getSale(done.saleId);
       if (input.book || input.outage) requireUser(['sale_book']);
       s.license.assertCanSell();
       const usual = input.customerId ? s.customers.getCustomer(input.customerId).price_level : 'retail';
@@ -1878,13 +1895,17 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         fieldRepId: input.fieldRepId ?? null,
         outage: input.outage ?? null,
       };
-      if (input.replacesId) {
-        const grant = editGrant(input.replacesId);
-        const replaced = s.pos.replaceSale(c, input.replacesId, saleInput, sess().user!.id);
-        if (grant) s.editRequests.markUsed(c, grant.id, replaced.id);
-        return replaced;
-      }
-      return s.pos.completeSale(c, saleInput);
+      const sale = (() => {
+        if (input.replacesId) {
+          const grant = editGrant(input.replacesId);
+          const replaced = s.pos.replaceSale(c, input.replacesId, saleInput, sess().user!.id);
+          if (grant) s.editRequests.markUsed(c, grant.id, replaced.id);
+          return replaced;
+        }
+        return s.pos.completeSale(c, saleInput);
+      })();
+      if (input.requestId) rememberSale(input.requestId, c.userId, sale.id);
+      return sale;
     },
     /** Taux de TVA des frais de livraison, pour le total affiché à la caisse. */
     'deliveries.feeVat': () => {

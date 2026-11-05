@@ -61,6 +61,10 @@ export interface SyncEvent {
   payload: Record<string, unknown> | null;
 }
 
+/** Opération propre à un magasin (pas une donnée partagée) qui n'est pas celui du PC. */
+export const isForeign = (device: Device, e: SyncEvent) =>
+  typeof e.storeId === 'string' && e.storeId !== '' && e.storeId !== device.store_id && !GLOBAL_ENTITIES.includes(e.entity);
+
 export interface Device {
   id: string;
   name: string;
@@ -126,17 +130,18 @@ export class SyncService {
     }
   }
 
-  private async createDevice(name: string, storeId: string, registerId: string) {
+  private async createDevice(name: string, storeId: string, registerId: string, enrolledBy: string) {
     await this.checkStations();
     const id = randomUUID();
     const token = randomBytes(32).toString('base64url');
     try {
-      await this.pg.query('INSERT INTO devices (id, name, store_id, register_id, token_hash) VALUES ($1, $2, $3, $4, $5)', [
+      await this.pg.query('INSERT INTO devices (id, name, store_id, register_id, token_hash, enrolled_by) VALUES ($1, $2, $3, $4, $5, $6)', [
         id,
         name,
         storeId,
         registerId,
         hashToken(token),
+        enrolledBy,
       ]);
     } catch (e) {
       if ((e as { code?: string }).code === '23505') throw new ConflictException('Cette caisse est déjà reliée à un autre PC');
@@ -153,7 +158,7 @@ export class SyncService {
     const expected = Buffer.from(await this.enrollmentKey());
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new ForbiddenException("Clé d'enrôlement incorrecte");
     if (!input.storeId || !input.registerId) throw new BadRequestException('Magasin et caisse obligatoires');
-    return this.createDevice(input.name?.trim() || 'Poste', input.storeId, input.registerId);
+    return this.createDevice(input.name?.trim() || 'Poste', input.storeId, input.registerId, 'key');
   }
 
   /** Nouveau PC : rattaché à une caisse déclarée dans l'administration, avec son code d'activation. */
@@ -169,7 +174,7 @@ export class SyncService {
     );
     const register = rows.find((r) => r.payload.activation_code === code && r.payload.active !== 0);
     if (!register) throw new NotFoundException("Code d'activation inconnu. Vérifiez que le poste principal s'est bien synchronisé.");
-    return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id);
+    return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id, 'activation');
   }
 
   /**
@@ -203,7 +208,7 @@ export class SyncService {
       storeId = stores[0]!.entity_id;
     }
     // Le PC n'occupe aucune caisse : la place est tenue par un identifiant propre au poste.
-    return this.createDevice(input.name?.trim() || 'Poste', storeId, `poste:${randomUUID()}`);
+    return this.createDevice(input.name?.trim() || 'Poste', storeId, `poste:${randomUUID()}`, `user:${user.entity_id}`);
   }
 
   async authenticate(authorization: string | undefined, appVersion?: string): Promise<Device> {
@@ -258,13 +263,24 @@ export class SyncService {
       if (KNOWN_ENTITIES.has(e.entity)) valid.push(e);
       else rejected.push({ id: e.id, reason: `Donnée inconnue du serveur : ${String(e.entity).slice(0, 50)}` });
     }
+    // Opérations d'un magasin envoyées par le PC d'un autre magasin : acceptées (achats groupés, PC du siège),
+    // mais comptées sur le PC pour que l'administration les voie. Une opération déjà reçue ne compte pas.
+    let foreign = 0;
+    let last: { entity: string; storeId: string; at: string } | null = null;
     await this.pg.transaction(async (tx) => {
       for (const e of valid) {
-        await tx.query(
+        const { rows } = await tx.query(
           `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING RETURNING id`,
           [e.id, device.id, e.entity, e.entityId, e.op, e.storeId, e.registerId, e.payload === null ? null : JSON.stringify(e.payload), e.createdAt],
         );
+        if (rows.length && isForeign(device, e)) {
+          foreign++;
+          last = { entity: e.entity, storeId: String(e.storeId), at: new Date().toISOString() };
+        }
+      }
+      if (foreign) {
+        await tx.query('UPDATE devices SET foreign_events = foreign_events + $2, foreign_last = $3 WHERE id = $1', [device.id, foreign, JSON.stringify(last)]);
       }
     });
     return { accepted: valid.map((e) => e.id), rejected };

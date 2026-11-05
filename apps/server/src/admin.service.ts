@@ -160,7 +160,10 @@ export class AdminService {
       revoked_at: Date | null;
       app_version: string | null;
       kind: string;
-    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version, kind FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
+      enrolled_by: string | null;
+      foreign_events: number;
+      foreign_last: { entity: string; storeId: string; at: string } | null;
+    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version, kind, enrolled_by, foreign_events, foreign_last FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
     const { rows: counts } = await this.pg.query<{ total: number; today: number; first: Date | null }>(
       'SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE received_at >= $1)::int AS today, MIN(received_at) AS first FROM events',
       [startOfDay()],
@@ -207,6 +210,9 @@ export class AdminService {
         online: !d.revoked_at && d.last_seen_at !== null && now - new Date(d.last_seen_at).getTime() < ONLINE_MS,
         revoked: d.revoked_at !== null,
         appVersion: d.app_version,
+        enrolledBy: d.enrolled_by === 'key' ? 'Clé d’enrôlement' : d.enrolled_by === 'activation' ? 'Code de caisse' : d.enrolled_by?.startsWith('user:') ? `Utilisateur ${names.get(d.enrolled_by.slice(5)) ?? ''}`.trim() : null,
+        foreignEvents: Number(d.foreign_events ?? 0),
+        foreignLast: d.foreign_last ? { ...d.foreign_last, store: names.get(d.foreign_last.storeId) ?? '—' } : null,
       })),
       stores: [...stores.values()],
       backups: {

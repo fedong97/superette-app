@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Context, type Services, createServices, enrollStation, openDatabase, syncOnce } from '@superette/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { type Db, PG } from '../src/database';
 import { createApp } from '../src/main';
 
 const LOCAL = 'jeton-de-la-fenetre-du-serveur';
@@ -287,6 +288,26 @@ describe('inventaire sur téléphone', () => {
     const g2 = await (await admin('/admin/api/mobile/guests', { inventoryId: invId, name: 'Inès', onBehalfOf: ctx.userId })).json();
     guestSession = (await (await phone('/guest', { code: g2.code })).json()).session;
     expect((await phone('/inventories', undefined, guestSession)).status).toBe(200);
+  });
+
+  it('renvoie aux PC un comptage reçu mais jamais envoyé (serveur arrêté entre les deux), une seule fois', async () => {
+    const pg = app.get<Db>(PG);
+    const c = count(A.lait!, 'Frigo', 2_000, at(33));
+    await syncOnce(pc);
+    const before = line(invId, A.lait!)!.counted ?? 0;
+    // Le serveur a enregistré le comptage puis s'est arrêté avant de l'envoyer aux PC : le téléphone n'a pas eu de réponse.
+    const { rows } = await pg.query<{ device_id: string; user_id: string }>('SELECT device_id, user_id FROM mobile_counts WHERE inventory_id = $1 AND user_id IS NOT NULL LIMIT 1', [invId]);
+    await pg.query('INSERT INTO mobile_counts (id, device_id, user_id, inventory_id, article_id, location, qty, counted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [
+      c.id, rows[0]!.device_id, rows[0]!.user_id, invId, A.lait, 'Frigo', 2_000, new Date(c.countedAt),
+    ]);
+    expect((await (await phone('/counts', { counts: [c] })).json()).accepted).toEqual([c.id]);
+    await syncOnce(pc);
+    expect(line(invId, A.lait!)!.counted).toBe(before + 2_000);
+    const sent = async () => Number((await pg.query<{ n: string }>("SELECT COUNT(*) AS n FROM events WHERE entity = 'inventory_line'")).rows[0]!.n);
+    const n1 = await sent();
+    // Renvoyé encore une fois : déjà parti aux PC, rien de plus.
+    await phone('/counts', { counts: [c] });
+    expect(await sent()).toBe(n1);
   });
 
   it('refuse les comptages d’un inventaire clôturé, puis le téléphone délié', async () => {

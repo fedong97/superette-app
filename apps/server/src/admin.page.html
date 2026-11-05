@@ -298,7 +298,9 @@
     h += '<table><thead><tr><th>PC</th><th>Magasin</th><th>Caisse</th><th>État</th><th>Version</th><th>Dernière synchronisation</th>' + (actions ? '<th>Relié le</th><th></th>' : '') + '</tr></thead><tbody>';
     h += liste.map(function (d) {
       var pastille = d.revoked ? '<span class="pastille non">Délié</span>' : d.online ? '<span class="pastille ok">En ligne</span>' : '<span class="pastille alerte">Hors ligne</span>';
-      return '<tr><td>' + esc(d.name) + '</td><td>' + esc(d.store) + '</td><td>' + esc(d.register) + '</td><td>' + pastille + '</td><td>' + esc(d.appVersion || '—') + '</td><td>' + esc(depuis(d.lastSeenAt)) + '</td>' +
+      var autre = d.foreignEvents ? '<br><small class="muted" title="Accepté : achats groupés ou administration depuis ce PC. À vérifier si ce PC ne sert qu’à la caisse.">' + esc(d.foreignEvents + ' opération(s) pour un autre magasin, dernière : ' + d.foreignLast.entity + ' · ' + d.foreignLast.store) + '</small>' : '';
+      var relie = actions && d.enrolledBy ? '<br><small class="muted">' + esc('Relié par : ' + d.enrolledBy) + '</small>' : '';
+      return '<tr><td>' + esc(d.name) + relie + autre + '</td><td>' + esc(d.store) + '</td><td>' + esc(d.register) + '</td><td>' + pastille + '</td><td>' + esc(d.appVersion || '—') + '</td><td>' + esc(depuis(d.lastSeenAt)) + '</td>' +
         (actions ? '<td>' + esc(date(d.createdAt)) + '</td><td>' + (d.revoked ? '' : '<button class="danger" data-delier="' + esc(d.id) + '" data-nom="' + esc(d.name) + '">Délier</button>') + '</td>' : '') + '</tr>';
     }).join('');
     return h + '</tbody></table></div>';

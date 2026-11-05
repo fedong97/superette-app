@@ -1496,7 +1496,7 @@ export class MobileService {
     if (!(await this.rights(caller)).count) throw new ForbiddenException('Vous n’avez pas le droit de compter un inventaire. Demandez-le au gérant.');
     const accepted: string[] = [];
     const rejected: { id: string; reason: string }[] = [];
-    const touched = new Map<string, Set<string>>();
+    const touched = new Map<string, { articles: Set<string>; counts: string[] }>();
     const inventories = new Map<string, Awaited<ReturnType<MobileService['inventory']>>>();
     const articles = new Map<string, boolean>();
     const soon = Date.now() + 10 * 60_000;
@@ -1536,16 +1536,21 @@ export class MobileService {
         [id, caller.device.id, caller.user.id, invId, articleId, location, c.qty, detail ? JSON.stringify(detail) : null, new Date(at)],
       );
       accepted.push(id);
-      if (!rows.length) continue;
-      if (!touched.has(invId)) touched.set(invId, new Set());
-      touched.get(invId)!.add(articleId);
+      // Déjà reçu : renvoyé aux PC seulement s'il ne leur était jamais parti (serveur arrêté entre les deux).
+      if (!rows.length) {
+        const { rows: unsent } = await this.pg.query('SELECT 1 FROM mobile_counts WHERE id = $1 AND published_at IS NULL', [id]);
+        if (!unsent.length) continue;
+      }
+      if (!touched.has(invId)) touched.set(invId, { articles: new Set(), counts: [] });
+      touched.get(invId)!.articles.add(articleId);
+      touched.get(invId)!.counts.push(id);
     }
-    for (const [invId, ids] of touched) await this.publish(caller, inventories.get(invId)!.inv!, ids);
+    for (const [invId, t] of touched) await this.publish(caller, inventories.get(invId)!.inv!, t.articles, t.counts);
     return { accepted, rejected };
   }
 
   /** Envoie aux PC la nouvelle quantité comptée de chaque produit (total des endroits). */
-  private async publish(caller: MobileCaller, inv: OpenInventory, articleIds: Set<string>) {
+  private async publish(caller: MobileCaller, inv: OpenInventory, articleIds: Set<string>, countIds: string[] = []) {
     const lines = await this.lines(inv.id);
     const levels = await this.stockLevels(inv.warehouseId);
     const now = new Date();
@@ -1596,6 +1601,8 @@ export class MobileService {
           [randomUUID(), caller.device.id, entity, entityId, inv.storeId, JSON.stringify(payload), now],
         );
       }
+      // Dans la même transaction que l'envoi aux PC : un comptage marqué envoyé l'a vraiment été.
+      if (countIds.length) await tx.query('UPDATE mobile_counts SET published_at = $2 WHERE id = ANY($1)', [countIds, now]);
     });
   }
 

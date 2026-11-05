@@ -458,6 +458,20 @@ CREATE TABLE push_tokens (
 CREATE INDEX push_tokens_store ON push_tokens (store_id);
 `,
   },
+  {
+    version: 14,
+    sql: `
+-- Comptage du téléphone reçu mais pas encore envoyé aux PC (arrêt du serveur entre les deux) :
+-- renvoyé quand le téléphone le renvoie. Les comptages déjà là étaient envoyés.
+ALTER TABLE mobile_counts ADD COLUMN published_at TIMESTAMPTZ;
+UPDATE mobile_counts SET published_at = received_at;
+-- Comment le PC a été relié (clé d'enrôlement, code de caisse, utilisateur), et les opérations
+-- qu'il a envoyées pour un autre magasin que le sien (achats groupés, administration…).
+ALTER TABLE devices ADD COLUMN enrolled_by TEXT;
+ALTER TABLE devices ADD COLUMN foreign_events INT NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN foreign_last JSONB;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

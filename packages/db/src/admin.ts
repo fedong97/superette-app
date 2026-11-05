@@ -1297,7 +1297,23 @@ export class AdminService extends Base {
    * Filtres par personne, par fiche (produit, client, fournisseur…), par
    * période et par mot (action, détails, nom de la fiche).
    */
-  auditSearch(f: { userId?: string | null; entityId?: string | null; text?: string | null; from?: string | null; to?: string | null; action?: string | null; limit?: number } = {}): AuditRow[] {
+  auditSearch(
+    f: {
+      userId?: string | null;
+      entityId?: string | null;
+      text?: string | null;
+      from?: string | null;
+      to?: string | null;
+      action?: string | null;
+      /** Motifs d'actions (« cash.* », « customer* ») : un thème du journal. */
+      patterns?: string[] | null;
+      /** Actions dont le nom en français contient le mot cherché (« prix » → price.store…). */
+      textActions?: string[] | null;
+      /** Sans les connexions réussies (les codes faux restent). */
+      hideLogins?: boolean;
+      limit?: number;
+    } = {},
+  ): AuditRow[] {
     const text = f.text?.trim() ? `%${f.text.trim().toLowerCase()}%` : null;
     const to = f.to ? new Date(Date.parse(`${f.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : null;
     return this.db
@@ -1308,18 +1324,35 @@ export class AdminService extends Base {
                               WHEN 'supplier' THEN (SELECT name FROM suppliers WHERE id = a.entity_id)
                               WHEN 'user' THEN (SELECT name FROM users WHERE id = a.entity_id)
                               WHEN 'sale' THEN (SELECT number FROM sales WHERE id = a.entity_id)
-                              WHEN 'warehouse' THEN (SELECT name FROM warehouses WHERE id = a.entity_id) END AS entity_name
+                              WHEN 'warehouse' THEN (SELECT name FROM warehouses WHERE id = a.entity_id)
+                              WHEN 'cash_session' THEN (SELECT r.name FROM cash_sessions cs JOIN registers r ON r.id = cs.register_id WHERE cs.id = a.entity_id)
+                              WHEN 'register' THEN (SELECT name FROM registers WHERE id = a.entity_id)
+                              WHEN 'store' THEN (SELECT name FROM stores WHERE id = a.entity_id)
+                              WHEN 'staff' THEN (SELECT name FROM staff WHERE id = a.entity_id) END AS entity_name
          FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
          WHERE (@userId IS NULL OR a.user_id = @userId) AND (@entityId IS NULL OR a.entity_id = @entityId)
            AND (@action IS NULL OR a.action LIKE @action || '%')
            AND (@from IS NULL OR a.at >= @from) AND (@to IS NULL OR a.at < @to)
-           AND (@text IS NULL OR lower(a.action) LIKE @text OR lower(COALESCE(a.details, '')) LIKE @text OR lower(COALESCE(u.name, '')) LIKE @text
+           AND (@patterns IS NULL OR EXISTS (SELECT 1 FROM json_each(@patterns) p WHERE a.action GLOB p.value))
+           AND (@hideLogins = 0 OR a.action <> 'auth.login')
+           AND (@text IS NULL OR lower(a.action) LIKE @text OR a.action IN (SELECT value FROM json_each(@textActions)) OR lower(COALESCE(a.details, '')) LIKE @text OR lower(COALESCE(u.name, '')) LIKE @text
                 OR (a.entity = 'article' AND a.entity_id IN (SELECT id FROM articles WHERE lower(name) LIKE @text OR lower(code) LIKE @text))
                 OR (a.entity = 'customer' AND a.entity_id IN (SELECT id FROM customers WHERE lower(name) LIKE @text))
                 OR (a.entity = 'supplier' AND a.entity_id IN (SELECT id FROM suppliers WHERE lower(name) LIKE @text)))
          ORDER BY a.at DESC LIMIT @limit`,
       )
-      .all({ userId: f.userId ?? null, entityId: f.entityId ?? null, action: f.action?.trim() || null, from: f.from ?? null, to, text, limit: Math.min(Math.max(f.limit ?? 300, 1), 2000) }) as AuditRow[];
+      .all({
+        userId: f.userId ?? null,
+        entityId: f.entityId ?? null,
+        action: f.action?.trim() || null,
+        from: f.from ?? null,
+        to,
+        text,
+        patterns: f.patterns?.length ? JSON.stringify(f.patterns) : null,
+        textActions: JSON.stringify(f.textActions ?? []),
+        hideLogins: f.hideLogins ? 1 : 0,
+        limit: Math.min(Math.max(f.limit ?? 300, 1), 2000),
+      }) as AuditRow[];
   }
 
   /**

@@ -118,6 +118,14 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.114.0',
+    items: [
+      "Journal d'audit en clair : chaque action se lit comme une phrase (« ANGE a fermé la caisse électronique (Z n° 5) avec un manque de 1 350 FCFA »), avec le nom de la caisse. Plus de codes ni de données techniques à l'écran.",
+      "Journal d'audit : en rouge ce qui doit alerter (écart de caisse, annulation, suppression, code faux), en orange ce qui mérite un coup d'œil (remise, prix changé). Les lignes sont groupées par jour et un clic montre le détail, montant par montant.",
+      "Journal d'audit : filtres par thème (Caisse et argent, Ventes, Prix et articles…) et « À surveiller » pour ne voir que le rouge et l'orange. Les connexions sont masquées au départ ; les codes faux restent toujours visibles.",
+    ],
+  },
+  {
     version: '0.113.0',
     items: [
       'Une seule version réunit les nouveautés du logiciel de caisse (0.107.0 et 0.108.0 : menus par métier, caisse, fenêtres entières) et celles d’ONIX 360 Mobile (0.107.0 à 0.112.0 : nouvelle interface, gestion sur le téléphone, notifications). Les deux listes sont ci-dessous.',

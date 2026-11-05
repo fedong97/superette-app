@@ -43,3 +43,4 @@ export * from './outageBook';
 export * from './outageBookRead';
 export * from './digitNet';
 export * from './pcScreens';
+export * from './auditText';

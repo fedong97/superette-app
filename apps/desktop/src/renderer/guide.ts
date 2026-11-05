@@ -122,7 +122,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     items: [
       'Une seule version réunit les nouveautés du logiciel de caisse (0.107.0 et 0.108.0 : menus par métier, caisse, fenêtres entières) et celles d’ONIX 360 Mobile (0.107.0 à 0.112.0 : nouvelle interface, gestion sur le téléphone, notifications). Les deux listes sont ci-dessous.',
       "Caisse : appuyer deux fois sur F4 (ou garder la touche enfoncée) n'enregistre plus deux ventes ; la seconde validation est ignorée.",
-      "Code du gérant à la caisse : après 10 codes faux (ou le nombre réglé dans « Blocage après des codes faux »), plus aucun code n'est accepté sur ce PC pendant 15 minutes. Le gérant peut toujours accepter depuis son téléphone. Chaque code faux est dans le journal d'audit.",
+      "Code du gérant à la caisse : après 4 codes faux (ou le nombre réglé dans « Blocage après des codes faux »), plus aucun code n'est accepté sur ce PC pendant 15 minutes. Le gérant peut toujours accepter depuis son téléphone. Chaque code faux est dans le journal d'audit.",
     ],
   },
   {

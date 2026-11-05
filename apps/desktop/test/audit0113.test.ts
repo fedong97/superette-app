@@ -56,28 +56,27 @@ describe('une seule vente par validation', () => {
 });
 
 describe('code du gérant à la caisse', () => {
-  it('bloqué sur le PC après 10 codes faux, même le bon ; le blocage est au journal', () => {
-    for (let i = 0; i < 9; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
+  it('bloqué sur le PC après 4 codes faux, même le bon ; le blocage est au journal', () => {
+    for (let i = 0; i < 3; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
     expect(() => s.admin.authorizeSupervisor('9999')).toThrow(/pendant 15 minutes/);
     expect(() => s.admin.authorizeSupervisor('2222')).toThrow(/codes refusés encore/);
     const actions = s.admin.auditLog(50).map((r) => r.action);
     expect(actions).toContain('supervisor.locked');
-    expect(actions.filter((a) => a === 'supervisor.failed')).toHaveLength(10);
+    expect(actions.filter((a) => a === 'supervisor.failed')).toHaveLength(4);
   });
 
   it('un bon code remet le compte à zéro ; un code vide ne compte pas', () => {
-    for (let i = 0; i < 9; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow();
+    for (let i = 0; i < 3; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow();
     expect(s.admin.authorizeSupervisor('2222').name).toBe('Mireille');
     for (let i = 0; i < 20; i++) expect(() => s.admin.authorizeSupervisor('')).toThrow('Code superviseur refusé');
-    for (let i = 0; i < 9; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
+    for (let i = 0; i < 3; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
     expect(s.admin.authorizeSupervisor('2222').name).toBe('Mireille');
   });
 
   it('suit le réglage « Blocage après des codes faux » quand il est donné', () => {
     const storeId = s.admin.station()!.store.id;
-    s.admin.saveStoreSettings(s.pos.getSale(sell().id).user_id, storeId, { maxLoginAttempts: 3 });
-    expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
-    expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
+    s.admin.saveStoreSettings(s.pos.getSale(sell().id).user_id, storeId, { maxLoginAttempts: 6 });
+    for (let i = 0; i < 5; i++) expect(() => s.admin.authorizeSupervisor('9999')).toThrow('Code superviseur refusé');
     expect(() => s.admin.authorizeSupervisor('9999')).toThrow(/pendant 15 minutes/);
   });
 });

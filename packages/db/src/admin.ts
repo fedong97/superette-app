@@ -23,7 +23,7 @@ import { AppError, Base, hashPin, newId, verifyPin } from './util';
 /** Durée du blocage après trop de codes faux. */
 const LOCK_MINUTES = 15;
 /** Codes du gérant faux acceptés sur un PC avant blocage, quand « Blocage après des codes faux » est à 0. */
-const SUPERVISOR_MAX_FAILURES = 10;
+const SUPERVISOR_MAX_FAILURES = 4;
 
 export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
 
@@ -1232,7 +1232,7 @@ export class AdminService extends Base {
   /** Code d'un administrateur ou d'un gérant pour valider une action. */
   /**
    * Code du gérant tapé à la caisse (remise, annulation, crédit…). Les codes faux sont comptés sur
-   * ce PC : au-delà du nombre réglé dans « Blocage après des codes faux » (10 si le réglage est à 0),
+   * ce PC : au-delà du nombre réglé dans « Blocage après des codes faux » (4 si le réglage est à 0),
    * plus aucun code superviseur n'est accepté sur ce PC pendant 15 minutes, même le bon. L'accord
    * par téléphone reste possible. Chaque code faux et chaque blocage vont au journal d'audit.
    */

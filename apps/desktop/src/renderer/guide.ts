@@ -126,6 +126,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       "Mobile Money : une demande abandonnée à la caisse est encore vérifiée pendant 24 h. Si le client paie quand même, le gérant le voit dans « À traiter » et note dans Administration › Paiement mobile ce qu'il a fait (remboursé, rattaché à une vente).",
       "ONIX 360 Mobile : un comptage ou un relevé refusé par le serveur ne disparaît plus. Il est gardé dans Réglages › « Saisies à vérifier », avec son motif, et se partage avec le gérant.",
       "Synchronisation : des opérations refusées par un serveur pas encore à jour ne bloquent plus les ventes faites après elles.",
+      "Administration › Serveur central : chaque conflit de synchronisation se réessaie après correction, ou s'ignore avec un motif. Les conflits ouverts sont dans « À traiter ». Le bouton « Exporter le diagnostic » prépare un fichier pour le support, sans jeton ni code.",
     ],
   },
   {

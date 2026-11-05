@@ -2919,4 +2919,14 @@ ALTER TABLE mobile_payments ADD COLUMN late_checked TEXT;
 ALTER TABLE mobile_payments ADD COLUMN late_handled TEXT;
 `,
   },
+  {
+    version: 69,
+    name: 'conflits de synchronisation résolus',
+    sql: `
+-- Opération reçue qui ne s'appliquait pas : réessayée avec succès ou ignorée (avec le motif), par qui.
+ALTER TABLE sync_conflicts ADD COLUMN resolved_at TEXT;
+ALTER TABLE sync_conflicts ADD COLUMN resolution TEXT;
+ALTER TABLE sync_conflicts ADD COLUMN resolved_by TEXT;
+`,
+  },
 ];

@@ -1,6 +1,6 @@
 import type { Db } from './database';
 import type { StockService } from './stock';
-import { Base, type Clock, newId } from './util';
+import { AppError, Base, type Clock, newId } from './util';
 
 /** Une opération échangée avec le serveur central. */
 export interface SyncEvent {
@@ -319,7 +319,7 @@ export class SyncService extends Base {
       connected: Boolean(this.get('sync.token')),
       cursor: Number(this.get('sync.cursor') ?? 0),
       pending: this.db.prepare('SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL').pluck().get() as number,
-      conflicts: this.db.prepare('SELECT COUNT(*) FROM sync_conflicts').pluck().get() as number,
+      conflicts: this.db.prepare('SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NULL').pluck().get() as number,
       lastSyncAt: this.get('sync.lastSyncAt'),
       lastError: this.get('sync.lastError'),
       checkOk: this.lastCheck()?.ok ?? null,
@@ -410,8 +410,70 @@ export class SyncService extends Base {
     this.set('sync.lastError', error);
   }
 
+  /**
+   * Diagnostic de la synchronisation à envoyer au support : état, file d'envoi par donnée,
+   * conflits ouverts. Aucun jeton, aucune clé, aucun code n'y figure.
+   */
+  diagnostic() {
+    const st = this.state();
+    const waiting = this.db
+      .prepare('SELECT entity, COUNT(*) AS n, MIN(created_at) AS oldest FROM outbox WHERE sent_at IS NULL GROUP BY entity ORDER BY n DESC LIMIT 50')
+      .all() as { entity: string; n: number; oldest: string }[];
+    const resolved = this.db.prepare('SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NOT NULL').pluck().get() as number;
+    return {
+      server: st.url,
+      deviceId: st.deviceId,
+      connected: st.connected,
+      cursor: st.cursor,
+      epoch: this.get('sync.epoch'),
+      lastSyncAt: st.lastSyncAt,
+      lastError: st.lastError,
+      pending: st.pending,
+      pendingByEntity: waiting,
+      conflicts: { open: st.conflicts, resolved, latest: this.conflicts(20) },
+      check: { ok: st.checkOk, at: st.checkAt },
+      serverBackup: { at: st.serverBackupAt, problem: st.serverBackupProblem },
+    };
+  }
+
+  /** Opérations reçues qui ne s'appliquent pas, pas encore résolues. */
   conflicts(limit = 100): { id: string; entity: string; entity_id: string; message: string; at: string }[] {
-    return this.db.prepare('SELECT id, entity, entity_id, message, at FROM sync_conflicts ORDER BY at DESC LIMIT ?').all(limit) as never;
+    return this.db.prepare('SELECT id, entity, entity_id, message, at FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY at DESC LIMIT ?').all(limit) as never;
+  }
+
+  private openConflict(id: string): { id: string; entity: string; entity_id: string; payload: string | null; at: string } {
+    const c = this.db.prepare('SELECT id, entity, entity_id, payload, at FROM sync_conflicts WHERE id = ? AND resolved_at IS NULL').get(id) as
+      | { id: string; entity: string; entity_id: string; payload: string | null; at: string }
+      | undefined;
+    if (!c) throw new AppError('Conflit introuvable ou déjà résolu', 'NOT_FOUND');
+    return c;
+  }
+
+  /**
+   * Réessaie l'opération reçue (après avoir corrigé la cause : code-barres libéré, article recréé…).
+   * Appliquée : le conflit est résolu. Toujours en échec : il reste, avec le nouveau motif.
+   */
+  retryConflict(userId: string, id: string): { ok: boolean; message: string | null } {
+    const c = this.openConflict(id);
+    const payload = c.payload ? (JSON.parse(c.payload) as Record<string, unknown> | null) : null;
+    const event: SyncEvent = { id: c.id, entity: c.entity, entityId: c.entity_id, op: payload ? 'upsert' : 'delete', storeId: null, registerId: null, createdAt: c.at, payload };
+    const r = this.applyRemote([event], false);
+    if (r.conflicts) {
+      this.db.prepare('UPDATE sync_conflicts SET message = ? WHERE id = ?').run(r.error ?? 'Toujours en échec', id);
+      return { ok: false, message: r.error ?? null };
+    }
+    this.db.prepare("UPDATE sync_conflicts SET resolved_at = ?, resolution = 'Réessayé : appliqué', resolved_by = ? WHERE id = ?").run(this.now(), userId, id);
+    this.audit(userId, 'sync.conflict_retried', c.entity, c.entity_id);
+    return { ok: true, message: null };
+  }
+
+  /** L'opération reçue ne sera pas appliquée sur ce PC : le motif est gardé et va au journal. */
+  ignoreConflict(userId: string, id: string, reason: string): void {
+    const c = this.openConflict(id);
+    const why = reason.trim().slice(0, 200);
+    if (!why) throw new AppError('Indiquez pourquoi ce conflit est ignoré', 'INVALID');
+    this.db.prepare('UPDATE sync_conflicts SET resolved_at = ?, resolution = ?, resolved_by = ? WHERE id = ?').run(this.now(), `Ignoré : ${why}`, userId, id);
+    this.audit(userId, 'sync.conflict_ignored', c.entity, c.entity_id, { reason: why });
   }
 
   // --- Envoi ------------------------------------------------------------------
@@ -709,11 +771,12 @@ export class SyncService extends Base {
    * échoue (code-barres déjà pris par un autre article…) est notée dans
    * `sync_conflicts` sans bloquer les suivantes.
    */
-  applyRemote(events: SyncEvent[]): { applied: number; conflicts: number } {
+  applyRemote(events: SyncEvent[], record = true): { applied: number; conflicts: number; error?: string } {
     const stockToRecompute = new Map<string, [string, string]>();
     const lotsToRecompute = new Set<string>();
     let applied = 0;
     let conflicts = 0;
+    let error: string | undefined;
     // Les clés étrangères sont vérifiées à la source ; ici l'ordre d'arrivée
     // entre postes n'est pas garanti (un mouvement peut précéder son lot).
     this.db.pragma('foreign_keys = OFF');
@@ -725,7 +788,8 @@ export class SyncService extends Base {
             applied++;
           } catch (e) {
             conflicts++;
-            this.conflict(event, e instanceof Error ? e.message : String(e));
+            error = e instanceof Error ? e.message : String(e);
+            if (record) this.conflict(event, error);
           }
         }
         for (const [articleId, warehouseId] of stockToRecompute.values()) this.stock.recompute(articleId, warehouseId);
@@ -734,7 +798,7 @@ export class SyncService extends Base {
     } finally {
       this.db.pragma('foreign_keys = ON');
     }
-    return { applied, conflicts };
+    return error === undefined ? { applied, conflicts } : { applied, conflicts, error };
   }
 
   /** Le document local est-il plus avancé (expédié, clôturé…) que la version reçue ? */

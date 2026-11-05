@@ -5921,6 +5921,13 @@ export const EN: Record<string, string> = {
   "a payé": "paid",
   "après l'abandon à la caisse. Qu'avez-vous fait (remboursé, rattaché au ticket n°…) ?": "after it was abandoned at the till. What did you do (refunded, attached to receipt no.…)?",
   "Paiement noté comme traité": "Payment marked as handled",
+  "Fichier à envoyer au support : état de la synchronisation, file d'envoi, conflits. Sans jeton, clé ni code.": "File to send to support: sync state, send queue, conflicts. No token, key or code.",
+  "Exporter le diagnostic": "Export diagnostics",
+  "Opération appliquée": "Operation applied",
+  "Toujours en échec :": "Still failing:",
+  "Pourquoi ignorer cette opération ? Elle ne sera pas appliquée sur ce PC (le motif va au journal d'audit).": "Why ignore this operation? It will not be applied on this PC (the reason goes to the audit log).",
+  "Ignorer…": "Ignore…",
+  "Administration › Serveur central : chaque conflit de synchronisation se réessaie après correction, ou s'ignore avec un motif. Les conflits ouverts sont dans « À traiter ». Le bouton « Exporter le diagnostic » prépare un fichier pour le support, sans jeton ni code.": "Administration › Central server: each sync conflict can be retried after fixing it, or ignored with a reason. Open conflicts are in \"To do\". The \"Export diagnostics\" button prepares a file for support, with no token or code.",
   // 0.112.0 : scan avec la caméra
   "ONIX 360 Mobile : le scan avec l'appareil photo marche de nouveau (inventaire, panier au rayon, réception, contrôle sortie, QR code du gérant). Depuis la 0.109.0, l'image de la caméra restait cachée.": "ONIX 360 Mobile: scanning with the camera works again (inventory, shelf basket, receiving, exit check, manager QR code). Since 0.109.0, the camera image stayed hidden.",
   // 0.111.0 : détail des factures sur le téléphone

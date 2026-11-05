@@ -691,6 +691,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       ['expenses_pending', can(u, ['expense_approve'])],
       ['outages_open', can(u, ['outage_close', 'sale_book'])],
       ['mobile_late', can(u, ['settings_edit'])],
+      ['sync_conflicts', u.role === 'admin'],
     ];
     return s.attention.list(storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
   };
@@ -1503,6 +1504,14 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     'sync.lastCheck': () => (requireUser(ADMIN), s.sync.lastCheck()),
     'sync.resendEntity': (entity: string) => (requireAdmin(), sync.resendEntity(entity)),
     'sync.conflicts': () => (requireUser(ADMIN), s.sync.conflicts()),
+    /** Diagnostic sans secret (ni jeton, ni clé, ni code) à envoyer au support. */
+    'sync.diagnostic': () => {
+      requireUser(ADMIN);
+      const { receivables: _clients, ...pc } = stationStatus();
+      return { exportedAt: new Date().toISOString(), pc, sync: s.sync.diagnostic() };
+    },
+    'sync.retryConflict': (id: string) => s.sync.retryConflict(requireUser(ADMIN).id, id),
+    'sync.ignoreConflict': (id: string, reason: string) => s.sync.ignoreConflict(requireUser(ADMIN).id, id, reason),
     'sync.disconnect': () => {
       requireAdmin();
       s.sync.disconnect();

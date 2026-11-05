@@ -169,7 +169,7 @@ export class FiscalYearService extends Base {
     const linked = this.db.prepare("SELECT 1 FROM settings WHERE key = 'sync.token'").get();
     if (linked) {
       const pending = this.db.prepare('SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL').pluck().get() as number;
-      const conflicts = this.db.prepare('SELECT COUNT(*) FROM sync_conflicts').pluck().get() as number;
+      const conflicts = this.db.prepare('SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NULL').pluck().get() as number;
       add('sync', 'Serveur central', pending === 0 && conflicts === 0, false, pending || conflicts ? `${pending} opération(s) pas encore envoyée(s), ${conflicts} conflit(s) : synchronisez avant de clôturer.` : 'Tout est envoyé.');
     }
     return checks;

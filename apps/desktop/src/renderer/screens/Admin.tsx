@@ -2,7 +2,7 @@ import { BACKUP_FREQUENCIES, ELECTRONIC_METHODS, PAYMENT_METHODS, type Permissio
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
-import { askConfirm, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, askText, downloadText, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
 import { Delegation } from './AdminDelegation';
 import { Digest } from './AdminDigest';
@@ -1359,6 +1359,21 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 Renvoyer au serveur ce qui lui manque
               </button>
             )}
+            {isAdmin && (
+              <button
+                title="Fichier à envoyer au support : état de la synchronisation, file d'envoi, conflits. Sans jeton, clé ni code."
+                onClick={async () => {
+                  try {
+                    const d = await call('sync.diagnostic');
+                    downloadText(`diagnostic-onix360-${d.exportedAt.slice(0, 10)}.json`, JSON.stringify(d, null, 2), 'application/json');
+                  } catch (err) {
+                    toast.error(err);
+                  }
+                }}
+              >
+                Exporter le diagnostic
+              </button>
+            )}
             <button className="primary" disabled={busy} onClick={() => act(() => call('sync.now'))}>
               Synchroniser maintenant
             </button>
@@ -1412,12 +1427,17 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
       {(conflicts.data ?? []).length > 0 && (
         <>
           <h3>Conflits à vérifier</h3>
+          <p className="muted">
+            Opérations envoyées par d'autres PC qui ne s'appliquent pas ici. Corrigez la cause (par exemple un code-barres déjà pris), puis réessayez ; sinon ignorez-les en
+            disant pourquoi.
+          </p>
           <table className="list">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Élément</th>
                 <th>Problème</th>
+                {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -1426,6 +1446,42 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                   <td>{dateTime(c.at)}</td>
                   <td>{c.entity}</td>
                   <td>{c.message}</td>
+                  {isAdmin && (
+                    <td className="nowrap">
+                      <button
+                        className="small"
+                        onClick={async () => {
+                          try {
+                            const r = await call('sync.retryConflict', c.id);
+                            if (r.ok) toast.ok('Opération appliquée');
+                            else toast.error(new Error(`Toujours en échec : ${r.message ?? ''}`));
+                          } catch (err) {
+                            toast.error(err);
+                          }
+                          conflicts.reload();
+                          state.reload();
+                        }}
+                      >
+                        Réessayer
+                      </button>
+                      <button
+                        className="small ghost"
+                        onClick={async () => {
+                          const reason = await askText("Pourquoi ignorer cette opération ? Elle ne sera pas appliquée sur ce PC (le motif va au journal d'audit).");
+                          if (!reason) return;
+                          try {
+                            await call('sync.ignoreConflict', c.id, reason);
+                          } catch (err) {
+                            toast.error(err);
+                          }
+                          conflicts.reload();
+                          state.reload();
+                        }}
+                      >
+                        Ignorer…
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

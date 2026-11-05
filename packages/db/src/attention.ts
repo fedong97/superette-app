@@ -27,7 +27,8 @@ export type AttentionKey =
   | 'stock_anomalies'
   | 'expenses_pending'
   | 'outages_open'
-  | 'mobile_late';
+  | 'mobile_late'
+  | 'sync_conflicts';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -347,6 +348,19 @@ export class AttentionService extends Base {
         amount: rows.length ? rows.reduce((t, r) => t + r.amount, 0) : null,
         detail: rows.length ? `Client${rows.length > 1 ? 's' : ''} ${firstNames(rows.map((r) => r.phone))} : remboursez ou rattachez le paiement à une vente` : 'Aucun paiement reçu après un abandon',
         tone: 'danger',
+      });
+    }
+
+    if (want('sync_conflicts')) {
+      // Opérations d'autres PC qui ne s'appliquent pas ici : ce PC n'a pas les mêmes données que les autres.
+      const rows = this.db.prepare('SELECT entity FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY at').pluck().all() as string[];
+      items.push({
+        key: 'sync_conflicts',
+        label: 'Conflits de synchronisation',
+        count: rows.length,
+        amount: null,
+        detail: rows.length ? `${rows.length} opération(s) reçue(s) d'autres PC non appliquée(s) (${firstNames([...new Set(rows)])}) : réessayez ou ignorez-les` : 'Aucun conflit',
+        tone: 'warning',
       });
     }
 

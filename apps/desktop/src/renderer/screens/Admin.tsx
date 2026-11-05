@@ -1312,6 +1312,15 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 <th>État</th>
                 <td className={st.lastError ? 'neg' : 'pos'}>{st.lastError ?? 'Connecté'}</td>
               </tr>
+              {st.untrusted && (
+                <tr>
+                  <th>Non partagé</th>
+                  <td className="neg">
+                    {st.untrusted.count} modification(s) faite(s) ici sont réservées aux PC de confiance du siège ({st.untrusted.entity}) : elles restent sur ce PC. Faites-les
+                    depuis un PC de confiance.
+                  </td>
+                </tr>
+              )}
               {(st.serverBackupAt || st.serverBackupProblem) && (
                 <tr>
                   <th>Sauvegarde du serveur</th>

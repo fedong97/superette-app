@@ -70,6 +70,30 @@ export interface Device {
   name: string;
   store_id: string;
   register_id: string;
+  /** PC de confiance (siège), désigné dans l'administration du serveur. */
+  trusted?: boolean;
+}
+
+/** Données de tout le réseau : réservées aux PC de confiance (sauf la fiche du magasin du PC lui-même). */
+const NETWORK_ADMIN = new Set(['store', 'company', 'vat_rate', 'role_rights']);
+/** Données partagées rattachées à un magasin : un PC ordinaire ne touche qu'à celles du sien. */
+const STORE_OWNED = new Set(['user', 'register', 'warehouse']);
+
+/**
+ * Pourquoi l'opération demande un PC de confiance, ou `null` si un PC ordinaire peut l'envoyer.
+ * Les ventes, le stock, la caisse et le catalogue (articles, clients, fournisseurs) restent ouverts à tous.
+ */
+export function trustNeeded(device: Device, e: SyncEvent): string | null {
+  if (isForeign(device, e)) return 'opération d’un autre magasin';
+  if (NETWORK_ADMIN.has(e.entity)) {
+    if (e.entity === 'store' && e.entityId === device.store_id) return null;
+    return 'administration du réseau';
+  }
+  if (STORE_OWNED.has(e.entity)) {
+    const owner = e.payload && 'store_id' in e.payload ? e.payload['store_id'] : e.storeId;
+    if (owner !== device.store_id) return owner ? 'utilisateur, caisse ou dépôt d’un autre magasin' : 'utilisateur, caisse ou dépôt de tous les magasins';
+  }
+  return null;
 }
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -215,7 +239,7 @@ export class SyncService {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     if (!token) throw new UnauthorizedException('Jeton manquant');
     const { rows } = await this.pg.query<Device>(
-      "UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id, name, store_id, register_id",
+      "UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id, name, store_id, register_id, trusted",
       [hashToken(token), /^\d+\.\d+\.\d+$/.test(appVersion ?? '') ? appVersion : null],
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');
@@ -252,16 +276,29 @@ export class SyncService {
    * Une opération refusée (donnée qu'un serveur plus ancien ne connaît pas) ne
    * bloque pas les autres : elle reste en attente sur le PC jusqu'à la mise à jour du serveur.
    */
-  async push(device: Device, events: SyncEvent[]): Promise<{ accepted: string[]; rejected: { id: string; reason: string }[] }> {
+  async push(device: Device, events: SyncEvent[]): Promise<{ accepted: string[]; rejected: { id: string; reason: string; final?: true }[] }> {
     if (!Array.isArray(events) || events.length > 2000) throw new BadRequestException('Lot d’opérations invalide (2000 maximum)');
     const valid: SyncEvent[] = [];
-    const rejected: { id: string; reason: string }[] = [];
+    const rejected: { id: string; reason: string; final?: true }[] = [];
+    // Déjà là, à l'identique (données de départ d'un PC neuf) : acceptée sans rien enregistrer.
+    const same: string[] = [];
+    const guarded = !device.trusted && (await this.trustEnforced());
     for (const e of events) {
       if (typeof e?.id !== 'string' || typeof e.entityId !== 'string' || !['upsert', 'delete'].includes(e.op)) {
         throw new BadRequestException(`Opération invalide : ${JSON.stringify(e).slice(0, 200)}`);
       }
-      if (KNOWN_ENTITIES.has(e.entity)) valid.push(e);
-      else rejected.push({ id: e.id, reason: `Donnée inconnue du serveur : ${String(e.entity).slice(0, 50)}` });
+      if (!KNOWN_ENTITIES.has(e.entity)) {
+        rejected.push({ id: e.id, reason: `Donnée inconnue du serveur : ${String(e.entity).slice(0, 50)}` });
+        continue;
+      }
+      const why = guarded ? trustNeeded(device, e) : null;
+      if (!why) {
+        valid.push(e);
+        continue;
+      }
+      if (await this.unchanged(e)) same.push(e.id);
+      // Refus définitif : le PC ne la renverra pas, et le dit à l'écran.
+      else rejected.push({ id: e.id, reason: `Réservé aux PC de confiance (${why}) : ${e.entity}`, final: true });
     }
     // Opérations d'un magasin envoyées par le PC d'un autre magasin : acceptées (achats groupés, PC du siège),
     // mais comptées sur le PC pour que l'administration les voie. Une opération déjà reçue ne compte pas.
@@ -283,7 +320,23 @@ export class SyncService {
         await tx.query('UPDATE devices SET foreign_events = foreign_events + $2, foreign_last = $3 WHERE id = $1', [device.id, foreign, JSON.stringify(last)]);
       }
     });
-    return { accepted: valid.map((e) => e.id), rejected };
+    return { accepted: [...valid.map((e) => e.id), ...same], rejected };
+  }
+
+  /** Les règles des PC de confiance s'appliquent dès qu'un PC de confiance est désigné. */
+  private async trustEnforced(): Promise<boolean> {
+    const { rows } = await this.pg.query("SELECT 1 FROM devices WHERE trusted AND revoked_at IS NULL AND kind = 'pc' LIMIT 1");
+    return rows.length > 0;
+  }
+
+  /** La dernière version connue du serveur est-elle déjà exactement celle-ci ? */
+  private async unchanged(e: SyncEvent): Promise<boolean> {
+    const { rows } = await this.pg.query<{ op: string; payload: unknown }>('SELECT op, payload FROM events WHERE entity = $1 AND entity_id = $2 ORDER BY seq DESC LIMIT 1', [e.entity, e.entityId]);
+    const last = rows[0];
+    if (!last || last.op !== e.op) return false;
+    if (e.payload === null || last.payload === null) return e.payload === last.payload;
+    const { rows: eq } = await this.pg.query<{ same: boolean }>('SELECT $1::jsonb = $2::jsonb AS same', [JSON.stringify(last.payload), JSON.stringify(e.payload)]);
+    return eq[0]?.same === true;
   }
 
   /**

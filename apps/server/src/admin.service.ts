@@ -163,7 +163,8 @@ export class AdminService {
       enrolled_by: string | null;
       foreign_events: number;
       foreign_last: { entity: string; storeId: string; at: string } | null;
-    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version, kind, enrolled_by, foreign_events, foreign_last FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
+      trusted: boolean;
+    }>('SELECT id, name, store_id, register_id, created_at, last_seen_at, revoked_at, app_version, kind, enrolled_by, foreign_events, foreign_last, trusted FROM devices ORDER BY revoked_at NULLS FIRST, created_at');
     const { rows: counts } = await this.pg.query<{ total: number; today: number; first: Date | null }>(
       'SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE received_at >= $1)::int AS today, MIN(received_at) AS first FROM events',
       [startOfDay()],
@@ -212,6 +213,7 @@ export class AdminService {
         appVersion: d.app_version,
         enrolledBy: d.enrolled_by === 'key' ? 'Clé d’enrôlement' : d.enrolled_by === 'activation' ? 'Code de caisse' : d.enrolled_by?.startsWith('user:') ? `Utilisateur ${names.get(d.enrolled_by.slice(5)) ?? ''}`.trim() : null,
         foreignEvents: Number(d.foreign_events ?? 0),
+        trusted: d.trusted === true,
         foreignLast: d.foreign_last ? { ...d.foreign_last, store: names.get(d.foreign_last.storeId) ?? '—' } : null,
       })),
       stores: [...stores.values()],
@@ -305,6 +307,17 @@ export class AdminService {
   }
 
   // ——— Actions ———
+
+  /**
+   * PC de confiance (siège) : dès qu'un PC l'est, seuls ces PC envoient l'administration du réseau
+   * et les données des autres magasins. Le dernier ne peut pas être retiré par erreur sans le dire.
+   */
+  async trustDevice(id: string, trusted: boolean) {
+    const { rows } = await this.pg.query("UPDATE devices SET trusted = $2 WHERE id = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id", [id, trusted === true]);
+    if (!rows[0]) throw new NotFoundException('Poste introuvable ou délié');
+    const { rows: left } = await this.pg.query("SELECT COUNT(*)::int AS n FROM devices WHERE trusted AND revoked_at IS NULL AND kind = 'pc'");
+    return { trusted: trusted === true, trustedCount: Number((left[0] as { n: number }).n) };
+  }
 
   async revokeDevice(id: string) {
     const { rows } = await this.pg.query('UPDATE devices SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING id', [id]);

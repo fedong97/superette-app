@@ -248,7 +248,14 @@ export class AdminController {
     return this.admin.salesByDay();
   }
 
-  @Post('admin/api/devices/:id/revoke')
+  @Post('admin/api/devices/:id/trust')
+  @HttpCode(200)
+  async trust(@Req() req: Request, @Param('id') id: string, @Body() body: { trusted?: boolean }) {
+    this.guard(req);
+    return this.admin.trustDevice(id, body?.trusted === true);
+  }
+
+    @Post('admin/api/devices/:id/revoke')
   @HttpCode(200)
   async revoke(@Req() req: Request, @Param('id') id: string) {
     this.guard(req);

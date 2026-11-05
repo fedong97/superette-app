@@ -31,6 +31,8 @@ export interface SyncState {
   serverBackupProblem: string | null;
   /** Dernière sauvegarde réussie du serveur central (null : inconnue). */
   serverBackupAt: string | null;
+  /** Modifications que le serveur réserve aux PC de confiance : pas partagées (null : aucune). */
+  untrusted: { count: number; entity: string; reason: string; at: string } | null;
 }
 
 /** Entités stockées telles quelles dans une table (clé `id`). */
@@ -326,7 +328,32 @@ export class SyncService extends Base {
       checkAt: this.lastCheck()?.at ?? null,
       serverBackupProblem: this.serverBackup()?.problem ?? null,
       serverBackupAt: this.serverBackup()?.at ?? null,
+      untrusted: this.untrusted(),
     };
+  }
+
+  private untrusted(): SyncState['untrusted'] {
+    const raw = this.get('sync.untrusted');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as SyncState['untrusted'];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Opérations que le serveur refuse pour de bon (réservées aux PC de confiance) : elles ne repartent
+   * plus, restent faites sur ce PC seulement, et l'écran du serveur central le dit.
+   */
+  markRefused(refused: { id: string; reason: string }[]): void {
+    if (!refused.length) return;
+    const entities = this.db.prepare(`SELECT DISTINCT entity FROM outbox WHERE id IN (${refused.map(() => '?').join(',')}) ORDER BY entity`).pluck().all(...refused.map((r) => r.id)) as string[];
+    this.markSent(refused.map((r) => r.id));
+    const before = this.untrusted()?.count ?? 0;
+    const last = refused[refused.length - 1]!;
+    this.set('sync.untrusted', JSON.stringify({ count: before + refused.length, entity: entities.join(', '), reason: last.reason, at: this.now() }));
+    this.audit(null, 'sync.refused_untrusted', undefined, undefined, { count: refused.length, entities });
   }
 
   private serverBackup(): { at: string | null; problem: string | null } | null {
@@ -397,7 +424,7 @@ export class SyncService extends Base {
   }
 
   disconnect(): void {
-    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup']) this.set(k, null);
+    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup', 'sync.untrusted']) this.set(k, null);
   }
 
   setCursor(cursor: number): void {

@@ -472,6 +472,14 @@ ALTER TABLE devices ADD COLUMN foreign_events INT NOT NULL DEFAULT 0;
 ALTER TABLE devices ADD COLUMN foreign_last JSONB;
 `,
   },
+  {
+    version: 15,
+    sql: `
+-- PC de confiance (siège) : dès qu'il y en a un, eux seuls envoient l'administration et les données des autres magasins.
+-- Aucun au départ : rien ne change tant que l'administrateur n'en a pas désigné.
+ALTER TABLE devices ADD COLUMN trusted BOOLEAN NOT NULL DEFAULT false;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

@@ -91,10 +91,12 @@ export async function syncOnce(s: Services, restarted = false): Promise<{ sent: 
     for (;;) {
       const { events: batch, lastSeq } = s.sync.pendingAfter(500, after);
       if (batch.length === 0) break;
-      const r = await request<{ accepted: string[]; rejected?: { id: string; reason: string }[] }>(creds.url, '/api/v1/sync/push', { token: creds.token, body: { events: batch } });
+      const r = await request<{ accepted: string[]; rejected?: { id: string; reason: string; final?: boolean }[] }>(creds.url, '/api/v1/sync/push', { token: creds.token, body: { events: batch } });
       s.sync.markSent(r.accepted);
       sent += r.accepted.length;
-      refused.push(...(r.rejected ?? []));
+      // Réservées aux PC de confiance : refus définitif, elles ne repartent pas.
+      s.sync.markRefused((r.rejected ?? []).filter((x) => x.final));
+      refused.push(...(r.rejected ?? []).filter((x) => !x.final));
       after = lastSeq;
       if (r.accepted.length + (r.rejected?.length ?? 0) < batch.length || batch.length < 500) break;
     }

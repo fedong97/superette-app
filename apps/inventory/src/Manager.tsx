@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { type Article, formatQty, search } from './logic';
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { type Article, formatQty, newId, search } from './logic';
 import * as S from './state';
+import type { ModuleId } from './modules';
+import { AppHeader, EmptyState, Icon, SectionTitle, Skeleton, StatCard } from './ui';
 
 /**
  * Espace du gérant sur le téléphone (ONIX 360 Mobile) : la journée du
@@ -16,6 +18,47 @@ const fcfa = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} FCFA`;
 const heure = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
 const jour = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
 const pct = (now: number, before: number) => (before > 0 ? Math.round(((now - before) / before) * 100) : null);
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** Jour décalé de `n` jours par rapport à aujourd'hui (AAAA-MM-JJ). */
+const shiftDay = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return isoDay(d);
+};
+const frDay = (day: string) => day.split('-').reverse().join('/');
+
+type PeriodKey = 'today' | 'yesterday' | 'week' | 'month' | 'day';
+interface Period {
+  key: PeriodKey;
+  from: string;
+  to: string;
+}
+const PERIODS: [Exclude<PeriodKey, 'day'>, string][] = [
+  ['today', 'Aujourd’hui'],
+  ['yesterday', 'Hier'],
+  ['week', '7 jours'],
+  ['month', 'Ce mois'],
+];
+function periodOf(key: Exclude<PeriodKey, 'day'>): Period {
+  const today = shiftDay(0);
+  if (key === 'yesterday') return { key, from: shiftDay(-1), to: shiftDay(-1) };
+  if (key === 'week') return { key, from: shiftDay(-6), to: today };
+  if (key === 'month') return { key, from: `${today.slice(0, 8)}01`, to: today };
+  return { key, from: today, to: today };
+}
+const periodLabel = (p: Period) =>
+  p.key === 'today' ? 'aujourd’hui' : p.key === 'yesterday' ? 'hier' : p.key === 'week' ? '7 derniers jours' : p.key === 'month' ? 'ce mois-ci' : frDay(p.from);
+
+/** Filtre « choisir une date » : un calendrier natif, sans date future. */
+function DateChip({ value, onPick, label = 'Date' }: { value: string; onPick: (day: string) => void; label?: string }) {
+  return (
+    <label className={`chip date ${value ? 'on' : ''}`}>
+      <Icon name="calendar" size={16} />
+      {value ? frDay(value) : label}
+      <input type="date" max={shiftDay(0)} value={value} onChange={(e) => e.target.value && onPick(e.target.value)} aria-label="Choisir une date" />
+    </label>
+  );
+}
 
 interface Register {
   id: string;
@@ -108,88 +151,160 @@ interface ArticleFile {
   nextDelivery: { number: string; expectedDate: string; qty: number } | null;
 }
 
-type Tab = 'jour' | 'vendeurs' | 'caisses' | 'stock' | 'clients';
+/** Action du gérant : enregistrée sur le serveur, exécutée par le premier PC allumé du magasin. */
+interface ManagerAction {
+  id: string;
+  kind: string;
+  label: string;
+  userName: string;
+  status: 'pending' | 'done' | 'failed' | 'expired';
+  message: string | null;
+  at: string;
+  doneAt: string | null;
+}
 
-const TABS: [Tab, string][] = [
-  ['jour', 'Journée'],
-  ['vendeurs', 'Vendeurs'],
-  ['caisses', 'Caisses'],
-  ['stock', 'Stock'],
-  ['clients', 'Clients'],
-];
+interface Inbox {
+  edits: { id: string; number: string; sale: string; total: number | null; by: string; reason: string; at: string }[];
+  stock: { id: string; number: number; article: string; before: number; requested: number; reason: string; by: string; at: string }[];
+  expenses: { id: string; number: string; label: string; amount: number; beneficiary: string | null; by: string; at: string }[];
+  actions: ManagerAction[];
+}
+
+interface DaySale {
+  id: string;
+  number: string;
+  kind: 'sale' | 'return';
+  cancelled: boolean;
+  total: number;
+  discount: number;
+  seller: string;
+  cashier: string;
+  customer: string | null;
+  credit: boolean;
+  at: string;
+  cancelReason: string | null;
+}
+
+/**
+ * Gestion complète : les écrans du PC (clients, trésorerie, caisses…) dans le
+ * téléphone ; un PC allumé du magasin exécute chaque action au nom du gérant.
+ */
+export function openPcManagement(screen?: string) {
+  const st = S.getState();
+  if (!st.config || !st.session) return;
+  try {
+    localStorage.setItem('onix.pc', JSON.stringify({ url: st.config.url, token: st.config.token, session: st.session.token }));
+  } catch {
+    return;
+  }
+  location.href = `./pc/mobile.html${screen ? `#${encodeURIComponent(screen)}` : ''}`;
+}
+
+const ACTION_STATUS: Record<ManagerAction['status'], string> = { pending: 'en attente d’un PC', done: 'fait', failed: 'refusé', expired: 'abandonné' };
+
+/** Envoie une action du gérant au serveur ; un PC du magasin l'exécute en quelques secondes. */
+const act = (kind: string, payload: Record<string, unknown>, label: string) =>
+  S.call<ManagerAction>('/manager/actions', { id: newId(), kind, payload, label });
 
 const INVOICE_STATUS: Record<string, string> = { waiting: 'à encaisser', editing: 'en modification', returned: 'rendues au vendeur', paying: 'en cours d’encaissement' };
 const MISSED: Record<string, string> = { absent: 'pas en magasin', rupture: 'en rupture', prix: 'trop cher', autre: 'autre' };
 
-export function Manager({ onBack }: { onBack: (() => void) | null }) {
-  const s = useStore();
-  const [tab, setTab] = useState<Tab>('jour');
-  const [yesterday, setYesterday] = useState(false);
+interface ManagerCtx {
+  home: Home | null;
+  error: string;
+  /** Jour affiché (AAAA-MM-JJ) ; vide : aujourd'hui. */
+  day: string;
+  setDay: (d: string) => void;
+  load: () => void;
+  openApprovals: () => void;
+}
+const Ctx = createContext<ManagerCtx | null>(null);
+export const useManager = () => useContext(Ctx);
+
+/** Données de l'espace du gérant, chargées une fois pour l'accueil et ses écrans. */
+export function ManagerProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const [day, setDay] = useState('');
   const [home, setHome] = useState<Home | null>(null);
   const [error, setError] = useState('');
   const [approvals, setApprovals] = useState(false);
-
   const load = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    const day = yesterday ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
     S.call<Home>(`/manager${day ? `?day=${day}` : ''}`).then(
       (h) => (setHome(h), setError('')),
       (e) => setError(message(e)),
     );
   };
   useEffect(() => {
+    if (!enabled) return;
     load();
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yesterday]);
+  }, [day, enabled]);
+  if (!enabled) return <>{children}</>;
+  return (
+    <Ctx.Provider value={{ home, error, day, setDay, load, openApprovals: () => setApprovals(true) }}>
+      {children}
+      {approvals ? <ApprovalsSheet write={Boolean(home?.write)} onClose={() => (setApprovals(false), load())} /> : null}
+    </Ctx.Provider>
+  );
+}
 
+/** Ce qui demande l'attention du gérant : demandes d'accord et alertes du magasin. */
+export function useManagerAttention(): { level: 'danger' | 'warning'; title: string; text?: string; action?: () => void }[] {
+  const m = useManager();
+  if (!m?.home) return m?.error ? [{ level: 'danger', title: 'Espace du gérant indisponible', text: m.error, action: m.load }] : [];
+  const out: { level: 'danger' | 'warning'; title: string; text?: string; action?: () => void }[] = [];
+  if (m.home.approvals) out.push({ level: 'danger', title: `${m.home.approvals} demande(s) d’accord des caisses`, text: 'Touchez pour répondre', action: m.openApprovals });
+  for (const a of m.home.alerts) out.push({ level: a.level === 'erreur' ? 'danger' : 'warning', title: a.text });
+  return out;
+}
+
+/** Accueil du gérant : la journée du magasin et ses vendeurs. */
+export function ManagerHome() {
+  const m = useManager();
+  const [full, setFull] = useState(false);
+  if (!m) return null;
+  const { home, error, day, setDay } = m;
+  if (!home) return error ? null : <Skeleton rows={3} stats />;
+  const st = home.store;
+  if (!st) return <EmptyState icon="store" title="Pas encore de données" text="Les PC du magasin envoient la journée à leur prochaine synchronisation." />;
+  return (
+    <>
+      <DayTab home={home} st={st} day={day} onDay={setDay} full={full} onFull={() => setFull(!full)} />
+      {full ? <SellersTab home={home} st={st} /> : null}
+    </>
+  );
+}
+
+const MANAGER_TITLES: Partial<Record<ModuleId, string>> = { ventes: 'Ventes', valider: 'À valider', stock: 'Stock', caisses: 'Caisses', clients: 'Crédits clients', equipe: 'Délégation' };
+
+/** Un écran de l'espace du gérant, avec son en-tête. */
+export function ManagerScreen({ id, links }: { id: ModuleId; links?: ReactNode }) {
+  const s = useStore();
+  const m = useManager();
+  const home = m?.home ?? null;
   const st = home?.store ?? null;
   return (
     <div className="page">
-      <header className="bar">
-        {onBack ? (
-          <button className="ghost" onClick={onBack} aria-label="Retour">
-            ‹
-          </button>
-        ) : null}
-        <div className="grow">
-          <b>Gérant · {s.config?.storeName}</b>
-          <small>{home ? `${home.today ? 'Mis à jour' : 'Journée d’hier'} à ${heure(home.generatedAt)}` : s.session?.user.name}</small>
-        </div>
-        <button className="ghost" onClick={load} aria-label="Actualiser">
-          ⟳
+      <AppHeader title={MANAGER_TITLES[id] ?? ''} subtitle={home ? `${home.today ? 'Mis à jour' : 'Journée d’hier'} à ${heure(home.generatedAt)}` : s.config?.storeName}>
+        <button className="ghost" onClick={() => m?.load()} aria-label="Actualiser">
+          <Icon name="refresh" />
         </button>
-        {!onBack ? (
-          <button className="ghost" onClick={() => void S.logout()} aria-label="Changer d'utilisateur">
-            ⎋
-          </button>
+      </AppHeader>
+      <main className="enter" key={id}>
+        {m?.error ? <div className="notice erreur">{m.error}</div> : null}
+        {!home && !m?.error ? <Skeleton rows={4} stats /> : null}
+        {home && id === 'valider' ? <InboxTab write={home.write} /> : null}
+        {home && id === 'ventes' ? <SalesTab write={home.write} /> : null}
+        {home && st && id === 'stock' ? <StockTab home={home} st={st} /> : null}
+        {home && st && id === 'caisses' ? <RegistersTab st={st} /> : null}
+        {home && id === 'clients' ? <CustomersTab write={home.write} /> : null}
+        {home && id === 'equipe' ? <TeamTab write={home.write} /> : null}
+        {home && !st && (id === 'stock' || id === 'caisses') ? (
+          <EmptyState icon="store" title="Pas encore de données" text="Les PC du magasin envoient l’état du magasin à leur prochaine synchronisation." />
         ) : null}
-      </header>
-      <main>
-        <div className="tabs">
-          {TABS.map(([k, label]) => (
-            <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {error ? <div className="notice erreur">{error}</div> : null}
-        {!home && !error ? <div className="card muted">Chargement…</div> : null}
-        {home && home.approvals ? (
-          <button className="big primary" onClick={() => setApprovals(true)}>
-            {home.approvals} demande(s) d’accord des caisses
-          </button>
-        ) : null}
-        {home && st && tab === 'jour' ? <DayTab home={home} st={st} yesterday={yesterday} onDay={setYesterday} /> : null}
-        {home && st && tab === 'vendeurs' ? <SellersTab home={home} st={st} /> : null}
-        {home && st && tab === 'caisses' ? <RegistersTab st={st} /> : null}
-        {home && st && tab === 'stock' ? <StockTab home={home} st={st} /> : null}
-        {home && tab === 'clients' ? <CustomersTab /> : null}
-        {home && !st ? <div className="card muted">Aucune donnée de ce magasin sur le serveur pour l’instant : les PC l’envoient à leur prochaine synchronisation.</div> : null}
+        {links}
       </main>
-      {approvals ? <ApprovalsSheet write={Boolean(home?.write)} onClose={() => (setApprovals(false), load())} /> : null}
     </div>
   );
 }
@@ -208,55 +323,51 @@ function Bars({ values, labels }: { values: number[]; labels: string[] }) {
   );
 }
 
-function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; yesterday: boolean; onDay: (y: boolean) => void }) {
+function DayTab({ home, st, day, onDay, full, onFull }: { home: Home; st: StoreBoard; day: string; onDay: (d: string) => void; full: boolean; onFull: () => void }) {
+  const yesterday = day === shiftDay(-1);
   const p = home.periods;
   const vsYesterday = pct(st.net, st.yesterday);
   const vsMonth = pct(p.month.total, p.lastMonth.total);
   const hours = st.byHour.map((v, h) => ({ v, h })).filter((x) => x.v > 0 || (x.h >= 7 && x.h <= 21));
   return (
     <>
-      <div className="segmented">
-        <button className={!yesterday ? 'on' : ''} onClick={() => onDay(false)}>
+      <div className="chips">
+        <button className={`chip ${!day ? 'on' : ''}`} onClick={() => onDay('')}>
           Aujourd’hui
         </button>
-        <button className={yesterday ? 'on' : ''} onClick={() => onDay(true)}>
+        <button className={`chip ${yesterday ? 'on' : ''}`} onClick={() => onDay(shiftDay(-1))}>
           Hier
         </button>
+        <DateChip value={day && !yesterday ? day : ''} onPick={onDay} />
+      </div>
+      <div className="hero">
+        <span className="hero-label">Ventes nettes {!day ? 'du jour' : yesterday ? 'd’hier' : `du ${frDay(day)}`}</span>
+        <b className="hero-value">{fcfa(st.net)}</b>
+        {vsYesterday !== null && !day ? (
+          <span className={`trend ${vsYesterday >= 0 ? 'up' : 'down'}`}>
+            <Icon name={vsYesterday >= 0 ? 'trend-up' : 'trend-down'} size={14} />
+            {vsYesterday >= 0 ? '+' : ''}
+            {vsYesterday} % par rapport à hier
+          </span>
+        ) : null}
+        {st.returns ? <span className="hero-sub">dont {fcfa(st.returns)} de retours clients</span> : null}
       </div>
       <div className="kpis">
-        <div>
-          <b>{fcfa(st.net)}</b>
-          <small>ventes nettes{vsYesterday !== null && !yesterday ? ` · ${vsYesterday >= 0 ? '+' : ''}${vsYesterday} % / hier` : ''}</small>
-        </div>
-        <div>
-          <b>{st.sales}</b>
-          <small>tickets · {fcfa(st.average)} en moyenne</small>
-        </div>
-        <div>
-          <b>{fcfa(p.month.total)}</b>
-          <small>
-            ce mois-ci{vsMonth !== null ? ` · ${vsMonth >= 0 ? '+' : ''}${vsMonth} % / mois dernier à la même date` : ''}
-          </small>
-        </div>
-        <div>
-          <b>{fcfa(st.returns)}</b>
-          <small>retours clients</small>
-        </div>
+        <StatCard icon="receipt" label="Tickets" value={st.sales} hint={`${fcfa(st.average)} en moyenne`} />
+        <StatCard icon="trend-up" label="Ce mois-ci" value={fcfa(p.month.total)} trend={vsMonth} hint="par rapport au mois dernier à la même date" />
+        <StatCard icon="box" tone="danger" label="Ruptures" value={st.outOfStockCount} />
+        <StatCard icon="alert" tone="warning" label="Stock bas" value={st.lowStockCount} />
       </div>
-      {home.alerts.length ? (
-        <div className="list">
-          {home.alerts.map((a, i) => (
-            <div key={i} className={`notice ${a.level === 'erreur' ? 'erreur' : 'attention'}`}>
-              {a.text}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <h3>Les 7 derniers jours</h3>
+      <SectionTitle>Les 7 derniers jours</SectionTitle>
       <Bars values={p.week.map((d) => d.total)} labels={p.week.map((d) => jour(d.day))} />
-      <h3>Par heure</h3>
+      <button className="big" onClick={onFull} aria-expanded={full}>
+        {full ? 'Masquer le détail de la journée' : 'Détail de la journée : heures, paiements, vendeurs…'}
+      </button>
+      {full ? (
+        <>
+      <SectionTitle>Par heure</SectionTitle>
       <Bars values={hours.map((x) => x.v)} labels={hours.map((x) => `${x.h}h`)} />
-      <h3>Paiements</h3>
+      <SectionTitle>Paiements</SectionTitle>
       <div className="list">
         {st.byMethod.map((m) => (
           <div key={m.method} className="row item">
@@ -266,7 +377,7 @@ function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; ye
         ))}
         {!st.byMethod.length ? <div className="empty">Aucun paiement.</div> : null}
       </div>
-      <h3>En ce moment au magasin</h3>
+      <SectionTitle>En ce moment au magasin</SectionTitle>
       <div className="list">
         {home.floor.carts.map((c) => (
           <div key={c.seller} className="row item">
@@ -289,7 +400,7 @@ function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; ye
         ))}
         {!home.floor.carts.length && !home.floor.invoices.length ? <div className="empty">Aucun panier ni facture en attente.</div> : null}
       </div>
-      <h3>Meilleures ventes</h3>
+      <SectionTitle>Meilleures ventes</SectionTitle>
       <div className="list">
         {st.top.map((t) => (
           <div key={t.label} className="row item">
@@ -299,6 +410,8 @@ function DayTab({ home, st, yesterday, onDay }: { home: Home; st: StoreBoard; ye
         ))}
         {!st.top.length ? <div className="empty">Aucune vente.</div> : null}
       </div>
+        </>
+      ) : null}
     </>
   );
 }
@@ -308,6 +421,7 @@ function SellersTab({ home, st }: { home: Home; st: StoreBoard }) {
   const max = Math.max(1, ...sellers.map((x) => x.total));
   return (
     <>
+      <SectionTitle>Vendeurs</SectionTitle>
       <p className="muted small">Ventes encaissées {home.today ? 'aujourd’hui' : 'ce jour-là'} au nom de chaque vendeur (le vendeur du panier ou de la facture, sinon le caissier).</p>
       <div className="list">
         {sellers.map((x) => (
@@ -437,6 +551,10 @@ function StockTab({ home, st }: { home: Home; st: StoreBoard }) {
         </div>
       ) : (
         <>
+          <div className="kpis">
+            <StatCard icon="box" tone="danger" label="Ruptures" value={st.outOfStockCount} />
+            <StatCard icon="alert" tone="warning" label="Stock bas" value={st.lowStockCount} />
+          </div>
           <h3>Ruptures ({st.outOfStockCount})</h3>
           <div className="list">
             {st.outOfStock.slice(0, 40).map(row)}
@@ -474,7 +592,7 @@ function StockTab({ home, st }: { home: Home; st: StoreBoard }) {
               </div>
             ))}
             {orders && !orders.length ? <div className="empty">Aucune commande en attente de livraison.</div> : null}
-            {!orders ? <div className="empty">Chargement…</div> : null}
+            {!orders ? <Skeleton rows={2} /> : null}
           </div>
         </>
       )}
@@ -588,9 +706,24 @@ function ArticleSheet({ article, write, onClose }: { article: Article; write: bo
   );
 }
 
-function CustomersTab() {
+function CustomersTab({ write }: { write: boolean }) {
   const [data, setData] = useState<{ receivables: Receivables | null; at: string | null } | null>(null);
   const [error, setError] = useState('');
+  const [limitOf, setLimitOf] = useState<Receivables['customers'][number] | null>(null);
+  const [limit, setLimit] = useState('');
+  const [done, setDone] = useState('');
+  const saveLimit = async () => {
+    if (!limitOf) return;
+    const value = Math.round(Number(limit.replace(/\s/g, '')));
+    if (!Number.isFinite(value) || value < 0) return setError('Plafond invalide');
+    try {
+      await act('customer.limit', { customerId: limitOf.id, creditLimit: value }, `Plafond de ${limitOf.name} : ${fcfa(value)}`);
+      setDone(`Plafond de ${limitOf.name} envoyé : un PC du magasin l’applique dans quelques secondes.`);
+      setLimitOf(null);
+    } catch (e) {
+      setError(message(e));
+    }
+  };
   useEffect(() => {
     S.call<{ receivables: Receivables | null; at: string | null }>('/manager/receivables').then(setData, (e) => setError(message(e)));
   }, []);
@@ -602,7 +735,8 @@ function CustomersTab() {
   return (
     <>
       {error ? <div className="notice erreur">{error}</div> : null}
-      {!data && !error ? <div className="card muted">Chargement…</div> : null}
+      {done ? <div className="notice info">{done}</div> : null}
+      {!data && !error ? <Skeleton rows={4} /> : null}
       {data && !r ? <div className="card muted">Les crédits clients arrivent avec l’état des PC (toutes les 5 minutes). Mettez les PC du magasin en version 0.98.0 ou plus.</div> : null}
       {r ? (
         <>
@@ -628,6 +762,11 @@ function CustomersTab() {
                   {c.overdue ? <span className="discount">{fcfa(c.overdue)} en retard · </span> : null}
                   {c.limit ? `plafond ${fcfa(c.limit)}` : 'sans plafond'}
                 </small>
+                {write ? (
+                  <button className="link" onClick={() => (setLimitOf(c), setLimit(String(c.limit || '')), setDone(''))}>
+                    Changer le plafond
+                  </button>
+                ) : null}
                 {c.phone ? (
                   <div className="row">
                     <a className="small-btn" href={`tel:${c.phone.replace(/\s/g, '')}`}>
@@ -647,6 +786,21 @@ function CustomersTab() {
             ))}
           </div>
         </>
+      ) : null}
+      {limitOf ? (
+        <div className="modal" onClick={(e) => e.target === e.currentTarget && setLimitOf(null)}>
+          <div className="sheet">
+            <h2>Plafond de crédit · {limitOf.name}</h2>
+            <p className="muted small">Doit aujourd’hui {fcfa(limitOf.balance)}. 0 : sans plafond.</p>
+            <input inputMode="numeric" value={limit} onChange={(e) => setLimit(e.target.value.replace(/[^\d]/g, ''))} placeholder="Plafond en FCFA" autoFocus />
+            <button className="big primary" onClick={() => void saveLimit()}>
+              Enregistrer
+            </button>
+            <button className="link" onClick={() => setLimitOf(null)}>
+              Annuler
+            </button>
+          </div>
+        </div>
       ) : null}
     </>
   );
@@ -716,5 +870,540 @@ function ApprovalsSheet({ write, onClose }: { write: boolean; onClose: () => voi
         </button>
       </div>
     </div>
+  );
+}
+
+/** Statut des actions du gérant : faites par un PC du magasin, ou refusées avec la raison. */
+function ActionsList({ actions }: { actions: ManagerAction[] }) {
+  if (!actions.length) return null;
+  return (
+    <>
+      <h3>Vos actions récentes</h3>
+      <div className="list">
+        {actions.slice(0, 12).map((a) => (
+          <div key={a.id} className="card">
+            <div className="row">
+              <span className="grow">{a.label}</span>
+              <small className={a.status === 'done' ? '' : a.status === 'pending' ? 'muted' : 'discount'}>{ACTION_STATUS[a.status]}</small>
+            </div>
+            <small className="muted">
+              {heure(a.at)}
+              {a.message ? ` · ${a.message}` : ''}
+            </small>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Tout ce qui attend le gérant : demandes de modification de facture,
+ * corrections de stock, dépenses à approuver. Accorder ou refuser ici vaut
+ * comme au PC : le premier PC allumé du magasin l'applique en son nom.
+ */
+function InboxTab({ write }: { write: boolean }) {
+  const [inbox, setInbox] = useState<Inbox | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [sent, setSent] = useState<Set<string>>(new Set());
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [sheet, setSheet] = useState(false);
+  const load = () => {
+    S.call<Inbox>('/manager/inbox').then(
+      (r) => (setInbox(r), setError('')),
+      (e) => setError(message(e)),
+    );
+    S.call<{ approvals: Approval[] }>('/manager/approvals').then(
+      (r) => setApprovals(r.approvals),
+      () => undefined,
+    );
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, []);
+  const decide = async (kind: string, id: string, approve: boolean, label: string) => {
+    let note: string | null = null;
+    if (!approve) {
+      note = window.prompt('Raison du refus (facultatif)') ?? null;
+    }
+    setBusy(id);
+    setError('');
+    try {
+      await act(kind, { id, approve, note }, `${approve ? 'Accordé' : 'Refusé'} : ${label}`);
+      setSent((x) => new Set(x).add(id));
+      load();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy('');
+    }
+  };
+  const buttons = (kind: string, id: string, label: string) =>
+    write ? (
+      sent.has(id) ? (
+        <small className="muted">Réponse envoyée : un PC du magasin l’applique…</small>
+      ) : (
+        <div className="row">
+          <button className="small-btn primary grow" disabled={busy === id} onClick={() => void decide(kind, id, true, label)}>
+            Accorder
+          </button>
+          <button className="small-btn grow" disabled={busy === id} onClick={() => void decide(kind, id, false, label)}>
+            Refuser
+          </button>
+        </div>
+      )
+    ) : null;
+  const empty = inbox && !inbox.edits.length && !inbox.stock.length && !inbox.expenses.length && !approvals.length;
+  return (
+    <>
+      {error ? <div className="notice erreur">{error}</div> : null}
+      {!write ? <p className="muted small">Téléphone en consultation seule : demandez à passer ce téléphone en « Gestion » pour répondre.</p> : null}
+      {!inbox && !error ? <Skeleton rows={4} /> : null}
+      {approvals.length ? (
+        <button className="big primary" onClick={() => setSheet(true)}>
+          {approvals.length} demande(s) d’accord des caisses
+        </button>
+      ) : null}
+      {inbox?.edits.length ? (
+        <>
+          <h3>Modifications de facture</h3>
+          <div className="list">
+            {inbox.edits.map((e) => (
+              <div key={e.id} className="card">
+                <div className="row">
+                  <b className="grow">Facture {e.sale || e.number}</b>
+                  {e.total !== null ? <b>{fcfa(e.total)}</b> : null}
+                </div>
+                <small className="muted">
+                  {e.by} · {heure(e.at)}
+                  {e.reason ? ` · « ${e.reason} »` : ''}
+                </small>
+                {buttons('edit.decide', e.id, `modification de la facture ${e.sale || e.number}`)}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {inbox?.stock.length ? (
+        <>
+          <h3>Corrections de stock</h3>
+          <div className="list">
+            {inbox.stock.map((r) => (
+              <div key={r.id} className="card">
+                <b>{r.article}</b>
+                <small>
+                  {(r.before / 1000).toLocaleString('fr-FR')} → <b>{(r.requested / 1000).toLocaleString('fr-FR')}</b>
+                </small>
+                <small className="muted">
+                  {r.by} · {heure(r.at)}
+                  {r.reason ? ` · « ${r.reason} »` : ''}
+                </small>
+                {buttons('stock.decide', r.id, `stock de ${r.article}`)}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {inbox?.expenses.length ? (
+        <>
+          <h3>Dépenses à approuver</h3>
+          <div className="list">
+            {inbox.expenses.map((x) => (
+              <div key={x.id} className="card">
+                <div className="row">
+                  <b className="grow">{x.label}</b>
+                  <b>{fcfa(x.amount)}</b>
+                </div>
+                <small className="muted">
+                  {x.by}
+                  {x.beneficiary ? ` · pour ${x.beneficiary}` : ''} · {x.number}
+                </small>
+                {buttons('expense.decide', x.id, `dépense ${x.label} (${fcfa(x.amount)})`)}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {empty ? <div className="empty">Rien à valider pour l’instant.</div> : null}
+      {inbox ? <ActionsList actions={inbox.actions} /> : null}
+      {sheet ? <ApprovalsSheet write={write} onClose={() => (setSheet(false), load())} /> : null}
+    </>
+  );
+}
+
+/** Factures du jour : qui a vendu quoi, à crédit, remisées ; annulation avec motif. */
+function SalesTab({ write }: { write: boolean }) {
+  const [data, setData] = useState<{ day: string; days?: number; more?: number; sales: DaySale[]; total: number; count: number } | null>(null);
+  const [error, setError] = useState('');
+  const [q, setQ] = useState('');
+  const [period, setPeriod] = useState<Period>(() => periodOf('today'));
+  const [kind, setKind] = useState<'all' | 'credit' | 'return' | 'cancelled'>('all');
+  const [cancel, setCancel] = useState<DaySale | null>(null);
+  const [open, setOpen] = useState<DaySale | null>(null);
+  const [reason, setReason] = useState('');
+  const [done, setDone] = useState('');
+  const load = () => {
+    S.call<{ day: string; days?: number; more?: number; sales: DaySale[]; total: number; count: number }>(`/manager/sales?day=${period.from}${period.to !== period.from ? `&to=${period.to}` : ''}`).then(
+      (r) => (setData(r), setError('')),
+      (e) => setError(message(e)),
+    );
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period.from, period.to]);
+  const list = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return (data?.sales ?? [])
+      .filter((x) => kind === 'all' || (kind === 'credit' ? x.credit && !x.cancelled : kind === 'return' ? x.kind === 'return' : x.cancelled))
+      .filter((x) => !t || [x.number, x.seller, x.cashier, x.customer ?? ''].some((v) => v.toLowerCase().includes(t)));
+  }, [data, q, kind]);
+  const several = period.from !== period.to;
+  const confirm = async () => {
+    if (!cancel || !reason.trim()) return;
+    try {
+      await act('sale.cancel', { saleId: cancel.id, reason: reason.trim() }, `Annuler la facture ${cancel.number}`);
+      setDone(`Annulation de ${cancel.number} envoyée : un PC du magasin l’applique, voyez « À valider » pour la réponse.`);
+      setCancel(null);
+      setReason('');
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  return (
+    <>
+      <div className="chips">
+        {PERIODS.map(([k, label]) => (
+          <button key={k} className={`chip ${period.key === k ? 'on' : ''}`} onClick={() => setPeriod(periodOf(k))}>
+            {label}
+          </button>
+        ))}
+        <DateChip value={period.key === 'day' ? period.from : ''} onPick={(d) => setPeriod({ key: 'day', from: d, to: d })} />
+      </div>
+      {error ? <div className="notice erreur">{error}</div> : null}
+      {done ? <div className="notice info">{done}</div> : null}
+      {!data && !error ? <Skeleton rows={5} stats /> : null}
+      {data ? (
+        <>
+          <div className="hero">
+            <span className="hero-label">Total net · {periodLabel(period)}</span>
+            <b className="hero-value">{fcfa(data.total)}</b>
+            <span className="hero-sub">
+              {data.count} facture(s){data.count ? ` · ${fcfa(data.total / data.count)} en moyenne` : ''}
+            </span>
+          </div>
+          <div className="chips">
+            {(
+              [
+                ['all', 'Toutes'],
+                ['credit', 'À crédit'],
+                ['return', 'Retours'],
+                ['cancelled', 'Annulées'],
+              ] as const
+            ).map(([k, label]) => (
+              <button key={k} className={`chip small-chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Numéro, vendeur, client…" enterKeyHint="search" />
+          <div className="list">
+            {list.map((x) => (
+              <button key={x.id} className={`li sale-row ${x.cancelled ? 'cancelled' : ''}`} onClick={() => setOpen(x)}>
+                <span className={`li-icon ${x.cancelled ? 'neutral' : x.kind === 'return' ? 'warning' : 'brand'}`}>
+                  <Icon name="receipt" size={20} />
+                </span>
+                <span className="grow">
+                  <span className="li-title">
+                    {x.number}
+                    {x.kind === 'return' ? ' · retour' : ''}
+                  </span>
+                  <small>
+                    {several ? `${new Date(x.at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} · ` : ''}
+                    {heure(x.at)} · {x.seller || x.cashier}
+                    {x.customer ? ` · ${x.customer}` : ''}
+                  </small>
+                  {x.credit || x.discount || x.cancelled ? (
+                    <small className="discount">
+                      {[x.cancelled ? 'annulée' : '', x.credit ? 'à crédit' : '', x.discount ? `remise ${fcfa(x.discount)}` : ''].filter(Boolean).join(' · ')}
+                    </small>
+                  ) : null}
+                </span>
+                <span className="li-value">{fcfa(x.total)}</span>
+                <span className="chev">
+                  <Icon name="chevron" size={18} />
+                </span>
+              </button>
+            ))}
+            {!list.length ? <EmptyState icon="receipt" title="Aucune facture" text={q.trim() || kind !== 'all' ? 'Aucune facture ne correspond à ces filtres.' : 'Aucune facture encaissée sur cette période.'} /> : null}
+            {data.more ? <p className="muted small center">Les {data.sales.length} factures les plus récentes sont affichées ({data.more} de plus sur la période, comptées dans le total).</p> : null}
+          </div>
+        </>
+      ) : null}
+      {open ? <SaleSheet sale={open} onClose={() => setOpen(null)} onCancel={write && !open.cancelled && open.kind === 'sale' ? () => (setCancel(open), setOpen(null), setDone('')) : undefined} /> : null}
+      {cancel ? (
+        <div className="modal" onClick={(e) => e.target === e.currentTarget && setCancel(null)}>
+          <div className="sheet">
+            <h2>Annuler la facture {cancel.number}</h2>
+            <p className="muted small">
+              {fcfa(cancel.total)} · {cancel.seller || cancel.cashier}. Le stock revient et la caisse est corrigée, comme au PC.
+            </p>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motif de l’annulation" autoFocus />
+            <button className="big primary" disabled={!reason.trim()} onClick={() => void confirm()}>
+              Annuler la facture
+            </button>
+            <button className="link" onClick={() => setCancel(null)}>
+              Retour
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+interface SaleDetail {
+  id: string;
+  number: string;
+  kind: 'sale' | 'return';
+  cancelled: boolean;
+  cancelReason: string | null;
+  at: string;
+  register: string | null;
+  seller: string;
+  cashier: string;
+  customer: string | null;
+  total: number;
+  totalHt: number;
+  vat: number;
+  discount: number;
+  change: number;
+  lines: { label: string; qty: number; pack: string | null; packUnits: number; unitPrice: number; discount: number; total: number; promo: boolean }[];
+  payments: { method: string; label: string; amount: number; reference: string | null }[];
+}
+
+/** Quantité vendue (millièmes d'unité), au carton quand la ligne est un carton. */
+const qtyText = (l: SaleDetail['lines'][number]) => {
+  if (l.pack && l.packUnits > 0) {
+    const packs = l.qty / l.packUnits;
+    if (Number.isInteger(packs)) return `${packs} ${l.pack.toLowerCase()}`;
+  }
+  return (l.qty / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+};
+
+/** Fiche d'une facture : produits, remises, paiements, qui l'a faite (lecture seule, comme envoyée par les PC). */
+function SaleSheet({ sale, onClose, onCancel }: { sale: DaySale; onClose: () => void; onCancel?: () => void }) {
+  const [d, setD] = useState<SaleDetail | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    S.call<SaleDetail>(`/manager/sales/${encodeURIComponent(sale.id)}`).then(setD, (e) => setError(message(e)));
+  }, [sale.id]);
+  const when = new Date(sale.at).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <div className="sheet-head">
+          <h2>
+            {sale.kind === 'return' ? 'Retour' : 'Facture'} {sale.number}
+          </h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Fermer">
+            <Icon name="x" />
+          </button>
+        </div>
+        <div className="row">
+          <span className="muted grow">{when}</span>
+          <span className={`pill ${sale.cancelled ? 'ko' : sale.credit ? 'wait' : 'ok'}`}>{sale.cancelled ? 'Annulée' : sale.credit ? 'À crédit' : 'Payée'}</span>
+        </div>
+        {sale.cancelled && sale.cancelReason ? <div className="notice erreur">Annulée : {sale.cancelReason}</div> : null}
+        <div className="facts">
+          <div>
+            <small>Vendeur</small>
+            {sale.seller || sale.cashier || '—'}
+          </div>
+          <div>
+            <small>Caissier</small>
+            {sale.cashier || '—'}
+          </div>
+          <div>
+            <small>Caisse</small>
+            {d?.register ?? '—'}
+          </div>
+          <div>
+            <small>Client</small>
+            {sale.customer ?? 'Comptoir'}
+          </div>
+        </div>
+        {error ? <div className="notice erreur">{error}</div> : null}
+        {!d && !error ? <Skeleton rows={3} /> : null}
+        {d ? (
+          <>
+            <SectionTitle>Produits ({d.lines.length})</SectionTitle>
+            <div className="list grouped">
+              {d.lines.map((l, i) => (
+                <div key={i} className="li">
+                  <span className="grow">
+                    <span className="li-title">{l.label}</span>
+                    <small>
+                      {qtyText(l)} × {fcfa(l.pack && l.packUnits ? (l.unitPrice * l.packUnits) / 1000 : l.unitPrice)}
+                      {l.discount ? <span className="discount"> · remise {fcfa(l.discount)}</span> : null}
+                      {l.promo ? ' · promotion' : ''}
+                    </small>
+                  </span>
+                  <span className="li-value">{fcfa(l.total)}</span>
+                </div>
+              ))}
+              {!d.lines.length ? <div className="empty">Les produits de cette facture ne sont pas encore arrivés sur le serveur.</div> : null}
+            </div>
+            <div className="card totals">
+              {d.discount ? (
+                <div className="row">
+                  <span className="grow">Remises</span>
+                  <span className="discount">− {fcfa(d.discount)}</span>
+                </div>
+              ) : null}
+              {d.vat ? (
+                <div className="row">
+                  <span className="grow muted">dont TVA</span>
+                  <span className="muted">{fcfa(d.vat)}</span>
+                </div>
+              ) : null}
+              <div className="row">
+                <b className="grow">Total</b>
+                <b>{fcfa(d.total)}</b>
+              </div>
+            </div>
+            <SectionTitle>Paiement</SectionTitle>
+            <div className="list grouped">
+              {d.payments.map((p, i) => (
+                <div key={i} className="li">
+                  <span className="grow">
+                    <span className="li-title">{p.label}</span>
+                    {p.reference ? <small>Réf. {p.reference}</small> : null}
+                  </span>
+                  <span className="li-value">{fcfa(p.amount)}</span>
+                </div>
+              ))}
+              {d.change ? (
+                <div className="li">
+                  <span className="grow muted">Monnaie rendue</span>
+                  <span className="li-value">{fcfa(d.change)}</span>
+                </div>
+              ) : null}
+              {!d.payments.length ? <div className="empty">Aucun paiement enregistré.</div> : null}
+            </div>
+          </>
+        ) : null}
+        {onCancel ? (
+          <button className="big danger-btn" onClick={onCancel}>
+            Annuler cette facture
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+interface TeamUser {
+  id: string;
+  name: string;
+  role: string;
+  delegation: { byName: string; until: string } | null;
+}
+
+const ROLE: Record<string, string> = { manager: 'gérant', cashier: 'caissier', seller: 'vendeur', storekeeper: 'magasinier', accountant: 'comptable' };
+
+/** Confier ses pouvoirs à un employé jusqu'à une date (absence, voyage), ou y mettre fin. */
+function TeamTab({ write }: { write: boolean }) {
+  const [users, setUsers] = useState<TeamUser[] | null>(null);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+  const [to, setTo] = useState<TeamUser | null>(null);
+  const [days, setDays] = useState('1');
+  const load = () =>
+    S.call<{ users: TeamUser[] }>('/manager/team').then(
+      (r) => (setUsers(r.users), setError('')),
+      (e) => setError(message(e)),
+    );
+  useEffect(() => {
+    void load();
+  }, []);
+  const delegate = async () => {
+    if (!to) return;
+    const n = Math.max(1, Math.min(60, Number(days) || 1));
+    const until = new Date();
+    until.setDate(until.getDate() + n);
+    until.setHours(23, 0, 0, 0);
+    try {
+      await act('delegate', { toUserId: to.id, until: until.toISOString() }, `Pouvoirs confiés à ${to.name} pour ${n} jour(s)`);
+      setDone(`Vos pouvoirs passent à ${to.name} dès qu’un PC du magasin l’enregistre (quelques secondes).`);
+      setTo(null);
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  const end = async (u: TeamUser) => {
+    try {
+      await act('delegate.end', { userId: u.id }, `Fin de délégation de ${u.name}`);
+      setDone(`Fin de délégation de ${u.name} envoyée.`);
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  return (
+    <>
+      <p className="muted small">Absent ? Confiez vos pouvoirs (codes, remises, annulations, validations) à un employé jusqu’à une date : tout revient seul à la fin.</p>
+      {error ? <div className="notice erreur">{error}</div> : null}
+      {done ? <div className="notice info">{done}</div> : null}
+      {!users && !error ? <Skeleton rows={4} /> : null}
+      <div className="list">
+        {(users ?? []).map((u) => (
+          <div key={u.id} className="card">
+            <div className="row">
+              <b className="grow">{u.name}</b>
+              <small className="muted">{ROLE[u.role] ?? u.role}</small>
+            </div>
+            {u.delegation ? (
+              <small className="discount">
+                Pouvoirs de {u.delegation.byName} jusqu’au {new Date(u.delegation.until).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+              </small>
+            ) : null}
+            {write ? (
+              u.delegation ? (
+                <button className="link" onClick={() => void end(u)}>
+                  Mettre fin à la délégation
+                </button>
+              ) : (
+                <button className="link" onClick={() => (setTo(u), setDone(''))}>
+                  Lui confier mes pouvoirs
+                </button>
+              )
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {to ? (
+        <div className="modal" onClick={(e) => e.target === e.currentTarget && setTo(null)}>
+          <div className="sheet">
+            <h2>Confier mes pouvoirs à {to.name}</h2>
+            <label>
+              Pendant combien de jours ?
+              <input inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value.replace(/\D/g, '').slice(0, 2))} />
+            </label>
+            <p className="muted small">Jusqu’au {(() => { const d = new Date(); d.setDate(d.getDate() + Math.max(1, Number(days) || 1)); return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }); })()} à 23 h.</p>
+            <button className="big primary" onClick={() => void delegate()}>
+              Confier
+            </button>
+            <button className="link" onClick={() => setTo(null)}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

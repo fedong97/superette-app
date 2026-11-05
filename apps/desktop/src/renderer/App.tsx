@@ -1048,7 +1048,7 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
    * Éléments permis à l'utilisateur, sans séparateur en tête, en fin ni en double.
    * Ce qui n'est pas permis ne s'affiche pas du tout (pas de ligne grisée).
    */
-  const supervisor = user.role === 'admin' || user.role === 'manager';
+  const supervisor = user.role === 'admin' || user.rights.includes('supervisor');
   const visibleItems = (items: MenuItem[], forSearch = false) =>
     items
       .filter((i) => forSearch || !i.searchOnly)

@@ -118,8 +118,42 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.113.0',
+    items: [
+      'Une seule version réunit les nouveautés du logiciel de caisse (0.107.0 et 0.108.0 : menus par métier, caisse, fenêtres entières) et celles d’ONIX 360 Mobile (0.107.0 à 0.112.0 : nouvelle interface, gestion sur le téléphone, notifications). Les deux listes sont ci-dessous.',
+    ],
+  },
+  {
+    version: '0.112.0',
+    items: [
+      "ONIX 360 Mobile : le scan avec l'appareil photo marche de nouveau (inventaire, panier au rayon, réception, contrôle sortie, QR code du gérant). Depuis la 0.109.0, l'image de la caméra restait cachée.",
+    ],
+  },
+  {
+    version: '0.111.0',
+    items: [
+      "Ventes sur le téléphone : touchez une facture pour voir son détail : produits avec quantités, prix et remises, total et TVA, paiements, monnaie rendue, vendeur, caissier, caisse et client. L'annulation se fait depuis cette fiche.",
+    ],
+  },
+  {
+    version: '0.110.0',
+    items: [
+      "ONIX 360 Mobile : menu latéral (☰) comme sur les maquettes, avec le profil, tous les écrans autorisés rangés par thème, les notifications, les paramètres et la déconnexion. Les écrans de gestion du PC (achats, produits, clients, fournisseurs, dépenses, comptabilité, administration…) y sont directement, seulement s'ils sont dans vos droits.",
+      "Ventes sur le téléphone : filtres Aujourd'hui, Hier, 7 jours, Ce mois ou une date au choix, et par type (à crédit, retours, annulées). Le tableau de bord s'affiche pour le jour de votre choix.",
+    ],
+  },
+  {
+    version: '0.109.0',
+    items: [
+      "ONIX 360 Mobile fait peau neuve : barre de navigation en bas, accueil, menu « Plus » et actions rapides construits selon les droits de la personne connectée. Chacun ne voit que ce qui sert à son travail (gérant, vendeur, magasinier, caissier…), sans rien perdre des fonctions existantes.",
+      "Accueil du téléphone : ce qui demande l'attention en premier (demandes d'accord, écarts de caisse, paniers rendus, produits à recompter, saisies à envoyer), puis les chiffres du jour selon le rôle. Nouvelles couleurs ONIX, cartes plus légères, chargements et écrans vides plus clairs.",
+    ],
+  },
+  {
     version: '0.108.0',
     items: [
+      "ONIX 360 Mobile, gérant : « Gérer la boutique » ouvre les écrans de gestion du PC sur le téléphone : tableau de bord, ventes, trésorerie et caisses, clients, fournisseurs, achats et paiements, dépenses, comptabilité, produits et prix, stock, équipe et planning, caisses et utilisateurs. On y crée, modifie, encaisse et règle comme au PC.",
+      "Chaque action faite sur le téléphone est exécutée par un PC allumé du magasin (n'importe lequel), avec les droits de la personne connectée, sans déranger la personne assise devant ce PC. L'impression, les fichiers et les réglages propres à un poste restent sur les PC.",
       'Les fenêtres comme « Nouvel article » s’ouvrent entières, à droite de la barre latérale.',
       'Achats et Fournisseurs sont de nouveau deux menus séparés.',
       'Caisse : le bandeau rouge « PC hors ligne » est retiré, la barre du bas affiche déjà « Serveur : hors ligne ». Le menu Actions s’ouvre entier, et chaque modèle d’écran de vente tient sur une page sans défiler.',
@@ -140,6 +174,12 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
       'Nouveau : « Règles de mon magasin » (Administration) regroupe les 16 réglages qui changent la journée, avec la valeur conseillée.',
       'L’accord par téléphone est proposé d’office quand le gérant n’est pas devant le PC.',
       'Ctrl+K retrouve un client par son numéro de téléphone, même tapé sans espaces. La page gérant du serveur renvoie vers ONIX 360 Mobile. Les raccourcis clavier ne changent pas.',
+      "Rien n'est réservé au seul gérant : nouveau groupe « Opérations sensibles » dans les droits, et droit « Superviseur » qui rend le code d'un employé valable comme celui du gérant (annulations, retours, remises, crédit au-delà du plafond, sorties de caisse, avances…).",
+      "Délégation temporaire : Administration › Délégation et plafonds, le gérant confie ses pouvoirs à un employé jusqu'à une date ; tout revient seul à la fin. Plafonds par personne : remise maximale et sortie de caisse maximale sans code.",
+      "Caisse séparée : à l'encaissement, le caissier choisit ticket (F2), listing (F7), A4 (F9) ou rien (F4) ; le vendeur peut demander le listing ou l'A4 en envoyant la facture.",
+      "ONIX 360 Mobile, vendeur : remise sur le total, facture à crédit pour un client de la liste avec acompte, format de facture voulu par le client ; la caisse valide à crédit en un geste.",
+      "ONIX 360 Mobile, gérant : nouvelles pages « À valider » (modifications de facture, corrections de stock, dépenses), « Ventes » du jour avec annulation, plafond de crédit d'un client et délégation. N'importe quel PC allumé du magasin applique ces actions en quelques secondes.",
+      "Notifications Android, appli fermée : demandes d'accord, demandes à valider, écarts et clôtures de caisse, grosses remises, annulations, ruptures. À régler une fois sur la page Téléphones du serveur avec un projet Firebase gratuit.",
     ],
   },
   {

@@ -292,7 +292,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const purchases = new PurchaseService(db, clock, stock);
   const receipts = new ReceiptService(db, clock, admin, pos, customers, expenses, treasury, inventories, rebates, quotes, purchases);
   const staff = new StaffService(db, clock, admin);
-  const cashdesk = new CashDeskService(db, clock, pos, customers, purchases, expenses, staff, treasury, vouchers);
+  const cashdesk = new CashDeskService(db, clock, pos, customers, purchases, expenses, staff, treasury, vouchers, admin);
   const reports = new ReportService(db, clock);
   const accounting = new AccountingService(db, clock);
   const statements = new FinancialStatementsService(db, clock, accounting, stock);

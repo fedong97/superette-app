@@ -13,8 +13,8 @@ const FILES = [
 /** Textes identiques en anglais, ou laissés en français exprès (le choix « Français »). */
 const SAME = new Set([
   'Administration', 'Session', 'Situation', 'Commission', 'Correction', 'Action', 'Action ▾', 'Transaction', 'Synchronisation', 'Version',
-  'Document', 'Orientation', 'Section', 'Promotion', 'Description', 'Destination', 'Consumer key', 'Consumer secret', 'SARL, SA, Ets…',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Français', 'Afficher les écrans en français',
+  'Document', 'Orientation', 'Section', 'Promotion', 'Description', 'Destination', 'Consumer key', 'Consumer secret', 'SARL, SA, Ets…', 'Bearer', 'application/json',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Français', 'Afficher les écrans en français', 'English / Français',
 ]);
 const FRENCH = /[éèêàçùôîûœÉÀ]|\b(le|la|les|des|du|un|une|et|pour|sur|avec|aucun|aucune|est|dans|par|de|au|aux|en|ou|ce|cette|ses|son|sa|d|l|qu)\b|^[A-Z][a-z]+(er|ez|é|ée|és|ées|ion|eur|ure|ment|ité|té)\b/i;
 const CODE = /^[a-z][a-zA-Z0-9_.:-]*$|^[A-Z_0-9.]+$|[{}<>;=]|^\.|^#|^\w+\(|px\b|^--|^https?:|^[a-z-]+(\s[a-z-]+)+$/;

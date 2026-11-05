@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { parseNetContent, parseQtyTiers, splitTtc, unitPriceText } from '@superette/core';
 import { type Result, call } from '../api';
-import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, useLoad, useToast, has, useCan, useStoreSettings, useDraft, useFind } from '../ui';
+import { Empty, Field, Modal, Tabs, dateTime, fcfa, parseAmount, parseQty, qty, useLoad, useToast, has, useCan, useStoreSettings, useDraft, useFind } from '../ui';
 import { ExportDialog, ImportDialog, type ListFilter, PriceUpdateDialog } from './articleFiles';
 import { useArticleSuggestions, SuggestionList } from './pickers';
 import { Shelving } from './Controls';
@@ -65,6 +65,9 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
     data: loaded.data?.filter((a) => (status !== 'inactive' || !a.active) && (!departmentId || (a.family_id !== null && families.has(a.family_id)))),
   };
   const filter: ListFilter = { query: search, departmentId, familyId: '', status };
+  // 0.107.0 : la quantité en stock dans la liste (première question au téléphone : « il en reste combien ? »).
+  const stockRows = useLoad(() => (has(user, 'stock') ? call('stock.list', {}) : Promise.resolve([])), []);
+  const stockOf = new Map((stockRows.data ?? []).map((r) => [r.article_id, r]));
   return (
     <>
       <div className="filters">
@@ -106,13 +109,14 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
           <thead>
             <tr>
               <th />
-              <th>Code</th>
               <th>Désignation</th>
               <th>Rayon</th>
-              <th>Code-barres</th>
+              {has(user, 'stock') && <th className="r">Stock</th>}
               <th className="r">Achat</th>
               <th className="r">{tx('Vente TTC')}</th>
               <th className="r">Marge</th>
+              <th>Code-barres</th>
+              <th>Code</th>
               <th />
             </tr>
           </thead>
@@ -123,7 +127,6 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
               return (
                 <tr key={a.id} className={a.active ? 'clickable' : 'clickable inactive'} onClick={() => setEditing(a)}>
                   <td className="thumb-cell">{a.photo_thumb && <img className="thumb" src={a.photo_thumb} alt="" />}</td>
-                  <td>{a.code}</td>
                   <td>
                     {a.name}
                     {a.brand && <small className="muted"> · {a.brand}</small>}
@@ -135,13 +138,17 @@ function ArticleList({ user, startNew, focusSearch }: { user: User; startNew: bo
                     )}
                   </td>
                   <td>{a.department_name ?? '—'}</td>
-                  <td>{a.barcodes[0]?.code ?? (a.plu ? `PLU ${a.plu}` : '—')}</td>
+                  {has(user, 'stock') && (
+                    <td className={`r ${(stockOf.get(a.id)?.qty ?? 0) <= 0 ? 'neg' : ''}`}>{stockOf.has(a.id) ? qty(stockOf.get(a.id)!.qty, a.unit) : '—'}</td>
+                  )}
                   <td className="r">{fcfa(a.purchase_price)}</td>
                   <td className="r">
                     {fcfa(a.store_price)}
                     {a.unit !== 'piece' && <small> /{a.unit === 'kg' ? 'kg' : 'L'}</small>}
                   </td>
                   <td className={`r ${margin !== null && margin < 0 ? 'neg' : ''}`}>{margin === null ? '—' : `${margin} %`}</td>
+                  <td className="muted">{a.barcodes[0]?.code ?? (a.plu ? `PLU ${a.plu}` : '—')}</td>
+                  <td className="muted">{a.code}</td>
                   <td>{!a.active && <span className="tag">en sommeil</span>}</td>
                 </tr>
               );

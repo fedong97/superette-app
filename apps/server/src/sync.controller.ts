@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Ip, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Inject, Param, Post, Query } from '@nestjs/common';
+import { ClientIp } from './clientIp';
 import { ApprovalsService } from './approvals.service';
 import { CounterService } from './counter.service';
 import { MobileService } from './mobile.service';
+import { ManagerActionsService } from './managerActions.service';
+import { type RemoteReply, RemotePcService } from './remotePc.service';
 import { type SyncEvent, SyncService } from './sync.service';
 
 /** Limite les essais de code d'activation (6 chiffres) ou d'identifiant : 10 échecs par heure et par adresse. */
@@ -14,7 +17,35 @@ export class SyncController {
     @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
     @Inject(MobileService) private readonly mobile: MobileService,
     @Inject(CounterService) private readonly counter: CounterService,
+    @Inject(ManagerActionsService) private readonly actions: ManagerActionsService,
+    @Inject(RemotePcService) private readonly remote: RemotePcService,
   ) {}
+
+  // ——— Actions du gérant faites sur le téléphone, exécutées par un PC du magasin ———
+
+  @Get('manager-actions')
+  async managerActions(@Headers('authorization') auth: string | undefined) {
+    return this.actions.claim(await this.sync.authenticate(auth));
+  }
+
+  @Post('manager-actions/:id')
+  @HttpCode(200)
+  async managerActionDone(@Headers('authorization') auth: string | undefined, @Param('id') id: string, @Body() body: { ok?: boolean; message?: string | null }) {
+    return this.actions.finish(await this.sync.authenticate(auth), id, body ?? {});
+  }
+
+  // ——— Le PC sur le téléphone du gérant : le PC attend les appels et rend les réponses ———
+
+  @Get('remote-pc/next')
+  async remoteNext(@Headers('authorization') auth: string | undefined, @Query('wait') wait?: string) {
+    return this.remote.next(await this.sync.authenticate(auth), Number(wait) || undefined);
+  }
+
+  @Post('remote-pc/:id')
+  @HttpCode(200)
+  async remoteReply(@Headers('authorization') auth: string | undefined, @Param('id') id: string, @Body() body: RemoteReply) {
+    return this.remote.reply(await this.sync.authenticate(auth), id, body);
+  }
 
   @Get('health')
   health() {
@@ -27,7 +58,7 @@ export class SyncController {
   }
 
   @Post('devices/activate')
-  async activate(@Body() body: { activationCode: string; name?: string }, @Ip() ip: string) {
+  async activate(@Body() body: { activationCode: string; name?: string }, @ClientIp() ip: string) {
     const now = Date.now();
     const f = failures.get(ip);
     if (f && f.until > now && f.count >= 10) throw new HttpException('Trop de tentatives, réessayez dans une heure', HttpStatus.TOO_MANY_REQUESTS);
@@ -44,7 +75,7 @@ export class SyncController {
 
   /** Nouveau PC sans code de caisse : identifiant et code d'un utilisateur du magasin. Mêmes limites d'essais. */
   @Post('devices/join')
-  async join(@Body() body: { login: string; pin: string; name?: string }, @Ip() ip: string) {
+  async join(@Body() body: { login: string; pin: string; name?: string }, @ClientIp() ip: string) {
     const now = Date.now();
     const f = failures.get(ip);
     if (f && f.until > now && f.count >= 10) throw new HttpException('Trop de tentatives, réessayez dans une heure', HttpStatus.TOO_MANY_REQUESTS);

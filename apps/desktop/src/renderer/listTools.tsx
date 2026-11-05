@@ -25,7 +25,19 @@ const SKIP = '.pos-screen, .modal, [data-lv-off]';
 function headers(table: HTMLTableElement): string[] {
   const row = table.tHead?.rows[0];
   if (!row) return [];
+  reindex(row);
   return [...row.cells].sort((a, b) => idx(a) - idx(b)).map((c, i) => c.textContent?.trim() || `Colonne ${i + 1}`);
+}
+
+/**
+ * 0.107.0 : une colonne ajoutée par React après coup (les dépôts de l'état du stock,
+ * chargés après la liste) n'a pas de position notée ; les autres en ont une, devenue
+ * fausse. On renumérote alors toute la ligne dans l'ordre de la page, sinon les
+ * en-têtes et les chiffres se décalent.
+ */
+function reindex(row: Element) {
+  const cells = [...row.children] as HTMLElement[];
+  if (cells.some((c) => c.dataset.lvI === undefined) && cells.some((c) => c.dataset.lvI !== undefined)) cells.forEach((c, i) => (c.dataset.lvI = String(i)));
 }
 
 /** Position d'origine d'une cellule, notée la première fois qu'on la voit. */
@@ -53,6 +65,7 @@ function sortValue(text: string): number | string {
 }
 
 function cellsOf(row: HTMLTableRowElement): HTMLTableCellElement[] {
+  reindex(row);
   return [...row.cells].sort((a, b) => idx(a) - idx(b));
 }
 
@@ -128,6 +141,8 @@ export function ListTools({ prefs, onSave }: { prefs: ListPrefs; onSave: (p: Lis
   const toast = useToast();
   const [hover, setHover] = useState<{ table: HTMLTableElement; rect: DOMRect } | null>(null);
   const [panel, setPanel] = useState<{ table: HTMLTableElement; key: string } | null>(null);
+  /** 0.108.0 : la barre (filtre, colonnes, Excel, PDF) ne s'ouvre qu'au clic sur le petit bouton ⋯ de la liste. */
+  const [opened, setOpened] = useState<HTMLTableElement | null>(null);
   const [filter, setFilter] = useState<Record<string, string>>({});
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
@@ -179,16 +194,29 @@ export function ListTools({ prefs, onSave }: { prefs: ListPrefs; onSave: (p: Lis
     };
     const onMove = (e: MouseEvent) => {
       const el = e.target as HTMLElement;
-      if (el.closest('.lv-tools, .lv-panel')) return;
+      if (el.closest('.lv-tools, .lv-panel, .lv-more')) return;
+      if (el.closest?.('.modal-back')) {
+        setHover((h) => (h ? null : h));
+        return;
+      }
       const table = el.closest?.('table.list') as HTMLTableElement | null;
       if (table && table.dataset.lv && !table.closest(SKIP)) setHover((h) => (h?.table === table ? h : { table, rect: table.getBoundingClientRect() }));
       else setHover((h) => (h ? null : h));
     };
+    // La barre ouverte se referme d'un clic ailleurs ou avec Échap.
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest?.('.lv-tools, .lv-panel')) setOpened(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpened(null);
     document.addEventListener('click', onClick);
     document.addEventListener('mousemove', onMove);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('click', onClick);
       document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -215,27 +243,45 @@ export function ListTools({ prefs, onSave }: { prefs: ListPrefs; onSave: (p: Lis
     }
   };
 
-  const tools = hover && !panel && (
-    <div className="lv-tools" style={{ top: Math.max(4, hover.rect.top - 30), left: Math.max(4, hover.rect.right - 330) }}>
+  // Liste dont la barre est ouverte ; sinon, au survol, seulement le petit bouton ⋯.
+  const cur = opened && opened.isConnected ? { table: opened, rect: opened.getBoundingClientRect() } : hover;
+  const filtered = Boolean(cur && filter[cur.table.dataset.lv!]);
+  const tools = cur && !panel && (cur.table !== opened ? (
+    <button
+      type="button"
+      className={`lv-more ${filtered ? 'on' : ''}`}
+      style={{ top: Math.max(4, cur.rect.top - 19), right: Math.max(4, window.innerWidth - cur.rect.right) }}
+      title="Filtrer, choisir les colonnes, imprimer, Excel ou PDF"
+      aria-label="Options de la liste"
+      onClick={() => setOpened(cur.table)}
+    >
+      {filtered ? '⋯ Filtre actif' : '⋯'}
+    </button>
+  ) : (
+    <div className="lv-tools" style={{ top: Math.max(4, cur.rect.top - 30), right: Math.max(4, window.innerWidth - cur.rect.right) }}>
       <input
+        autoFocus
         placeholder="Filtrer la liste…"
-        value={filter[hover.table.dataset.lv!] ?? ''}
-        onChange={(e) => setFilter((f) => ({ ...f, [hover.table.dataset.lv!]: e.target.value }))}
+        value={filter[cur.table.dataset.lv!] ?? ''}
+        onChange={(e) => setFilter((f) => ({ ...f, [cur.table.dataset.lv!]: e.target.value }))}
       />
-      <button type="button" title="Colonnes et vues de cette liste" onClick={() => setPanel({ table: hover.table, key: hover.table.dataset.lv! })}>
+      <button type="button" title="Colonnes et vues de cette liste" onClick={() => setPanel({ table: cur.table, key: cur.table.dataset.lv! })}>
         ☰ Colonnes
       </button>
-      <button type="button" title="Imprimer la liste" onClick={() => void exportTo(hover.table, 'print')}>
+      <button type="button" title="Imprimer la liste" onClick={() => void exportTo(cur.table, 'print')}>
         🖨
       </button>
-      <button type="button" title="Exporter vers Excel" onClick={() => void exportTo(hover.table, 'xlsx')}>
+      <button type="button" title="Exporter vers Excel" onClick={() => void exportTo(cur.table, 'xlsx')}>
         Excel
       </button>
-      <button type="button" title="Enregistrer en PDF" onClick={() => void exportTo(hover.table, 'pdf')}>
+      <button type="button" title="Enregistrer en PDF" onClick={() => void exportTo(cur.table, 'pdf')}>
         PDF
       </button>
+      <button type="button" className="ghost" title="Fermer la barre" aria-label="Fermer la barre" onClick={() => setOpened(null)}>
+        ✕
+      </button>
     </div>
-  );
+  ));
 
   return (
     <>

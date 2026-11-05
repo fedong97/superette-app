@@ -61,11 +61,39 @@ export interface SyncEvent {
   payload: Record<string, unknown> | null;
 }
 
+/** Opération propre à un magasin (pas une donnée partagée) qui n'est pas celui du PC. */
+export const isForeign = (device: Device, e: SyncEvent) =>
+  typeof e.storeId === 'string' && e.storeId !== '' && e.storeId !== device.store_id && !GLOBAL_ENTITIES.includes(e.entity);
+
 export interface Device {
   id: string;
   name: string;
   store_id: string;
   register_id: string;
+  /** PC de confiance (siège), désigné dans l'administration du serveur. */
+  trusted?: boolean;
+}
+
+/** Données de tout le réseau : réservées aux PC de confiance (sauf la fiche du magasin du PC lui-même). */
+const NETWORK_ADMIN = new Set(['store', 'company', 'vat_rate', 'role_rights']);
+/** Données partagées rattachées à un magasin : un PC ordinaire ne touche qu'à celles du sien. */
+const STORE_OWNED = new Set(['user', 'register', 'warehouse']);
+
+/**
+ * Pourquoi l'opération demande un PC de confiance, ou `null` si un PC ordinaire peut l'envoyer.
+ * Les ventes, le stock, la caisse et le catalogue (articles, clients, fournisseurs) restent ouverts à tous.
+ */
+export function trustNeeded(device: Device, e: SyncEvent): string | null {
+  if (isForeign(device, e)) return 'opération d’un autre magasin';
+  if (NETWORK_ADMIN.has(e.entity)) {
+    if (e.entity === 'store' && e.entityId === device.store_id) return null;
+    return 'administration du réseau';
+  }
+  if (STORE_OWNED.has(e.entity)) {
+    const owner = e.payload && 'store_id' in e.payload ? e.payload['store_id'] : e.storeId;
+    if (owner !== device.store_id) return owner ? 'utilisateur, caisse ou dépôt d’un autre magasin' : 'utilisateur, caisse ou dépôt de tous les magasins';
+  }
+  return null;
 }
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -126,17 +154,18 @@ export class SyncService {
     }
   }
 
-  private async createDevice(name: string, storeId: string, registerId: string) {
+  private async createDevice(name: string, storeId: string, registerId: string, enrolledBy: string) {
     await this.checkStations();
     const id = randomUUID();
     const token = randomBytes(32).toString('base64url');
     try {
-      await this.pg.query('INSERT INTO devices (id, name, store_id, register_id, token_hash) VALUES ($1, $2, $3, $4, $5)', [
+      await this.pg.query('INSERT INTO devices (id, name, store_id, register_id, token_hash, enrolled_by) VALUES ($1, $2, $3, $4, $5, $6)', [
         id,
         name,
         storeId,
         registerId,
         hashToken(token),
+        enrolledBy,
       ]);
     } catch (e) {
       if ((e as { code?: string }).code === '23505') throw new ConflictException('Cette caisse est déjà reliée à un autre PC');
@@ -153,7 +182,7 @@ export class SyncService {
     const expected = Buffer.from(await this.enrollmentKey());
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new ForbiddenException("Clé d'enrôlement incorrecte");
     if (!input.storeId || !input.registerId) throw new BadRequestException('Magasin et caisse obligatoires');
-    return this.createDevice(input.name?.trim() || 'Poste', input.storeId, input.registerId);
+    return this.createDevice(input.name?.trim() || 'Poste', input.storeId, input.registerId, 'key');
   }
 
   /** Nouveau PC : rattaché à une caisse déclarée dans l'administration, avec son code d'activation. */
@@ -169,7 +198,7 @@ export class SyncService {
     );
     const register = rows.find((r) => r.payload.activation_code === code && r.payload.active !== 0);
     if (!register) throw new NotFoundException("Code d'activation inconnu. Vérifiez que le poste principal s'est bien synchronisé.");
-    return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id);
+    return this.createDevice(input.name?.trim() || 'Poste', register.payload.store_id, register.entity_id, 'activation');
   }
 
   /**
@@ -203,14 +232,14 @@ export class SyncService {
       storeId = stores[0]!.entity_id;
     }
     // Le PC n'occupe aucune caisse : la place est tenue par un identifiant propre au poste.
-    return this.createDevice(input.name?.trim() || 'Poste', storeId, `poste:${randomUUID()}`);
+    return this.createDevice(input.name?.trim() || 'Poste', storeId, `poste:${randomUUID()}`, `user:${user.entity_id}`);
   }
 
   async authenticate(authorization: string | undefined, appVersion?: string): Promise<Device> {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     if (!token) throw new UnauthorizedException('Jeton manquant');
     const { rows } = await this.pg.query<Device>(
-      "UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id, name, store_id, register_id",
+      "UPDATE devices SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE token_hash = $1 AND revoked_at IS NULL AND kind = 'pc' RETURNING id, name, store_id, register_id, trusted",
       [hashToken(token), /^\d+\.\d+\.\d+$/.test(appVersion ?? '') ? appVersion : null],
     );
     if (!rows[0]) throw new UnauthorizedException('Poste inconnu ou révoqué');
@@ -247,27 +276,67 @@ export class SyncService {
    * Une opération refusée (donnée qu'un serveur plus ancien ne connaît pas) ne
    * bloque pas les autres : elle reste en attente sur le PC jusqu'à la mise à jour du serveur.
    */
-  async push(device: Device, events: SyncEvent[]): Promise<{ accepted: string[]; rejected: { id: string; reason: string }[] }> {
+  async push(device: Device, events: SyncEvent[]): Promise<{ accepted: string[]; rejected: { id: string; reason: string; final?: true }[] }> {
     if (!Array.isArray(events) || events.length > 2000) throw new BadRequestException('Lot d’opérations invalide (2000 maximum)');
     const valid: SyncEvent[] = [];
-    const rejected: { id: string; reason: string }[] = [];
+    const rejected: { id: string; reason: string; final?: true }[] = [];
+    // Déjà là, à l'identique (données de départ d'un PC neuf) : acceptée sans rien enregistrer.
+    const same: string[] = [];
+    const guarded = !device.trusted && (await this.trustEnforced());
     for (const e of events) {
       if (typeof e?.id !== 'string' || typeof e.entityId !== 'string' || !['upsert', 'delete'].includes(e.op)) {
         throw new BadRequestException(`Opération invalide : ${JSON.stringify(e).slice(0, 200)}`);
       }
-      if (KNOWN_ENTITIES.has(e.entity)) valid.push(e);
-      else rejected.push({ id: e.id, reason: `Donnée inconnue du serveur : ${String(e.entity).slice(0, 50)}` });
+      if (!KNOWN_ENTITIES.has(e.entity)) {
+        rejected.push({ id: e.id, reason: `Donnée inconnue du serveur : ${String(e.entity).slice(0, 50)}` });
+        continue;
+      }
+      const why = guarded ? trustNeeded(device, e) : null;
+      if (!why) {
+        valid.push(e);
+        continue;
+      }
+      if (await this.unchanged(e)) same.push(e.id);
+      // Refus définitif : le PC ne la renverra pas, et le dit à l'écran.
+      else rejected.push({ id: e.id, reason: `Réservé aux PC de confiance (${why}) : ${e.entity}`, final: true });
     }
+    // Opérations d'un magasin envoyées par le PC d'un autre magasin : acceptées (achats groupés, PC du siège),
+    // mais comptées sur le PC pour que l'administration les voie. Une opération déjà reçue ne compte pas.
+    let foreign = 0;
+    let last: { entity: string; storeId: string; at: string } | null = null;
     await this.pg.transaction(async (tx) => {
       for (const e of valid) {
-        await tx.query(
+        const { rows } = await tx.query(
           `INSERT INTO events (id, device_id, entity, entity_id, op, store_id, register_id, payload, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING RETURNING id`,
           [e.id, device.id, e.entity, e.entityId, e.op, e.storeId, e.registerId, e.payload === null ? null : JSON.stringify(e.payload), e.createdAt],
         );
+        if (rows.length && isForeign(device, e)) {
+          foreign++;
+          last = { entity: e.entity, storeId: String(e.storeId), at: new Date().toISOString() };
+        }
+      }
+      if (foreign) {
+        await tx.query('UPDATE devices SET foreign_events = foreign_events + $2, foreign_last = $3 WHERE id = $1', [device.id, foreign, JSON.stringify(last)]);
       }
     });
-    return { accepted: valid.map((e) => e.id), rejected };
+    return { accepted: [...valid.map((e) => e.id), ...same], rejected };
+  }
+
+  /** Les règles des PC de confiance s'appliquent dès qu'un PC de confiance est désigné. */
+  private async trustEnforced(): Promise<boolean> {
+    const { rows } = await this.pg.query("SELECT 1 FROM devices WHERE trusted AND revoked_at IS NULL AND kind = 'pc' LIMIT 1");
+    return rows.length > 0;
+  }
+
+  /** La dernière version connue du serveur est-elle déjà exactement celle-ci ? */
+  private async unchanged(e: SyncEvent): Promise<boolean> {
+    const { rows } = await this.pg.query<{ op: string; payload: unknown }>('SELECT op, payload FROM events WHERE entity = $1 AND entity_id = $2 ORDER BY seq DESC LIMIT 1', [e.entity, e.entityId]);
+    const last = rows[0];
+    if (!last || last.op !== e.op) return false;
+    if (e.payload === null || last.payload === null) return e.payload === last.payload;
+    const { rows: eq } = await this.pg.query<{ same: boolean }>('SELECT $1::jsonb = $2::jsonb AS same', [JSON.stringify(last.payload), JSON.stringify(e.payload)]);
+    return eq[0]?.same === true;
   }
 
   /**
@@ -301,6 +370,8 @@ export class SyncService {
     /** Dernier numéro d'opération du serveur : un curseur plus grand vient d'une autre base. */
     lastSeq: number;
     serverBackup: ServerBackupState | null;
+    /** Heure du serveur : le PC dont l'horloge s'en écarte le signale. */
+    serverTime: string;
   }> {
     const max = Math.min(Math.max(limit || 1000, 1), 5000);
     const { rows } = await this.pg.query<{
@@ -347,6 +418,7 @@ export class SyncService {
       epochFrom: epoch.from,
       lastSeq: Number(last[0]?.seq ?? 0),
       serverBackup: await this.backups.state().catch(() => null),
+      serverTime: new Date().toISOString(),
     };
   }
 }

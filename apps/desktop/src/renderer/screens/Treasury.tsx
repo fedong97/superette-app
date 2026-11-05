@@ -74,6 +74,7 @@ export function FullTreasury({
   const [tab, setTab] = useState<Exclude<TreasuryTab, 'central' | 'emoney'>>(initialTab === 'history' ? 'history' : 'day');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'open' | 'close' | 'handover' | 'declared' | 'central-in' | 'central-out' | null>(null);
+  const [chain, setChain] = useState<LinkedRow[]>([]);
   // Historique filtré par type de caisse : espèces, électronique ou banque.
   const [kind, setKind] = useState<RegisterKind | 'all'>('all');
 
@@ -312,10 +313,12 @@ export function FullTreasury({
           onDone={(id) => {
             setDialog(null);
             setSessionId(id);
+            setChain(state.data!.linked.filter((l) => l.session));
             reload();
           }}
         />
       )}
+      {chain.length > 0 && <LinkedCloseChain linked={chain} canApprove={state.data.canOpen} threshold={state.data.gapThreshold} onEnd={() => (setChain([]), reload())} />}
       {dialog === 'declared' && register && open && (
         <DeclaredCloseDialog
           register={register}
@@ -403,7 +406,7 @@ function Day({
   return (
     <div className="tre-day">
       <div className="tre-head">
-        <Field label="Session">
+        <Field label="Journée">
           <select value={se.id} onChange={(e) => onSession(e.target.value)}>
             {sessions.map((x) => (
               <option key={x.id} value={x.id}>
@@ -420,7 +423,7 @@ function Day({
           <input readOnly value={se.closed_at ? `${dateTime(se.closed_at)} · ${se.closed_by_name ?? ''}` : ''} />
         </Field>
         {!declared && (
-          <Field label="Mnt. à l'ouverture" hint={se.carried_float !== null ? `dont ${fcfa(se.carried_float)} laissés la veille` : undefined}>
+          <Field label="Fond de caisse à l'ouverture" hint={se.carried_float !== null ? `dont ${fcfa(se.carried_float)} laissés la veille` : undefined}>
             <input readOnly className="r tre-amount" value={fcfa(se.opening_float)} />
           </Field>
         )}
@@ -491,8 +494,8 @@ function Day({
       {!declared && (
         <div className="tre-foot">
           <div>
-            <small>V. à crédit</small>
-            <strong className="tre-credit">{fcfa(cash.creditSales)}</strong>
+            <small>Ventes à crédit</small>
+            <strong className={cash.creditSales ? 'tre-credit' : 'tre-amount'}>{fcfa(cash.creditSales)}</strong>
           </div>
           <div>
             <small>Attendu à la clôture</small>
@@ -503,7 +506,7 @@ function Day({
             <strong className="tre-amount">{z.counted === null ? '—' : fcfa(z.counted)}</strong>
           </div>
           <div className={diffClass}>
-            <small>Différentiel</small>
+            <small>Écart</small>
             <strong className="tre-amount">{z.difference === null ? '—' : fcfa(z.difference)}</strong>
           </div>
           {se.deposit !== null && (
@@ -814,6 +817,22 @@ function Denominations({ count, onChange }: { count: Record<number, number>; onC
  * Ouverture : le fond proposé est celui laissé à la dernière clôture. Un fond
  * plus élevé est complété par la caisse centrale ; un fond plus bas lui rend l'excédent.
  */
+/**
+ * 0.107.0 : ouverture de sa caisse depuis la fiche de vente, avec le même comptage
+ * du fond que dans Trésorerie (la caisse de ce poste, ou la première attribuée).
+ */
+export function OpenRegisterHere({ registerId, onClose, onDone }: { registerId?: string | null; onClose: () => void; onDone: () => void }) {
+  const state = useLoad(() => call('treasury.state'), []);
+  if (!state.data) return null;
+  const list = state.data.registers;
+  const register = list.find((r) => r.id === registerId) ?? list.find((r) => r.isThisStation && r.kind === 'cash') ?? list.find((r) => r.isThisStation);
+  if (!register) {
+    onClose();
+    return null;
+  }
+  return <OpenDialog register={register} canOpen={state.data.canOpen} onClose={onClose} onDone={onDone} />;
+}
+
 function OpenDialog({ register, canOpen, onClose, onDone }: { register: RegisterRow; canOpen: boolean; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const carried = register.carriedFloat;
@@ -985,7 +1004,7 @@ function CloseDialog({
               <strong>{fcfa(preview.counted)}</strong>
             </div>
             <div className={preview.difference < 0 ? 'neg' : preview.difference > 0 ? 'pos' : ''}>
-              <small>Différentiel</small>
+              <small>Écart</small>
               <strong>{fcfa(preview.difference)}</strong>
             </div>
           </div>
@@ -1035,6 +1054,7 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
   const state = useLoad(() => call('treasury.state'), [registerId]);
   const day = useLoad(() => call('treasury.myDay'), [registerId]);
   const [dialog, setDialog] = useState<'open' | 'close' | 'handover' | null>(null);
+  const [chain, setChain] = useState<LinkedRow[]>([]);
   const reload = () => {
     state.reload();
     day.reload();
@@ -1172,11 +1192,37 @@ function CashierTreasury({ user, registerId = null, onChanged }: TreasuryProps) 
           onClose={() => setDialog(null)}
           onDone={() => {
             setDialog(null);
+            setChain(state.data?.linked.filter((l) => l.session) ?? []);
             reload();
           }}
         />
       )}
+      {chain.length > 0 && state.data && <LinkedCloseChain linked={chain} canApprove={state.data.canOpen} threshold={state.data.gapThreshold} onEnd={() => (setChain([]), reload())} />}
     </div>
+  );
+}
+
+/**
+ * 0.107.0 : clôture du soir d'une traite. Après la caisse espèces, les caisses
+ * électronique et banque du caissier encore ouvertes se clôturent à la suite.
+ */
+function LinkedCloseChain({ linked, canApprove, threshold, onEnd }: { linked: LinkedRow[]; canApprove: boolean; threshold: number; onEnd: () => void }) {
+  const [i, setI] = useState(0);
+  const r = linked[i];
+  if (!r?.session) return null;
+  const next = () => (i + 1 < linked.length ? setI(i + 1) : onEnd());
+  return (
+    <DeclaredCloseDialog
+      key={r.id}
+      register={r}
+      session={r.session}
+      blind
+      canApprove={canApprove}
+      threshold={threshold}
+      step={`Étape ${i + 2} sur ${linked.length + 1}`}
+      onClose={onEnd}
+      onDone={next}
+    />
   );
 }
 
@@ -1576,6 +1622,7 @@ function DeclaredCloseDialog({
   blind,
   canApprove,
   threshold,
+  step,
   onClose,
   onDone,
 }: {
@@ -1584,6 +1631,7 @@ function DeclaredCloseDialog({
   blind: boolean;
   canApprove: boolean;
   threshold: number;
+  step?: string;
   onClose: () => void;
   onDone: (sessionId: string) => void;
 }) {
@@ -1637,7 +1685,7 @@ function DeclaredCloseDialog({
   }
 
   return (
-    <Modal title={`Clôturer ${register.name}`} onClose={onClose} wide={!blind || canDeposit || exits.length > 0}>
+    <Modal title={`${step ? `${step} · ` : ''}Clôturer ${register.name}`} onClose={onClose} wide={!blind || canDeposit || exits.length > 0}>
       <p className="muted">
         Saisissez pour chaque moyen le montant relevé, puis validez. {blind ? '' : electronic ? 'L’attendu tient compte du solde de départ et des sorties du compte.' : 'L’écart se calcule avec l’encaissé de la journée.'}
       </p>

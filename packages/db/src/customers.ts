@@ -174,11 +174,11 @@ export class CustomerService extends Base {
         `SELECT c.*, (SELECT MAX(s.created_at) FROM sales s WHERE s.customer_id = c.id AND s.store_id = @storeId) AS last_sale
          FROM customers c
          WHERE (@all = 1 OR c.active = 1)
-           AND (@search IS NULL OR c.name LIKE @search OR c.code LIKE @search OR c.phone LIKE @search OR c.zone LIKE @search)
+           AND (@search IS NULL OR c.name LIKE @search OR c.code LIKE @search OR c.phone LIKE @search OR (@digits IS NOT NULL AND REPLACE(REPLACE(REPLACE(c.phone, ' ', ''), '.', ''), '-', '') LIKE @digits) OR c.zone LIKE @search)
            AND (@zone IS NULL OR COALESCE(c.zone, '') = @zone)
          ORDER BY c.name`,
       )
-      .all({ storeId, all: opts.includeInactive ? 1 : 0, search: opts.search?.trim() ? `%${opts.search.trim()}%` : null, zone: opts.zone ?? null }) as (Customer & {
+      .all({ storeId, all: opts.includeInactive ? 1 : 0, search: opts.search?.trim() ? `%${opts.search.trim()}%` : null, digits: /^[\d\s.+-]{4,}$/.test(opts.search?.trim() ?? '') ? `%${opts.search!.replace(/\D/g, '')}%` : null, zone: opts.zone ?? null }) as (Customer & {
       last_sale: string | null;
     })[];
     const result = rows.map((c) => {
@@ -470,11 +470,12 @@ export class CustomerService extends Base {
    * Vérifie qu'une vente à crédit est possible. Au-delà du plafond, il faut
    * l'accord d'un gérant (authorizedBy), tracé dans le journal d'audit.
    */
-  assertCredit(storeId: string, customerId: string, amount: Fcfa, authorizedBy: { id: string; role: string } | null, opts: { blockLate?: boolean } = {}): Customer {
+  assertCredit(storeId: string, customerId: string, amount: Fcfa, authorizedBy: { id: string; role: string; supervisor?: boolean } | null, opts: { blockLate?: boolean } = {}): Customer {
     const customer = this.getCustomer(customerId);
     if (!customer.active) throw new AppError(`Le client ${customer.name} est désactivé`, 'INVALID');
     const { balance, openItems } = this.ledger(storeId, customerId);
-    const manager = authorizedBy && (authorizedBy.role === 'admin' || authorizedBy.role === 'manager');
+    // Gérant, administrateur, ou superviseur et utilisateur à qui le droit « crédit au-delà du plafond » est donné.
+    const manager = authorizedBy && (authorizedBy.supervisor ?? (authorizedBy.role === 'admin' || authorizedBy.role === 'manager'));
     // Paramètre « bloquer les clients en retard » : une facture échue non payée bloque le crédit, sauf accord du gérant.
     const late = openItems.filter((i) => i.days_late > 0).reduce((t, i) => t + i.remaining, 0);
     if (opts.blockLate && late > 0) {

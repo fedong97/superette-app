@@ -78,6 +78,8 @@ export interface MobilePayment {
   register_id: string | null;
   user_id: string | null;
   user_name?: string | null;
+  /** Payé après un abandon : quand le gérant l'a traité (remboursé, rattaché à une vente). */
+  late_handled?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +88,8 @@ const MTN_URL = { sandbox: 'https://sandbox.momodeveloper.mtn.com', production: 
 const SETTING = 'mobilepay.config';
 /** Délai de la simulation avant la réponse du « client ». */
 const SIMULATION_MS = 5_000;
+/** Pendant combien de temps une demande abandonnée est encore vérifiée chez l'opérateur. */
+const LATE_WINDOW_MS = 24 * 3_600_000;
 
 type Fetch = typeof fetch;
 
@@ -275,37 +279,92 @@ export class MobilePayService extends Base {
   async status(id: string): Promise<MobilePayment> {
     const p = this.get(id);
     if (p.status !== 'pending') return p;
-    const c = this.raw();
     if (p.mode === 'simulation') {
       if (this.clock().getTime() - new Date(p.created_at).getTime() < SIMULATION_MS) return p;
       if (p.phone.endsWith('0')) return this.update(id, { status: 'failed', reason: 'Le client a refusé le paiement (simulation)' });
       return this.update(id, { status: 'success', transaction_id: `SIM${Date.now().toString().slice(-8)}` });
     }
+    const answer = await this.ask(p);
+    if (!answer) return p;
+    return answer.paid ? this.update(id, { status: 'success', transaction_id: answer.transactionId }) : this.update(id, { status: 'failed', reason: answer.reason });
+  }
+
+  /** Réponse de l'opérateur : payé, refusé, ou `null` tant que le client n'a rien fait (ou pas de réseau). */
+  private async ask(p: MobilePayment): Promise<{ paid: true; transactionId: string } | { paid: false; reason: string } | null> {
+    const c = this.raw();
     try {
       if (p.method === 'MTN_MOMO') {
         const m = c.MTN_MOMO;
         const res = await this.call(`${MTN_URL[p.mode === 'sandbox' ? 'sandbox' : 'production']}/collection/v1_0/requesttopay/${p.provider_ref}`, { headers: await this.mtnHeaders(m, p.mode) });
-        if (!res.ok) return p;
+        if (!res.ok) return null;
         const body = (await res.json()) as { status?: string; financialTransactionId?: string; reason?: string | { message?: string } };
-        if (body.status === 'SUCCESSFUL') return this.update(id, { status: 'success', transaction_id: body.financialTransactionId ?? p.provider_ref });
+        if (body.status === 'SUCCESSFUL') return { paid: true, transactionId: body.financialTransactionId ?? p.provider_ref ?? p.id };
         if (body.status === 'FAILED' || body.status === 'REJECTED' || body.status === 'TIMEOUT') {
           const why = typeof body.reason === 'string' ? body.reason : (body.reason?.message ?? body.status);
-          return this.update(id, { status: 'failed', reason: MTN_REASONS[why] ?? `Paiement refusé (${why})` });
+          return { paid: false, reason: MTN_REASONS[why] ?? `Paiement refusé (${why})` };
         }
-        return p;
+        return null;
       }
       const o = c.ORANGE_MONEY;
       const res = await this.call(`${o.baseUrl}/omcoreapis/1.0.2/mp/paymentstatus/${p.provider_ref}`, { headers: await this.orangeHeaders(o) });
-      if (!res.ok) return p;
+      if (!res.ok) return null;
       const data = ((await res.json()) as { data?: { status?: string; txnid?: string; inittxnmessage?: string } }).data ?? {};
       const st = String(data.status ?? '').toUpperCase();
-      if (st.startsWith('SUCCESS')) return this.update(id, { status: 'success', transaction_id: data.txnid ?? p.provider_ref });
-      if (st === 'FAILED' || st === 'CANCELLED' || st === 'EXPIRED') return this.update(id, { status: 'failed', reason: data.inittxnmessage || 'Paiement refusé ou expiré' });
-      return p;
+      if (st.startsWith('SUCCESS')) return { paid: true, transactionId: data.txnid ?? p.provider_ref ?? p.id };
+      if (st === 'FAILED' || st === 'CANCELLED' || st === 'EXPIRED') return { paid: false, reason: data.inittxnmessage || 'Paiement refusé ou expiré' };
+      return null;
     } catch {
-      // Pas de réseau pour l'instant : la demande reste en attente, on réessaiera.
-      return p;
+      // Pas de réseau pour l'instant : on réessaiera.
+      return null;
     }
+  }
+
+  /**
+   * Demandes abandonnées à la caisse depuis moins de 24 h : l'opérateur est encore interrogé.
+   * Si le client a payé après l'abandon, l'argent est reçu sans vente : la demande garde l'état
+   * « Abandonné » avec son numéro de transaction, et part dans « À traiter » du gérant.
+   */
+  async recheckAbandoned(): Promise<MobilePayment[]> {
+    const since = new Date(this.clock().getTime() - LATE_WINDOW_MS).toISOString();
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM mobile_payments WHERE status = 'cancelled' AND transaction_id IS NULL AND provider_ref IS NOT NULL AND mode != 'simulation' AND late_checked IS NULL AND created_at >= ? ORDER BY created_at LIMIT 20",
+      )
+      .all(since) as MobilePayment[];
+    const found: MobilePayment[] = [];
+    for (const p of rows) {
+      const answer = await this.ask(p);
+      if (!answer) continue;
+      if (!answer.paid) {
+        // Refus définitif : plus besoin de redemander.
+        this.db.prepare('UPDATE mobile_payments SET late_checked = ? WHERE id = ?').run(this.now(), p.id);
+        continue;
+      }
+      this.db
+        .prepare('UPDATE mobile_payments SET transaction_id = ?, reason = ?, late_checked = ?, updated_at = ? WHERE id = ?')
+        .run(answer.transactionId, 'Payé après l’abandon : rembourser le client ou rattacher à une vente', this.now(), this.now(), p.id);
+      this.audit(null, 'mobilepay.late_success', 'mobile_payment', p.id, { amount: p.amount, transactionId: answer.transactionId });
+      found.push(this.get(p.id));
+    }
+    return found;
+  }
+
+  /** Paiements reçus après un abandon, pas encore traités par le gérant. */
+  lateUnhandled(storeId: string): MobilePayment[] {
+    return this.db
+      .prepare("SELECT * FROM mobile_payments WHERE store_id = ? AND status = 'cancelled' AND transaction_id IS NOT NULL AND late_handled IS NULL ORDER BY created_at")
+      .all(storeId) as MobilePayment[];
+  }
+
+  /** Le gérant a remboursé le client ou rattaché le paiement à une vente : il le note. */
+  handleLate(ctx: Context, id: string, note: string): MobilePayment {
+    const p = this.get(id);
+    if (p.status !== 'cancelled' || !p.transaction_id) throw new AppError('Ce paiement n’a pas été reçu après un abandon', 'INVALID');
+    const what = note.trim();
+    if (!what) throw new AppError('Dites ce qui a été fait (remboursé, rattaché au ticket…)', 'INVALID');
+    this.db.prepare('UPDATE mobile_payments SET late_handled = ?, reason = ?, updated_at = ? WHERE id = ?').run(this.now(), `Payé après l’abandon, traité : ${what.slice(0, 200)}`, this.now(), id);
+    this.audit(ctx.userId, 'mobilepay.late_handled', 'mobile_payment', id, { note: what.slice(0, 200) });
+    return this.get(id);
   }
 
   /** Abandon à la caisse : le client ne confirme pas. Un paiement confirmé plus tard reste visible dans l'historique. */

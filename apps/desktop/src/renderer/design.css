@@ -211,6 +211,13 @@ table.list tr.total td { background: var(--surface-2); font-weight: 650; }
 /* --- Fenêtres modales --- */
 .modal-back { background: rgba(22, 51, 45, 0.32); backdrop-filter: blur(2px); animation: fade-in var(--base) var(--ease); }
 .desk .modal-back { left: 0; }
+/* 0.108.0 : la fenêtre s'ouvre à droite de la barre latérale, entière (la barre ne la coupe plus). */
+.desk .modal-back { left: var(--side-w, 0px); z-index: 30; }
+.desk.pos-full .modal-back { left: 0; }
+.modal { max-width: calc(100vw - var(--side-w, 0px) - 24px); }
+.modal .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.modal :is(.grid2, .grid3, .grid4) > * { min-width: 0; }
+.modal .inline > input { min-width: 0; flex: 1 1 auto; }
 .modal { background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: var(--s5) var(--s6); animation: pop-in var(--base) var(--ease); }
 .modal-head { margin: 0 0 var(--s4); padding: 0; background: none; border-radius: 0; color: var(--ink); }
 .modal-head h2 { color: var(--ink); font-size: 17px; }
@@ -492,7 +499,8 @@ fieldset.box legend { font-weight: 600; color: var(--muted); }
   .kpis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .page { padding: var(--s4); }
   .modal { width: 100% !important; max-height: 92vh; border-radius: 16px 16px 0 0; align-self: end; }
-  .modal-back { place-items: end center; }
+  .modal-back, .desk .modal-back { place-items: end center; left: 0; }
+  .modal { max-width: 100vw; }
   .statusbar > :nth-child(n + 4) { display: none; }
   button, input, select { min-height: 40px; }
 }
@@ -641,3 +649,66 @@ ul.home-rank { list-style: none; padding-left: 0; }
 .role-tiles button, .role-tiles button:hover:not(:disabled) { background: var(--stat-bg); border: 1px solid var(--stat-line); }
 .role-tiles button:hover:not(:disabled) { border-color: var(--brand); }
 .role-tiles .tile-icon { background: var(--surface); box-shadow: inset 0 0 0 1px var(--stat-line); }
+
+/* ===== 0.107.0 : ergonomie au quotidien ================================================== */
+/* Barre d'état allégée : les alertes à gauche, la version discrète à droite. */
+.statusbar .sb-spacer { flex: 1; }
+/* Chiffres de l'accueil : le montant tient sur une ligne en 1366 × 768. */
+.home-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.home-kpis strong { font-size: clamp(17px, 1.45vw, 22px); white-space: nowrap; }
+/* Menu « Actions » de la caisse, rangé en groupes. */
+.pos-actmenu { position: relative; display: inline-block; }
+.pos-actmenu > button.opt.action { padding: 8px 14px; font-weight: 700; border: 1px solid var(--border); border-radius: var(--radius-md, 8px); background: var(--surface); cursor: pointer; }
+.pos-actions-back { position: fixed; inset: 0; z-index: 40; }
+.pos-actions-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 41; min-width: 330px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,.18)); display: grid; gap: 6px; }
+.pos-actions-group h4 { margin: 4px 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pos-actions-group button { display: flex; width: 100%; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: none; font-weight: 600; cursor: pointer; }
+.pos-actions-group button:hover, .pos-actions-group button:focus-visible { background: var(--brand-light); }
+.pos-actions-group button i { width: 22px; text-align: center; font-style: normal; }
+.pos-actions-group button small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
+/* Entrée / sortie d'argent : grandes cases à toucher. */
+.money-choice { display: grid; gap: 10px; }
+.money-choice button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; text-align: left; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.money-choice button:hover, .money-choice button:focus-visible { border-color: var(--brand); background: var(--brand-lighter); }
+.money-choice small { color: var(--text-secondary); }
+/* Réception : bons de commande en attente du fournisseur choisi. */
+.reception-orders { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--info-bg, #eef4ff); border: 1px solid var(--info, #2563eb); color: var(--text-primary); }
+/* Barre latérale : une ombre en haut ou en bas dit qu'il reste des menus à faire défiler (la barre de défilement est masquée). */
+.rail-scroll {
+  background:
+    linear-gradient(var(--brand-dark) 30%, transparent) top / 100% 28px no-repeat local,
+    linear-gradient(transparent, var(--brand-dark) 70%) bottom / 100% 28px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.45), transparent) top / 100% 12px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.45), transparent) bottom / 100% 12px no-repeat scroll;
+}
+/* Droits par rôle : un rôle à la fois. */
+.rights-roles { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.rights-roles button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-weight: 600; cursor: pointer; }
+.rights-roles button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+/* 0.107.0 : Ma fin de journée */
+.endday { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; max-width: 760px; }
+.endday li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line, #d8dde3); border-radius: 8px; background: var(--panel, #fff); }
+.endday li.ok { opacity: 0.7; }
+.endday-mark { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: #fde8c8; color: #8a4b00; }
+.endday li.ok .endday-mark { background: #d9f2df; color: #1d6b34; }
+.endday-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.endday-text small { color: var(--muted, #667); }
+.banner { margin: 8px 0 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); font-weight: 600; max-width: 760px; }
+.banner.ok { background: #e6f6ea; border-color: #7cc48d; color: #1d6b34; }
+.banner.warn { background: var(--warn-soft, #fff3e0); border-color: var(--warn, #c77700); color: var(--warn, #8a4b00); }
+
+/* 0.107.0 : Règles de mon magasin */
+.store-rules .card { margin-bottom: 12px; }
+.rules-table td { vertical-align: middle; }
+.rules-table tr.rule-apart td:nth-child(2) { background: var(--warn-soft, #fff3e0); }
+
+/* 0.107.0 : accord par téléphone proposé d'office */
+.phone-approval.suggested { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--info-bg, #eef4ff); border: 1px solid var(--info, #2563eb); }
+.phone-approval.suggested > small { flex-basis: 100%; }
+
+.pos-bills { grid-template-columns: repeat(7, 1fr); }
+.pos-bills button { font-size: 17px; }
+
+/* 0.108.0 : les lignes vides des fiches de vente ne prennent plus le style des pages vides (bloc centré). */
+tr.empty { display: table-row; padding: 0; max-width: none; margin: 0; }

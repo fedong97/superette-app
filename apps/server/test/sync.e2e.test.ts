@@ -506,7 +506,20 @@ describe.each(DATABASE_URL ? ['postgres', 'integree'] : ['integree'])('synchroni
     });
 
     it('montre les postes, les ventes du jour et le journal des opérations', async () => {
+      // Opération de Bastos envoyée par le PC d'Akwa : acceptée (achats groupés), mais signalée sur le poste.
+      const bastos = pc1.admin.listStores().find((x) => x.code === 'YDE1')!.id;
+      const creds = pc1.sync.credentials()!;
+      const foreign = { id: randomUUID(), entity: 'expense', entityId: randomUUID(), op: 'upsert', storeId: bastos, registerId: null, createdAt: new Date().toISOString(), payload: {} };
+      for (let i = 0; i < 2; i++) {
+        const r = await fetch(`${url}/api/v1/sync/push`, { method: 'POST', headers: { authorization: `Bearer ${creds.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ events: [foreign] }) });
+        expect((await r.json()).accepted).toEqual([foreign.id]);
+      }
       const o = await (await get('/admin/api/overview')).json();
+      const caisse1 = o.devices.find((d: { name: string }) => d.name === 'PC caisse 1');
+      // Renvoyée deux fois : comptée une fois.
+      expect(caisse1).toMatchObject({ enrolledBy: 'Clé d’enrôlement', foreignEvents: 1, foreignLast: { entity: 'expense', store: 'Superette Bastos' } });
+      expect(o.devices.find((d: { name: string }) => d.name === 'PC Yaoundé')).toMatchObject({ enrolledBy: 'Code de caisse', foreignEvents: 0 });
+      expect(o.devices.find((d: { name: string }) => d.name === 'PC vendeur')).toMatchObject({ enrolledBy: 'Utilisateur Paul' });
       expect(o.database).toBe(base);
       expect(o.devices.filter((d: { revoked: boolean }) => !d.revoked).length).toBeGreaterThanOrEqual(2);
       expect(o.devices.find((d: { name: string }) => d.name === 'PC caisse 1')).toMatchObject({ store: 'Superette Akwa', online: true });

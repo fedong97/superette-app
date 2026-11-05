@@ -1,6 +1,6 @@
 import type { Db } from './database';
 import type { StockService } from './stock';
-import { Base, type Clock, newId } from './util';
+import { AppError, Base, type Clock, newId } from './util';
 
 /** Une opération échangée avec le serveur central. */
 export interface SyncEvent {
@@ -31,6 +31,10 @@ export interface SyncState {
   serverBackupProblem: string | null;
   /** Dernière sauvegarde réussie du serveur central (null : inconnue). */
   serverBackupAt: string | null;
+  /** L'horloge de ce PC s'écarte de celle du serveur de plus de 2 minutes : écart en secondes (positif : le PC retarde). */
+  clockSkewSeconds: number | null;
+  /** Modifications que le serveur réserve aux PC de confiance : pas partagées (null : aucune). */
+  untrusted: { count: number; entity: string; reason: string; at: string } | null;
 }
 
 /** Entités stockées telles quelles dans une table (clé `id`). */
@@ -319,14 +323,51 @@ export class SyncService extends Base {
       connected: Boolean(this.get('sync.token')),
       cursor: Number(this.get('sync.cursor') ?? 0),
       pending: this.db.prepare('SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL').pluck().get() as number,
-      conflicts: this.db.prepare('SELECT COUNT(*) FROM sync_conflicts').pluck().get() as number,
+      conflicts: this.db.prepare('SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NULL').pluck().get() as number,
       lastSyncAt: this.get('sync.lastSyncAt'),
       lastError: this.get('sync.lastError'),
       checkOk: this.lastCheck()?.ok ?? null,
       checkAt: this.lastCheck()?.at ?? null,
       serverBackupProblem: this.serverBackup()?.problem ?? null,
       serverBackupAt: this.serverBackup()?.at ?? null,
+      clockSkewSeconds: this.clockSkew(),
+      untrusted: this.untrusted(),
     };
+  }
+
+  /** Écart retenu au-delà de 2 minutes seulement ; en dessous, rien n'est signalé. */
+  setClockSkew(ms: number): void {
+    if (!Number.isFinite(ms)) return;
+    this.set('sync.clockSkew', Math.abs(ms) > 2 * 60_000 ? String(Math.round(ms / 1000)) : null);
+  }
+
+  private clockSkew(): number | null {
+    const v = this.get('sync.clockSkew');
+    return v === null ? null : Number(v);
+  }
+
+  private untrusted(): SyncState['untrusted'] {
+    const raw = this.get('sync.untrusted');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as SyncState['untrusted'];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Opérations que le serveur refuse pour de bon (réservées aux PC de confiance) : elles ne repartent
+   * plus, restent faites sur ce PC seulement, et l'écran du serveur central le dit.
+   */
+  markRefused(refused: { id: string; reason: string }[]): void {
+    if (!refused.length) return;
+    const entities = this.db.prepare(`SELECT DISTINCT entity FROM outbox WHERE id IN (${refused.map(() => '?').join(',')}) ORDER BY entity`).pluck().all(...refused.map((r) => r.id)) as string[];
+    this.markSent(refused.map((r) => r.id));
+    const before = this.untrusted()?.count ?? 0;
+    const last = refused[refused.length - 1]!;
+    this.set('sync.untrusted', JSON.stringify({ count: before + refused.length, entity: entities.join(', '), reason: last.reason, at: this.now() }));
+    this.audit(null, 'sync.refused_untrusted', undefined, undefined, { count: refused.length, entities });
   }
 
   private serverBackup(): { at: string | null; problem: string | null } | null {
@@ -397,7 +438,7 @@ export class SyncService extends Base {
   }
 
   disconnect(): void {
-    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup']) this.set(k, null);
+    for (const k of ['sync.token', 'sync.deviceId', 'sync.lastError', 'sync.serverBackup', 'sync.untrusted', 'sync.clockSkew']) this.set(k, null);
   }
 
   setCursor(cursor: number): void {
@@ -410,8 +451,70 @@ export class SyncService extends Base {
     this.set('sync.lastError', error);
   }
 
+  /**
+   * Diagnostic de la synchronisation à envoyer au support : état, file d'envoi par donnée,
+   * conflits ouverts. Aucun jeton, aucune clé, aucun code n'y figure.
+   */
+  diagnostic() {
+    const st = this.state();
+    const waiting = this.db
+      .prepare('SELECT entity, COUNT(*) AS n, MIN(created_at) AS oldest FROM outbox WHERE sent_at IS NULL GROUP BY entity ORDER BY n DESC LIMIT 50')
+      .all() as { entity: string; n: number; oldest: string }[];
+    const resolved = this.db.prepare('SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NOT NULL').pluck().get() as number;
+    return {
+      server: st.url,
+      deviceId: st.deviceId,
+      connected: st.connected,
+      cursor: st.cursor,
+      epoch: this.get('sync.epoch'),
+      lastSyncAt: st.lastSyncAt,
+      lastError: st.lastError,
+      pending: st.pending,
+      pendingByEntity: waiting,
+      conflicts: { open: st.conflicts, resolved, latest: this.conflicts(20) },
+      check: { ok: st.checkOk, at: st.checkAt },
+      serverBackup: { at: st.serverBackupAt, problem: st.serverBackupProblem },
+    };
+  }
+
+  /** Opérations reçues qui ne s'appliquent pas, pas encore résolues. */
   conflicts(limit = 100): { id: string; entity: string; entity_id: string; message: string; at: string }[] {
-    return this.db.prepare('SELECT id, entity, entity_id, message, at FROM sync_conflicts ORDER BY at DESC LIMIT ?').all(limit) as never;
+    return this.db.prepare('SELECT id, entity, entity_id, message, at FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY at DESC LIMIT ?').all(limit) as never;
+  }
+
+  private openConflict(id: string): { id: string; entity: string; entity_id: string; payload: string | null; at: string } {
+    const c = this.db.prepare('SELECT id, entity, entity_id, payload, at FROM sync_conflicts WHERE id = ? AND resolved_at IS NULL').get(id) as
+      | { id: string; entity: string; entity_id: string; payload: string | null; at: string }
+      | undefined;
+    if (!c) throw new AppError('Conflit introuvable ou déjà résolu', 'NOT_FOUND');
+    return c;
+  }
+
+  /**
+   * Réessaie l'opération reçue (après avoir corrigé la cause : code-barres libéré, article recréé…).
+   * Appliquée : le conflit est résolu. Toujours en échec : il reste, avec le nouveau motif.
+   */
+  retryConflict(userId: string, id: string): { ok: boolean; message: string | null } {
+    const c = this.openConflict(id);
+    const payload = c.payload ? (JSON.parse(c.payload) as Record<string, unknown> | null) : null;
+    const event: SyncEvent = { id: c.id, entity: c.entity, entityId: c.entity_id, op: payload ? 'upsert' : 'delete', storeId: null, registerId: null, createdAt: c.at, payload };
+    const r = this.applyRemote([event], false);
+    if (r.conflicts) {
+      this.db.prepare('UPDATE sync_conflicts SET message = ? WHERE id = ?').run(r.error ?? 'Toujours en échec', id);
+      return { ok: false, message: r.error ?? null };
+    }
+    this.db.prepare("UPDATE sync_conflicts SET resolved_at = ?, resolution = 'Réessayé : appliqué', resolved_by = ? WHERE id = ?").run(this.now(), userId, id);
+    this.audit(userId, 'sync.conflict_retried', c.entity, c.entity_id);
+    return { ok: true, message: null };
+  }
+
+  /** L'opération reçue ne sera pas appliquée sur ce PC : le motif est gardé et va au journal. */
+  ignoreConflict(userId: string, id: string, reason: string): void {
+    const c = this.openConflict(id);
+    const why = reason.trim().slice(0, 200);
+    if (!why) throw new AppError('Indiquez pourquoi ce conflit est ignoré', 'INVALID');
+    this.db.prepare('UPDATE sync_conflicts SET resolved_at = ?, resolution = ?, resolved_by = ? WHERE id = ?').run(this.now(), `Ignoré : ${why}`, userId, id);
+    this.audit(userId, 'sync.conflict_ignored', c.entity, c.entity_id, { reason: why });
   }
 
   // --- Envoi ------------------------------------------------------------------
@@ -442,9 +545,21 @@ export class SyncService extends Base {
 
   /** Opérations à envoyer, dans l'ordre où elles ont été faites. */
   pending(limit = 500): SyncEvent[] {
+    return this.pendingAfter(limit, 0).events;
+  }
+
+  /**
+   * Opérations à envoyer après `afterSeq` : l'envoi continue derrière un lot que le
+   * serveur a entièrement refusé, au lieu de rester bloqué dessus.
+   */
+  pendingAfter(limit: number, afterSeq: number): { events: SyncEvent[]; lastSeq: number } {
     const rows = this.db
-      .prepare('SELECT id, entity, entity_id, op, store_id, register_id, created_at FROM outbox WHERE sent_at IS NULL ORDER BY seq LIMIT ?')
-      .all(limit) as { id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[];
+      .prepare('SELECT seq, id, entity, entity_id, op, store_id, register_id, created_at FROM outbox WHERE sent_at IS NULL AND seq > ? ORDER BY seq LIMIT ?')
+      .all(afterSeq, limit) as { seq: number; id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[];
+    return { events: this.toEvents(rows), lastSeq: rows.length ? rows[rows.length - 1]!.seq : afterSeq };
+  }
+
+  private toEvents(rows: { id: string; entity: string; entity_id: string; op: 'upsert' | 'delete'; store_id: string | null; register_id: string | null; created_at: string }[]): SyncEvent[] {
     return rows.map((r) => {
       const payload = r.op === 'delete' ? null : this.serialize(r.entity, r.entity_id);
       return {
@@ -697,11 +812,12 @@ export class SyncService extends Base {
    * échoue (code-barres déjà pris par un autre article…) est notée dans
    * `sync_conflicts` sans bloquer les suivantes.
    */
-  applyRemote(events: SyncEvent[]): { applied: number; conflicts: number } {
+  applyRemote(events: SyncEvent[], record = true): { applied: number; conflicts: number; error?: string } {
     const stockToRecompute = new Map<string, [string, string]>();
     const lotsToRecompute = new Set<string>();
     let applied = 0;
     let conflicts = 0;
+    let error: string | undefined;
     // Les clés étrangères sont vérifiées à la source ; ici l'ordre d'arrivée
     // entre postes n'est pas garanti (un mouvement peut précéder son lot).
     this.db.pragma('foreign_keys = OFF');
@@ -713,7 +829,8 @@ export class SyncService extends Base {
             applied++;
           } catch (e) {
             conflicts++;
-            this.conflict(event, e instanceof Error ? e.message : String(e));
+            error = e instanceof Error ? e.message : String(e);
+            if (record) this.conflict(event, error);
           }
         }
         for (const [articleId, warehouseId] of stockToRecompute.values()) this.stock.recompute(articleId, warehouseId);
@@ -722,7 +839,7 @@ export class SyncService extends Base {
     } finally {
       this.db.pragma('foreign_keys = ON');
     }
-    return { applied, conflicts };
+    return error === undefined ? { applied, conflicts } : { applied, conflicts, error };
   }
 
   /** Le document local est-il plus avancé (expédié, clôturé…) que la version reçue ? */

@@ -14,6 +14,9 @@ import { createPrinter } from './print';
 import { createSyncRunner } from './sync';
 import { createUpdater } from './updater';
 
+// 0.107.0 : dates et nombres des champs à la française (jj/mm/aaaa), quelle que soit la langue de Windows.
+app.commandLine.appendSwitch('lang', 'fr-FR');
+
 // Le logiciel s'appelait « Superette Gestion » : on garde son dossier de données
 // (%APPDATA%\Superette Gestion) pour que les magasins retrouvent leur base après la mise à jour.
 app.setPath('userData', join(app.getPath('appData'), 'Superette Gestion'));

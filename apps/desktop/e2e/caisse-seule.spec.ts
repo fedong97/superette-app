@@ -39,7 +39,7 @@ test('caisse seule : plein écran à la demande ou dès la connexion selon le r�
     await invoke(page, 'treasury.open', 0, undefined, register!.id);
 
     // Affichage habituel : menus, onglets, et le bouton ⛶ dans la barre verte de la fiche.
-    await page.getByRole('button', { name: 'V. cash 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Vente 1', exact: true }).click();
     await expect(page.locator('nav.rail')).toBeVisible();
     await shot(page, '01-affichage-habituel');
 
@@ -54,8 +54,8 @@ test('caisse seule : plein écran à la demande ou dès la connexion selon le r�
     await scan.press('Enter');
     await shot(page, '02-caisse-seule');
 
-    // On passe à V. cash 2 sans quitter le plein écran.
-    await front(page).locator('.pos-switch').getByRole('button', { name: 'V. cash 2' }).click();
+    // On passe à Vente 2 sans quitter le plein écran.
+    await front(page).locator('.pos-switch').getByRole('button', { name: 'Vente 2' }).click();
     await expect(front(page).locator('.mdi-title')).toContainText('2');
     await expect(page.locator('nav.rail')).toBeHidden();
     await shot(page, '03-caisse-seule-v-cash-2');

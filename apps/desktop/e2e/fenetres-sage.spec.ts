@@ -27,6 +27,12 @@ test('chaque écran a sa fenêtre : réduire, agrandir, fermer ; les réglages n
   await page.setViewportSize({ width: 1500, height: 900 });
   try {
     await createStore(page);
+    // 0.107.0 : les fenêtres s'ouvrent en plein par défaut ; ce test vérifie la cascade.
+    await invoke(page, 'prefs.set', 'winCascade', true);
+    await page.reload();
+    await page.waitForTimeout(1200);
+    const compris = page.getByRole('button', { name: 'Compris' });
+    if (await compris.count()) await compris.first().click();
 
     // Paramètres seul, sans les autres onglets de l'administration ; boîte de dialogue : seulement ✕.
     await openFrom(page, 'Réglages', 'Paramètres');
@@ -83,7 +89,7 @@ test('ticket d’une petite fenêtre : les boutons du bas passent à la ligne au
     await invoke(page, 'stock.receive', { warehouseId: wh.id, lines: [{ articleId: art.id, qty: 10_000, unitCost: 4000 }] });
     const reg = (await invoke<{ registers: { id: string }[] }>(page, 'treasury.state')).registers[0]!;
     await invoke(page, 'treasury.open', 0, undefined, reg.id);
-    await page.getByRole('button', { name: 'V. cash 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Vente 1', exact: true }).click();
     const scan = page.getByPlaceholder(/code-barres/).first();
     await scan.fill('6001234567899');
     await scan.press('Enter');

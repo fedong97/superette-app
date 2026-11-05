@@ -100,8 +100,8 @@ export class QuoteService extends Base {
     if (totals.totalDiscount > 0) {
       const ok = (id: string | null | undefined) => {
         if (!id) return false;
-        const role = this.admin.getUser(id).role;
-        return role === 'admin' || role === 'manager';
+        const u = this.admin.getUser(id);
+        return this.admin.isSupervisor(u) || this.admin.hasRight(u, 'quote_discount');
       };
       if (!ok(ctx.userId) && !ok(opts.discountAuthorizedBy)) throw new AppError('Remise soumise à validation du gérant', 'SUPERVISOR_REQUIRED');
     }

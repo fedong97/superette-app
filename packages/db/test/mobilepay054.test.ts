@@ -98,3 +98,73 @@ describe('paiement mobile automatique', () => {
     expect(() => s.mobilePay.saveConfig(ctx.userId, 'ORANGE_MONEY', { mode: 'sandbox' })).toThrow(/simulation/);
   });
 });
+
+/** Contre-expertise de l'audit (0.113.0) : un client qui paie après l'abandon à la caisse ne passe plus inaperçu. */
+describe('Mobile Money payé après un abandon', () => {
+  let s: Services;
+  let ctx: Context;
+  let now = new Date('2026-10-16T08:00:00Z');
+  let operator: Record<string, unknown> = { status: 'PENDING' };
+  let asked = 0;
+
+  beforeEach(() => {
+    now = new Date('2026-10-16T08:00:00Z');
+    operator = { status: 'PENDING' };
+    asked = 0;
+    s = createServices(openDatabase(':memory:'), () => now);
+    const { store, register, admin } = s.admin.bootstrap({ storeCode: 'DLA1', storeName: 'Superette Akwa', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' });
+    ctx = { storeId: store.id, registerId: register.id, userId: admin.id };
+    const base = fakeMtn([]);
+    s.mobilePay = new MobilePayService(s.db, () => now, (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes('/collection/v1_0/requesttopay/')) {
+        asked++;
+        return new Response(JSON.stringify(operator), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return base(url, init);
+    }) as typeof fetch);
+    s.mobilePay.saveConfig(ctx.userId, 'MTN_MOMO', { mode: 'production', subscriptionKey: 'k', apiUser: 'u', apiKey: 'a' });
+  });
+
+  const late = () => s.attention.list(ctx.storeId, new Set(['mobile_late'])).find((i) => i.key === 'mobile_late')!;
+
+  it('vérifie encore la demande abandonnée, la signale au gérant, puis la retire quand il l’a traitée', async () => {
+    const p = await s.mobilePay.request(ctx, { method: 'MTN_MOMO', phone: '677001122', amount: 7_500 });
+    s.mobilePay.cancel(ctx, p.id);
+    expect(await s.mobilePay.recheckAbandoned()).toEqual([]);
+    expect(late().count).toBe(0);
+    // Le client valide sur son téléphone une minute après.
+    operator = { status: 'SUCCESSFUL', financialTransactionId: 'TX-77' };
+    now = new Date(now.getTime() + 60_000);
+    const found = await s.mobilePay.recheckAbandoned();
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ status: 'cancelled', transaction_id: 'TX-77', reason: expect.stringContaining('Payé après l’abandon') });
+    expect(late()).toMatchObject({ count: 1, amount: 7_500, tone: 'danger' });
+    expect(s.admin.auditLog(20).map((r) => r.action)).toContain('mobilepay.late_success');
+    // Une fois trouvé, il n'est plus redemandé à l'opérateur.
+    const before = asked;
+    await s.mobilePay.recheckAbandoned();
+    expect(asked).toBe(before);
+    expect(() => s.mobilePay.handleLate(ctx, p.id, ' ')).toThrow(/Dites ce qui a été fait/);
+    s.mobilePay.handleLate(ctx, p.id, 'Remboursé en espèces');
+    expect(late().count).toBe(0);
+    expect(s.mobilePay.get(p.id).reason).toContain('Remboursé en espèces');
+  });
+
+  it('oublie un refus définitif et les demandes de plus de 24 h', async () => {
+    const refused = await s.mobilePay.request(ctx, { method: 'MTN_MOMO', phone: '677001122', amount: 1_000 });
+    s.mobilePay.cancel(ctx, refused.id);
+    operator = { status: 'FAILED', reason: 'NOT_ENOUGH_FUNDS' };
+    await s.mobilePay.recheckAbandoned();
+    const before = asked;
+    await s.mobilePay.recheckAbandoned();
+    expect(asked).toBe(before);
+    expect(s.mobilePay.get(refused.id).status).toBe('cancelled');
+
+    const old = await s.mobilePay.request(ctx, { method: 'MTN_MOMO', phone: '677001122', amount: 2_000 });
+    s.mobilePay.cancel(ctx, old.id);
+    now = new Date(now.getTime() + 25 * 3_600_000);
+    operator = { status: 'SUCCESSFUL', financialTransactionId: 'TX-OLD' };
+    expect(await s.mobilePay.recheckAbandoned()).toEqual([]);
+    expect(late().count).toBe(0);
+  });
+});

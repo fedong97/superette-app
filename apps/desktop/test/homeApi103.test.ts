@@ -44,7 +44,9 @@ describe("page d'accueil (0.103.0)", () => {
     s.pos.completeSale({ storeId, registerId, userId: s.admin.listUsers().find((u) => u.login === 'awa')!.id }, { lines: [{ articleId: riz, qty: 2_000 }], payments: [{ method: 'CASH', amount: 2_000 }] });
     const cashier = await overview();
     expect(cashier).toMatchObject({ today: null, yesterday: null, registers: [], attention: [], activity: [], stock: null });
-    expect(cashier.mine).toMatchObject({ id: registerId, status: 'open', net: 2_000 });
+    // 0.107.0 : sans « Voir les montants de la caisse », ni ventes ni attendu.
+    expect(cashier.mine).toMatchObject({ id: registerId, status: 'open', net: 0, expected: null });
+    expect(cashier.mineAmounts).toBe(false);
 
     login('steve', '1234');
     const manager = await overview();

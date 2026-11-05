@@ -11,6 +11,7 @@ import { AppError, Base, type Clock, type Context, newId } from './util';
 import { CONTAINER_ACCOUNT } from './containers';
 import type { GiftVoucher, VoucherService } from './vouchers';
 import type { Db } from './database';
+import type { AdminService } from './admin';
 
 
 /** Sens de chaque nature : une avance sort, un remboursement du personnel entre. */
@@ -155,6 +156,7 @@ export class CashDeskService extends Base {
     private readonly staff: StaffService,
     private readonly treasury: TreasuryService,
     private readonly vouchers: VoucherService,
+    private readonly admin?: AdminService,
   ) {
     super(db, clock);
   }
@@ -278,7 +280,15 @@ export class CashDeskService extends Base {
         if (maxPct > 0 && s.base_salary > 0) {
           const ceiling = Math.floor((s.base_salary * maxPct) / 100);
           const after = Math.max(0, s.advances) + input.amount;
-          const boss = input.authorizedBy ? (this.db.prepare("SELECT 1 FROM users WHERE id = ? AND role IN ('admin', 'manager')").get(input.authorizedBy) as unknown) : null;
+          // Superviseur (gérant ou droit donné) ou utilisateur qui a le droit « avance au-delà du maximum ».
+          const boss = input.authorizedBy
+            ? this.admin
+              ? (() => {
+                  const u = this.admin.getUser(input.authorizedBy);
+                  return this.admin.isSupervisor(u) || this.admin.hasRight(u, 'advance_over');
+                })()
+              : Boolean(this.db.prepare("SELECT 1 FROM users WHERE id = ? AND role IN ('admin', 'manager')").get(input.authorizedBy))
+            : false;
           if (after > ceiling && !boss) {
             throw new AppError(`Avances de ${s.name} limitées à ${ceiling} FCFA (${maxPct} % du salaire) : il en doit déjà ${Math.max(0, s.advances)}. Code du gérant nécessaire`, 'SUPERVISOR_REQUIRED');
           }

@@ -2,12 +2,14 @@ import { BACKUP_FREQUENCIES, ELECTRONIC_METHODS, PAYMENT_METHODS, type Permissio
 import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { ROLE_LABELS } from '../App';
-import { askConfirm, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
+import { askConfirm, askText, downloadText, Empty, Field, Modal, Tabs, dateTime, today, useCan, useLoad, useToast } from '../ui';
 import { RoleRights, UserPrivileges } from './AdminRights';
+import { Delegation } from './AdminDelegation';
 import { Digest } from './AdminDigest';
 import { ResetData } from './AdminReset';
 import { MobilePay } from './AdminMobilePay';
 import { Settings } from './AdminSettings';
+import { StoreRules } from './StoreRules';
 import { BrandAndBadge, UserPhotoField } from './AdminBrand';
 import { PrintTemplates } from './PrintTemplates';
 import { FiscalYears } from './Accounting';
@@ -24,16 +26,16 @@ import serverLogo from '../assets/logo-serveur.png';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations';
+type Tab = 'rules' | 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations' | 'delegation';
 
-export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: () => void; initialTab?: Tab }) {
+export function Admin({ user, onChanged, initialTab, only }: { user: User; onChanged: () => void; initialTab?: Tab; /** Onglets gardés (téléphone du gérant). */ only?: readonly Tab[] }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
   // Utilisateur ouvert depuis la liste (« Privilèges… ») dans l'onglet des privilèges.
   const [privUser, setPrivUser] = useState<string | null>(null);
   // Modèle ouvert depuis Paramètres (« Modifier… ») dans l'onglet des modèles.
   const [editTpl, setEditTpl] = useState<string | null>(null);
   const can = (p: Permission) => user.rights.includes(p);
-  const tabs: [Tab, string][] = [
+  const allTabs: [Tab, string][] = [
     ...(user.role === 'admin' ? ([['stores', 'Magasins']] as [Tab, string][]) : []),
     ['registers', 'Caisses'],
     ['warehouses', 'Dépôts'],
@@ -41,6 +43,8 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ['users', 'Utilisateurs'],
     ['rights', 'Droits par rôle'],
     ['privileges', 'Privilèges par utilisateur'],
+    ['rules', 'Règles de mon magasin'],
+    ...(can('delegate') || can('user_limits') ? ([['delegation', 'Délégation et plafonds']] as [Tab, string][]) : []),
     ['settings', 'Paramètres'],
     ['brand', 'Couleurs et badges'],
     ...(can('accounting') || can('fiscal_years') ? ([['fiscal', 'Exercices comptables']] as [Tab, string][]) : []),
@@ -59,6 +63,7 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
     ...(can('dashboard') ? ([['digest', 'Résumé du jour']] as [Tab, string][]) : []),
     ...(can('audit') ? ([['audit', "Journal d'audit"]] as [Tab, string][]) : []),
   ];
+  const tabs = only ? allTabs.filter(([k]) => only.includes(k)) : allTabs;
   return (
     <div className="page">
       <header className="page-head">
@@ -80,7 +85,9 @@ export function Admin({ user, onChanged, initialTab }: { user: User; onChanged: 
         />
       )}
       {tab === 'rights' && <RoleRights isAdmin={user.role === 'admin'} onChanged={onChanged} />}
+      {tab === 'delegation' && <Delegation user={user} onChanged={onChanged} />}
       {tab === 'privileges' && <UserPrivileges key={privUser ?? ''} isAdmin={user.role === 'admin'} initialUserId={privUser} onChanged={onChanged} />}
+      {tab === 'rules' && <StoreRules canEdit={can('settings_edit')} onChanged={onChanged} />}
       {tab === 'settings' && (
         <Settings
           user={user}
@@ -1252,6 +1259,13 @@ function License({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
   );
 }
 
+/** « En retard de 5 min » / « En avance de 2 h 10 min » par rapport au serveur. */
+const clockGap = (seconds: number) => {
+  const m = Math.round(Math.abs(seconds) / 60);
+  const span = m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+  return `${seconds > 0 ? 'En retard' : 'En avance'} de ${span} sur le serveur`;
+};
+
 function CentralServer({ isAdmin }: { isAdmin: boolean }) {
   const toast = useToast();
   const state = useLoad(() => call('sync.state'));
@@ -1305,6 +1319,23 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 <th>État</th>
                 <td className={st.lastError ? 'neg' : 'pos'}>{st.lastError ?? 'Connecté'}</td>
               </tr>
+              {st.clockSkewSeconds !== null && (
+                <tr>
+                  <th>Heure du PC</th>
+                  <td className="neg">
+                    {clockGap(st.clockSkewSeconds)} : réglez la date et l'heure de Windows (Douala). Une heure fausse peut faire gagner une modification plus ancienne entre deux PC.
+                  </td>
+                </tr>
+              )}
+              {st.untrusted && (
+                <tr>
+                  <th>Non partagé</th>
+                  <td className="neg">
+                    {st.untrusted.count} modification(s) faite(s) ici sont réservées aux PC de confiance du siège ({st.untrusted.entity}) : elles restent sur ce PC. Faites-les
+                    depuis un PC de confiance.
+                  </td>
+                </tr>
+              )}
               {(st.serverBackupAt || st.serverBackupProblem) && (
                 <tr>
                   <th>Sauvegarde du serveur</th>
@@ -1350,6 +1381,21 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                 }}
               >
                 Renvoyer au serveur ce qui lui manque
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                title="Fichier à envoyer au support : état de la synchronisation, file d'envoi, conflits. Sans jeton, clé ni code."
+                onClick={async () => {
+                  try {
+                    const d = await call('sync.diagnostic');
+                    downloadText(`diagnostic-onix360-${d.exportedAt.slice(0, 10)}.json`, JSON.stringify(d, null, 2), 'application/json');
+                  } catch (err) {
+                    toast.error(err);
+                  }
+                }}
+              >
+                Exporter le diagnostic
               </button>
             )}
             <button className="primary" disabled={busy} onClick={() => act(() => call('sync.now'))}>
@@ -1405,12 +1451,17 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
       {(conflicts.data ?? []).length > 0 && (
         <>
           <h3>Conflits à vérifier</h3>
+          <p className="muted">
+            Opérations envoyées par d'autres PC qui ne s'appliquent pas ici. Corrigez la cause (par exemple un code-barres déjà pris), puis réessayez ; sinon ignorez-les en
+            disant pourquoi.
+          </p>
           <table className="list">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Élément</th>
                 <th>Problème</th>
+                {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -1419,6 +1470,42 @@ function CentralServer({ isAdmin }: { isAdmin: boolean }) {
                   <td>{dateTime(c.at)}</td>
                   <td>{c.entity}</td>
                   <td>{c.message}</td>
+                  {isAdmin && (
+                    <td className="nowrap">
+                      <button
+                        className="small"
+                        onClick={async () => {
+                          try {
+                            const r = await call('sync.retryConflict', c.id);
+                            if (r.ok) toast.ok('Opération appliquée');
+                            else toast.error(new Error(`Toujours en échec : ${r.message ?? ''}`));
+                          } catch (err) {
+                            toast.error(err);
+                          }
+                          conflicts.reload();
+                          state.reload();
+                        }}
+                      >
+                        Réessayer
+                      </button>
+                      <button
+                        className="small ghost"
+                        onClick={async () => {
+                          const reason = await askText("Pourquoi ignorer cette opération ? Elle ne sera pas appliquée sur ce PC (le motif va au journal d'audit).");
+                          if (!reason) return;
+                          try {
+                            await call('sync.ignoreConflict', c.id, reason);
+                          } catch (err) {
+                            toast.error(err);
+                          }
+                          conflicts.reload();
+                          state.reload();
+                        }}
+                      >
+                        Ignorer…
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

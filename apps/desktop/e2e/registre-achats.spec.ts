@@ -50,7 +50,7 @@ test('registre des achats : factures, avoirs et réceptions non facturées ; Ctr
 
     // Caisse : Ctrl+Suppr vide la fiche, Ctrl+Z la rend.
     await invoke(page, 'treasury.open', 0, undefined, register!.id);
-    await page.getByRole('button', { name: 'V. cash 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Vente 1', exact: true }).click();
     const scan = page.getByPlaceholder(/code-barres|scanner/).first();
     await scan.fill('6001234567899');
     await scan.press('Enter');

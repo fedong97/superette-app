@@ -26,7 +26,10 @@ export type AttentionKey =
   | 'store_requests'
   | 'stock_anomalies'
   | 'expenses_pending'
-  | 'outages_open';
+  | 'outages_open'
+  | 'mobile_late'
+  | 'sync_conflicts'
+  | 'clock_skew';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -331,6 +334,49 @@ export class AttentionService extends Base {
         amount: rows.length ? rows.reduce((t, r) => t + r.declared_total, 0) : null,
         detail: rows.length ? `Coupure${rows.length > 1 ? 's' : ''} n° ${firstNames(rows.map((r) => r.number))} : saisissez les ventes du cahier puis clôturez` : 'Aucune coupure en cours',
         tone: 'info',
+      });
+    }
+
+    if (want('mobile_late')) {
+      // Mobile Money payé par le client après l'abandon à la caisse : argent reçu sans vente.
+      const rows = this.db
+        .prepare("SELECT phone, amount FROM mobile_payments WHERE store_id = ? AND status = 'cancelled' AND transaction_id IS NOT NULL AND late_handled IS NULL ORDER BY created_at")
+        .all(storeId) as { phone: string; amount: Fcfa }[];
+      items.push({
+        key: 'mobile_late',
+        label: 'Mobile Money payé après un abandon',
+        count: rows.length,
+        amount: rows.length ? rows.reduce((t, r) => t + r.amount, 0) : null,
+        detail: rows.length ? `Client${rows.length > 1 ? 's' : ''} ${firstNames(rows.map((r) => r.phone))} : remboursez ou rattachez le paiement à une vente` : 'Aucun paiement reçu après un abandon',
+        tone: 'danger',
+      });
+    }
+
+    if (want('sync_conflicts')) {
+      // Opérations d'autres PC qui ne s'appliquent pas ici : ce PC n'a pas les mêmes données que les autres.
+      const rows = this.db.prepare('SELECT entity FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY at').pluck().all() as string[];
+      items.push({
+        key: 'sync_conflicts',
+        label: 'Conflits de synchronisation',
+        count: rows.length,
+        amount: null,
+        detail: rows.length ? `${rows.length} opération(s) reçue(s) d'autres PC non appliquée(s) (${firstNames([...new Set(rows)])}) : réessayez ou ignorez-les` : 'Aucun conflit',
+        tone: 'warning',
+      });
+    }
+
+    if (want('clock_skew')) {
+      // Heure de ce PC trop loin de celle du serveur (vue à la dernière synchronisation).
+      const raw = this.db.prepare("SELECT value FROM settings WHERE key = 'sync.clockSkew'").pluck().get() as string | undefined;
+      const sec = raw === undefined ? 0 : Number(raw);
+      const min = Math.round(Math.abs(sec) / 60);
+      items.push({
+        key: 'clock_skew',
+        label: 'Heure du PC à régler',
+        count: sec ? 1 : 0,
+        amount: null,
+        detail: sec ? `Ce PC est ${sec > 0 ? 'en retard' : 'en avance'} de ${min} min sur le serveur : réglez la date et l'heure de Windows` : "L'heure du PC est juste",
+        tone: 'warning',
       });
     }
 

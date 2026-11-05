@@ -1,5 +1,7 @@
 import { ApiError, findServer, request } from './api';
-import { type Article, type Catalog, type FileLine, type Hit, type ParsedFile, type PlaceCount, type PriceLevel, type SaleLine, buildIndex, fileArticle, newId, placeKey } from './logic';
+import { type Article, type Catalog, type FileLine, type Hit, type ParsedFile, type PlaceCount, type PriceLevel, type SaleLine, buildIndex, fileArticle, formatQty, newId, placeKey } from './logic';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { FirebaseSetup, native } from './device';
 import { clearAll, load, save } from './storage';
 
 /** Téléphone relié à un magasin par le QR code du gérant. */
@@ -35,8 +37,20 @@ export interface Session {
     discount?: boolean;
     tariff?: boolean;
     manage?: 'read' | 'full' | null;
+    /** Vente à crédit à un client du magasin. */
+    credit?: boolean;
+    /** Crédit au-delà du plafond du client sans le code du gérant. */
+    creditOver?: boolean;
   };
 }
+
+/** Règlement voulu pour le panier : comptant à la caisse, ou crédit (acompte à la caisse), et impression du client. */
+export interface CartPay {
+  credit: boolean;
+  deposit: number;
+  print: 'ticket' | 'listing' | 'a4';
+}
+const NO_PAY: CartPay = { credit: false, deposit: 0, print: 'ticket' };
 
 /** Ligne du panier préparé au rayon : quantité en millièmes d'unité, conditionnement, remise. */
 export type CartLine = SaleLine;
@@ -64,6 +78,7 @@ export interface SentCart {
   customerName?: string | null;
   priceLevel?: PriceLevel | null;
   discountReason?: string | null;
+  saleOptions?: { credit: boolean; deposit: number; creditBy: string | null; printFormat: 'ticket' | 'listing' | 'a4' | null } | null;
   at: string;
   takenAt: string | null;
   status?: CartStatus;
@@ -144,6 +159,28 @@ interface OutUnknown {
   session: string;
 }
 
+/**
+ * Saisie que le serveur n'a pas acceptée (inventaire clôturé ou annulé entre-temps, article
+ * inconnu, utilisateur déconnecté…). Elle n'est jamais effacée sans qu'une personne l'ait vue :
+ * elle reste dans « Saisies à vérifier » jusqu'à ce qu'on la retire, après l'avoir ressaisie au PC.
+ */
+export interface Rejected {
+  id: string;
+  kind: 'comptage' | 'relevé';
+  /** Produit compté, ou code et nom notés pour un produit inconnu. */
+  what: string;
+  /** Quantité, endroit et inventaire. */
+  detail: string;
+  reason: string;
+  /** Heure de la saisie. */
+  at: string;
+  /** Heure du refus. */
+  rejectedAt: string;
+}
+
+/** Saisies à vérifier gardées au plus (les plus anciennes partent au-delà). */
+const MAX_REJECTED = 500;
+
 export interface HistoryItem {
   id: string;
   inventoryId: string;
@@ -163,6 +200,8 @@ export interface Notice {
 
 export interface State {
   ready: boolean;
+  /** Écran à ouvrir après un toucher sur une notification (valider, ventes, accueil…). */
+  openScreen: string | null;
   config: Config | null;
   session: Session | null;
   catalog: Catalog | null;
@@ -192,16 +231,20 @@ export interface State {
   /** Tarif choisi pour le panier ; null : celui du client (détail sans client). */
   cartLevel: PriceLevel | null;
   cartReason: string;
+  cartPay: CartPay;
   /** Panier déjà envoyé, rouvert pour le modifier : il repart sous le même numéro. */
   cartEdit: { id: string; number: number } | null;
   sentCarts: SentCart[];
   sellerDay: SellerDay | null;
+  /** Saisies refusées par le serveur, à vérifier (gardées sur le téléphone). */
+  rejected: Rejected[];
 }
 
 const DEFAULT_LOCATIONS = ['Rayon', 'Réserve', 'Chambre froide'];
 
 let state: State = {
   ready: false,
+  openScreen: null,
   config: null,
   session: null,
   catalog: null,
@@ -227,9 +270,11 @@ let state: State = {
   cartCustomer: null,
   cartLevel: null,
   cartReason: '',
+  cartPay: NO_PAY,
   cartEdit: null,
   sentCarts: [],
   sellerDay: null,
+  rejected: [],
 };
 
 let outbox: OutCount[] = [];
@@ -267,6 +312,70 @@ export function dismiss(id: string) {
   set({ notices: state.notices.filter((n) => n.id !== id) });
 }
 
+/**
+ * Identifiant d'un envoi tant qu'il n'a pas réussi : si la réponse du serveur se perd (réseau
+ * faible), le nouvel essai repart avec le même identifiant et le serveur reconnaît le doublon
+ * (même panier, même réception, même contrôle, même vente manquée) au lieu d'en créer un second.
+ */
+const attempts = new Map<string, string>();
+const attemptId = (key: string) => {
+  let id = attempts.get(key);
+  if (!id) attempts.set(key, (id = newId()));
+  return id;
+};
+
+/** Met des saisies refusées de côté, avec leur motif, au lieu de les effacer. */
+async function keepRejected(items: Rejected[]) {
+  if (!items.length) return;
+  const known = new Set(state.rejected.map((r) => r.id));
+  const rejected = [...items.filter((r) => !known.has(r.id)), ...state.rejected].slice(0, MAX_REJECTED);
+  await save('rejected', rejected);
+  set({ rejected });
+}
+
+function rejectedCount(o: OutCount, reason: string): Rejected {
+  const article = state.articles.get(o.articleId);
+  const inv = state.inventories.find((i) => i.id === o.inventoryId);
+  const qty = o.qty === null ? 'comptage effacé' : `quantité ${article ? formatQty(o.qty, article) : o.qty / 1000}`;
+  return {
+    id: o.id,
+    kind: 'comptage',
+    what: article ? `${article.name}${article.code ? ` (${article.code})` : ''}` : `Article ${o.articleId}`,
+    detail: `${qty} · ${o.location}${inv ? ` · inventaire ${inv.number}${inv.label ? ` ${inv.label}` : ''}` : ''}`,
+    reason,
+    at: o.countedAt,
+    rejectedAt: new Date().toISOString(),
+  };
+}
+
+function rejectedUnknown(u: OutUnknown, reason: string): Rejected {
+  return {
+    id: u.id,
+    kind: 'relevé',
+    what: [u.code, u.note].filter(Boolean).join(' · ') || 'Produit inconnu (photo)',
+    detail: `${u.qty === null ? 'quantité non notée' : `quantité ${u.qty / 1000}`} · ${u.location}`,
+    reason,
+    at: u.at,
+    rejectedAt: new Date().toISOString(),
+  };
+}
+
+/** La personne a ressaisi la saisie refusée (ou l'a jugée inutile) : elle sort de la liste. */
+export async function dropRejected(id: string | null) {
+  const rejected = id === null ? [] : state.rejected.filter((r) => r.id !== id);
+  await save('rejected', rejected);
+  set({ rejected });
+}
+
+/** Les saisies à vérifier en texte, pour les envoyer au gérant (WhatsApp, SMS…). */
+export function rejectedText(): string {
+  const day = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return [
+    `Saisies refusées par le serveur (${state.config?.deviceName ?? 'téléphone'}) :`,
+    ...state.rejected.map((r) => `- ${r.what} : ${r.detail} (saisi le ${day(r.at)}) : ${r.reason}`),
+  ].join('\n');
+}
+
 const auth = () => ({ token: state.config?.token, session: state.session?.token });
 
 /** Appel au serveur du magasin avec le téléphone et la personne connectés (espace du gérant). */
@@ -292,14 +401,17 @@ export async function init() {
   ]);
   outbox = await load<OutCount[]>('outbox', []);
   unknowns = await load<OutUnknown[]>('unknowns', []);
+  const rejected = await load<Rejected[]>('rejected', []);
   countsByUser = await load('counts', {});
   historyByUser = await load('history', {});
   archivesByUser = await load('archives', {});
   const files = await load<FileInventory[]>('files', []);
   const cart = await load<SavedCart>('cart', { lines: [], label: '' });
+  cartSendId = cart.sendId ?? null;
   const userId = session?.user.id;
   set({
     ready: true,
+    rejected,
     config,
     session,
     ...withCatalog(catalog),
@@ -317,8 +429,10 @@ export async function init() {
     cartCustomer: cart.customer ?? null,
     cartLevel: cart.level ?? null,
     cartReason: cart.reason ?? '',
+    cartPay: cart.pay ?? NO_PAY,
     cartEdit: cart.edit ?? null,
   });
+  if (session) void startPush();
   setInterval(() => void sync(), 20_000);
   window.addEventListener('online', () => void sync());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void sync());
@@ -370,6 +484,54 @@ async function startSession(session: Session) {
     online: true,
   });
   await sync();
+  void startPush();
+}
+
+// ——— Notifications (Firebase) ———
+
+let pushToken: string | null = null;
+let pushListening = false;
+
+/** Écran demandé par une notification touchée (lu puis effacé par l'espace du gérant). */
+export function setOpenScreen(screen: string | null) {
+  set({ openScreen: screen });
+}
+
+/**
+ * Abonne le téléphone aux alertes du magasin quand le serveur a ses réglages
+ * Firebase : Firebase démarre avec eux, Android donne un jeton, le serveur
+ * l'enregistre au nom de la personne connectée. Sans réglages : rien.
+ */
+async function startPush() {
+  const config = state.config;
+  const session = state.session;
+  if (!native || !config || !session || session.user.role === 'guest') return;
+  try {
+    const r = await call<{ firebase: { appId: string; apiKey: string; projectId: string; senderId: string } | null }>('/push');
+    if (!r.firebase) return;
+    await FirebaseSetup.init(r.firebase);
+    if (!pushListening) {
+      pushListening = true;
+      await PushNotifications.addListener('registration', (t) => {
+        pushToken = t.value;
+        void call('/push', { token: t.value }).catch(() => undefined);
+      });
+      await PushNotifications.addListener('pushNotificationActionPerformed', (a) => {
+        const screen = (a.notification.data as { screen?: string } | undefined)?.screen;
+        if (screen) setOpenScreen(screen);
+      });
+      await PushNotifications.addListener('pushNotificationReceived', (n) => {
+        // Appli ouverte : Android n'affiche pas la notification, on la montre dans l'appli.
+        if (n.title || n.body) notify([n.title, n.body].filter(Boolean).join(' : '));
+      });
+    }
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') perm = await PushNotifications.requestPermissions();
+    if (perm.receive !== 'granted') return;
+    await PushNotifications.register();
+  } catch {
+    // Serveur ancien ou Firebase indisponible : les alertes restent visibles dans l'appli ouverte.
+  }
 }
 
 /** Aide sans compte sur un téléphone déjà relié : le code à 6 chiffres donné par le gérant. */
@@ -404,6 +566,8 @@ export async function login(loginName: string, pin: string) {
 export async function logout() {
   const session = state.session;
   await sync();
+  // Plus de notifications pour la personne qui s'en va.
+  if (pushToken) await call('/push', { token: null }).catch(() => undefined);
   if (session && state.config && !outbox.some((o) => o.session === session.token) && !unknowns.some((u) => u.session === session.token)) {
     await request(state.config.url, '/api/v1/mobile/logout', { body: {}, auth: { token: state.config.token, session: session.token } }).catch(() => undefined);
   }
@@ -419,7 +583,9 @@ export async function unpair() {
   countsByUser = {};
   historyByUser = {};
   archivesByUser = {};
-  set({ config: null, session: null, ...withCatalog(null), inventories: [], files: [], archives: [], counts: {}, history: [], notices: [] });
+  cartSendId = null;
+  attempts.clear();
+  set({ config: null, session: null, ...withCatalog(null), inventories: [], files: [], archives: [], counts: {}, history: [], notices: [], rejected: [] });
 }
 
 export async function setServerAddress(url: string) {
@@ -659,20 +825,26 @@ async function pushCounts(config: Config) {
         auth: { token: config.token, session: sessionToken },
       });
     } catch (e) {
-      // Saisies d'une session qui n'existe plus (téléphone délié puis relié) : elles ne partiront jamais.
+      // Saisies d'une session qui n'existe plus (téléphone délié puis relié, aide dont l'accès est
+      // coupé) : elles ne partiront jamais, mais elles restent à vérifier sur le téléphone.
       if (e instanceof ApiError && e.status === 401 && sessionToken !== state.session?.token && !/délié/.test(e.message)) {
+        const lost = outbox.filter((o) => o.session === sessionToken);
+        await keepRejected(lost.map((o) => rejectedCount(o, 'Utilisateur déconnecté ou accès terminé avant l’envoi')));
         outbox = outbox.filter((o) => o.session !== sessionToken);
-        notify(`${batch.length} saisie(s) d'un utilisateur déconnecté n'ont pas pu être envoyées.`, 'erreur');
+        await save('outbox', outbox);
+        notify(`${lost.length} saisie(s) d'un utilisateur déconnecté n'ont pas pu être envoyées : elles sont dans « Saisies à vérifier ».`, 'erreur');
         continue;
       }
       throw e;
     }
-    const done = new Set([...r.accepted, ...r.rejected.map((x) => x.id)]);
+    const why = new Map(r.rejected.map((x) => [x.id, x.reason]));
+    await keepRejected(batch.filter((o) => why.has(o.id)).map((o) => rejectedCount(o, why.get(o.id)!)));
+    const done = new Set([...r.accepted, ...why.keys()]);
     outbox = outbox.filter((o) => !done.has(o.id));
     await save('outbox', outbox);
     if (r.rejected.length) {
       const reasons = [...new Set(r.rejected.map((x) => x.reason))].join(', ');
-      notify(`${r.rejected.length} saisie(s) refusée(s) par le serveur : ${reasons}.`, 'erreur');
+      notify(`${r.rejected.length} saisie(s) refusée(s) par le serveur (${reasons}) : elles sont dans « Saisies à vérifier ».`, 'erreur');
     }
     set({});
     if (!r.accepted.length && !r.rejected.length) break;
@@ -683,7 +855,17 @@ async function pushUnknowns(config: Config) {
   while (unknowns.length) {
     const u = unknowns[0]!;
     const { session, ...body } = u;
-    await request(config.url, '/api/v1/mobile/unknowns', { body, auth: { token: config.token, session } });
+    try {
+      await request(config.url, '/api/v1/mobile/unknowns', { body, auth: { token: config.token, session } });
+    } catch (e) {
+      // Refus définitif (photo trop lourde, relevé vide, session d'un autre utilisateur terminée) :
+      // le relevé passe dans « Saisies à vérifier » et ne bloque plus les envois suivants.
+      // Hors ligne, erreur du serveur ou session en cours expirée : il reste en file.
+      const final = e instanceof ApiError && ((e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 408 && e.status !== 429) || (e.status === 401 && session !== state.session?.token && !/délié/.test(e.message)));
+      if (!final) throw e;
+      await keepRejected([rejectedUnknown(u, e.message)]);
+      notify('Un relevé de produit inconnu a été refusé : il est dans « Saisies à vérifier ».', 'erreur');
+    }
     unknowns = unknowns.slice(1);
     await save('unknowns', unknowns);
     set({});
@@ -809,11 +991,17 @@ interface SavedCart {
   customer?: CartCustomer | null;
   level?: PriceLevel | null;
   reason?: string;
+  pay?: CartPay;
   edit?: { id: string; number: number } | null;
+  /** Identifiant du panier pour son premier envoi, gardé jusqu'à la réponse (voir `attemptId`). */
+  sendId?: string | null;
 }
 
+/** Identifiant du premier envoi du panier en cours, gardé même si l'application se ferme. */
+let cartSendId: string | null = null;
+
 const saveCart = () =>
-  save('cart', { lines: state.cart, label: state.cartLabel, customer: state.cartCustomer, level: state.cartLevel, reason: state.cartReason, edit: state.cartEdit } satisfies SavedCart);
+  save('cart', { lines: state.cart, label: state.cartLabel, customer: state.cartCustomer, level: state.cartLevel, reason: state.cartReason, pay: state.cartPay, edit: state.cartEdit, sendId: cartSendId } satisfies SavedCart);
 
 const sameLine = (l: CartLine, articleId: string, packId: string | null | undefined) => l.articleId === articleId && (l.packId ?? null) === (packId ?? null);
 
@@ -865,7 +1053,35 @@ export function setCartReason(reason: string) {
 }
 
 export function clearCart() {
-  set({ cart: [], cartLabel: '', cartCustomer: null, cartLevel: null, cartReason: '', cartEdit: null });
+  cartSendId = null;
+  set({ cart: [], cartLabel: '', cartCustomer: null, cartLevel: null, cartReason: '', cartPay: NO_PAY, cartEdit: null });
+  void saveCart();
+}
+
+/** Comptant ou crédit, acompte, impression voulue par le client. */
+export function setCartPay(patch: Partial<CartPay>) {
+  set({ cartPay: { ...state.cartPay, ...patch } });
+  void saveCart();
+}
+
+/**
+ * Remise sur le total : répartie sur les lignes au prorata de leur montant
+ * (après leurs remises), pour que la caisse et le serveur la contrôlent ligne
+ * par ligne comme les autres remises. `amounts` : montant de chaque ligne avant cette remise.
+ */
+export function spreadDiscount(amounts: { articleId: string; packId: string | null; net: number }[], amount: number) {
+  const base = amounts.reduce((t, a) => t + Math.max(0, a.net), 0);
+  if (!(amount > 0) || base <= 0) return;
+  const total = Math.min(Math.round(amount), base);
+  let left = total;
+  const cart = state.cart.map((l) => ({ ...l }));
+  amounts.forEach((a, i) => {
+    const share = i === amounts.length - 1 ? left : Math.min(left, Math.floor((total * Math.max(0, a.net)) / base));
+    left -= share;
+    const line = cart.find((l) => l.articleId === a.articleId && (l.packId ?? null) === (a.packId ?? null));
+    if (line && share > 0) line.discount = (line.discount ?? 0) + share;
+  });
+  set({ cart });
   void saveCart();
 }
 
@@ -876,13 +1092,17 @@ export const cartLevelOf = (st: Pick<State, 'cartLevel' | 'cartCustomer'>): Pric
  * Envoie le panier à la caisse : il y attend d'être encaissé, au nom du vendeur.
  * `supervisorPin` : code du gérant quand la remise ou le tarif le demandent.
  */
-export async function sendCart(supervisorPin?: string): Promise<{ number: number; total: number | null; edited: boolean }> {
+export async function sendCart(supervisorPin?: string, creditPin?: string): Promise<{ number: number; total: number | null; edited: boolean }> {
   const config = state.config;
   if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
   if (!state.cart.length) throw new ApiError('Le panier est vide', 400);
   const full = state.session.can?.sell === 'full';
   const edit = state.cartEdit;
-  const id = edit?.id ?? newId();
+  if (!edit && !cartSendId) {
+    cartSendId = newId();
+    await saveCart();
+  }
+  const id = edit?.id ?? cartSendId!;
   const lines = [...state.cart].reverse().map((l) => ({ articleId: l.articleId, qty: l.qty, packId: l.packId ?? null, ...(full && l.discount ? { discount: l.discount } : {}) }));
   const level = cartLevelOf(state);
   const r = await request<{ id: string; number: number; total?: number }>(config.url, '/api/v1/mobile/carts', {
@@ -896,6 +1116,8 @@ export async function sendCart(supervisorPin?: string): Promise<{ number: number
             priceLevel: level,
             discountReason: state.cartReason.trim() || null,
             ...(supervisorPin ? { supervisorPin } : {}),
+            printFormat: state.cartPay.print,
+            ...(state.cartPay.credit ? { credit: true, deposit: state.cartPay.deposit, ...(creditPin ? { creditPin } : {}) } : {}),
           }
         : {}),
     },
@@ -916,6 +1138,8 @@ export async function loadSentCarts() {
 
 /** Rouvre un panier pas encore pris en caisse (`keep`), ou en refait un nouveau à partir de ses produits. */
 export function reopenCart(c: SentCart, keep: boolean) {
+  // Un panier refait à partir d'un autre part sous un nouvel identifiant.
+  cartSendId = null;
   const customer: CartCustomer | null = c.customerId
     ? { id: c.customerId, code: '', name: c.customerName ?? '', phone: null, priceLevel: c.priceLevel ?? 'retail', creditLimit: 0 }
     : null;
@@ -925,6 +1149,7 @@ export function reopenCart(c: SentCart, keep: boolean) {
     cartCustomer: customer,
     cartLevel: c.priceLevel ?? null,
     cartReason: c.discountReason ?? '',
+    cartPay: c.saleOptions ? { credit: c.saleOptions.credit, deposit: c.saleOptions.deposit, print: c.saleOptions.printFormat ?? 'ticket' } : NO_PAY,
     cartEdit: keep ? { id: c.id, number: c.number } : null,
   });
   void saveCart();
@@ -954,7 +1179,9 @@ export type MissedReason = 'absent' | 'rupture' | 'prix' | 'autre';
 export async function recordMissed(input: { articleId: string | null; label: string | null; qty: number; reason: MissedReason; note?: string | null; customerName?: string | null; phone?: string | null }) {
   const config = state.config;
   if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
-  await request<{ id: string }>(config.url, '/api/v1/mobile/missed', { body: { id: newId(), ...input }, auth: auth() });
+  const key = `missed:${JSON.stringify(input)}`;
+  await request<{ id: string }>(config.url, '/api/v1/mobile/missed', { body: { id: attemptId(key), ...input }, auth: auth() });
+  attempts.delete(key);
 }
 
 // ——— Contrôle des tickets à la sortie ———
@@ -980,7 +1207,9 @@ export async function exitLookup(code: string): Promise<ExitTicket> {
 export async function exitRecord(t: ExitTicket, status: 'ok' | 'problem', note?: string | null) {
   const config = state.config;
   if (!config || !state.session) throw new ApiError('Connectez-vous', 401);
-  await request<{ id: string }>(config.url, '/api/v1/mobile/exit', { body: { id: newId(), saleId: t.saleId, number: t.number, status, note: note ?? null }, auth: auth() });
+  const key = `exit:${t.saleId}:${status}:${note ?? ''}`;
+  await request<{ id: string }>(config.url, '/api/v1/mobile/exit', { body: { id: attemptId(key), saleId: t.saleId, number: t.number, status, note: note ?? null }, auth: auth() });
+  attempts.delete(key);
 }
 
 // ——— Fiche produit : ailleurs, bientôt, à la place ———
@@ -1029,6 +1258,15 @@ export async function receptionOrders(): Promise<ReceptionOrder[]> {
   return (await request<{ orders: ReceptionOrder[] }>(config.url, '/api/v1/mobile/reception-orders', { auth: auth() })).orders;
 }
 
+/** Identifiant de l'envoi de la réception d'un bon, gardé jusqu'à la réponse, même si l'application se ferme. */
+async function receptionSendId(orderId: string): Promise<string> {
+  const kept = await load<{ orderId: string; id: string } | null>('reception-send', null);
+  if (kept?.orderId === orderId) return kept.id;
+  const id = newId();
+  await save('reception-send', { orderId, id });
+  return id;
+}
+
 export const loadReceptionDraft = () => load<ReceptionDraft | null>('reception', null);
 export const saveReceptionDraft = (d: ReceptionDraft | null) => save('reception', d);
 
@@ -1041,8 +1279,9 @@ export async function sendReception(d: ReceptionDraft, order: ReceptionOrder): P
     .map((l) => ({ orderLineId: l.id, articleId: l.articleId, qty: d.lines[l.id]!.qty, damaged: d.lines[l.id]!.damaged, lot: d.lines[l.id]!.lot || null, expiry: d.lines[l.id]!.expiry || null }));
   if (!lines.length) throw new ApiError('Rien n’a été compté', 400);
   await request<{ id: string }>(config.url, '/api/v1/mobile/receptions', {
-    body: { id: newId(), orderId: d.orderId, deliveryNote: d.deliveryNote.trim() || null, note: d.note.trim() || null, lines },
+    body: { id: await receptionSendId(d.orderId), orderId: d.orderId, deliveryNote: d.deliveryNote.trim() || null, note: d.note.trim() || null, lines },
     auth: auth(),
   });
+  await save('reception-send', null);
   await saveReceptionDraft(null);
 }

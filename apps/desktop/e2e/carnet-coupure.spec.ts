@@ -133,8 +133,9 @@ test('Coupure : la photo d’une page du carnet ONIX est lue, vérifiée puis en
     writeFileSync(resolve(SHOTS, '01-photo-de-la-page.jpg'), jpeg);
 
     // À la caisse : Coupure, puis « Lire une page du carnet ».
-    await page.getByRole('button', { name: 'V. cash 1', exact: true }).click();
-    await page.locator('select').filter({ hasText: 'Actions' }).selectOption('outage');
+    await page.getByRole('button', { name: 'Vente 1', exact: true }).click();
+    await page.getByRole('button', { name: /Actions/ }).first().click();
+    await page.getByRole('menuitem', { name: /Ventes pendant une coupure/ }).click();
     await page.getByRole('button', { name: 'Lire une page du carnet' }).click();
     await page.screenshot({ path: resolve(SHOTS, '02-choisir-la-photo.png') });
     await page.locator('.modal input[type=file]').setInputFiles({ name: 'page-1.jpg', mimeType: 'image/jpeg', buffer: jpeg });
@@ -151,7 +152,7 @@ test('Coupure : la photo d’une page du carnet ONIX est lue, vérifiée puis en
     await expect(page.getByText(/2 vente\(s\) de la page 1 enregistrées/)).toBeVisible();
     const o = await invoke<{ entered_total: number; gap: number; sales: number; pages: number }>(page, 'outages.current');
     expect(o).toMatchObject({ entered_total: 7775, gap: 0, sales: 2, pages: 1 });
-    await page.locator('select').filter({ hasText: 'Actions' }).selectOption('outage');
+    // La fenêtre de la coupure revient d'elle-même, avec les ventes saisies.
     await expect(page.getByText('Ventes saisies (2)')).toBeVisible();
     await page.waitForTimeout(500);
     await page.screenshot({ path: resolve(SHOTS, '04-coupure-sans-ecart.png') });

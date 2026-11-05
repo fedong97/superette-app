@@ -10,6 +10,9 @@ import {
   registerMethods,
   TVA_CAMEROUN_NORMAL,
   type UserPrivileges,
+  type Delegation,
+  type UserLimits,
+  delegationActive,
   mergeStoreSettings,
   parseStoreSettings,
   roleRights,
@@ -19,6 +22,8 @@ import { AppError, Base, hashPin, newId, verifyPin } from './util';
 
 /** Durée du blocage après trop de codes faux. */
 const LOCK_MINUTES = 15;
+/** Codes du gérant faux acceptés sur un PC avant blocage, quand « Blocage après des codes faux » est à 0. */
+const SUPERVISOR_MAX_FAILURES = 4;
 
 export type Role = 'admin' | 'manager' | 'cashier' | 'seller' | 'buyer' | 'stock' | 'accountant';
 
@@ -1046,10 +1051,114 @@ export class AdminService extends Base {
 
   /** Privilèges personnels d'un utilisateur (droits accordés en plus de son rôle, droits retirés). */
   privileges(userId: string): UserPrivileges {
-    const row = this.db.prepare('SELECT grants, revokes FROM user_rights WHERE id = ?').get(userId) as { grants: string; revokes: string } | undefined;
-    if (!row) return { grants: [], revokes: [] };
+    const row = this.db.prepare('SELECT grants, revokes, delegation, limits FROM user_rights WHERE id = ?').get(userId) as
+      | { grants: string; revokes: string; delegation: string | null; limits: string | null }
+      | undefined;
+    if (!row) return { grants: [], revokes: [], delegation: null, limits: null };
     const known = (list: string) => (JSON.parse(list) as string[]).filter((p): p is Permission => p in PERMISSIONS);
-    return { grants: known(row.grants), revokes: known(row.revokes) };
+    const parse = <T>(v: string | null): T | null => {
+      try {
+        return v ? (JSON.parse(v) as T) : null;
+      } catch {
+        return null;
+      }
+    };
+    const delegation = parse<Delegation>(row.delegation);
+    if (delegation) delegation.rights = (delegation.rights ?? []).filter((p): p is Permission => p in PERMISSIONS);
+    return { grants: known(row.grants), revokes: known(row.revokes), delegation, limits: parse<UserLimits>(row.limits) };
+  }
+
+  /** Écrit la ligne de privilèges d'un utilisateur (une seule colonne changée, les autres gardées) et la fait partir vers les autres postes. */
+  private writePrivileges(userId: string, patch: { grants?: string; revokes?: string; delegation?: string | null; limits?: string | null }) {
+    const current = this.db.prepare('SELECT grants, revokes, delegation, limits FROM user_rights WHERE id = ?').get(userId) as
+      | { grants: string; revokes: string; delegation: string | null; limits: string | null }
+      | undefined;
+    const row = {
+      id: userId,
+      grants: patch.grants ?? current?.grants ?? '[]',
+      revokes: patch.revokes ?? current?.revokes ?? '[]',
+      delegation: patch.delegation !== undefined ? patch.delegation : (current?.delegation ?? null),
+      limits: patch.limits !== undefined ? patch.limits : (current?.limits ?? null),
+      updated_at: this.now(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO user_rights (id, grants, revokes, delegation, limits, updated_at) VALUES (@id, @grants, @revokes, @delegation, @limits, @updated_at)
+         ON CONFLICT(id) DO UPDATE SET grants = excluded.grants, revokes = excluded.revokes, delegation = excluded.delegation, limits = excluded.limits, updated_at = excluded.updated_at`,
+      )
+      .run(row);
+    this.enqueue(null, 'user_rights', userId, 'upsert', row);
+  }
+
+  /**
+   * Le gérant qui s'absente confie ses pouvoirs à un utilisateur jusqu'à une date :
+   * celui-ci reçoit une copie de ses droits (sauf celui de déléguer à son tour),
+   * puis tout revient tout seul à la date de fin.
+   */
+  delegate(byUserId: string, toUserId: string, until: string): Delegation {
+    const by = this.getUser(byUserId);
+    const to = this.getUser(toUserId);
+    if (to.id === by.id) throw new AppError('Choisissez un autre utilisateur que vous', 'INVALID');
+    if (!to.active || to.deleted_at) throw new AppError(`${to.name} est désactivé`, 'INVALID');
+    if (to.role === 'admin') throw new AppError("L'administrateur a déjà tous les droits", 'INVALID');
+    if (!this.hasRight(by, 'delegate')) throw new AppError("Vous n'avez pas le droit de confier vos pouvoirs", 'FORBIDDEN');
+    const end = new Date(until);
+    if (Number.isNaN(end.getTime()) || end.getTime() <= Date.now()) throw new AppError('La date de fin doit être dans le futur', 'INVALID');
+    if (end.getTime() - Date.now() > 92 * 86_400_000) throw new AppError('Une délégation dure 3 mois au plus', 'INVALID');
+    // Les droits propres du gérant (pas ceux qu'il tient lui-même d'une délégation).
+    const own = userRights(by.role, this.rights(by.role), by.role === 'admin' ? null : { ...this.privileges(by.id), delegation: null });
+    const delegation: Delegation = { by: by.id, byName: by.name, until: end.toISOString(), rights: own.filter((p) => p !== 'delegate'), at: this.now() };
+    return this.tx(() => {
+      this.writePrivileges(to.id, { delegation: JSON.stringify(delegation) });
+      this.audit(byUserId, 'admin.delegate', 'user', to.id, { until: delegation.until, rights: delegation.rights.length });
+      return delegation;
+    });
+  }
+
+  /** Met fin tout de suite à la délégation d'un utilisateur. */
+  endDelegation(byUserId: string, userId: string): void {
+    const p = this.privileges(userId);
+    if (!p.delegation) return;
+    this.tx(() => {
+      this.writePrivileges(userId, { delegation: null });
+      this.audit(byUserId, 'admin.delegate_end', 'user', userId, { by: p.delegation!.byName });
+    });
+  }
+
+  /** Délégations en cours dans le magasin. */
+  delegations(): { userId: string; userName: string; delegation: Delegation }[] {
+    const out: { userId: string; userName: string; delegation: Delegation }[] = [];
+    for (const u of this.listUsers()) {
+      const d = this.privileges(u.id).delegation;
+      if (delegationActive(d)) out.push({ userId: u.id, userName: u.name, delegation: d });
+    }
+    return out;
+  }
+
+  /** Plafonds d'un utilisateur quand il agit sans le code du gérant. */
+  saveLimits(byUserId: string, userId: string, limits: UserLimits): UserLimits {
+    const user = this.getUser(userId);
+    if (user.role === 'admin') throw new AppError("L'administrateur n'a pas de plafond", 'INVALID');
+    const pct = Math.round(Number(limits.discountPct ?? 0));
+    const out = Math.round(Number(limits.cashOut ?? 0));
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new AppError('Remise maxi : entre 0 et 100 %', 'INVALID');
+    if (!Number.isFinite(out) || out < 0) throw new AppError('Sortie de caisse maxi invalide', 'INVALID');
+    const clean: UserLimits = { ...(pct ? { discountPct: pct } : {}), ...(out ? { cashOut: out } : {}) };
+    return this.tx(() => {
+      this.writePrivileges(userId, { limits: Object.keys(clean).length ? JSON.stringify(clean) : null });
+      this.audit(byUserId, 'admin.limits', 'user', userId, clean);
+      return clean;
+    });
+  }
+
+  /** Plafonds de l'utilisateur (vides : pas de plafond au-delà de son droit). */
+  limits(userId: string): UserLimits {
+    return this.privileges(userId).limits ?? {};
+  }
+
+  /** Superviseur : son code vaut celui du gérant (gérant, administrateur, ou droit donné). */
+  isSupervisor(user: Pick<User, 'id' | 'role'>): boolean {
+    return user.role === 'admin' || this.hasRight(user, 'supervisor');
   }
 
   /** Droits effectifs d'un utilisateur : son rôle, plus ses privilèges accordés, moins ceux qui lui sont retirés. */
@@ -1074,13 +1183,7 @@ export class AdminService extends Base {
     const grants = [...new Set(input.grants)].filter((p) => !role.has(p));
     const revokes = [...new Set(input.revokes)].filter((p) => role.has(p));
     return this.tx(() => {
-      const row = { id: userId, grants: JSON.stringify(grants), revokes: JSON.stringify(revokes), updated_at: this.now() };
-      this.db
-        .prepare(
-          'INSERT INTO user_rights (id, grants, revokes, updated_at) VALUES (@id, @grants, @revokes, @updated_at) ON CONFLICT(id) DO UPDATE SET grants = excluded.grants, revokes = excluded.revokes, updated_at = excluded.updated_at',
-        )
-        .run(row);
-      this.enqueue(null, 'user_rights', userId, 'upsert', row);
+      this.writePrivileges(userId, { grants: JSON.stringify(grants), revokes: JSON.stringify(revokes) });
       this.audit(byUserId, 'admin.privileges', 'user', userId, { grants, revokes });
       return { grants, revokes };
     });
@@ -1127,13 +1230,54 @@ export class AdminService extends Base {
   }
 
   /** Code d'un administrateur ou d'un gérant pour valider une action. */
+  /**
+   * Code du gérant tapé à la caisse (remise, annulation, crédit…). Les codes faux sont comptés sur
+   * ce PC : au-delà du nombre réglé dans « Blocage après des codes faux » (4 si le réglage est à 0),
+   * plus aucun code superviseur n'est accepté sur ce PC pendant 15 minutes, même le bon. L'accord
+   * par téléphone reste possible. Chaque code faux et chaque blocage vont au journal d'audit.
+   */
   authorizeSupervisor(pin: string): User {
-    const rows = this.db
-      .prepare("SELECT id, pin_hash FROM users WHERE active = 1 AND role IN ('admin', 'manager')")
-      .all() as { id: string; pin_hash: string }[];
-    const match = rows.find((r) => verifyPin(pin, r.pin_hash));
-    if (!match) throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    const now = this.now();
+    const state = this.supervisorAttempts();
+    if (state.lockedUntil && state.lockedUntil > now) {
+      const minutes = Math.max(1, Math.ceil((Date.parse(state.lockedUntil) - Date.parse(now)) / 60000));
+      throw new AppError(`Trop de codes du gérant faux sur ce PC : codes refusés encore ${minutes} min. Le gérant peut accepter depuis son téléphone.`, 'SUPERVISOR_LOCKED');
+    }
+    // Gérant, administrateur, ou tout utilisateur à qui le droit « Superviseur » est donné (rôle, privilège, délégation).
+    const rows = this.db.prepare('SELECT id, role, pin_hash FROM users WHERE active = 1 AND deleted_at IS NULL').all() as { id: string; role: Role; pin_hash: string }[];
+    const match = rows.find((r) => this.isSupervisor(r) && verifyPin(pin, r.pin_hash));
+    if (!match) {
+      // Rien de tapé (le caissier n'a pas encore donné de code) : ce n'est pas un essai.
+      if (/^\d{4,8}$/.test(String(pin ?? ''))) {
+        const sid = this.getSetting('station.storeId');
+        const setting = sid ? this.storeSettings(sid).maxLoginAttempts : 0;
+        const max = setting > 0 ? setting : SUPERVISOR_MAX_FAILURES;
+        const failures = state.failures + 1;
+        const lock = failures >= max;
+        this.audit(null, 'supervisor.failed', undefined, undefined, { failures });
+        this.saveSupervisorAttempts(lock ? { failures: 0, lockedUntil: new Date(Date.parse(now) + LOCK_MINUTES * 60000).toISOString() } : { failures, lockedUntil: null });
+        if (lock) {
+          this.audit(null, 'supervisor.locked', undefined, undefined, { minutes: LOCK_MINUTES });
+          throw new AppError(`Trop de codes du gérant faux : codes refusés sur ce PC pendant ${LOCK_MINUTES} minutes. Le gérant peut accepter depuis son téléphone.`, 'SUPERVISOR_LOCKED');
+        }
+      }
+      throw new AppError('Code superviseur refusé', 'SUPERVISOR_DENIED');
+    }
+    if (state.failures) this.saveSupervisorAttempts({ failures: 0, lockedUntil: null });
     return this.getUser(match.id);
+  }
+
+  private supervisorAttempts(): { failures: number; lockedUntil: string | null } {
+    try {
+      const raw = JSON.parse(this.getSetting('supervisor.attempts') ?? 'null') as { failures?: number; lockedUntil?: string | null } | null;
+      return { failures: Number(raw?.failures ?? 0) || 0, lockedUntil: raw?.lockedUntil ?? null };
+    } catch {
+      return { failures: 0, lockedUntil: null };
+    }
+  }
+
+  private saveSupervisorAttempts(state: { failures: number; lockedUntil: string | null }): void {
+    this.setSetting('supervisor.attempts', JSON.stringify(state));
   }
 
   listVatRates(): { id: string; label: string; rate_bp: number }[] {

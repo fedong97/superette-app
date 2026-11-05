@@ -111,9 +111,7 @@ function DayFigures({ today, yesterday, cashInDrawer, showCash }: { today: Figur
   const tiles: [string, ReactNode, ReactNode, () => void][] = [
     [tx("Chiffre d'affaires TTC"), <CountUp value={today.revenue} />, <Versus now={today.revenue} before={yesterday?.revenue} />, go],
     ['Tickets', <CountUp value={today.tickets} money={false} />, <Versus now={today.tickets} before={yesterday?.tickets} />, go],
-    ['Panier moyen', <CountUp value={today.average} />, <Versus now={today.average} before={yesterday?.average} />, go],
     [tx('Marge brute HT'), <CountUp value={today.margin} />, <span className="stat-trend flat">{rate === null ? 'taux —' : `taux ${rate} %`}</span>, go],
-    ['Règlements clients', <CountUp value={today.receipts} />, <Versus now={today.receipts} before={yesterday?.receipts} />, () => openScreen('customers', 'payments')],
   ];
   if (showCash) tiles.push(['Espèces en caisse', <CountUp value={cashInDrawer} />, <span className="stat-trend flat">caisses ouvertes</span>, () => openScreen('treasury', 'live')]);
   return (
@@ -329,7 +327,7 @@ function TopAndStock({ top, stock }: { top: Figures['top']; stock: Overview['sto
 
 // --- Ma caisse et mes factures (vendeur, caissier) -------------------------------------------------
 
-function MyTill({ mine, sent }: { mine: Overview['mine']; sent: Overview['sent'] }) {
+function MyTill({ mine, sent, amounts }: { mine: Overview['mine']; sent: Overview['sent']; amounts: boolean }) {
   return (
     <div className="home-mine">
       {mine && (
@@ -347,10 +345,10 @@ function MyTill({ mine, sent }: { mine: Overview['mine']; sent: Overview['sent']
                 ? 'Fermée'
                 : 'Pas encore ouverte'}
           </small>
-          {mine.status === 'open' && (
+          {mine.status === 'open' && amounts && (
             <span className="till-mini-figures">
               <span>
-                {fcfa(mine.net)} <small>· {mine.tickets} ticket{mine.tickets > 1 ? 's' : ''}</small>
+                {fcfa(mine.net)} <small>· {mine.tickets} ticket{mine.tickets > 1 ? 's' : ''} · toute la caisse</small>
               </span>
               {mine.kind === 'cash' && mine.expected !== null && <small>Attendu dans le tiroir {fcfa(mine.expected)}</small>}
             </span>
@@ -420,6 +418,7 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
           <DayFigures today={d.today} yesterday={d.yesterday} cashInDrawer={d.cashInDrawer} showCash={d.registers.length > 0} />
         </Block>
       )}
+      <div className="home-grid">
       {show('tills') && (
         <Block index={i++} title="Caisses en direct" more={['Tout voir', () => openScreen('treasury', 'live')]}>
           <TillsStrip registers={d.registers} />
@@ -439,6 +438,7 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
           </div>
         </Block>
       )}
+      </div>
       {(show('hours') || show('activity')) && d.today && (
         <div className="home-grid">
           {show('hours') && (
@@ -460,7 +460,7 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
       )}
       {show('mine') && (
         <Block index={i++} title="Ma caisse et mes factures">
-          <MyTill mine={d.mine} sent={d.sent} />
+          <MyTill mine={d.mine} sent={d.sent} amounts={d.mineAmounts} />
         </Block>
       )}
       {show('tasks') && <DayTasks compact />}

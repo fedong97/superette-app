@@ -165,6 +165,11 @@ export class RateLimit {
     this.hits.set(key, h);
   }
 
+  /** Oublie les demandes comptées (essai réussi). */
+  reset(key: string) {
+    this.hits.delete(key);
+  }
+
   /** Vérifie puis compte. */
   take(key: string) {
     this.check(key);

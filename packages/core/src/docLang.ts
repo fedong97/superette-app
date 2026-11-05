@@ -235,6 +235,8 @@ const EN: Record<string, string> = {
   Remboursements: 'Refunds',
   Apports: 'Cash in',
   Prélèvements: 'Cash pickups',
+  'Entrées d’argent': 'Cash in',
+  'Versements à la centrale': 'Deposits to central',
   'Prélèvements versés à la centrale': 'Pickups deposited to central',
   'Autres entrées (Encaisser)': 'Other receipts (Collect)',
   'Autres sorties (Décaisser)': 'Other payouts (Pay out)',

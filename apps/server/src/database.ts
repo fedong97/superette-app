@@ -422,6 +422,64 @@ ALTER TABLE shelf_carts ADD COLUMN updated_at TIMESTAMPTZ;
 ALTER TABLE shelf_carts ADD COLUMN cancelled_at TIMESTAMPTZ;
 `,
   },
+  {
+    version: 13,
+    sql: `
+-- Vendeur sur le téléphone : vente à crédit, acompte, remise sur le total, impression voulue.
+ALTER TABLE shelf_carts ADD COLUMN sale_options JSONB;
+-- Actions du gérant faites sur le téléphone, exécutées par un PC du magasin (le premier qui la prend).
+CREATE TABLE manager_actions (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  message TEXT,
+  claimed_by TEXT,
+  claimed_at TIMESTAMPTZ,
+  done_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX manager_actions_pending ON manager_actions (store_id, created_at) WHERE status = 'pending';
+CREATE INDEX manager_actions_user ON manager_actions (user_id, created_at);
+-- Téléphones Android abonnés aux notifications (Firebase), appli fermée.
+CREATE TABLE push_tokens (
+  token TEXT PRIMARY KEY,
+  device_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  kinds JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX push_tokens_store ON push_tokens (store_id);
+`,
+  },
+  {
+    version: 14,
+    sql: `
+-- Comptage du téléphone reçu mais pas encore envoyé aux PC (arrêt du serveur entre les deux) :
+-- renvoyé quand le téléphone le renvoie. Les comptages déjà là étaient envoyés.
+ALTER TABLE mobile_counts ADD COLUMN published_at TIMESTAMPTZ;
+UPDATE mobile_counts SET published_at = received_at;
+-- Comment le PC a été relié (clé d'enrôlement, code de caisse, utilisateur), et les opérations
+-- qu'il a envoyées pour un autre magasin que le sien (achats groupés, administration…).
+ALTER TABLE devices ADD COLUMN enrolled_by TEXT;
+ALTER TABLE devices ADD COLUMN foreign_events INT NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN foreign_last JSONB;
+`,
+  },
+  {
+    version: 15,
+    sql: `
+-- PC de confiance (siège) : dès qu'il y en a un, eux seuls envoient l'administration et les données des autres magasins.
+-- Aucun au départ : rien ne change tant que l'administrateur n'en a pas désigné.
+ALTER TABLE devices ADD COLUMN trusted BOOLEAN NOT NULL DEFAULT false;
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

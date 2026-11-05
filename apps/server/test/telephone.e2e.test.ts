@@ -80,7 +80,7 @@ describe('téléphone du gérant : accord à distance et alertes', () => {
 
     const r = await get(`/admin/api/alerts?since=${start.cursor}`);
     const kinds = r.alerts.map((a: { kind: string }) => a.kind).sort();
-    expect(kinds).toEqual(['cancel', 'discount', 'gap', 'stockout']);
+    expect(kinds).toEqual(['cancel', 'closing', 'discount', 'gap', 'stockout']);
     expect(r.alerts.find((a: { kind: string }) => a.kind === 'discount')).toMatchObject({ pct: 40, store: 'Superette Akwa' });
     expect(r.alerts.find((a: { kind: string }) => a.kind === 'gap').text).toContain('-600 FCFA');
     expect(r.alerts.find((a: { kind: string }) => a.kind === 'stockout').text).toContain('Savon Azur');
@@ -130,7 +130,7 @@ describe('panier préparé au rayon', () => {
       return fetch(`${url}/api/v1/mobile${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) });
     };
     const login = await (await phone('/login', { login: 'paul', pin: '1111' })).json();
-    expect(login.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false, sell: 'full', discount: false, tariff: false, manage: null });
+    expect(login.can).toEqual({ count: false, cart: true, exit: false, missed: true, receive: false, sell: 'full', discount: false, tariff: false, manage: null, credit: true, creditOver: false });
     const catalog = await (await phone('/catalog', undefined, login.session)).json();
     expect(catalog.articles.find((a: { id: string }) => a.id === riz)).toMatchObject({ price: 1_000 });
 

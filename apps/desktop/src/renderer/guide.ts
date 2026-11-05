@@ -14,6 +14,9 @@ const T = {
   vendre: { icon: '🛒', label: 'Vendre', desc: 'Fiche de facturation au comptant', open: ['cash1'] },
   credit: { icon: '📒', label: 'Vente à crédit', desc: 'Pour un client en compte', open: ['credit'] },
   caisse: { icon: '💰', label: 'Ma caisse', desc: 'Ouvrir ou clôturer la caisse', open: ['treasury', 'day'] },
+  envoyer: { icon: '📨', label: 'Préparer une facture', desc: 'Elle part à la caisse pour être encaissée', open: ['cash1'] },
+  envoyees: { icon: '🧾', label: 'Mes factures envoyées', desc: 'En attente, renvoyées, encaissées', open: ['sales', 'tickets'] },
+  majournee: { icon: '🎯', label: 'Ma journée', desc: 'Objectif, ventes et commission', open: ['staff', 'targets'] },
   factures: { icon: '🧾', label: 'Mes factures', desc: 'Retrouver et réimprimer un ticket', open: ['sales', 'tickets'] },
   devis: { icon: '📝', label: 'Devis', desc: 'Devis et factures proforma', open: ['quotes'] },
   clients: { icon: '👥', label: 'Clients', desc: 'Fiches, comptes et règlements', open: ['customers', 'list'] },
@@ -21,8 +24,8 @@ const T = {
   tabord: { icon: '📊', label: 'Tableau de bord', desc: 'Les chiffres du jour', open: ['dashboard', 'day'] },
   journees: { icon: '🗂️', label: 'Journées de caisse', desc: 'Z, écarts à justifier', open: ['treasury', 'history'] },
   stock: { icon: '📦', label: 'Stock', desc: 'Quantités par dépôt', open: ['stock', 'state'] },
-  reception: { icon: '🚚', label: 'Réception', desc: 'Entrer une livraison', open: ['stock', 'receive'] },
-  transfert: { icon: '🔁', label: 'Transfert', desc: 'Entre la réserve et la surface', open: ['stock', 'transfer'] },
+  reception: { icon: '🚚', label: 'Recevoir une livraison', desc: 'Le bon de commande du fournisseur est proposé', open: ['stock', 'receive'] },
+  transfert: { icon: '🔁', label: 'Nouveau transfert', desc: 'De la réserve vers la surface de vente', open: ['stock', 'transferNew'] },
   inventaire: { icon: '📋', label: 'Inventaire', desc: 'Compter le stock', open: ['stock', 'inventory'] },
   pertes: { icon: '🗑️', label: 'Pertes et casse', desc: 'Sortir un produit abîmé', open: ['stock', 'loss'] },
   peremption: { icon: '⏳', label: 'Péremptions', desc: 'Lots qui périment bientôt', open: ['stock', 'expiry'] },
@@ -45,7 +48,7 @@ const T = {
 /** Accueil par rôle : les gestes de tous les jours, dans l'ordre de la journée. */
 export const ROLE_TILES: Record<Role, Tile[]> = {
   cashier: [T.vendre, T.caisse, T.factures, T.credit, T.clients, T.devis],
-  seller: [T.vendre, T.caisse, T.factures, T.credit, T.clients, T.devis],
+  seller: [T.envoyer, T.envoyees, T.devis, T.clients, T.credit, T.majournee],
   manager: [T.attention, T.tabord, T.vendre, T.journees, T.stock, T.commandes, T.clients, T.depenses, T.rapports],
   admin: [T.attention, T.tabord, T.admin, T.journees, T.produits, T.stock, T.rapports, T.sauvegardes, T.vendre],
   stock: [T.reception, T.transfert, T.inventaire, T.stock, T.pertes, T.peremption, T.etiquettes],
@@ -69,13 +72,13 @@ export const GETTING_STARTED: Record<Role, GuideStep[]> = {
   ],
   manager: [
     { text: 'Le matin, regardez les Points d’attention : ruptures, écarts, factures en retard.', open: ['dashboard', 'attention'] },
-    { text: 'Recevez les livraisons et transférez la marchandise de la réserve vers la surface de vente.', open: ['stock', 'receive'] },
+    { text: 'Recevez les livraisons (le bon de commande du fournisseur est proposé) et transférez la marchandise vers la surface de vente.', open: ['stock', 'receive'] },
     { text: 'Pendant la journée, suivez le Tableau de bord : chiffre d’affaires et meilleures ventes.', open: ['dashboard', 'day'] },
     { text: 'Le soir, contrôlez les clôtures de caisse et justifiez les écarts.', open: ['treasury', 'history'] },
     { text: 'Chaque semaine, lancez la Proposition de commande pour les fournisseurs.', open: ['purchases', 'reorder'] },
   ],
   cashier: [
-    { text: 'Ouvrez votre caisse : le fond laissé la veille est proposé.', open: ['treasury', 'day'] },
+    { text: 'Ouvrez votre caisse depuis la fiche de vente (« Ouvrir ma caisse ») : le fond laissé la veille est proposé.', open: ['cash1'] },
     { text: 'Vendez : scannez ou tapez le nom du produit, puis Entrée pour valider en espèces.', open: ['cash1'] },
     { text: 'Pour MTN, Orange, carte ou chèque, appuyez sur Ctrl+E et notez la référence.' },
     { text: 'En cas de doute, le bouton « ? » en haut à droite explique la page affichée.' },
@@ -84,7 +87,7 @@ export const GETTING_STARTED: Record<Role, GuideStep[]> = {
   seller: [],
   stock: [
     { text: 'À chaque livraison, saisissez la réception avec la date limite des périssables.', open: ['stock', 'receive'] },
-    { text: 'Transférez la marchandise de la réserve vers la surface de vente.', open: ['stock', 'transfer'] },
+    { text: 'Transférez la marchandise de la réserve vers la surface de vente.', open: ['stock', 'transferNew'] },
     { text: 'Sortez la casse et les produits périmés en pertes.', open: ['stock', 'loss'] },
     { text: 'Comptez les inventaires ouverts par le gérant.', open: ['stock', 'inventory'] },
     { text: 'Imprimez les étiquettes des prix qui ont changé.', open: ['labels'] },
@@ -104,10 +107,90 @@ export const GETTING_STARTED: Record<Role, GuideStep[]> = {
     { text: 'En fin d’exercice, imprimez les états financiers et la DSF.', open: ['accounting', 'statements'] },
   ],
 };
-GETTING_STARTED.seller = GETTING_STARTED.cashier;
+GETTING_STARTED.seller = [
+  { text: 'Préparez la facture du client : scannez ou tapez le nom du produit.', open: ['cash1'] },
+  { text: '« Envoyer » (F4) la fait partir à la caisse et imprime le bon du client ; le client paie au caissier.' },
+  { text: 'Suivez vos factures envoyées : en attente, renvoyées par la caisse ou encaissées.', open: ['sales', 'tickets'] },
+  { text: 'Au rayon, vous pouvez préparer le panier du client sur le téléphone (ONIX 360 Mobile).' },
+  { text: 'Regardez votre journée : objectif, ventes et commission.', open: ['staff', 'targets'] },
+];
 
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
+  {
+    version: '0.113.0',
+    items: [
+      'Une seule version réunit les nouveautés du logiciel de caisse (0.107.0 et 0.108.0 : menus par métier, caisse, fenêtres entières) et celles d’ONIX 360 Mobile (0.107.0 à 0.112.0 : nouvelle interface, gestion sur le téléphone, notifications). Les deux listes sont ci-dessous.',
+      "Caisse : appuyer deux fois sur F4 (ou garder la touche enfoncée) n'enregistre plus deux ventes ; la seconde validation est ignorée.",
+      "Code du gérant à la caisse : après 4 codes faux (ou le nombre réglé dans « Blocage après des codes faux »), plus aucun code n'est accepté sur ce PC pendant 15 minutes. Le gérant peut toujours accepter depuis son téléphone. Chaque code faux est dans le journal d'audit.",
+      "Mobile Money : une demande abandonnée à la caisse est encore vérifiée pendant 24 h. Si le client paie quand même, le gérant le voit dans « À traiter » et note dans Administration › Paiement mobile ce qu'il a fait (remboursé, rattaché à une vente).",
+      "ONIX 360 Mobile : un comptage ou un relevé refusé par le serveur ne disparaît plus. Il est gardé dans Réglages › « Saisies à vérifier », avec son motif, et se partage avec le gérant.",
+      "Synchronisation : des opérations refusées par un serveur pas encore à jour ne bloquent plus les ventes faites après elles.",
+      "PC de confiance : dans l'administration du serveur (Postes), cochez les PC du siège. Dès qu'un PC est coché, eux seuls envoient l'administration du réseau (magasins, TVA, droits des rôles) et les données des autres magasins (achats groupés…). Chaque PC continue de vendre et de gérer son propre magasin. Tant qu'aucun PC n'est coché, rien ne change.",
+      "Heure du PC : quand l'horloge d'un PC s'écarte de plus de 2 minutes de celle du serveur, le gérant le voit dans « À traiter » et dans Administration › Serveur central.",
+      "Droits : un caissier ne lit plus les bons de commande ni les réceptions, et les soldes et règlements des clients sont réservés aux droits du menu Clients.",
+      "Administration › Serveur central : chaque conflit de synchronisation se réessaie après correction, ou s'ignore avec un motif. Les conflits ouverts sont dans « À traiter ». Le bouton « Exporter le diagnostic » prépare un fichier pour le support, sans jeton ni code.",
+    ],
+  },
+  {
+    version: '0.112.0',
+    items: [
+      "ONIX 360 Mobile : le scan avec l'appareil photo marche de nouveau (inventaire, panier au rayon, réception, contrôle sortie, QR code du gérant). Depuis la 0.109.0, l'image de la caméra restait cachée.",
+    ],
+  },
+  {
+    version: '0.111.0',
+    items: [
+      "Ventes sur le téléphone : touchez une facture pour voir son détail : produits avec quantités, prix et remises, total et TVA, paiements, monnaie rendue, vendeur, caissier, caisse et client. L'annulation se fait depuis cette fiche.",
+    ],
+  },
+  {
+    version: '0.110.0',
+    items: [
+      "ONIX 360 Mobile : menu latéral (☰) comme sur les maquettes, avec le profil, tous les écrans autorisés rangés par thème, les notifications, les paramètres et la déconnexion. Les écrans de gestion du PC (achats, produits, clients, fournisseurs, dépenses, comptabilité, administration…) y sont directement, seulement s'ils sont dans vos droits.",
+      "Ventes sur le téléphone : filtres Aujourd'hui, Hier, 7 jours, Ce mois ou une date au choix, et par type (à crédit, retours, annulées). Le tableau de bord s'affiche pour le jour de votre choix.",
+    ],
+  },
+  {
+    version: '0.109.0',
+    items: [
+      "ONIX 360 Mobile fait peau neuve : barre de navigation en bas, accueil, menu « Plus » et actions rapides construits selon les droits de la personne connectée. Chacun ne voit que ce qui sert à son travail (gérant, vendeur, magasinier, caissier…), sans rien perdre des fonctions existantes.",
+      "Accueil du téléphone : ce qui demande l'attention en premier (demandes d'accord, écarts de caisse, paniers rendus, produits à recompter, saisies à envoyer), puis les chiffres du jour selon le rôle. Nouvelles couleurs ONIX, cartes plus légères, chargements et écrans vides plus clairs.",
+    ],
+  },
+  {
+    version: '0.108.0',
+    items: [
+      "ONIX 360 Mobile, gérant : « Gérer la boutique » ouvre les écrans de gestion du PC sur le téléphone : tableau de bord, ventes, trésorerie et caisses, clients, fournisseurs, achats et paiements, dépenses, comptabilité, produits et prix, stock, équipe et planning, caisses et utilisateurs. On y crée, modifie, encaisse et règle comme au PC.",
+      "Chaque action faite sur le téléphone est exécutée par un PC allumé du magasin (n'importe lequel), avec les droits de la personne connectée, sans déranger la personne assise devant ce PC. L'impression, les fichiers et les réglages propres à un poste restent sur les PC.",
+      'Les fenêtres comme « Nouvel article » s’ouvrent entières, à droite de la barre latérale.',
+      'Achats et Fournisseurs sont de nouveau deux menus séparés.',
+      'Caisse : le bandeau rouge « PC hors ligne » est retiré, la barre du bas affiche déjà « Serveur : hors ligne ». Le menu Actions s’ouvre entier, et chaque modèle d’écran de vente tient sur une page sans défiler.',
+      'Modèle conventionnel : « Nom du client sur le ticket » est à côté du client comptoir, en haut.',
+      'Listes : Filtrer, Colonnes, Excel et PDF ne s’affichent plus tout seuls ; cliquez sur le petit bouton ⋯ au-dessus de la liste.',
+    ],
+  },
+  {
+    version: '0.107.0',
+    items: [
+      'Correctif : sans le droit « Voir les montants de la caisse », l’accueil ne montre plus les ventes ni l’attendu de sa caisse (le comptage du soir reste à l’aveugle).',
+      'Correctif : les colonnes des listes restent alignées quand des colonnes de dépôts s’ajoutent ; les dates des champs sont en français ; la sauvegarde n’est plus « en retard » sur un PC neuf.',
+      'Caisse : ouverture de la caisse depuis l’écran de vente, menu Actions rangé par usage, « Encaisser » et « Décaisser » regroupés, remise sur tout le ticket, billet de 500 FCFA, A4 et WhatsApp proposés après la vente.',
+      'Menus regroupés par métier (Caisse et argent, Articles, Achats, Stock, Clients, Personnel, Pilotage, Comptabilité, Administration, Aide) et écrans renommés en mots simples (« Vente 1 », « Prix d’achat », « Fond de caisse », « Écart »…). Les anciens noms trouvent toujours l’écran avec Ctrl+K.',
+      'Fenêtres ouvertes en plein écran par défaut (ou en cascade, au choix dans Mon compte), icônes dans les menus et la barre latérale.',
+      'Liste des produits avec le stock ; accueil du gérant en 4 chiffres, caisses et points d’attention côte à côte ; droits par rôle affichés un rôle à la fois.',
+      'Nouveau : « Ma fin de journée » (Pilotage) liste ce qui reste à faire avant de fermer : caisses ouvertes, écarts, dépenses, transferts, factures, sauvegarde, envoi au serveur.',
+      'Nouveau : « Règles de mon magasin » (Administration) regroupe les 16 réglages qui changent la journée, avec la valeur conseillée.',
+      'L’accord par téléphone est proposé d’office quand le gérant n’est pas devant le PC.',
+      'Ctrl+K retrouve un client par son numéro de téléphone, même tapé sans espaces. La page gérant du serveur renvoie vers ONIX 360 Mobile. Les raccourcis clavier ne changent pas.',
+      "Rien n'est réservé au seul gérant : nouveau groupe « Opérations sensibles » dans les droits, et droit « Superviseur » qui rend le code d'un employé valable comme celui du gérant (annulations, retours, remises, crédit au-delà du plafond, sorties de caisse, avances…).",
+      "Délégation temporaire : Administration › Délégation et plafonds, le gérant confie ses pouvoirs à un employé jusqu'à une date ; tout revient seul à la fin. Plafonds par personne : remise maximale et sortie de caisse maximale sans code.",
+      "Caisse séparée : à l'encaissement, le caissier choisit ticket (F2), listing (F7), A4 (F9) ou rien (F4) ; le vendeur peut demander le listing ou l'A4 en envoyant la facture.",
+      "ONIX 360 Mobile, vendeur : remise sur le total, facture à crédit pour un client de la liste avec acompte, format de facture voulu par le client ; la caisse valide à crédit en un geste.",
+      "ONIX 360 Mobile, gérant : nouvelles pages « À valider » (modifications de facture, corrections de stock, dépenses), « Ventes » du jour avec annulation, plafond de crédit d'un client et délégation. N'importe quel PC allumé du magasin applique ces actions en quelques secondes.",
+      "Notifications Android, appli fermée : demandes d'accord, demandes à valider, écarts et clôtures de caisse, grosses remises, annulations, ruptures. À régler une fois sur la page Téléphones du serveur avec un projet Firebase gratuit.",
+    ],
+  },
   {
     version: '0.106.0',
     items: [
@@ -267,8 +350,8 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
     version: '0.91.0',
     items: [
-      'Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met V. cash 1, V. cash 2 et V. crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.',
-      'En plein écran, les boutons V. cash 1, V. cash 2 et V. crédit de la barre verte passent d’une fiche à l’autre. « Quitter le plein écran » (ou F11) ramène l’affichage habituel ; il revient aussi tout seul en allant à la trésorerie ou à la clôture.',
+      'Mode « Caisse seule » : le bouton ⛶ de la barre verte (ou F11) met Vente 1, Vente 2 et Vente à crédit en plein écran, sans menus, onglets ni barre des tâches de Windows. Le caissier ne voit que sa fiche de vente, la bande des touches et la ligne du bas.',
+      'En plein écran, les boutons Vente 1, Vente 2 et Vente à crédit de la barre verte passent d’une fiche à l’autre. « Quitter le plein écran » (ou F11) ramène l’affichage habituel ; il revient aussi tout seul en allant à la trésorerie ou à la clôture.',
       'Le logiciel se souvient du choix de chacun. Dans Paramètres › Écran de caisse, le gérant coche les rôles (caissier, vendeur, gérant, administrateur) qui arrivent directement en mode Caisse seule après la connexion.',
     ],
   },
@@ -297,7 +380,7 @@ export const WHATS_NEW: { version: string; items: string[] }[] = [
     items: [
       'Menus rangés par métier : 10 menus au lieu de 15 (Vente, Trésorerie, Stock, Articles, Achats, Clients, Dépenses, Personnel, Suivi, Compta). Chaque écran n’y est plus qu’une fois, sous de petits titres (Commander, Recevoir, Payer…).',
       'Un menu ouvert s’affiche en entier, sur plusieurs colonnes si l’écran est trop bas : plus besoin de défiler.',
-      'Onglets du haut selon le rôle : le caissier a V. cash 1, V. cash 2, V. crédit, Mes factures et Ma caisse ; le magasinier ses tâches, la réception et le stock ; le gérant son tableau de bord. Chacun peut toujours les personnaliser.',
+      'Onglets du haut selon le rôle : le caissier a Vente 1, Vente 2, Vente à crédit, Mes factures et Ma caisse ; le magasinier ses tâches, la réception et le stock ; le gérant son tableau de bord. Chacun peut toujours les personnaliser.',
       'Ctrl+K « Rechercher une fonction » trouve aussi les mots du métier et les anciens noms : inventaire, réception fournisseur, facture, magasinier…',
       'Fichier devient « Mon compte », sous votre nom en haut à droite. Les barres déjà personnalisées sont gardées et suivent les nouveaux noms.',
     ],

@@ -42,3 +42,4 @@ export * from './discounts';
 export * from './outageBook';
 export * from './outageBookRead';
 export * from './digitNet';
+export * from './pcScreens';

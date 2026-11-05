@@ -109,7 +109,7 @@ test('captures de la palette sur les écrans principaux', async () => {
     await shot(page, '11-caisse');
 
     await page.keyboard.press('Escape');
-    await page.locator('nav.rail .rail-item', { hasText: 'Dépenses' }).first().click();
+    await page.locator('nav.rail .rail-item', { hasText: 'Caisse et argent' }).first().click();
     await page.locator('.menu-drop').getByRole('button', { name: 'Nouvelle dépense', exact: true }).click();
     await shot(page, '12-fenetre-nouvelle-depense');
     expect(errors).toEqual([]);

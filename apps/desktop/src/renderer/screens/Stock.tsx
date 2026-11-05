@@ -9,7 +9,7 @@ import { Clearance, CycleCount, Losses } from './Clearance';
 import { packCostText, purchaseUnits } from './packs';
 import { type ExtraTerms, type TermsText, lineNet, lineTerms, noTerms } from './purchaseTerms';
 import { ArticlePicker, SupplierSelect, WarehouseSelect } from './pickers';
-import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, parseAmount, parseQty, qty, today, useLoad, useToast, has } from '../ui';
+import { Empty, Field, Modal, Tabs, dateFr, dateTime, fcfa, openScreen, parseAmount, parseQty, qty, today, useCan, useLoad, useToast, has } from '../ui';
 import { tx } from '../tax';
 import { ReceptionLabels } from './barcodePrint';
 import { PurchaseEntry } from './purchaseEntry';
@@ -59,7 +59,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       ['state', 'État du stock'],
       ['multi', 'Stock multi-magasin'],
       ['warehouses', 'Articles par dépôt'],
-      ['receive', 'Réception'],
+      ['receive', 'Recevoir une livraison'],
       ['loss', 'Pertes et casse'],
       ['restock', 'Réassort du rayon'],
       ['transfer', 'Transfert'],
@@ -69,7 +69,7 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
       ['recalls', 'Rappels de lots'],
       ['moves', 'Mouvements'],
       ['adjustments', 'Ajustements'],
-      ['monitoring', 'Monitoring'],
+      ['monitoring', 'Corrections demandées'],
       ['anomalies', 'À vérifier'],
       ['clearance', 'Déstockage'],
       ['losses', 'Démarque'],
@@ -154,7 +154,7 @@ function StockState({ critical = false }: { critical?: boolean }) {
           <option value="surstock">Surstocks</option>
         </select>
         <input className="search" placeholder="Rechercher" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <span className="muted">Valeur du stock (CMUP) : {fcfa(total)}</span>
+        <span className="muted">Valeur du stock (coût moyen) : {fcfa(total)}</span>
         <button disabled={!rows.data} onClick={exportXlsx}>
           Exporter vers Excel
         </button>
@@ -170,7 +170,7 @@ function StockState({ critical = false }: { critical?: boolean }) {
               </th>
             ))}
             <th className="r">{perWarehouse.length ? 'Total' : 'Quantité'}</th>
-            <th className="r">CMUP</th>
+            <th className="r" title="Coût moyen unitaire pondéré (CMUP)">Coût moyen</th>
             <th className="r">Valeur</th>
             <th>Prochaine DLC</th>
             <th>Niveau</th>
@@ -332,16 +332,32 @@ function Reception() {
   const [lines, setLines] = useState<RecLine[]>([]);
   const [received, setReceived] = useState<{ articleId: string; qty: number; packUnits: number }[] | null>(null);
   const total = lines.reduce((s, l) => s + lineNet(l), 0);
+  // 0.107.0 : le fournisseur choisi, ses bons de commande envoyés sont proposés avant une réception libre ;
+  // le fournisseur est obligatoire, sauf pour le gérant.
+  const can = useCan();
+  const supplierOptional = can('ignore_stock');
+  const orders = useLoad(() => (supplierId ? call('purchases.orders', { supplierId, open: true }) : Promise.resolve([])), [supplierId]);
+  const waiting = (orders.data ?? []).filter((o) => o.status === 'sent');
   return (
     <div>
       {received && <ReceptionLabels title="Réception enregistrée · imprimer les étiquettes ?" lines={received} onClose={() => setReceived(null)} />}
       <p className="muted">
-        Réception libre, sans bon de commande (lot et date limite). Pour réceptionner une commande : Achats › Bons de commande. Pour saisir la facture en même temps :
-        Achats › Facture directe.
+        Choisissez le fournisseur : s'il a un bon de commande en attente, réceptionnez plutôt le bon (le reliquat reste suivi). Sinon, saisissez la livraison ici. Pour saisir la facture en même temps : « Facture directe ».
       </p>
+      {waiting.length > 0 && (
+        <div className="banner info reception-orders">
+          <b>
+            {waiting.length === 1 ? 'Ce fournisseur a un bon de commande en attente' : `Ce fournisseur a ${waiting.length} bons de commande en attente`} :{' '}
+            {waiting.map((o) => o.number).join(', ')}.
+          </b>
+          <button className="primary" onClick={() => openScreen('purchases', 'orders')}>
+            Réceptionner le bon de commande
+          </button>
+        </div>
+      )}
       <div className="grid3">
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} />
-        <SupplierSelect value={supplierId} onChange={setSupplierId} optional />
+        <SupplierSelect value={supplierId} onChange={setSupplierId} optional={supplierOptional} />
         <Field label="N° bon de livraison">
           <input value={reference} onChange={(e) => setReference(e.target.value)} />
         </Field>
@@ -351,7 +367,8 @@ function Reception() {
         <span className="big-total">{fcfa(total)}{tx(' HT')}</span>
         <button
           className="primary"
-          disabled={!lines.length}
+          disabled={!lines.length || (!supplierId && !supplierOptional)}
+          title={!supplierId && !supplierOptional ? 'Choisissez le fournisseur' : undefined}
           onClick={async () => {
             try {
               const input = lines.map(recLineInput);

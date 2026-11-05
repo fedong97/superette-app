@@ -3,7 +3,7 @@ import { type Page, expect, test } from '@playwright/test';
 import { createStore, invoke, launch } from './app';
 
 /** Menus que voient le caissier et le vendeur : tout y est en anglais. */
-const CASHIER_MENUS = ['Sales', 'Treasury', 'Customers'];
+const CASHIER_MENUS = ['Sales', 'Register and money', 'Customers'];
 const SKIP = /Quit|Switch user|Sign out|Sync/i;
 
 /** Textes encore en français à l'écran (mots courants ou lettres accentuées), hors données saisies. */
@@ -58,13 +58,16 @@ test('en anglais, les écrans du caissier et la vente sont traduits', async () =
     await invoke(page, 'admin.createUser', { name: 'Awa', login: 'awa', pin: '5678', role: 'cashier', storeId: store.id, registerId: reg.id });
 
     // Le gérant passe en anglais ; l'écran de connexion garde la langue du PC, et la caissière s'y connecte.
-    await page.getByRole('button', { name: 'English', exact: true }).click();
-    await page.getByRole('button', { name: 'Switch user' }).click();
+    // 0.107.0 : la langue et le changement d'utilisateur sont dans le menu du compte (pastille en bas de la barre).
+    await page.locator('.side-user').click();
+    await page.locator('.menu-drop').getByRole('button', { name: 'English / Français', exact: true }).click();
+    await page.locator('.side-user').click();
+    await page.locator('.menu-drop').getByRole('button', { name: 'Switch user' }).click();
     await page.getByLabel('Login').fill('awa');
     await page.getByLabel('Secret code').fill('5678');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.getByRole('button', { name: 'Got it' }).click({ timeout: 5000 }).catch(() => {});
-    await expect(page.getByRole('button', { name: 'Switch user' })).toBeVisible();
+    await expect(page.locator('.side-user')).toContainText('Awa');
 
     const left = new Map<string, Set<string>>();
     const note = async (where: string) => {
@@ -72,7 +75,7 @@ test('en anglais, les écrans du caissier et la vente sont traduits', async () =
     };
 
     // Vente en anglais : scan, montant exact, VALIDATE.
-    await page.getByRole('button', { name: 'Cash 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Sale 1', exact: true }).click();
     const scan = page.getByPlaceholder(/barcode/).first();
     await scan.fill('2*6001234567899');
     await scan.press('Enter');
@@ -85,11 +88,23 @@ test('en anglais, les écrans du caissier et la vente sont traduits', async () =
     await note('Register 1 (after sale)');
 
     // Chaque action de la caisse, puis l'encaissement d'une fiche pleine.
-    const actions = page.locator('.mdi.active select').filter({ has: page.locator('option', { hasText: 'Actions' }) }).first();
-    for (const value of ['cashIn', 'cashOut', 'cancel', 'return', 'custPay', 'quote', 'order', 'expense']) {
-      await actions.selectOption(value);
+    // 0.107.0 : le menu Actions est une liste groupée ; chaque action sauf la clôture.
+    const actionsBtn = page.locator('.mdi.active .pos-actmenu > button').first();
+    await actionsBtn.click();
+    const count = await page.locator('.pos-actions-menu [role=menuitem]').count();
+    await page.keyboard.press('Escape');
+    await page.locator('.pos-actions-back').click().catch(() => undefined);
+    for (let i = 0; i < count; i++) {
+      await actionsBtn.click();
+      const item = page.locator('.pos-actions-menu [role=menuitem]').nth(i);
+      const label = (await item.innerText()).replace(/\s+/g, ' ').trim();
+      if (/close my register/i.test(label)) {
+        await page.locator('.pos-actions-back').click();
+        continue;
+      }
+      await item.click();
       await page.waitForTimeout(400);
-      await note(`Register 1 › action ${value}`);
+      await note(`Register 1 › action ${label}`);
       await dismiss(page);
     }
     await scan.fill('6001234567899');

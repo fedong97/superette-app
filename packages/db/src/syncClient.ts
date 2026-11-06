@@ -441,6 +441,17 @@ export async function pushStationStatus(s: Services, status: StationStatus): Pro
   await request(creds.url, '/api/v1/devices/status', { token: creds.token, body: status });
 }
 
+/** 0.116.0 : envoie au serveur les plantages du logiciel notés sur ce PC (sans données saisies). */
+export async function pushAppErrors(s: Services): Promise<number> {
+  const creds = s.sync.credentials();
+  if (!creds) return 0;
+  const errors = s.appErrors.unsent();
+  if (!errors.length) return 0;
+  await request(creds.url, '/api/v1/devices/errors', { token: creds.token, body: { errors } });
+  s.appErrors.markSent(errors);
+  return errors.length;
+}
+
 /** État de tous les PC du magasin, d'après le serveur. */
 export async function stationStatuses(s: Services): Promise<{ deviceId: string; name: string; lastSeenAt: string | null; appVersion: string | null; status: StationStatus | null; self: boolean }[]> {
   const creds = s.sync.credentials();

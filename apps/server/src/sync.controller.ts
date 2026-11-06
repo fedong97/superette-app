@@ -194,6 +194,13 @@ export class SyncController {
     return this.sync.saveStatus(await this.sync.authenticate(auth), body);
   }
 
+  /** 0.116.0 : plantages du logiciel sur ce PC (sans données saisies), pour FEDONG. */
+  @Post('devices/errors')
+  @HttpCode(200)
+  async pushErrors(@Headers('authorization') auth: string | undefined, @Body() body: unknown) {
+    return this.sync.saveErrors(await this.sync.authenticate(auth), body);
+  }
+
   @Get('devices/status')
   async statuses(@Headers('authorization') auth: string | undefined) {
     return this.sync.statuses(await this.sync.authenticate(auth));

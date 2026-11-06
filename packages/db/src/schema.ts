@@ -2968,4 +2968,24 @@ CREATE TABLE seal_findings (
 );
 `,
   },
+  {
+    version: 72,
+    name: 'erreurs du logiciel',
+    sql: `
+-- Plantages du logiciel sur ce PC (message, endroit du programme, version ; jamais de données saisies),
+-- envoyés au serveur central. Propre à ce PC, jamais synchronisée.
+CREATE TABLE app_errors (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  message TEXT NOT NULL,
+  stack TEXT,
+  where_at TEXT,
+  version TEXT,
+  count INTEGER NOT NULL,
+  first_at TEXT NOT NULL,
+  last_at TEXT NOT NULL,
+  sent_at TEXT
+);
+`,
+  },
 ];

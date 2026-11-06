@@ -91,6 +91,7 @@ import {
   mobileReceptions,
   takeMobileReception,
   pushStationStatus,
+  pushAppErrors,
   stationStatuses,
   type Receivables,
   type StationStatus,
@@ -1510,6 +1511,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (s.sync.credentials() && Date.now() - lastStatusPush > 5 * 60_000) {
         lastStatusPush = Date.now();
         void pushStationStatus(s, stationStatus()).catch(() => undefined);
+        // 0.116.0 : et les plantages du logiciel notés sur ce PC.
+        void pushAppErrors(s).catch(() => undefined);
       }
       return s.sync.state();
     },
@@ -3816,6 +3819,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return printer.ownerReport(c.storeId, s.insights.ownerReport(c.storeId, month), month);
     },
     /** État de ce PC : synchronisation, version, sauvegarde, imprimante, licence. */
+    // --- 0.116.0 : erreurs du logiciel -----------------------------------------------
+    /** Un écran a planté : noté sur ce PC (sans données saisies), envoyé ensuite au serveur central. */
+    'errors.report': (input: { message: string; stack?: string | null; where?: string | null }) => {
+      s.appErrors.record({ source: 'screen', message: String(input?.message ?? ''), stack: input?.stack ?? null, where: input?.where ?? null, version: appVersion });
+      return true;
+    },
+    'errors.list': () => (requireUser(['stations']), s.appErrors.list(50)),
     'stations.self': () => (requireUser(['stations']), stationStatus()),
     /** État de tous les PC du magasin, d'après le serveur (ce PC seul s'il n'est pas relié). */
     'stations.all': async () => {

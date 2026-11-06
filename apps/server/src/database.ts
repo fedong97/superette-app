@@ -480,6 +480,28 @@ ALTER TABLE devices ADD COLUMN foreign_last JSONB;
 ALTER TABLE devices ADD COLUMN trusted BOOLEAN NOT NULL DEFAULT false;
 `,
   },
+  {
+    version: 16,
+    sql: `
+-- 0.116.0 : plantages du logiciel envoyés par les PC (message, endroit du programme, version ; jamais de données saisies).
+-- Une ligne par erreur et par jour sur un PC (identifiant donné par le PC) : le compteur suit les répétitions.
+CREATE TABLE client_errors (
+  device_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  message TEXT NOT NULL,
+  stack TEXT,
+  where_at TEXT,
+  version TEXT,
+  count INT NOT NULL,
+  first_at TIMESTAMPTZ NOT NULL,
+  last_at TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (device_id, id)
+);
+CREATE INDEX client_errors_last ON client_errors(last_at DESC);
+`,
+  },
 ];
 
 export async function migrate(db: Db): Promise<void> {

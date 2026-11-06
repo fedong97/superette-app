@@ -136,6 +136,23 @@ void app.whenReady().then(() => {
     app.quit();
     return;
   }
+  // 0.116.0 : un plantage du programme est noté (sans données saisies) puis envoyé au serveur central.
+  const noteError = (source: 'main' | 'action', e: unknown, where?: string) => {
+    try {
+      if (!services.db.open || e instanceof AppError) return;
+      services.appErrors.record({ source, message: e instanceof Error ? e.message : String(e), stack: e instanceof Error ? (e.stack ?? null) : null, where: where ?? null, version: app.getVersion() });
+    } catch {
+      // Noter l'erreur ne doit jamais en provoquer une autre.
+    }
+  };
+  process.on('uncaughtException', (e) => {
+    console.error('[plantage]', e);
+    noteError('main', e);
+  });
+  process.on('unhandledRejection', (e) => {
+    console.error('[promesse rejetée]', e);
+    noteError('main', e);
+  });
   // Une nouvelle boutique sur ce PC reprend son essai là où il en est, sans le faire recommencer.
   const ownTrial = services.admin.getSetting('license.trialStart');
   const trial = dossiers.shareTrial(ownTrial);
@@ -292,6 +309,7 @@ void app.whenReady().then(() => {
     } catch (e) {
       if (e instanceof AppError) return { ok: false, error: { message: e.message, code: e.code, fixes: fixesFor(e) } };
       console.error(`[api] ${String(name)}`, e);
+      noteError('action', e, String(name));
       return { ok: false, error: { message: e instanceof Error ? e.message : String(e), code: 'INTERNAL' } };
     }
   });

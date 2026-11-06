@@ -254,6 +254,34 @@ export class SyncService {
     return { ok: true };
   }
 
+  /**
+   * 0.116.0 : plantages du logiciel envoyés par un PC. Une erreur déjà reçue est
+   * mise à jour (compteur, dernière fois). Au plus 50 par envoi, textes bornés.
+   */
+  async saveErrors(device: Device, body: unknown): Promise<{ ok: true; received: number }> {
+    const list = (body as { errors?: unknown } | null)?.errors;
+    if (!Array.isArray(list) || list.length > 50) throw new BadRequestException('Erreurs du poste invalides');
+    const text = (v: unknown, max: number) => (typeof v === 'string' && v ? v.slice(0, max) : null);
+    const when = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : new Date().toISOString());
+    let received = 0;
+    for (const raw of list) {
+      const e = (raw ?? {}) as Record<string, unknown>;
+      const id = text(e['id'], 64);
+      const message = text(e['message'], 500);
+      if (!id || !message) continue;
+      const source = ['main', 'screen', 'action'].includes(String(e['source'])) ? String(e['source']) : 'main';
+      await this.pg.query(
+        `INSERT INTO client_errors (device_id, id, source, message, stack, where_at, version, count, first_at, last_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (device_id, id) DO UPDATE SET count = GREATEST(client_errors.count, excluded.count), last_at = excluded.last_at,
+           where_at = COALESCE(excluded.where_at, client_errors.where_at), received_at = now()`,
+        [device.id, id, source, message, text(e['stack'], 3_000), text(e['where'], 120), text(e['version'], 40), Math.max(1, Math.min(1_000_000, Math.trunc(Number(e['count']) || 1))), when(e['firstAt']), when(e['lastAt'])],
+      );
+      received++;
+    }
+    return { ok: true, received };
+  }
+
   /** PC du magasin et leur dernier état connu. */
   async statuses(device: Device) {
     const { rows } = await this.pg.query<{ id: string; name: string; last_seen_at: Date | null; app_version: string | null; status: unknown }>(

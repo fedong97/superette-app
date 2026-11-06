@@ -230,6 +230,13 @@ export class AdminController {
     return this.admin.overview();
   }
 
+  /** 0.116.0 : plantages du logiciel envoyés par les PC. */
+  @Get('admin/api/errors')
+  errors(@Req() req: Request) {
+    this.guard(req);
+    return this.admin.clientErrors();
+  }
+
   @Get('admin/api/groups')
   groups(@Req() req: Request) {
     this.guard(req);

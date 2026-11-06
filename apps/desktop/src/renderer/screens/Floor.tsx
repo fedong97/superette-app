@@ -905,6 +905,51 @@ export function Stations() {
           })}
         </tbody>
       </table>
+      <AppErrors />
+    </>
+  );
+}
+
+/** 0.116.0 : plantages du logiciel notés sur ce PC, envoyés au serveur central (onglet « Erreurs des PC »). */
+function AppErrors() {
+  const list = useLoad(() => call('errors.list'), []);
+  const rows = list.data ?? [];
+  return (
+    <>
+      <h3>Erreurs du logiciel sur ce PC</h3>
+      <p className="muted">
+        Quand le programme plante, ONIX le note ici sans aucune donnée saisie (ni client, ni montant, ni code) et l'envoie au serveur central, où le support FEDONG le voit
+        (page d'administration du serveur › Erreurs des PC).
+      </p>
+      {!rows.length ? (
+        <Empty>Aucune erreur notée sur ce PC.</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th>Dernière fois</th>
+              <th>Où</th>
+              <th>Message</th>
+              <th className="r">Fois</th>
+              <th>Envoyée</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => (
+              <tr key={e.id}>
+                <td>{dateTime(e.last_at)}</td>
+                <td>
+                  {e.source === 'screen' ? 'Écran' : e.source === 'action' ? 'Action' : 'Programme'}
+                  {e.where_at && <small className="muted block">{e.where_at}</small>}
+                </td>
+                <td>{e.message}</td>
+                <td className="r">{e.count}</td>
+                <td>{e.sent_at ? dateTime(e.sent_at) : <span className="muted">pas encore</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </>
   );
 }

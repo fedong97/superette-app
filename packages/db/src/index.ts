@@ -15,6 +15,7 @@ import { DeliveryService } from './deliveries';
 import { BackupService } from './backup';
 import { ResetService } from './reset';
 import { SealService } from './seals';
+import { AppErrorService } from './appErrors';
 import { FiscalYearService } from './fiscal';
 import { FicheService } from './fiches';
 import { RelayService } from './relay';
@@ -100,6 +101,7 @@ export * from './deliveries';
 export * from './backup';
 export * from './reset';
 export * from './seals';
+export * from './appErrors';
 export * from './fiscal';
 export * from './fiches';
 export * from './relay';
@@ -205,6 +207,7 @@ export interface Services {
   backups: BackupService;
   reset: ResetService;
   seals: SealService;
+  appErrors: AppErrorService;
   receipts: ReceiptService;
   purchases: PurchaseService;
   reports: ReportService;
@@ -280,6 +283,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const backups = new BackupService(db, clock);
   const reset = new ResetService(db, clock);
   const seals = new SealService(db, clock);
+  const appErrors = new AppErrorService(db, clock);
   const labels = new LabelService(db, clock, catalogue, promotions);
   const treasury = new TreasuryService(db, clock);
   const emoney = new EmoneyService(db, clock);
@@ -346,7 +350,7 @@ export function createServices(db: Db, clock: Clock = () => new Date(), machineI
   const storeTransfers = new StoreTransferService(db, clock, stock);
   const counter = new CounterService(db, clock, admin, pos, customers);
   const reportPresets = new ReportPresetService(db, clock);
-  return { db, counter, fieldReps, bookCodes, promoCodes, outages, anomalies, reportPresets, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, seals, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
+  return { db, counter, fieldReps, bookCodes, promoCodes, outages, anomalies, reportPresets, vouchers, recalls, exitChecks, priceSchedules, recurringOrders, storeTransfers, missedSales, floor, insights, offsets, editRequests, consignment, companies, containers, agent, staffTime, cashierControl, clearance, cycleCount, couriers, attendance, personnel, punches, fingerprint, staffWatch, supplierReturns, summaryInvoices, cheques, planning, opening, assets, fiches, repair, relay, templates, admin, catalogue, stock, inventories, transfers, monitoring, production, customers, loyalty, mobilePay, expenses, charges, controls, quotes, orders, commissions, pos, deliveries, treasury, emoney, staff, cashdesk, rebates, promotions, labels, backups, reset, seals, appErrors, receipts, purchases, reports, accounting, statements, fiscal, reconciliation, tax, notes, disclosures, attention, digest, sync, license };
 }
 
 export function openServices(file: string, clock?: Clock): Services {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { Empty, Tabs, fcfa, qty, today, useCan, useLoad } from '../ui';
+import { Empty, Tabs, fcfa, qty, today, useCan, useLoad, useStoreSettings } from '../ui';
+import { AmountAxis, MarginRate, RevenueSpark, Versus, niceMax } from './figures';
 import { OwnerReport, PriceReview, TeamBoard } from './Floor';
 import { MonthClear } from './MonthClear';
 import { tx } from '../tax';
@@ -142,36 +143,32 @@ function EndOfDay({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) 
   );
 }
 
-/** Variation d'un chiffre par rapport à la veille : ↑ 12,4 %, ↓ 3 %, ou = s'il n'y a rien à comparer. */
-function Trend({ now, before }: { now: number; before: number | undefined }) {
-  if (!before) return <span className="stat-trend flat">— vs hier</span>;
-  const pct = ((now - before) / Math.abs(before)) * 100;
-  const tone = Math.abs(pct) < 0.5 ? 'flat' : pct > 0 ? 'up' : 'down';
-  return (
-    <span className={`stat-trend ${tone}`} title="Par rapport à la veille">
-      {tone === 'up' ? '↑' : tone === 'down' ? '↓' : '='} {Math.abs(pct).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % vs hier
-    </span>
-  );
-}
-
-const dayBefore = (date: string) => {
+const daysBefore = (date: string, n: number) => {
   const d = new Date(`${date}T12:00:00`);
-  d.setDate(d.getDate() - 1);
+  d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
 };
+const dayBefore = (date: string) => daysBefore(date, 1);
 
 function Day({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
   const can = useCan();
   const [date, setDate] = useState(today());
   const day = useLoad(() => call('reports.daily', date), [date]);
   const prev = useLoad(() => call('reports.daily', dayBefore(date)), [date]);
+  // Même jour la semaine passée : la comparaison quand la veille n'a pas de vente.
+  const week = useLoad(() => call('reports.daily', daysBefore(date, 7)), [date]);
+  const noAlertCount = useLoad(() => call('stock.list', { level: 'normal' }), []);
+  const settings = useStoreSettings();
   const alerts = useLoad(() => call('stock.list', { level: 'rupture' }), []);
   const lowStock = useLoad(() => call('stock.list', { level: 'alerte' }), []);
   const expiring = useLoad(() => call('stock.expiring', 3), []);
   const d = day.data;
   const p = prev.data;
+  const w = week.data;
+  const Trend = ({ now, before, last }: { now: number; before: number | undefined; last: number | undefined }) => <Versus now={now} before={before} lastWeek={last} date={date} sameHour={false} />;
   const hours = d?.byHour ?? [];
-  const maxHour = Math.max(1, ...hours.map((h) => h.revenueTtc));
+  const maxHour = niceMax(Math.max(1, ...hours.map((h) => h.revenueTtc)));
+  const bestHour = hours.reduce((b, h) => (h.revenueTtc > (b?.revenueTtc ?? 0) ? h : b), undefined as (typeof hours)[number] | undefined);
   const maxDept = Math.max(1, ...(d?.byDepartment ?? []).map((r) => r.revenueHt));
   const rate = d?.revenueHt ? Math.round((d.grossMargin / d.revenueHt) * 100) : null;
   const actions: [string, [WinKind, string?], boolean][] = [
@@ -180,10 +177,12 @@ function Day({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
     ['Réception', ['stock', 'receive'], can('stock_receive')],
     ['Inventaire', ['stock', 'inventory'], can('inventory')],
   ];
-  const watch: [number | undefined, string, string, AttentionTarget][] = [
-    [alerts.data?.length, 'rupture', 'article(s) en rupture', ['stock', 'critical']],
-    [lowStock.data?.length, 'alerte', "article(s) sous le seuil d'alerte", ['stock', 'critical']],
-    [expiring.data?.length, 'alerte', 'lot(s) périmant sous 3 jours', ['stock', 'critical']],
+  const noAlert = noAlertCount.data?.filter((r) => r.alert_qty === null).length;
+  const watch: [number | undefined, string, string, AttentionTarget, string][] = [
+    [alerts.data?.length, 'rupture', 'article(s) en rupture', ['stock', 'critical'], 'Commander'],
+    [lowStock.data?.length, 'alerte', "article(s) sous le seuil d'alerte", ['stock', 'critical'], 'Commander'],
+    [noAlert, 'info', "article(s) sans seuil d'alerte", ['stock', 'state'], 'Voir'],
+    [expiring.data?.length, 'alerte', 'lot(s) périmant sous 3 jours', ['stock', 'critical'], 'Écouler'],
   ];
   return (
     <>
@@ -209,22 +208,23 @@ function Day({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
           <div>
             <small>{tx("Chiffre d'affaires TTC")}</small>
             <strong>{fcfa(d.revenueTtc)}</strong>
-            <Trend now={d.revenueTtc} before={p?.revenueTtc} />
+            <RevenueSpark byHour={d.byHour} width={160} />
+            <Trend now={d.revenueTtc} before={p?.revenueTtc} last={w?.revenueTtc} />
           </div>
           <div>
             <small>Tickets</small>
             <strong>{d.ticketCount}</strong>
-            <Trend now={d.ticketCount} before={p?.ticketCount} />
+            <Trend now={d.ticketCount} before={p?.ticketCount} last={w?.ticketCount} />
           </div>
           <div>
             <small>Panier moyen</small>
             <strong>{fcfa(d.averageBasket)}</strong>
-            <Trend now={d.averageBasket} before={p?.averageBasket} />
+            <Trend now={d.averageBasket} before={p?.averageBasket} last={w?.averageBasket} />
           </div>
           <div>
             <small>{tx('Marge brute HT')}</small>
             <strong>{fcfa(d.grossMargin)}</strong>
-            <span className="stat-trend flat">{rate === null ? 'taux —' : `taux ${rate} %`}</span>
+            <MarginRate rate={rate} target={settings.marginTargetPct} />
           </div>
         </div>
       ) : (
@@ -245,14 +245,22 @@ function Day({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
           </div>
           {hours.length ? (
             <>
-              <div className="hcols" role="img" aria-label="Chiffre d'affaires par heure">
-                {hours.map((h) => (
-                  <div key={h.hour} title={`${String(h.hour).padStart(2, '0')} h : ${fcfa(h.revenueTtc)} · ${h.tickets} ticket(s)`}>
-                    <i style={{ height: `${Math.max(2, (h.revenueTtc / maxHour) * 100)}%` }} />
-                  </div>
-                ))}
+              <div className="hours-axed">
+                <AmountAxis top={maxHour} />
+                <div className="hcols" role="img" aria-label="Chiffre d'affaires par heure">
+                  {hours.map((h) => (
+                    <div key={h.hour} title={`${String(h.hour).padStart(2, '0')} h : ${fcfa(h.revenueTtc)} · ${h.tickets} ticket(s)`}>
+                      {h === bestHour && (
+                        <b className="bar-value" style={{ bottom: `${(h.revenueTtc / maxHour) * 100}%` }}>
+                          {h.revenueTtc.toLocaleString('fr-FR')}
+                        </b>
+                      )}
+                      <i style={{ height: `${Math.max(2, (h.revenueTtc / maxHour) * 100)}%` }} />
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="hcols-x">
+              <div className="hcols-x hours-axed-x">
                 {hours.map((h) => (
                   <span key={h.hour}>{String(h.hour).padStart(2, '0')} h</span>
                 ))}
@@ -267,13 +275,13 @@ function Day({ onOpen }: { onOpen: (target: [WinKind, string?]) => void }) {
             <h3>À surveiller</h3>
           </div>
           <ul className="watch-list">
-            {watch.map(([n, tone, label, target]) => (
+            {watch.map(([n, tone, label, target, verb]) => (
               <li key={label}>
                 <button onClick={() => onOpen(target)}>
                   <span className={`tag num ${n ? tone : 'normal'}`}>{n ?? '…'}</span>
                   {label}
-                  <span className="go" aria-hidden>
-                    ›
+                  <span className={`go ${n ? 'todo-go' : ''}`} aria-hidden>
+                    {n ? `${verb} ›` : '›'}
                   </span>
                 </button>
               </li>

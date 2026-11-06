@@ -756,6 +756,8 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
   const chargesLate = useLoad(() => call('charges.late'), []);
   const gaps = useLoad(() => call('treasury.pendingGaps'), []);
   const attention = useLoad(() => (user.rights.includes('dashboard') ? call('attention.list').catch(() => []) : Promise.resolve([])), []);
+  /** Articles à commander (ruptures et alertes), affichés sur l'entrée Stock du menu. */
+  const stockToOrder = (attention.data ?? []).filter((i) => i.key === 'rupture' || i.key === 'alerte').reduce((t, i) => t + i.count, 0);
   useEffect(() => {
     const t = setInterval(() => attention.reload(), 5 * 60_000);
     return () => clearInterval(t);
@@ -1268,6 +1270,11 @@ function Workspace({ state, user, refresh }: { state: AppState; user: User; refr
                   <MenuIcon name={name} fallback={MENU_ICONS[name]} />
                 </i>
                 <span className="rail-label">{RAIL_LABELS[name] ?? name}</span>
+                {name === 'Stock' && stockToOrder > 0 && (
+                  <span className="rail-count" title={`${stockToOrder} article(s) en rupture ou sous le seuil d'alerte`}>
+                    {stockToOrder}
+                  </span>
+                )}
                 <Ico.ChevronRight className="rail-chev" size={15} aria-hidden />
               </button>
               {menu === name && menuDrop({ name, items: visibleItems(items), at: menuAt })}

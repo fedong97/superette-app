@@ -58,6 +58,10 @@ export interface StockRow {
   in_packs: string;
   /** Stock de chaque dépôt du magasin (identifiant du dépôt → quantité), pour l'aperçu par dépôt. */
   by_warehouse: Record<string, Milli>;
+  /** Ventes moyennes par jour sur les 28 derniers jours (retours déduits), pour la couverture en jours. */
+  avg_daily_sales: Milli;
+  /** Quantité déjà commandée et pas encore reçue (bons brouillons ou envoyés du magasin). */
+  on_order: Milli;
 }
 
 export interface ExpiringLot {
@@ -612,7 +616,12 @@ export class StockService extends Base {
                      ELSE COALESCE(MAX(s.avg_cost), a.purchase_price) END AS avg_cost,
                 (SELECT MIN(l.expiry) FROM lots l JOIN warehouses lw ON lw.id = l.warehouse_id
                   WHERE l.article_id = a.id AND l.qty > 0 AND l.expiry IS NOT NULL AND lw.store_id = @storeId
-                    AND (@warehouseId IS NULL OR l.warehouse_id = @warehouseId)) AS next_expiry
+                    AND (@warehouseId IS NULL OR l.warehouse_id = @warehouseId)) AS next_expiry,
+                (SELECT COALESCE(-SUM(m.qty), 0) FROM stock_movements m JOIN warehouses mw ON mw.id = m.warehouse_id
+                  WHERE m.article_id = a.id AND mw.store_id = @storeId AND m.type IN ('SALE', 'RETURN') AND m.at >= @since) AS sold_28,
+                (SELECT COALESCE(SUM(MAX(ol.qty - COALESCE((SELECT SUM(rl.qty) FROM reception_lines rl WHERE rl.order_line_id = ol.id), 0), 0)), 0)
+                  FROM purchase_order_lines ol JOIN purchase_orders po ON po.id = ol.order_id
+                  WHERE ol.article_id = a.id AND po.store_id = @storeId AND po.status IN ('draft', 'sent')) AS on_order
          FROM articles a
          LEFT JOIN families f ON f.id = a.family_id
          LEFT JOIN departments d ON d.id = f.department_id
@@ -622,10 +631,12 @@ export class StockService extends Base {
          GROUP BY a.id
          ORDER BY a.name`,
       )
-      .all({ storeId, warehouseId: opts.warehouseId ?? null, search: opts.search ? `%${opts.search}%` : null }) as (Omit<
-      StockRow,
-      'level' | 'value' | 'in_packs'
-    > & { unit_name: string | null })[];
+      .all({
+        storeId,
+        warehouseId: opts.warehouseId ?? null,
+        search: opts.search ? `%${opts.search}%` : null,
+        since: new Date(Date.parse(`${this.today()}T00:00:00Z`) - 27 * 86_400_000).toISOString().slice(0, 10),
+      }) as (Omit<StockRow, 'level' | 'value' | 'in_packs' | 'avg_daily_sales'> & { unit_name: string | null; sold_28: Milli })[];
     const packs = new Map<string, { name: string; units: Milli }[]>();
     for (const p of this.db.prepare('SELECT article_id, name, units FROM article_packs ORDER BY article_id, position').all() as { article_id: string; name: string; units: Milli }[]) {
       const list = packs.get(p.article_id) ?? [];
@@ -641,8 +652,9 @@ export class StockService extends Base {
       byWarehouse.set(x.article_id, m);
     }
     return rows
-      .map(({ unit_name, ...r }) => ({
+      .map(({ unit_name, sold_28, ...r }) => ({
         ...r,
+        avg_daily_sales: Math.max(0, Math.round(sold_28 / 28)),
         by_warehouse: byWarehouse.get(r.article_id) ?? {},
         value: Math.round((Math.max(0, r.qty) * r.avg_cost) / 1000),
         level: stockLevel(r.qty, { alert: r.alert_qty, max: r.max_qty }),

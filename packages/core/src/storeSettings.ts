@@ -76,6 +76,8 @@ export interface StoreSettings {
   supplierDefaultDays: number;
   /** Marge proposée sur le prix de revient pour le prix de vente, en % ; 0 : pas de proposition. */
   defaultMarginPct: number;
+  /** Objectif de taux de marge brute (en %), comparé au taux du jour sur l'accueil et le tableau de bord ; 0 : pas d'objectif. */
+  marginTargetPct: number;
 
   /** Déconnexion automatique après ce nombre de minutes sans activité ; 0 : jamais. */
   idleMinutes: number;
@@ -269,6 +271,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   transferTwoUsers: false,
   supplierDefaultDays: 30,
   defaultMarginPct: 0,
+  marginTargetPct: 20,
   idleMinutes: 0,
   pinMinLength: 4,
   maxLoginAttempts: 0,
@@ -358,6 +361,7 @@ const BOUNDS: Partial<Record<keyof StoreSettings, [number, number]>> = {
   defaultAlertQty: [0, 1e6],
   supplierDefaultDays: [0, 365],
   defaultMarginPct: [0, 1000],
+  marginTargetPct: [0, 100],
   idleMinutes: [0, 480],
   pinMinLength: [4, 8],
   maxLoginAttempts: [0, 20],

@@ -513,6 +513,7 @@ export function Settings({ user, onChanged, onEditTemplate }: { user: User; onCh
       'Ventes et caisse',
       '',
       [
+        { label: 'Objectif de taux de marge brute', hint: 'Comparé au taux de marge du jour sur l’accueil et le tableau de bord. 0 : pas d’objectif.', render: () => num('marginTargetPct', '%') },
         { label: 'Remise maximale sans le code du gérant', hint: 'En % du ticket. 0 : toute remise demande le code (sauf droit « remise sans code »).', render: () => num('maxDiscountPct', '%') },
         { label: 'Motif obligatoire pour une remise', hint: 'Oui : chaque remise du ticket porte un motif choisi dans une liste ; le Contrôle des caissiers les compte par vendeur. Une remise maximale propre à un article se règle sur sa fiche.', render: () => yes('discountReasonRequired') },
         {

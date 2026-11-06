@@ -1,7 +1,8 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Result, call } from '../api';
-import { Modal, fcfa, findIn, openScreen, qty, useCan, useLoad } from '../ui';
+import { Modal, fcfa, findIn, openScreen, qty, useCan, useLoad, useStoreSettings } from '../ui';
 import { tx } from '../tax';
+import { AmountAxis, MarginRate, RevenueSpark, Versus, niceMax } from './figures';
 import { ATTENTION_TARGET } from './Dashboard';
 import { DayTasks } from './Floor';
 
@@ -72,17 +73,23 @@ function CountUp({ value, money = true }: { value: number; money?: boolean }) {
   return <>{money ? fcfa(v) : v.toLocaleString('fr-FR')}</>;
 }
 
-/** Variation par rapport à la veille à la même heure. */
-function Versus({ now, before }: { now: number; before: number | undefined }) {
-  if (!before) return <span className="stat-trend flat">— vs hier</span>;
-  const pct = ((now - before) / Math.abs(before)) * 100;
-  const tone = Math.abs(pct) < 0.5 ? 'flat' : pct > 0 ? 'up' : 'down';
-  return (
-    <span className={`stat-trend ${tone}`} title="Par rapport à hier à la même heure">
-      {tone === 'up' ? '↑' : tone === 'down' ? '↓' : '='} {Math.abs(pct).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % vs hier
-    </span>
-  );
-}
+const TONE_TAG = { danger: 'rupture', warning: 'alerte', info: 'info' } as const;
+
+/** Verbe du bouton de chaque point d'attention, sur l'accueil. */
+const ACTION_LABEL: Partial<Record<Overview['attention'][number]['key'], string>> = {
+  rupture: 'Commander',
+  alerte: 'Commander',
+  cash_gaps: 'Justifier',
+  transfers: 'Réceptionner',
+  inventories: 'Terminer',
+  supplier_invoices: 'Payer',
+  late_customers: 'Relancer',
+  expenses_pending: 'Approuver',
+  outages_open: 'Reporter',
+  to_notify: 'Prévenir',
+  sale_edit_requests: 'Examiner',
+  stock_requests: 'Examiner',
+};
 
 const hour = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
@@ -105,13 +112,35 @@ function Block({ index, title, more, children, className = '' }: { index: number
 
 // --- Chiffres du jour --------------------------------------------------------------
 
-function DayFigures({ today, yesterday, cashInDrawer, showCash }: { today: Figures; yesterday: Figures | null; cashInDrawer: number; showCash: boolean }) {
+function DayFigures({
+  today,
+  yesterday,
+  lastWeek,
+  cashInDrawer,
+  showCash,
+  marginTarget,
+}: {
+  today: Figures;
+  yesterday: Figures | null;
+  lastWeek: Figures | null;
+  cashInDrawer: number;
+  showCash: boolean;
+  marginTarget: number;
+}) {
   const rate = today.revenueHt ? Math.round((today.margin / today.revenueHt) * 100) : null;
   const go = () => openScreen('dashboard', 'day');
   const tiles: [string, ReactNode, ReactNode, () => void][] = [
-    [tx("Chiffre d'affaires TTC"), <CountUp value={today.revenue} />, <Versus now={today.revenue} before={yesterday?.revenue} />, go],
-    ['Tickets', <CountUp value={today.tickets} money={false} />, <Versus now={today.tickets} before={yesterday?.tickets} />, go],
-    [tx('Marge brute HT'), <CountUp value={today.margin} />, <span className="stat-trend flat">{rate === null ? 'taux —' : `taux ${rate} %`}</span>, go],
+    [
+      tx("Chiffre d'affaires TTC"),
+      <CountUp value={today.revenue} />,
+      <>
+        <RevenueSpark byHour={today.byHour} />
+        <Versus now={today.revenue} before={yesterday?.revenue} lastWeek={lastWeek?.revenue} />
+      </>,
+      go,
+    ],
+    ['Tickets', <CountUp value={today.tickets} money={false} />, <span className="stat-trend flat">{today.tickets ? `panier moyen ${fcfa(today.average)}` : 'aucun ticket'}</span>, go],
+    [tx('Marge brute HT'), <CountUp value={today.margin} />, <MarginRate rate={rate} target={marginTarget} />, go],
   ];
   if (showCash) tiles.push(['Espèces en caisse', <CountUp value={cashInDrawer} />, <span className="stat-trend flat">caisses ouvertes</span>, () => openScreen('treasury', 'live')]);
   return (
@@ -193,21 +222,33 @@ function HourChart({ today, yesterday }: { today: Figures['byHour']; yesterday: 
   const max = Math.max(1, ...today.map((h) => h.revenueTtc), ...yesterday.map((h) => h.revenueTtc));
   const at = (list: Figures['byHour'], h: number) => list.find((x) => x.hour === h);
   const slots = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const top = niceMax(max);
+  const nowHour = new Date().getHours();
+  const best = today.reduce((b, h) => (h.revenueTtc > (b?.revenueTtc ?? 0) ? h : b), undefined as Figures['byHour'][number] | undefined);
   return (
     <>
-      <div className="home-hours" role="img" aria-label="Ventes par heure, aujourd'hui et hier">
-        {slots.map((h) => {
-          const t = at(today, h);
-          const y = at(yesterday, h);
-          return (
-            <div key={h} title={`${String(h).padStart(2, '0')} h : ${fcfa(t?.revenueTtc ?? 0)} aujourd'hui · ${fcfa(y?.revenueTtc ?? 0)} hier`}>
-              <i className="yday" style={{ height: `${((y?.revenueTtc ?? 0) / max) * 100}%` }} />
-              <i className="now" style={{ height: `${((t?.revenueTtc ?? 0) / max) * 100}%` }} />
-            </div>
-          );
-        })}
+      <div className="hours-axed">
+        <AmountAxis top={top} />
+        <div className="home-hours" role="img" aria-label="Ventes par heure, aujourd'hui et hier">
+          {slots.map((h) => {
+            const t = at(today, h);
+            const y = at(yesterday, h);
+            const label = t && (h === nowHour || t === best) ? t.revenueTtc : null;
+            return (
+              <div key={h} title={`${String(h).padStart(2, '0')} h : ${fcfa(t?.revenueTtc ?? 0)} aujourd'hui · ${fcfa(y?.revenueTtc ?? 0)} hier`}>
+                <i className="yday" style={{ height: `${((y?.revenueTtc ?? 0) / top) * 100}%` }} />
+                <i className="now" style={{ height: `${((t?.revenueTtc ?? 0) / top) * 100}%` }} />
+                {label !== null && (
+                  <b className="bar-value" style={{ bottom: `${(label / top) * 100}%` }}>
+                    {label.toLocaleString('fr-FR')}
+                  </b>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-      <div className="home-hours-x">
+      <div className="home-hours-x hours-axed-x">
         {slots.map((h) => (
           <span key={h}>{String(h).padStart(2, '0')}h</span>
         ))}
@@ -254,6 +295,7 @@ function ActivityFeed({ items }: { items: Activity[] }) {
                   {hour(a.at)}
                   {a.register ? ` · ${a.register}` : ''}
                   {a.who ? ` · ${a.who}` : ''}
+                  {a.items ? <b className="feed-items"> · {a.items} article{a.items > 1 ? 's' : ''}</b> : null}
                 </small>
               </span>
               <span className={`feed-amount ${a.type === 'cancelled' ? 'void' : k.sign < 0 ? 'out' : k.sign > 0 ? 'in' : ''}`}>
@@ -385,6 +427,7 @@ function MyTill({ mine, sent, amounts }: { mine: Overview['mine']; sent: Overvie
  */
 export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNode }) {
   const can = useCan();
+  const settings = useStoreSettings();
   const data = useLoad(() => call('home.overview'), []);
   const [hidden, setHidden] = useState(() => loadHidden(userId));
   const [custom, setCustom] = useState(false);
@@ -415,7 +458,14 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
       {!d.today && myDay}
       {show('figures') && d.today && (
         <Block index={i++} title="Mon magasin maintenant" more={['Tableau de bord', () => openScreen('dashboard', 'day')]}>
-          <DayFigures today={d.today} yesterday={d.yesterday} cashInDrawer={d.cashInDrawer} showCash={d.registers.length > 0} />
+          <DayFigures
+            today={d.today}
+            yesterday={d.yesterday}
+            lastWeek={d.lastWeek}
+            cashInDrawer={d.cashInDrawer}
+            showCash={d.registers.length > 0}
+            marginTarget={settings.marginTargetPct}
+          />
         </Block>
       )}
       <div className="home-grid">
@@ -425,17 +475,22 @@ export function HomeOverview({ userId, myDay }: { userId: string; myDay: ReactNo
         </Block>
       )}
       {show('attention') && d.attention.length > 0 && (
-        <Block index={i++} title="Points d'attention" more={['Tout voir', () => openScreen('dashboard', 'attention')]}>
-          <div className="home-pills">
+        <Block index={i++} title="À traiter aujourd'hui" more={['Tout voir', () => openScreen('dashboard', 'attention')]}>
+          <ul className="watch-list home-todo">
             {d.attention.map((a) => (
-              <button key={a.key} type="button" className={`home-pill ${a.tone}`} onClick={() => openScreen(...ATTENTION_TARGET[a.key])} title={a.detail}>
-                <b>{a.count}</b>
-                <span>{a.label}</span>
-                {a.amount ? <small>{fcfa(a.amount)}</small> : null}
-                <em>Traiter ›</em>
-              </button>
+              <li key={a.key}>
+                <button type="button" onClick={() => openScreen(...ATTENTION_TARGET[a.key])} title={a.detail}>
+                  <span className={`tag num ${TONE_TAG[a.tone]}`}>{a.count}</span>
+                  <span className="todo-what">
+                    {a.label}
+                    {a.amount ? ` · ${fcfa(a.amount)}` : ''}
+                    {a.detail && <small>{a.detail}</small>}
+                  </span>
+                  <span className="go todo-go">{ACTION_LABEL[a.key] ?? 'Traiter'} ›</span>
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
         </Block>
       )}
       </div>

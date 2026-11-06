@@ -1866,6 +1866,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (type === 'OUT' && !cashOutFree(sess().user!, amount, supervisorPin)) supervisor(supervisorPin ?? '');
       s.pos.cashOperation(c, type, amount, reason);
     },
+    'pos.tileStock': (articleIds: string[], opts?: { warehouseId?: string | null }) => s.pos.tileStock(ctx().storeId, articleIds, { ...opts, userId: sess().user?.id ?? null }),
     'pos.search': (query: string, opts?: { customerId?: string | null; includeEmpty?: boolean; priceLevel?: PriceLevel | null; warehouseId?: string | null }) =>
       s.pos.searchForSale(ctx().storeId, query, { ...opts, userId: sess().user?.id ?? null }),
     /** Dépôts où l'utilisateur vend sans code du gérant ; la vente s'y complète. */
@@ -3631,6 +3632,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       const date = iso(now);
       const before = new Date(now);
       before.setDate(before.getDate() - 1);
+      // Même jour la semaine passée : la comparaison quand hier n'a pas de vente (jour de fermeture, première journée).
+      const weekAgo = new Date(now);
+      weekAgo.setDate(weekAgo.getDate() - 7);
       const until = now.toTimeString().slice(0, 8);
       const dash = can(u, ['dashboard']);
       const registers = dash || can(u, ['cash_live']) ? s.pos.liveRegisters(c.storeId) : [];
@@ -3657,6 +3661,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         at: now.toISOString(),
         today: dash ? figures(date) : null,
         yesterday: dash ? figures(iso(before), until) : null,
+        lastWeek: dash ? figures(iso(weekAgo), until) : null,
         cashInDrawer: registers.filter((r) => r.status === 'open' && r.kind === 'cash').reduce((t, r) => t + (r.expected ?? 0), 0),
         registers: can(u, ['cash_live']) || dash ? registers : [],
         canLive: can(u, ['cash_live']),

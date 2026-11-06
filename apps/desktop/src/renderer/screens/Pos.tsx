@@ -129,6 +129,15 @@ const dayPlus = (n: number) => {
 const UNIT_LABEL = { piece: 'Pièce', kg: 'Kg', litre: 'Litre' } as const;
 const BILLS = [500, 1000, 2000, 5000, 10000];
 const amount = (v: number) => formatFcfa(v, false);
+
+/** Stock restant sur une tuile : « 32 en stock », signalé sous le seuil d'alerte (mot et ⚠, pas seulement la couleur). */
+function TileStock({ stock, unit }: { stock?: { available: number; alert_qty: number | null }; unit: 'piece' | 'kg' | 'litre' }) {
+  if (!stock) return null;
+  const n = qty(stock.available, unit);
+  if (stock.available <= 0) return <small className="tile-stock out">épuisé</small>;
+  const low = stock.alert_qty !== null && stock.available <= stock.alert_qty;
+  return <small className={`tile-stock ${low ? 'low' : ''}`}>{low ? `⚠ ${n} restant${stock.available > 1000 ? 's' : ''}` : `${n} en stock`}</small>;
+}
 /** Deux lettres pour la tuile d'un produit sans photo : « Bière Castel » → « BC ». */
 const initials = (name: string) =>
   name
@@ -415,6 +424,12 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const suggestQuery = multiplied ? multiplied[2]! : input;
   const saleOpts = { priceLevel: levelChoice, warehouseId: warehouseChoice };
   const suggestions = useSaleRows(suggestQuery, customer?.id ?? null, saleOpts);
+  // Stock restant des tuiles (touches rapides, plus vendus), relu après chaque vente.
+  const tileIds = (quickKeys.data ?? []).map((a) => a.id);
+  const tileStock = useLoad(
+    () => (tileIds.length ? call('pos.tileStock', tileIds, { warehouseId: warehouseChoice }) : Promise.resolve({} as Result<'pos.tileStock'>)),
+    [tileIds.join(','), warehouseChoice, lastSale?.id],
+  );
   /** Une ligne choisie (conditionnement d'un article) : on demande d'abord la quantité. */
   const askQty = (row: SaleRow, initial?: string) => {
     setPicked({ row, initial });
@@ -985,7 +1000,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
   const paymentsPane = (
     <div className="tk-pane">
       <p className="muted">
-        Le règlement se fait à la validation (F4) : espèces avec les billets, ou Encaisser (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
+        Le règlement se fait à la validation (F4) : espèces avec les billets, ou Autre paiement (Ctrl+E) pour MTN Mobile Money, Orange Money, carte, bon
         d'achat et paiements mixtes.
       </p>
     </div>
@@ -1730,7 +1745,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         <kbd>F9</kbd> Facture A4
       </span>
       <span>
-        <kbd>Ctrl+E</kbd> Encaisser
+        <kbd>Ctrl+E</kbd> Autre paiement
       </span>
       <span>
         <kbd>Suppr</kbd> Enlever
@@ -1982,8 +1997,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
               </span>
               <kbd>F10</kbd>
             </button>
-            <button disabled={!lines.length} onClick={openPay}>
-              Encaisser <kbd>Ctrl+E</kbd>
+            <button disabled={!lines.length} onClick={openPay} title="Mobile Money, carte, bon d'achat, paiements mixtes">
+              Autre paiement <kbd>Ctrl+E</kbd>
             </button>
             <hr />
             <button disabled={!lines.length && (!lastSale || !can('sale_reprint'))} onClick={listingKey} title={lines.length ? 'Valider et imprimer la facture listing' : 'Réimprimer la dernière facture en listing'}>
@@ -2333,8 +2348,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
           <button disabled={!lastSale || lines.length > 0} onClick={sendWhatsapp} title="Envoyer le dernier ticket au client par WhatsApp">
             WhatsApp
           </button>
-          <button disabled={!lines.length} onClick={openPay}>
-            Encaisser <kbd>Ctrl+E</kbd>
+          <button disabled={!lines.length} onClick={openPay} title="Mobile Money, carte, bon d'achat, paiements mixtes">
+            Autre paiement <kbd>Ctrl+E</kbd>
           </button>
           <button className="g" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la vente sans imprimer">
             Valider <kbd>F4</kbd>
@@ -2390,7 +2405,8 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
                 onKeyDown={(e) => suggestions.onKeyDown(e, pickSuggestion)}
                 onBlur={suggestions.close}
                 autoComplete="off"
-                placeholder="Nom du produit ou code-barres (3*code pour la quantité)"
+                placeholder="Produit ou code-barres (3*code = quantité)"
+                title="Nom du produit ou code-barres ; 3*code pour vendre 3 fois le produit"
               />
               <button type="button" className="scan-hint" title="Recherche complète (F1)" onClick={() => openSearch(input)}>
                 Rechercher <kbd>F1</kbd>
@@ -2481,9 +2497,13 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
               : shownKeys.map((a) => (
                   <button type="button" key={a.id} className="pos-tile" style={tileColor(a.name)} onClick={() => addArticle(a)}>
                     {a.photo_thumb ? <img className="tile-ph" src={a.photo_thumb} alt="" /> : <span className="tile-ic">{initials(a.name)}</span>}
+                    <TileStock stock={tileStock.data?.[a.id]} unit={a.unit} />
                     <b>{a.name}</b>
                     <span className="tile-p">
-                      <strong>{amount(tariffPrice({ retail: a.store_price, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price }, level))}</strong>
+                      <strong>
+                        {amount(tariffPrice({ retail: a.store_price, wholesale: a.wholesale_price, superWholesale: a.super_wholesale_price }, level))}
+                        <small className="tile-cur"> FCFA</small>
+                      </strong>
                       <small>{a.unit !== 'piece' ? `le ${a.unit === 'kg' ? 'kg' : 'litre'}` : ''}</small>
                     </span>
                   </button>
@@ -2752,7 +2772,7 @@ export function Pos({ edit = null, user, hasRegister, registerId = null, canChoo
         ) : (
           <>
         <button className="pay" disabled={!lines.length} onClick={openPay} title="Mobile Money, carte, bon d'achat, paiements mixtes">
-          <i aria-hidden>💳</i>Encaisser <kbd>Ctrl+E</kbd>
+          <i aria-hidden>💳</i>Autre paiement <kbd>Ctrl+E</kbd>
         </button>
         <button className="go" disabled={!lines.length} onClick={() => void validate('none')} title="Enregistre la fiche sans rien imprimer">
           <i aria-hidden>✓</i>

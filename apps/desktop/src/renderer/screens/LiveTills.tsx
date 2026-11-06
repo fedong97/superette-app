@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { type Result, call } from '../api';
 import { Empty, fcfa, useFind, useLoad, useToast } from '../ui';
 import { FullTreasury } from './Treasury';
+import { SummaryTiles } from './summary';
 
 type User = NonNullable<Result<'app.state'>['user']>;
 type Live = Result<'treasury.live'>;
@@ -47,6 +48,15 @@ export function LiveTills({ user, onChanged }: { user: User; onChanged?: () => v
     }
   };
   const open = data.registers.filter((r) => r.status === 'open');
+  const stale = open.filter((r) => r.stale);
+  // Écarts des caisses fermées aujourd'hui.
+  const todayKey = new Date().toDateString();
+  const gaps = data.registers.filter((r) => r.status === 'closed' && r.session?.closed_at && new Date(r.session.closed_at).toDateString() === todayKey);
+  const show = (id: string, t: 'day' | 'history') => {
+    setSelected(id);
+    setTab(t);
+    setTimeout(() => document.querySelector('.live-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
   return (
     <div className="page live-tills">
       <header className="page-head">
@@ -64,13 +74,28 @@ export function LiveTills({ user, onChanged }: { user: User; onChanged?: () => v
         <button onClick={() => setTick((n) => n + 1)}>Actualiser</button>
       </header>
       {!data.connected && <p className="warn-text">Ce PC n’est pas relié au serveur central : seules les opérations faites sur ce PC apparaissent.</p>}
+      {data.registers.length > 0 && (
+        <SummaryTiles
+          tiles={[
+            { label: 'Espèces attendues', value: fcfa(open.filter((r) => r.kind === 'cash').reduce((t, r) => t + (r.expected ?? 0), 0)), note: 'caisses espèces ouvertes' },
+            { label: 'Ventes du jour', value: fcfa(open.reduce((t, r) => t + r.net, 0)), note: `${open.reduce((t, r) => t + r.tickets, 0)} tickets` },
+            {
+              label: 'Écarts des clôtures',
+              value: fcfa(gaps.reduce((t, r) => t + (r.difference ?? 0), 0)),
+              note: gaps.some((r) => r.difference) ? `${gaps.filter((r) => r.difference).length} caisse(s) avec écart` : 'aucun écart',
+              tone: gaps.some((r) => (r.difference ?? 0) < 0) ? 'down' : 'flat',
+            },
+            { label: 'Caisses ouvertes', value: `${open.length} sur ${data.registers.length}`, note: stale.length ? `${stale.length} non clôturée(s) d'un autre jour` : open.length ? 'en service' : 'toutes fermées', tone: stale.length ? 'down' : 'flat' },
+          ]}
+        />
+      )}
       {data.registers.length === 0 ? (
         <Empty>Aucune caisse : créez-en dans Administration › Caisses.</Empty>
       ) : (
         <div className="live-grid">
           {data.registers.map((r) => (
+            <div key={r.id} className="live-cell">
             <button
-              key={r.id}
               type="button"
               className={`live-card ${r.status} ${r.id === selected ? 'on' : ''} ${r.id === data.workRegisterId ? 'mine' : ''}`}
               onClick={() => setSelected(r.id === selected ? null : r.id)}
@@ -121,6 +146,19 @@ export function LiveTills({ user, onChanged }: { user: User; onChanged?: () => v
                 </>
               )}
             </button>
+            <span className="row-actions live-actions">
+              {r.status === 'open' && (
+                <button type="button" className="link" onClick={() => show(r.id, 'day')} title="Opérations du jour et clôture de cette caisse">
+                  Voir et clôturer ›
+                </button>
+              )}
+              {r.session && (
+                <button type="button" className="link" onClick={() => show(r.id, 'history')}>
+                  Historique ›
+                </button>
+              )}
+            </span>
+            </div>
           ))}
         </div>
       )}

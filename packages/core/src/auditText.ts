@@ -153,7 +153,12 @@ const R: Record<string, Rule> = {
       ),
     lv: gapLevel(),
   },
-  'cash.gap_justified': { l: "Écart de caisse justifié", t: (c) => `a justifié l'écart de ${F(Math.abs(num(c.d['difference']) ?? 0))} sur ${reg(c)}`, n: (c) => why(c), lv: 'watch' },
+  'cash.gap_justified': {
+    l: "Écart de caisse justifié",
+    t: (c) => `a justifié l'écart de ${F(Math.abs(num(c.d['difference']) ?? 0))} sur ${reg(c)}${c.d['charged_to_cashier'] ? ', mis à la charge du caissier (retenu sur sa paie)' : ''}`,
+    n: (c) => why(c),
+    lv: 'watch',
+  },
   'cash.handover': { l: 'Passage de caisse', t: (c) => `a passé ${reg(c)} à ${c.name(c.d['to']) ?? 'un collègue'}`, n: (c) => gapNote(c), lv: gapLevel() },
   'cash.in': { l: "Apport d'espèces", t: (c) => `a mis ${F(c.d['amount'])} dans ${reg(c)}`, n: (c) => why(c) },
   'cash.out': { l: "Retrait d'espèces", t: (c) => `a retiré ${F(c.d['amount'])} de ${reg(c)}`, n: (c) => why(c), lv: 'watch' },
@@ -525,6 +530,14 @@ const R: Record<string, Rule> = {
   'backup.create': { l: 'Sauvegarde', t: () => 'a fait une sauvegarde des données' },
   'backup.restore': { l: 'Restauration', t: () => 'a restauré une sauvegarde : les données ont été remplacées', lv: 'alert' },
   'repair.run': { l: 'Réparation de la base', t: () => 'a lancé la réparation de la base', n: (c) => (c.d['ok'] === false ? 'Des problèmes restent' : null), lv: 'watch' },
+  'integrity.check': {
+    l: "Contrôle d'intégrité",
+    t: (c) =>
+      c.d['ok'] === false
+        ? `a contrôlé le journal scellé : ${pl(c.d['total'], 'pièce')} retouchée${(num(c.d['total']) ?? 0) > 1 ? 's' : ''} en dehors d'ONIX`
+        : `a contrôlé le journal scellé : tout est intact (${pl(c.d['rows'], 'pièce')})`,
+    lv: (c) => (c.d['ok'] === false ? 'alert' : 'normal'),
+  },
   'data.reset': { l: 'Remise à zéro', t: (c) => `a remis les données à zéro${c.d['keepStock'] ? ' (stock gardé)' : ''}`, lv: 'alert' },
   'sync.conflict_ignored': { l: 'Opération ignorée', t: () => "a ignoré une opération venue d'un autre PC : elle n'est pas appliquée ici", n: (c) => why(c), lv: 'watch' },
   'sync.conflict_retried': { l: 'Opération réessayée', t: () => "a réessayé une opération venue d'un autre PC" },

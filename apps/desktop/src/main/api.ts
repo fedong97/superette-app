@@ -700,6 +700,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       ['mobile_late', can(u, ['settings_edit'])],
       ['sync_conflicts', u.role === 'admin'],
       ['clock_skew', can(u, ['settings_edit'])],
+      ['integrity', can(u, ['audit'])],
     ];
     return s.attention.list(storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
   };
@@ -1457,6 +1458,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (Object.keys(shared).length) for (const st of s.admin.listStores()) if (st.id !== c.storeId) s.admin.saveStoreSettings(c.userId, st.id, shared);
       return saved;
     },
+    // --- 0.116.0 : journal scellé ------------------------------------------------
+    'seals.status': () => (requireUser(['audit']), { last: s.seals.lastCheck(), fingerprint: s.seals.fingerprint(), earlier: s.seals.earlierFindings() }),
+    'seals.check': () => s.seals.check(requireUser(['audit']).id),
     'admin.audit': (filters?: Parameters<Services['admin']['auditSearch']>[0]) => (requireUser(['audit']), s.admin.auditSearch(filters ?? {})),
     /** Nouvel employé au même poste qu'un autre (rôle, caisse, dépôts, privilèges). */
     'admin.copyUser': (fromId: string, input: { name: string; login: string; pin: string }) => s.admin.copyUser(requireUser(['user_copy']).id, fromId, input),
@@ -2638,10 +2642,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!can(u, AMOUNTS) || !can(u, ['gap_justify'])) return [];
       return s.pos.pendingGaps(ctx().storeId);
     },
-    'treasury.justifyGap': (sessionId: string, reason: string) => {
+    'treasury.justifyGap': (sessionId: string, reason: string, opts?: { chargeCashier?: boolean }) => {
       const c = ctx(AMOUNTS);
       if (!can(sess().user!, ['gap_justify'])) throw new AppError("Vous n'avez pas le droit de justifier un écart de caisse", 'FORBIDDEN');
-      return s.pos.justifyGap(c, sessionId, reason);
+      return s.pos.justifyGap(c, sessionId, reason, opts ?? {});
+    },
+    /** Fiche du personnel du caissier, pour proposer de mettre un manquant à sa charge. */
+    'treasury.gapCashier': (sessionId: string) => {
+      ctx(AMOUNTS);
+      return s.pos.cashierStaff(s.pos.getSession(sessionId).user_id);
     },
     'treasury.central': (opts?: { from?: string; to?: string }) => {
       const c = ctx(['central_cash', 'accounting']);

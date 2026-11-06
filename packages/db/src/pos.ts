@@ -79,6 +79,9 @@ export interface CashSession {
   gap_approved_by: string | null;
   gap_approved_by_name?: string | null;
   gap_justified_at: string | null;
+  /** Manquant mis à la charge du caissier : sa fiche du personnel (avance retenue sur sa paie). */
+  gap_staff_id?: string | null;
+  gap_staff_name?: string | null;
 }
 
 /** Ligne d'entrée ou de sortie d'espèces d'une journée de caisse. */
@@ -477,8 +480,8 @@ export class PosService extends Base {
   getSession(id: string): CashSession {
     const s = this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name, g.name AS gap_approved_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
-         LEFT JOIN users c ON c.id = s.closed_by LEFT JOIN users g ON g.id = s.gap_approved_by WHERE s.id = ?`,
+        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name, g.name AS gap_approved_by_name, st.name AS gap_staff_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
+         LEFT JOIN users c ON c.id = s.closed_by LEFT JOIN users g ON g.id = s.gap_approved_by LEFT JOIN staff st ON st.id = s.gap_staff_id WHERE s.id = ?`,
       )
       .get(id) as CashSession | undefined;
     if (!s) throw new AppError('Session de caisse introuvable', 'NOT_FOUND');
@@ -2211,23 +2214,46 @@ export class PosService extends Base {
   }
 
   /** Le gérant, après avoir interpellé le caissier, donne le motif de l'écart d'une journée clôturée. */
-  justifyGap(ctx: Context, sessionId: string, reason: string): CashSession {
+  justifyGap(ctx: Context, sessionId: string, reason: string, opts: { chargeCashier?: boolean } = {}): CashSession {
     const session = this.getSession(sessionId);
     if (session.status !== 'closed') throw new AppError("La caisse n'est pas encore clôturée", 'INVALID');
     if (!reason.trim()) throw new AppError("Indiquez le motif de l'écart", 'INVALID');
+    let staffId: string | null = null;
+    if (opts.chargeCashier) {
+      if ((session.difference ?? 0) >= 0) throw new AppError("Seul un manquant peut être mis à la charge du caissier", 'INVALID');
+      const staff = this.cashierStaff(session.user_id);
+      if (!staff) throw new AppError("Ce caissier n'a pas de fiche dans le personnel avec un compte d'avances : créez-la (Personnel), reliée à son utilisateur, pour mettre le manquant à sa charge", 'INVALID');
+      staffId = staff.id;
+    }
     this.tx(() => {
-      this.db.prepare('UPDATE cash_sessions SET gap_reason = ?, gap_approved_by = ?, gap_justified_at = ? WHERE id = ?').run(reason.trim(), ctx.userId, this.now(), sessionId);
+      this.db
+        .prepare('UPDATE cash_sessions SET gap_reason = ?, gap_approved_by = ?, gap_justified_at = ?, gap_staff_id = ? WHERE id = ?')
+        .run(reason.trim(), ctx.userId, this.now(), staffId, sessionId);
       this.enqueue(ctx, 'cash_session', sessionId, 'upsert', this.getSession(sessionId));
-      this.audit(ctx.userId, 'cash.gap_justified', 'cash_session', sessionId, { difference: session.difference, reason: reason.trim(), previous: session.gap_reason });
+      this.audit(ctx.userId, 'cash.gap_justified', 'cash_session', sessionId, {
+        difference: session.difference,
+        reason: reason.trim(),
+        previous: session.gap_reason,
+        ...(staffId || session.gap_staff_id ? { charged_to_cashier: Boolean(staffId) } : {}),
+      });
     });
     return this.getSession(sessionId);
+  }
+
+  /** Fiche du personnel reliée à l'utilisateur de la caisse, avec un compte d'avances (pas un prestataire). */
+  cashierStaff(userId: string): { id: string; name: string } | null {
+    return (
+      (this.db
+        .prepare("SELECT id, name FROM staff WHERE user_id = ? AND active = 1 AND COALESCE(advance_account, '') <> '' ORDER BY code LIMIT 1")
+        .get(userId) as { id: string; name: string } | undefined) ?? null
+    );
   }
 
   listSessions(storeId: string, limit = 60, registerId?: string | null): CashSession[] {
     return this.db
       .prepare(
-        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name, g.name AS gap_approved_by_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
-         LEFT JOIN users c ON c.id = s.closed_by LEFT JOIN users g ON g.id = s.gap_approved_by
+        `SELECT s.*, u.name AS user_name, c.name AS closed_by_name, g.name AS gap_approved_by_name, st.name AS gap_staff_name FROM cash_sessions s JOIN users u ON u.id = s.user_id
+         LEFT JOIN users c ON c.id = s.closed_by LEFT JOIN users g ON g.id = s.gap_approved_by LEFT JOIN staff st ON st.id = s.gap_staff_id
          WHERE s.store_id = ? AND (? IS NULL OR s.register_id = ?) ORDER BY s.opened_at DESC LIMIT ?`,
       )
       .all(storeId, registerId ?? null, registerId ?? null, limit) as CashSession[];

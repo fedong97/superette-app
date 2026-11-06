@@ -39,7 +39,7 @@ import serverLogo from '../assets/logo-serveur.png';
 type User = NonNullable<Result<'app.state'>['user']>;
 type Role = User['role'];
 export type AdminTab = Tab;
-type Tab = 'rules' | 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations' | 'delegation';
+type Tab = 'rules' | 'stores' | 'registers' | 'warehouses' | 'users' | 'rights' | 'privileges' | 'settings' | 'templates' | 'backups' | 'server' | 'license' | 'digest' | 'audit' | 'integrity' | 'fiscal' | 'updates' | 'mobilepay' | 'fiches' | 'repair' | 'shopTemplates' | 'relay' | 'takeover' | 'brand' | 'companies' | 'stations' | 'delegation';
 
 export function Admin({ user, onChanged, initialTab, only }: { user: User; onChanged: () => void; initialTab?: Tab; /** Onglets gardés (téléphone du gérant). */ only?: readonly Tab[] }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? (user.role === 'admin' ? 'stores' : 'users'));
@@ -75,6 +75,7 @@ export function Admin({ user, onChanged, initialTab, only }: { user: User; onCha
     ['license', 'Licence'],
     ...(can('dashboard') ? ([['digest', 'Résumé du jour']] as [Tab, string][]) : []),
     ...(can('audit') ? ([['audit', "Journal d'audit"]] as [Tab, string][]) : []),
+    ...(can('audit') ? ([['integrity', 'Intégrité des données']] as [Tab, string][]) : []),
   ];
   const tabs = only ? allTabs.filter(([k]) => only.includes(k)) : allTabs;
   return (
@@ -127,6 +128,7 @@ export function Admin({ user, onChanged, initialTab, only }: { user: User; onCha
       {tab === 'license' && <License isAdmin={user.role === 'admin'} onChanged={onChanged} />}
       {tab === 'digest' && can('dashboard') && <Digest isAdmin={user.role === 'admin'} />}
       {tab === 'audit' && can('audit') && <Audit />}
+      {tab === 'integrity' && can('audit') && <Integrity />}
     </div>
   );
 }
@@ -1932,6 +1934,119 @@ const KIND_LABELS: Record<BackupInfo['kind'], string> = { auto: 'Automatique', m
 const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(bytes / 1024))} Ko`);
 
 /** Sauvegardes de la base de ce PC : automatique chaque jour, copie sur clé USB, restauration. */
+/**
+ * Journal scellé (0.116.0) : chaque pièce est enchaînée à la précédente par une
+ * empreinte. Le contrôle dit si quelqu'un a retouché la base en dehors d'ONIX.
+ */
+function Integrity() {
+  const toast = useToast();
+  const status = useLoad(() => call('seals.status'));
+  const [result, setResult] = useState<Result<'seals.check'> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      setResult(await call('seals.check'));
+      status.reload();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const last = status.data?.last ?? null;
+  const earlier = status.data?.earlier ?? [];
+  const fp = result?.fingerprint ?? status.data?.fingerprint ?? null;
+  return (
+    <>
+      <p className="muted">
+        Chaque vente, paiement, mouvement de caisse, de stock et de trésorerie reçoit une empreinte enchaînée à la précédente, comme les maillons d'une chaîne. Ce qu'ONIX
+        fait (même une annulation) ajoute un maillon. Une retouche faite dans la base en dehors d'ONIX casse la chaîne, et le contrôle la montre ici. Le contrôle se fait
+        tout seul une fois par jour.
+      </p>
+      <div className="integrity-bar">
+        <button className="primary" onClick={run} disabled={busy}>
+          {busy ? 'Contrôle en cours…' : 'Contrôler maintenant'}
+        </button>
+        {fp && (
+          <span className="muted">
+            Empreinte actuelle : <code>{fp}</code>
+          </span>
+        )}
+      </div>
+      {!result && last && (
+        <p className={last.ok ? 'pos' : 'danger-text'}>
+          Dernier contrôle le {dateTime(last.at)} : {last.ok ? `tout est intact (${last.rows} pièces).` : `${last.total} anomalie(s). Relancez le contrôle pour en voir le détail.`}
+        </p>
+      )}
+      {!result && !last && <p className="muted">Aucun contrôle encore fait sur ce PC.</p>}
+      {result && (
+        <>
+          {result.ok ? (
+            <div className="integrity-ok">
+              <strong>Tout est intact.</strong> {result.rows} pièces contrôlées, {result.seals} maillons relus
+              {result.since ? `, depuis le ${dateTime(result.since)}` : ''}.
+            </div>
+          ) : (
+            <div className="integrity-bad">
+              <strong>
+                {result.total} pièce{result.total > 1 ? 's' : ''} retouchée{result.total > 1 ? 's' : ''} en dehors d'ONIX.
+              </strong>{' '}
+              Quelqu'un a changé la base directement (outil SQLite, fichier remplacé…). Comparez avec la dernière sauvegarde et le journal d'audit, et demandez au support
+              FEDONG si besoin.
+            </div>
+          )}
+          {result.findings.length > 0 && <IntegrityFindings rows={result.findings} />}
+          {result.total > result.findings.length && <p className="muted">Les {result.findings.length} premières seulement sont listées.</p>}
+        </>
+      )}
+      {earlier.length > 0 && (
+        <>
+          <h3>Anomalies relevées avant une mise à jour d'ONIX</h3>
+          <p className="muted">Une mise à jour qui change la forme des données rescelle les pièces ; ce qui était déjà retouché à ce moment-là est gardé ici.</p>
+          <IntegrityFindings rows={earlier} />
+        </>
+      )}
+      {result?.since && (
+        <p className="muted small">
+          Le contrôle a commencé sur ce PC le {dateTime(result.since)} : les pièces plus anciennes ont été scellées ce jour-là, telles qu'elles étaient.
+        </p>
+      )}
+    </>
+  );
+}
+
+function IntegrityFindings({ rows }: { rows: Result<'seals.check'>['findings'] }) {
+  const PROBLEMS: Record<string, string> = {
+    modified: 'Modifiée en dehors d’ONIX',
+    deleted: 'Supprimée en dehors d’ONIX',
+    added: 'Ajoutée en dehors d’ONIX',
+    chain: 'Chaîne des empreintes rompue',
+  };
+  return (
+    <table className="list">
+      <thead>
+        <tr>
+          <th>Problème</th>
+          <th>Pièce</th>
+          <th>N° ou libellé</th>
+          <th>Dernière opération d'ONIX</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((f, i) => (
+          <tr key={`${f.table}-${f.row_id}-${i}`}>
+            <td className="danger-text">{PROBLEMS[f.problem] ?? f.problem}</td>
+            <td>{f.table_label}</td>
+            <td>{f.ref ?? <span className="muted">{f.row_id.slice(0, 8)}</span>}</td>
+            <td>{f.at ? dateTime(f.at) : <span className="muted">—</span>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
   const toast = useToast();
   const status = useLoad(() => call('backup.status'));

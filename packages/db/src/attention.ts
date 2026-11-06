@@ -29,7 +29,8 @@ export type AttentionKey =
   | 'outages_open'
   | 'mobile_late'
   | 'sync_conflicts'
-  | 'clock_skew';
+  | 'clock_skew'
+  | 'integrity';
 
 export interface AttentionItem {
   key: AttentionKey;
@@ -377,6 +378,21 @@ export class AttentionService extends Base {
         amount: null,
         detail: sec ? `Ce PC est ${sec > 0 ? 'en retard' : 'en avance'} de ${min} min sur le serveur : réglez la date et l'heure de Windows` : "L'heure du PC est juste",
         tone: 'warning',
+      });
+    }
+
+    if (want('integrity')) {
+      // Dernier contrôle du journal scellé (fait chaque jour sur ce PC, ou à la demande).
+      const raw = this.db.prepare("SELECT value FROM settings WHERE key = 'seal.lastCheck'").pluck().get() as string | undefined;
+      const last = raw ? (JSON.parse(raw) as { ok: boolean; total: number; at: string }) : null;
+      const n = last && !last.ok ? last.total : 0;
+      items.push({
+        key: 'integrity',
+        label: 'Données retouchées en dehors d’ONIX',
+        count: n,
+        amount: null,
+        detail: n ? `${n} pièce(s) modifiée(s), ajoutée(s) ou supprimée(s) sans passer par ONIX : voyez le contrôle d'intégrité` : 'Le journal scellé est intact',
+        tone: 'danger',
       });
     }
 

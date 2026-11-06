@@ -66,6 +66,7 @@ import {
   CUSTOMER_DISPLAY_MODES,
   type DocLang,
   type WarningKind,
+  readSupplierInvoice,
 } from '@superette/core';
 import {
   AppError,
@@ -198,6 +199,7 @@ import {
 } from '@superette/db';
 import { createCloudBackup } from './cloudBackup';
 
+import { pdfLines } from './pdfText';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -1749,6 +1751,27 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.purchases.saveSupplier(u.id, id || input.paymentTermsDays !== undefined ? input : { ...input, paymentTermsDays: settings().supplierDefaultDays }, id);
     },
     'purchases.freeGoods': (from: string, to: string) => s.purchases.freeGoods(ctx(['free_goods']).storeId, from, to),
+    /**
+     * 0.116.0 : lit une facture fournisseur en PDF (choisie sur le PC) et propose
+     * l'en-tête et les lignes, rapprochées des articles. Rien n'est enregistré.
+     */
+    'purchases.readInvoicePdf': async (supplierId?: string | null, file?: string | null) => {
+      requireUser(['purchase_invoices']);
+      const path = file ?? (await chooseOpenFile('Choisir la facture du fournisseur (PDF)', 'Facture PDF', ['pdf']));
+      if (!path) return null;
+      if (!/\.pdf$/i.test(path)) throw new AppError('Choisissez un fichier PDF', 'INVALID');
+      let lines: string[];
+      try {
+        lines = await pdfLines(new Uint8Array(readFileSync(path)));
+      } catch (e) {
+        throw new AppError(`PDF illisible : ${e instanceof Error ? e.message : String(e)}`, 'INVALID');
+      }
+      if (!lines.length) {
+        throw new AppError("Ce PDF ne contient pas de texte (facture scannée ou photo) : ONIX ne lit que les factures en PDF faites par un logiciel. Saisissez-la à la main.", 'INVALID');
+      }
+      const read = s.invoiceMatch.match(readSupplierInvoice(lines), supplierId ?? null, lines);
+      return { ...read, file: path };
+    },
     'suppliers.articles': (supplierId: string) => (requireUser(), s.purchases.supplierArticles(supplierId)),
     'suppliers.ofArticle': (articleId: string) => (requireUser(), s.purchases.articleSuppliers(articleId)),
     'suppliers.setArticle': (input: Parameters<Services['purchases']['setSupplierArticle']>[1]) =>

@@ -1548,6 +1548,140 @@ function PayDialog({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: ()
  * entrent en stock au coût net (remise, gratuits, remise globale), et la
  * facture va au registre des achats, réglée tout de suite ou à l'échéance.
  */
+type ReadPdf = NonNullable<Result<'purchases.readInvoicePdf'>>;
+const READ_MATCH: Record<string, string> = { barcode: 'code-barres', reference: 'référence du fournisseur', name: 'désignation proche' };
+
+/** Lignes lues dans le PDF : article proposé, à corriger ou à décocher, puis ajoutées à la facture directe. */
+function ReadInvoiceDialog({ read, onClose, onApply }: { read: ReadPdf; onClose: () => void; onApply: (read: ReadPdf, lines: RecLine[]) => void }) {
+  const toast = useToast();
+  const [rows, setRows] = useState(read.lines.map((l) => ({ ...l, keep: Boolean(l.articleId) })));
+  const [busy, setBusy] = useState(false);
+  const set = (i: number, patch: Partial<(typeof rows)[number]>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const kept = rows.filter((r) => r.keep && r.articleId);
+  const gap = read.totalHt !== null ? read.totalHt - read.linesTotal : null;
+  return (
+    <Modal title="Facture lue dans le PDF" onClose={onClose} wide>
+      <div className="kpis">
+        <div>
+          <small>Fournisseur</small>
+          <strong>{read.supplierName ?? 'non reconnu'}</strong>
+        </div>
+        <div>
+          <small>N° de facture</small>
+          <strong>{read.number ?? '—'}</strong>
+        </div>
+        <div>
+          <small>Date</small>
+          <strong>{read.date ? dateFr(read.date) : '—'}</strong>
+        </div>
+        <div>
+          <small>Total des lignes lues</small>
+          <strong>{fcfa(read.linesTotal)}</strong>
+        </div>
+        {read.totalHt !== null && (
+          <div className={gap ? 'neg' : 'pos'}>
+            <small>Total HT de la facture</small>
+            <strong>{fcfa(read.totalHt)}</strong>
+          </div>
+        )}
+      </div>
+      {gap ? (
+        <p className="warn-text">
+          Les lignes lues ne font pas le total HT de la facture ({fcfa(gap)} d'écart) : une ligne n'a pas été reconnue ou la facture a une remise. Ajoutez-la à la main.
+        </p>
+      ) : null}
+      {!rows.length ? (
+        <Empty>Aucune ligne d'article reconnue dans ce PDF (il faut, sur chaque ligne, la quantité, le prix unitaire et le montant).</Empty>
+      ) : (
+        <table className="list">
+          <thead>
+            <tr>
+              <th />
+              <th>Ligne de la facture</th>
+              <th className="r">Qté</th>
+              <th className="r">Prix unitaire</th>
+              <th className="r">Montant</th>
+              <th>Article d'ONIX</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td>
+                  <input type="checkbox" checked={r.keep} disabled={!r.articleId} onChange={(e) => set(i, { keep: e.target.checked })} aria-label="Prendre cette ligne" />
+                </td>
+                <td>
+                  {r.label}
+                  {(r.reference || r.barcode) && <small className="muted block">{[r.reference, r.barcode].filter(Boolean).join(' · ')}</small>}
+                </td>
+                <td className="r">{num(r.qty)}</td>
+                <td className="r">{fcfa(r.unitPrice)}</td>
+                <td className="r">{fcfa(r.total)}</td>
+                <td>
+                  {r.articleId ? (
+                    <>
+                      <b>{r.articleName}</b>
+                      {r.match && <small className="muted block">trouvé par {READ_MATCH[r.match]}</small>}
+                      {r.packUnits !== 1000 && <small className="muted block">par conditionnement de {num(r.packUnits)}</small>}
+                    </>
+                  ) : (
+                    <span className="warn-text">à choisir</span>
+                  )}
+                  {r.others.length > 0 && (
+                    <select value="" onChange={(e) => {
+                      const o = r.others.find((x) => x.id === e.target.value);
+                      if (o) set(i, { articleId: o.id, articleName: o.name, match: null, keep: true, packUnits: 1000 });
+                    }} aria-label="Autre article proche">
+                      <option value="">Autre article proche…</option>
+                      {r.others.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <ArticlePicker placeholder="Chercher l'article" onPick={(a) => set(i, { articleId: a.id, articleName: a.name, match: null, keep: true, packUnits: 1000 })} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="muted small">Les prix sont repris tels qu'écrits sur la facture, comme coût HT du conditionnement de la ligne. Vérifiez les remises et la TVA avant d'enregistrer.</p>
+      <div className="actions">
+        <button type="button" onClick={onClose}>
+          Annuler
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || (!kept.length && !read.number)}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const picked = await Promise.all(
+                kept.map(async (r) => {
+                  const a = await call('catalogue.get', r.articleId!);
+                  // Conditionnement lu (casier, carton) s'il existe pour l'article, sinon l'unité.
+                  const units = r.packUnits === 1000 || packChoices(a).some((c) => c.units === r.packUnits) ? r.packUnits : 1000;
+                  return { ...newRecLine(a), qty: num(r.qty), cost: String(r.unitPrice), packUnits: units, supplierRef: r.reference };
+                }),
+              );
+              onApply(read, picked);
+            } catch (err) {
+              toast.error(err);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {kept.length ? `Ajouter ${kept.length} ligne${kept.length > 1 ? 's' : ''} à la facture` : "Reprendre le n° et la date"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function DirectInvoice({
   canPay,
   edit,
@@ -1577,6 +1711,16 @@ function DirectInvoice({
   const [done, setDone] = useState<Invoice | null>(null);
   const [received, setReceived] = useState<{ articleId: string; qty: number; packUnits: number }[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [reading, setReading] = useState<ReadPdf | null>(null);
+  // 0.116.0 : lecture d'une facture en PDF : en-tête et lignes proposés, le magasinier vérifie.
+  const readPdf = async () => {
+    try {
+      const r = await call('purchases.readInvoicePdf', supplierId || null);
+      if (r) setReading(r);
+    } catch (err) {
+      toast.error(err);
+    }
+  };
   useEffect(() => {
     if (!edit) return;
     const inv = edit.invoice;
@@ -1644,7 +1788,26 @@ function DirectInvoice({
         <>
           <h2>Facture d'achat directe (sans bon de commande)</h2>
           <p className="muted">Saisissez la facture du fournisseur avec ses articles : la marchandise entre en stock au coût net et la facture va au registre des achats.</p>
+          <div className="read-pdf">
+            <button type="button" onClick={readPdf}>
+              Lire la facture du fournisseur (PDF)…
+            </button>
+            <span className="muted small">ONIX lit le numéro, la date et les lignes d'une facture en PDF faite par un logiciel ; vous vérifiez avant d'enregistrer.</span>
+          </div>
         </>
+      )}
+      {reading && (
+        <ReadInvoiceDialog
+          read={reading}
+          onClose={() => setReading(null)}
+          onApply={(found, picked) => {
+            if (!supplierId && found.supplierId) setSupplierId(found.supplierId);
+            if (!number && found.number) setNumber(found.number);
+            if (found.date) setDate(found.date);
+            setLines([...lines, ...picked]);
+            setReading(null);
+          }}
+        />
       )}
       <div className="grid3">
         {edit ? (

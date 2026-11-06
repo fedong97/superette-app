@@ -105,3 +105,24 @@ describe('manquant de caisse à la charge du caissier', () => {
     expect(() => s.pos.justifyGap(ctx, z.session.id, 'Inconnu', { chargeCashier: true })).toThrow(/fiche dans le personnel/);
   });
 });
+
+describe('facture fournisseur lue en PDF : rapprochement', () => {
+  it('trouve le fournisseur par son NIU et les articles par code-barres, référence ou désignation', async () => {
+    const { readSupplierInvoice } = await import('@superette/core');
+    const tva = s.admin.listVatRates()[0]!.id;
+    const sabc = s.purchases.saveSupplier(ctx.userId, { name: 'SABC Douala', taxpayerNumber: 'M012345678901A' });
+    const castel = s.catalogue.saveArticle(ctx.userId, { name: 'Castel 33 cl', unit: 'piece', vatRateId: tva, purchasePrice: 540, salePrice: 700, packs: [{ name: 'Casier 12', contains: 12, salePrice: 8_000 }] });
+    const coca = s.catalogue.saveArticle(ctx.userId, { name: 'Coca-Cola 1,5 L', unit: 'piece', vatRateId: tva, purchasePrice: 450, salePrice: 600, barcodes: [{ code: '5449000000996' }] });
+    const mutzig = s.catalogue.saveArticle(ctx.userId, { name: 'Bière Mutzig 65 cl', unit: 'piece', vatRateId: tva, purchasePrice: 600, salePrice: 800 });
+    s.purchases.setSupplierArticle(ctx.userId, { supplierId: sabc.id, articleId: mutzig.id, supplierRef: 'MUT65', unitCost: 600 });
+    const lines = ['SABC', 'NIU : M012345678901A', 'FACTURE N° FA-1', 'CAS33 Casier Castel 33 cl 10 6 450 64 500', '5449000000996 Coca 24 450 10 800', 'MUT65 Mutzig grande 2 600 1 200', 'Savon Azur 3 250 750'];
+    const m = s.invoiceMatch.match(readSupplierInvoice(lines), null, lines);
+    expect(m.supplierId).toBe(sabc.id);
+    expect(m.lines.map((l) => [l.articleId, l.match, l.packUnits])).toEqual([
+      [castel.id, 'name', 12_000],
+      [coca.id, 'barcode', 1000],
+      [mutzig.id, 'reference', 1000],
+      [null, null, 1000],
+    ]);
+  });
+});

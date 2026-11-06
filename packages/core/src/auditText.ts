@@ -56,7 +56,7 @@ export const AUDIT_THEMES: Record<AuditTheme, { label: string; patterns: string[
   },
   settings: {
     label: 'Réglages',
-    patterns: ['store.*', 'register.*', 'warehouse.*', 'company.*', 'template.*', 'digest.*', 'backup.*', 'repair.*', 'data.*', 'sync.*', 'fiche.*', 'license*', 'report_preset.*', 'takeover.*', 'relay.*'],
+    patterns: ['store.*', 'register.*', 'warehouse.*', 'company.*', 'template.*', 'digest.*', 'backup.*', 'repair.*', 'integrity.*', 'data.*', 'sync.*', 'fiche.*', 'license*', 'report_preset.*', 'takeover.*', 'relay.*'],
   },
   logins: { label: 'Connexions', patterns: ['auth.*', 'supervisor.*'] },
 };

@@ -98,6 +98,7 @@ export const REMOTE_BLOCKED: ReadonlySet<string> = new Set([
   'purchases.printInvoice',
   'purchases.printOrder',
   'purchases.printReorder',
+  'purchases.readInvoicePdf',
   'quotes.preview',
   'quotes.print',
   'rebates.print',

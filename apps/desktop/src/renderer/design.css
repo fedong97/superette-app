@@ -753,3 +753,4 @@ tr.empty { display: table-row; padding: 0; max-width: none; margin: 0; }
 .integrity-ok { background: var(--success-bg); color: var(--success-ink); }
 .integrity-bad { background: var(--danger-bg); color: var(--danger-ink); border: 1px solid var(--danger); }
 .gap-charge { display: grid; gap: 6px; margin: 8px 0 4px; }
+.read-pdf { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 4px 0 14px; }

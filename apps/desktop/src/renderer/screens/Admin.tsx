@@ -1930,7 +1930,15 @@ function Audit() {
 
 type BackupInfo = Result<'backup.list'>[number];
 
-const KIND_LABELS: Record<BackupInfo['kind'], string> = { auto: 'Automatique', manual: 'Manuelle', safety: 'Avant restauration' };
+const KIND_LABELS: Record<BackupInfo['kind'], string> = { auto: 'Automatique', manual: 'Manuelle', safety: 'Copie de secours' };
+/** Copie de secours : l'opération qui l'a demandée (0.116.0). */
+const SAFETY_LABELS: Record<string, string> = {
+  restore: 'Copie de secours avant restauration',
+  reset: 'Copie de secours avant remise à zéro',
+  repair: 'Copie de secours avant réparation',
+  template: 'Copie de secours avant modèle de boutique',
+  takeover: 'Copie de secours avant reprise des données',
+};
 const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(bytes / 1024))} Ko`);
 
 /** Sauvegardes de la base de ce PC : automatique chaque jour, copie sur clé USB, restauration. */
@@ -2204,7 +2212,7 @@ function Backups({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => vo
             {st.backups.map((b) => (
               <tr key={b.file}>
                 <td title={b.name}>{dateTime(b.created_at)}</td>
-                <td>{KIND_LABELS[b.kind]}</td>
+                <td>{b.kind === 'safety' ? (SAFETY_LABELS[b.reason ?? 'restore'] ?? KIND_LABELS.safety) : KIND_LABELS[b.kind]}</td>
                 <td>{b.store_name}</td>
                 <td className="r">{b.articles}</td>
                 <td className="r">{b.sales}</td>

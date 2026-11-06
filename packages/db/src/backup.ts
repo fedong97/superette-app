@@ -8,11 +8,26 @@ import { AppError, Base, type Clock } from './util';
 
 export type BackupKind = 'auto' | 'manual' | 'safety';
 
+/** Ce qui a demandé une copie de secours (0.116.0), écrit dans le nom du fichier. */
+export type SafetyReason = 'restore' | 'reset' | 'repair' | 'template' | 'takeover';
+export const SAFETY_REASONS: Record<SafetyReason, string> = {
+  restore: 'Avant restauration',
+  reset: 'Avant remise à zéro',
+  repair: 'Avant réparation',
+  template: 'Avant modèle de boutique',
+  takeover: 'Avant reprise des données',
+};
+/** Copies de secours gardées : celles des 30 derniers jours, et toujours les 3 dernières. */
+const SAFETY_DAYS = 30;
+const SAFETY_MIN = 3;
+
 export interface BackupInfo {
   file: string;
   name: string;
   size: number;
   kind: BackupKind;
+  /** Copie de secours : l'opération qui l'a demandée (null pour les anciennes copies « avant restauration »). */
+  reason: SafetyReason | null;
   /** Date de la sauvegarde (heure du fichier). */
   created_at: string;
   ok: boolean;
@@ -44,7 +59,7 @@ export interface BackupStatus {
   copy_pending: boolean;
 }
 
-const NAME = /^superette-.+-(\d{4}-\d{2}-\d{2})-(\d{4}(?:\d{2})?)-(auto|manual|safety)\.db$/;
+const NAME = /^superette-.+-(\d{4}-\d{2}-\d{2})-(\d{4}(?:\d{2})?)-(auto|manual|safety)(?:-(restore|reset|repair|template|takeover))?\.db$/;
 const DEFAULT_KEEP = 14;
 /** Copies vers la clé par passage (une par minute au plus) : la caisse ne doit pas attendre la clé. */
 const COPIES_PER_RUN = 3;
@@ -68,12 +83,14 @@ function standalone(file: string): void {
 
 /** Lit une sauvegarde sans la modifier et dit si elle peut être restaurée. */
 export function inspectBackup(file: string): BackupInfo {
-  const kind = (NAME.exec(basename(file))?.[3] as BackupKind | undefined) ?? 'manual';
+  const m = NAME.exec(basename(file));
+  const kind = (m?.[3] as BackupKind | undefined) ?? 'manual';
   const info: BackupInfo = {
     file,
     name: basename(file),
     size: 0,
     kind,
+    reason: kind === 'safety' ? ((m?.[4] as SafetyReason | undefined) ?? null) : null,
     created_at: '',
     ok: false,
     error: null,
@@ -229,8 +246,9 @@ export class BackupService extends Base {
   }
 
   /** Copie de la base dans `dir` (dossier automatique par défaut), vérifiée. */
-  async backup(userId: string | null, opts: { dir?: string; kind?: BackupKind } = {}): Promise<BackupInfo> {
+  async backup(userId: string | null, opts: { dir?: string; kind?: BackupKind; reason?: SafetyReason } = {}): Promise<BackupInfo> {
     const kind = opts.kind ?? 'manual';
+    const suffix = kind === 'safety' && opts.reason ? `-${opts.reason}` : '';
     const dir = opts.dir ?? this.status().dir;
     if (!dir) throw new AppError('Choisissez le dossier des sauvegardes', 'INVALID');
     try {
@@ -238,7 +256,7 @@ export class BackupService extends Base {
     } catch (e) {
       throw new AppError(`Dossier inaccessible : ${dir} (${e instanceof Error ? e.message : String(e)})`, 'INVALID');
     }
-    const file = join(dir, `${this.prefix()}-${this.stamp()}-${kind}.db`);
+    const file = join(dir, `${this.prefix()}-${this.stamp()}-${kind}${suffix}.db`);
     const tmp = `${file}.part`;
     try {
       // Copie à chaud par l'API de sauvegarde SQLite : cohérente même pendant une vente.
@@ -251,15 +269,60 @@ export class BackupService extends Base {
     }
     const info = inspectBackup(file);
     if (!info.ok) throw new AppError(`La copie relue est invalide : ${info.error}`, 'BACKUP_FAILED');
-    this.audit(userId, 'backup.create', undefined, undefined, { file, kind, size: info.size });
+    this.audit(userId, 'backup.create', undefined, undefined, { file, kind, size: info.size, ...(suffix ? { reason: opts.reason } : {}) });
     return info;
   }
 
-  /** Où copier la base actuelle juste avant une restauration. */
+  /**
+   * Copie de secours juste avant une opération qui efface ou remplace beaucoup de
+   * données (remise à zéro, réparation, modèle de boutique, reprise des données).
+   * Dans le dossier des sauvegardes, ou, s'il est inaccessible (clé USB débranchée),
+   * dans le dossier par défaut à côté de la base : l'opération n'est jamais bloquée
+   * pour une clé absente. Les copies de plus de 30 jours sont effacées (les 3
+   * dernières restent toujours). Rien pour une base en mémoire (tests).
+   */
+  async safetyCopy(userId: string | null, reason: SafetyReason): Promise<BackupInfo | null> {
+    if (this.db.memory) return null;
+    const dirs = [...new Set([this.status().dir, this.defaultDir()].filter((d): d is string => Boolean(d)))];
+    let last: unknown = null;
+    for (const dir of dirs) {
+      try {
+        const info = await this.backup(userId, { dir, kind: 'safety', reason });
+        this.pruneSafety(dir);
+        return info;
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last instanceof Error ? last : new AppError('Copie de secours impossible', 'BACKUP_FAILED');
+  }
+
+  /** Où copier la base actuelle juste avant une restauration (dossier des sauvegardes, ou celui par défaut). */
   safetyFile(): string {
-    const dir = this.status().dir;
+    const chosen = this.status().dir;
+    let dir = chosen;
+    try {
+      if (dir) mkdirSync(dir, { recursive: true });
+    } catch {
+      dir = this.defaultDir();
+    }
     if (!dir) throw new AppError('Choisissez le dossier des sauvegardes', 'INVALID');
-    return join(dir, `${this.prefix()}-${this.stamp()}-safety.db`);
+    return join(dir, `${this.prefix()}-${this.stamp()}-safety-restore.db`);
+  }
+
+  /** Copies de secours : gardées 30 jours, et toujours les 3 dernières. */
+  pruneSafety(dir: string): void {
+    const limit = this.clock().getTime() - SAFETY_DAYS * 86_400_000;
+    const copies = this.files(dir)
+      .filter((f) => NAME.exec(f)?.[3] === 'safety')
+      .sort((a, b) => when(b).localeCompare(when(a)));
+    for (const f of copies.slice(SAFETY_MIN)) {
+      try {
+        if (statSync(join(dir, f)).mtime.getTime() < limit) rmSync(join(dir, f), { force: true });
+      } catch {
+        // Fichier déjà parti ou verrouillé : il sera repris au prochain passage.
+      }
+    }
   }
 
   /** Sauvegarde du jour déjà faite dans le dossier automatique ? */

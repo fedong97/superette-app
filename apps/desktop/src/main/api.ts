@@ -1012,8 +1012,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         if (s.sync.credentials()) {
           throw new AppError('Cette fiche demande une remise à zéro des données d’essai, mais ce PC est relié au serveur central : les autres PC lui renverraient les données d’essai. Déliez ce PC (Administration › Serveur central), rapportez la fiche, puis reliez-le', 'INVALID');
         }
-        if (!s.backups.status().dir) throw new AppError('Cette fiche demande une remise à zéro : choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes), une sauvegarde est faite juste avant', 'INVALID');
-        backup = (await s.backups.backup(u.id, { kind: 'safety' })).file;
+        backup = (await s.backups.safetyCopy(u.id, 'reset'))?.file ?? null;
         s.reset.run(u.id, { keepStock: meta.reset.keepStock });
       }
       const back = s.fiches.bringBack(u.id, path);
@@ -1058,9 +1057,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Modèles de boutique ------------
     // La liste se lit aussi avant la création de la boutique (premier démarrage).
     'template.list': () => [...BUILTIN_TEMPLATES, ...templateFiles()].map(templateSummary),
-    'template.apply': (idOrFile: string) => {
+    'template.apply': async (idOrFile: string) => {
       const u = requireAdmin();
-      return s.templates.apply(u.id, ctx().storeId, findTemplate(idOrFile));
+      const template = findTemplate(idOrFile);
+      // 0.116.0 : copie de secours avant d'appliquer un modèle (prix, rayons, réglages remplacés).
+      await s.backups.safetyCopy(u.id, 'template');
+      return s.templates.apply(u.id, ctx().storeId, template);
     },
     'template.choose': async () => {
       const file = await chooseOpenFile('Choisir le modèle de boutique', 'Modèle ONIX 360', [TEMPLATE_EXTENSION]);
@@ -1087,8 +1089,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Reprise des données d'un magasin existant ----------------------------
     'takeover.summary': () => (requireUser(['data_takeover']), s.opening.summary(ctx().storeId)),
     /** Le fichier arrive en cellules texte (CSV ou Excel lu par l'écran) ; `preview` ne fait que montrer ce qui serait repris. */
-    'takeover.run': (kind: TakeoverKind, cells: string[][], opts: { preview: boolean; warehouseId?: string | null }) =>
-      s.opening.run(ctx(['data_takeover']), kind, cells, opts),
+    'takeover.run': async (kind: TakeoverKind, cells: string[][], opts: { preview: boolean; warehouseId?: string | null }) => {
+      const c = ctx(['data_takeover']);
+      // 0.116.0 : copie de secours avant de reprendre pour de bon les données d'un ancien logiciel.
+      if (!opts.preview) await s.backups.safetyCopy(c.userId, 'takeover');
+      return s.opening.run(c, kind, cells, opts);
+    },
 
     // --- Registre des immobilisations -----------------------------------------
     'assets.list': (opts: { at?: string; includeDisposed?: boolean } = {}) => (requireUser(['fixed_assets']), s.assets.list(ctx().storeId, opts)),
@@ -3493,9 +3499,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         const done = s.reset.run(u.id, { ...opts, inFiche: true });
         return { ...done, backup: null, fiche: s.fiches.markReset(u, Boolean(opts.keepStock)) };
       }
-      if (!s.backups.status().dir) throw new AppError('Choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes) : une sauvegarde est faite juste avant la remise à zéro', 'INVALID');
-      const backup = await s.backups.backup(u.id, { kind: 'safety' });
-      return { ...s.reset.run(u.id, opts), backup: backup.file, fiche: null };
+      // Copie de secours juste avant (dans le dossier par défaut si celui des sauvegardes est inaccessible).
+      const backup = await s.backups.safetyCopy(u.id, 'reset');
+      return { ...s.reset.run(u.id, opts), backup: backup?.file ?? null, fiche: null };
     },
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),

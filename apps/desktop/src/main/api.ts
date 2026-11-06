@@ -66,6 +66,7 @@ import {
   CUSTOMER_DISPLAY_MODES,
   type DocLang,
   type WarningKind,
+  readSupplierInvoice,
 } from '@superette/core';
 import {
   AppError,
@@ -91,6 +92,7 @@ import {
   mobileReceptions,
   takeMobileReception,
   pushStationStatus,
+  pushAppErrors,
   stationStatuses,
   type Receivables,
   type StationStatus,
@@ -197,6 +199,7 @@ import {
 } from '@superette/db';
 import { createCloudBackup } from './cloudBackup';
 
+import { pdfLines } from './pdfText';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -700,6 +703,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       ['mobile_late', can(u, ['settings_edit'])],
       ['sync_conflicts', u.role === 'admin'],
       ['clock_skew', can(u, ['settings_edit'])],
+      ['integrity', can(u, ['audit'])],
     ];
     return s.attention.list(storeId, new Set(rules.filter(([, ok]) => ok).map(([k]) => k)));
   };
@@ -1011,8 +1015,7 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         if (s.sync.credentials()) {
           throw new AppError('Cette fiche demande une remise à zéro des données d’essai, mais ce PC est relié au serveur central : les autres PC lui renverraient les données d’essai. Déliez ce PC (Administration › Serveur central), rapportez la fiche, puis reliez-le', 'INVALID');
         }
-        if (!s.backups.status().dir) throw new AppError('Cette fiche demande une remise à zéro : choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes), une sauvegarde est faite juste avant', 'INVALID');
-        backup = (await s.backups.backup(u.id, { kind: 'safety' })).file;
+        backup = (await s.backups.safetyCopy(u.id, 'reset'))?.file ?? null;
         s.reset.run(u.id, { keepStock: meta.reset.keepStock });
       }
       const back = s.fiches.bringBack(u.id, path);
@@ -1057,9 +1060,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Modèles de boutique ------------
     // La liste se lit aussi avant la création de la boutique (premier démarrage).
     'template.list': () => [...BUILTIN_TEMPLATES, ...templateFiles()].map(templateSummary),
-    'template.apply': (idOrFile: string) => {
+    'template.apply': async (idOrFile: string) => {
       const u = requireAdmin();
-      return s.templates.apply(u.id, ctx().storeId, findTemplate(idOrFile));
+      const template = findTemplate(idOrFile);
+      // 0.116.0 : copie de secours avant d'appliquer un modèle (prix, rayons, réglages remplacés).
+      await s.backups.safetyCopy(u.id, 'template');
+      return s.templates.apply(u.id, ctx().storeId, template);
     },
     'template.choose': async () => {
       const file = await chooseOpenFile('Choisir le modèle de boutique', 'Modèle ONIX 360', [TEMPLATE_EXTENSION]);
@@ -1086,8 +1092,12 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
     // --- Reprise des données d'un magasin existant ----------------------------
     'takeover.summary': () => (requireUser(['data_takeover']), s.opening.summary(ctx().storeId)),
     /** Le fichier arrive en cellules texte (CSV ou Excel lu par l'écran) ; `preview` ne fait que montrer ce qui serait repris. */
-    'takeover.run': (kind: TakeoverKind, cells: string[][], opts: { preview: boolean; warehouseId?: string | null }) =>
-      s.opening.run(ctx(['data_takeover']), kind, cells, opts),
+    'takeover.run': async (kind: TakeoverKind, cells: string[][], opts: { preview: boolean; warehouseId?: string | null }) => {
+      const c = ctx(['data_takeover']);
+      // 0.116.0 : copie de secours avant de reprendre pour de bon les données d'un ancien logiciel.
+      if (!opts.preview) await s.backups.safetyCopy(c.userId, 'takeover');
+      return s.opening.run(c, kind, cells, opts);
+    },
 
     // --- Registre des immobilisations -----------------------------------------
     'assets.list': (opts: { at?: string; includeDisposed?: boolean } = {}) => (requireUser(['fixed_assets']), s.assets.list(ctx().storeId, opts)),
@@ -1457,6 +1467,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (Object.keys(shared).length) for (const st of s.admin.listStores()) if (st.id !== c.storeId) s.admin.saveStoreSettings(c.userId, st.id, shared);
       return saved;
     },
+    // --- 0.116.0 : journal scellé ------------------------------------------------
+    'seals.status': () => (requireUser(['audit']), { last: s.seals.lastCheck(), fingerprint: s.seals.fingerprint(), earlier: s.seals.earlierFindings() }),
+    'seals.check': () => s.seals.check(requireUser(['audit']).id),
     'admin.audit': (filters?: Parameters<Services['admin']['auditSearch']>[0]) => (requireUser(['audit']), s.admin.auditSearch(filters ?? {})),
     /** Nouvel employé au même poste qu'un autre (rôle, caisse, dépôts, privilèges). */
     'admin.copyUser': (fromId: string, input: { name: string; login: string; pin: string }) => s.admin.copyUser(requireUser(['user_copy']).id, fromId, input),
@@ -1500,6 +1513,8 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (s.sync.credentials() && Date.now() - lastStatusPush > 5 * 60_000) {
         lastStatusPush = Date.now();
         void pushStationStatus(s, stationStatus()).catch(() => undefined);
+        // 0.116.0 : et les plantages du logiciel notés sur ce PC.
+        void pushAppErrors(s).catch(() => undefined);
       }
       return s.sync.state();
     },
@@ -1736,6 +1751,27 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return s.purchases.saveSupplier(u.id, id || input.paymentTermsDays !== undefined ? input : { ...input, paymentTermsDays: settings().supplierDefaultDays }, id);
     },
     'purchases.freeGoods': (from: string, to: string) => s.purchases.freeGoods(ctx(['free_goods']).storeId, from, to),
+    /**
+     * 0.116.0 : lit une facture fournisseur en PDF (choisie sur le PC) et propose
+     * l'en-tête et les lignes, rapprochées des articles. Rien n'est enregistré.
+     */
+    'purchases.readInvoicePdf': async (supplierId?: string | null, file?: string | null) => {
+      requireUser(['purchase_invoices']);
+      const path = file ?? (await chooseOpenFile('Choisir la facture du fournisseur (PDF)', 'Facture PDF', ['pdf']));
+      if (!path) return null;
+      if (!/\.pdf$/i.test(path)) throw new AppError('Choisissez un fichier PDF', 'INVALID');
+      let lines: string[];
+      try {
+        lines = await pdfLines(new Uint8Array(readFileSync(path)));
+      } catch (e) {
+        throw new AppError(`PDF illisible : ${e instanceof Error ? e.message : String(e)}`, 'INVALID');
+      }
+      if (!lines.length) {
+        throw new AppError("Ce PDF ne contient pas de texte (facture scannée ou photo) : ONIX ne lit que les factures en PDF faites par un logiciel. Saisissez-la à la main.", 'INVALID');
+      }
+      const read = s.invoiceMatch.match(readSupplierInvoice(lines), supplierId ?? null, lines);
+      return { ...read, file: path };
+    },
     'suppliers.articles': (supplierId: string) => (requireUser(), s.purchases.supplierArticles(supplierId)),
     'suppliers.ofArticle': (articleId: string) => (requireUser(), s.purchases.articleSuppliers(articleId)),
     'suppliers.setArticle': (input: Parameters<Services['purchases']['setSupplierArticle']>[1]) =>
@@ -2638,10 +2674,15 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       if (!can(u, AMOUNTS) || !can(u, ['gap_justify'])) return [];
       return s.pos.pendingGaps(ctx().storeId);
     },
-    'treasury.justifyGap': (sessionId: string, reason: string) => {
+    'treasury.justifyGap': (sessionId: string, reason: string, opts?: { chargeCashier?: boolean }) => {
       const c = ctx(AMOUNTS);
       if (!can(sess().user!, ['gap_justify'])) throw new AppError("Vous n'avez pas le droit de justifier un écart de caisse", 'FORBIDDEN');
-      return s.pos.justifyGap(c, sessionId, reason);
+      return s.pos.justifyGap(c, sessionId, reason, opts ?? {});
+    },
+    /** Fiche du personnel du caissier, pour proposer de mettre un manquant à sa charge. */
+    'treasury.gapCashier': (sessionId: string) => {
+      ctx(AMOUNTS);
+      return s.pos.cashierStaff(s.pos.getSession(sessionId).user_id);
     },
     'treasury.central': (opts?: { from?: string; to?: string }) => {
       const c = ctx(['central_cash', 'accounting']);
@@ -3484,9 +3525,9 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
         const done = s.reset.run(u.id, { ...opts, inFiche: true });
         return { ...done, backup: null, fiche: s.fiches.markReset(u, Boolean(opts.keepStock)) };
       }
-      if (!s.backups.status().dir) throw new AppError('Choisissez d’abord le dossier des sauvegardes (Administration › Sauvegardes) : une sauvegarde est faite juste avant la remise à zéro', 'INVALID');
-      const backup = await s.backups.backup(u.id, { kind: 'safety' });
-      return { ...s.reset.run(u.id, opts), backup: backup.file, fiche: null };
+      // Copie de secours juste avant (dans le dossier par défaut si celui des sauvegardes est inaccessible).
+      const backup = await s.backups.safetyCopy(u.id, 'reset');
+      return { ...s.reset.run(u.id, opts), backup: backup?.file ?? null, fiche: null };
     },
     'backup.status': () => (requireUser(['backups']), { ...s.backups.status(), backups: s.backups.list() }),
     'backup.overdue': () => (requireUser(), s.backups.status().overdue),
@@ -3801,6 +3842,13 @@ export function createApi(s: Services, printer: Printer, sync: SyncRunner, appVe
       return printer.ownerReport(c.storeId, s.insights.ownerReport(c.storeId, month), month);
     },
     /** État de ce PC : synchronisation, version, sauvegarde, imprimante, licence. */
+    // --- 0.116.0 : erreurs du logiciel -----------------------------------------------
+    /** Un écran a planté : noté sur ce PC (sans données saisies), envoyé ensuite au serveur central. */
+    'errors.report': (input: { message: string; stack?: string | null; where?: string | null }) => {
+      s.appErrors.record({ source: 'screen', message: String(input?.message ?? ''), stack: input?.stack ?? null, where: input?.where ?? null, version: appVersion });
+      return true;
+    },
+    'errors.list': () => (requireUser(['stations']), s.appErrors.list(50)),
     'stations.self': () => (requireUser(['stations']), stationStatus()),
     /** État de tous les PC du magasin, d'après le serveur (ce PC seul s'il n'est pas relié). */
     'stations.all': async () => {

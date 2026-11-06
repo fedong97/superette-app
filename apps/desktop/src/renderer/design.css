@@ -746,3 +746,11 @@ tr.empty { display: table-row; padding: 0; max-width: none; margin: 0; }
 .audit-detail dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .audit-rawlink { justify-self: start; font-size: 12px; }
 .audit-raw { margin: 0; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px; }
+
+/* 0.116.0 : contrôle d'intégrité du journal scellé */
+.integrity-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 10px 0 14px; }
+.integrity-ok, .integrity-bad { border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; line-height: 1.5; }
+.integrity-ok { background: var(--success-bg); color: var(--success-ink); }
+.integrity-bad { background: var(--danger-bg); color: var(--danger-ink); border: 1px solid var(--danger); }
+.gap-charge { display: grid; gap: 6px; margin: 8px 0 4px; }
+.read-pdf { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 4px 0 14px; }

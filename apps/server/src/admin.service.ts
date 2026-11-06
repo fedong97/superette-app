@@ -148,6 +148,39 @@ export class AdminService {
     return list;
   }
 
+  /** 0.116.0 : plantages du logiciel envoyés par les PC, les plus récents d'abord (90 derniers jours). */
+  async clientErrors() {
+    const { rows } = await this.pg.query<{
+      device_id: string;
+      id: string;
+      source: string;
+      message: string;
+      stack: string | null;
+      where_at: string | null;
+      version: string | null;
+      count: number;
+      first_at: Date;
+      last_at: Date;
+      name: string | null;
+    }>(
+      `SELECT e.device_id, e.id, e.source, e.message, e.stack, e.where_at, e.version, e.count, e.first_at, e.last_at, d.name
+       FROM client_errors e LEFT JOIN devices d ON d.id::text = e.device_id
+       WHERE e.last_at > now() - interval '90 days' ORDER BY e.last_at DESC LIMIT 300`,
+    );
+    return rows.map((r) => ({
+      device: r.name ?? r.device_id,
+      id: r.id,
+      source: r.source,
+      message: r.message,
+      stack: r.stack,
+      where: r.where_at,
+      version: r.version,
+      count: r.count,
+      firstAt: new Date(r.first_at).toISOString(),
+      lastAt: new Date(r.last_at).toISOString(),
+    }));
+  }
+
   async overview() {
     const names = await this.names();
     const { rows: devices } = await this.pg.query<{

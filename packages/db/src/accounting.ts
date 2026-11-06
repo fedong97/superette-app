@@ -286,11 +286,22 @@ export class AccountingService extends Base {
       .all(storeId) as { id: string; type: 'IN' | 'OUT'; amount: number; reason: string; d: string; register: string }[];
     const closings = this.db
       .prepare(
-        `SELECT cs.z_number, cs.difference, cs.counted_detail, date(cs.closed_at, 'localtime') AS d, g.name AS register, g.kind
-         FROM cash_sessions cs JOIN registers g ON g.id = cs.register_id
+        `SELECT cs.z_number, cs.difference, cs.counted_detail, date(cs.closed_at, 'localtime') AS d, g.name AS register, g.kind,
+                st.code AS staff_code, st.name AS staff_name, st.advance_account
+         FROM cash_sessions cs JOIN registers g ON g.id = cs.register_id LEFT JOIN staff st ON st.id = cs.gap_staff_id
          WHERE cs.store_id = ? AND cs.status = 'closed' AND cs.difference IS NOT NULL AND cs.difference <> 0`,
       )
-      .all(storeId) as { z_number: number; difference: number; counted_detail: string | null; d: string; register: string; kind: string }[];
+      .all(storeId) as {
+      z_number: number;
+      difference: number;
+      counted_detail: string | null;
+      d: string;
+      register: string;
+      kind: string;
+      staff_code: string | null;
+      staff_name: string | null;
+      advance_account: string | null;
+    }[];
     const out: Entry[] = [];
     for (const o of ops.filter((x) => inRange(x.d, opts.from, opts.to))) {
       const label = `${o.type === 'IN' ? 'Apport' : 'Prélèvement'} ${o.register} : ${o.reason}`;
@@ -312,7 +323,13 @@ export class AccountingService extends Base {
         ref: `Z${c.z_number}`,
         label,
         source: 'auto',
-        lines: [...this.closingLines(r, c, label), side(c.difference < 0 ? r.cash_short : r.cash_over, -c.difference, label)],
+        // Manquant mis à la charge du caissier : avance sur son sous-compte (4251…), retenue ensuite sur sa paie.
+        lines: [
+          ...this.closingLines(r, c, label),
+          c.difference < 0 && c.advance_account
+            ? side(c.advance_account, -c.difference, `${label}, à la charge de ${c.staff_name}`, { code: c.staff_code!, name: c.staff_name! })
+            : side(c.difference < 0 ? r.cash_short : r.cash_over, -c.difference, label),
+        ],
       });
     }
     return out;

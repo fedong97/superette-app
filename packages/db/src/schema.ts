@@ -2929,4 +2929,63 @@ ALTER TABLE sync_conflicts ADD COLUMN resolution TEXT;
 ALTER TABLE sync_conflicts ADD COLUMN resolved_by TEXT;
 `,
   },
+  {
+    version: 70,
+    name: 'manquant de caisse à la charge du caissier',
+    sql: `
+-- Manquant d'une clôture mis à la charge du caissier (fiche du personnel) : avance à retenir sur sa paie (compte 4251…), pas une charge du magasin.
+ALTER TABLE cash_sessions ADD COLUMN gap_staff_id TEXT;
+`,
+  },
+  {
+    version: 71,
+    name: 'journal scellé',
+    sql: `
+-- Chaîne des empreintes : un maillon par création (I), modification (U) ou suppression (D) faite par ONIX,
+-- plus le scellement de départ (S) et le rescellement après une mise à jour qui change les colonnes (M).
+-- Propre à ce PC : ni synchronisée ni effacée par la remise à zéro.
+CREATE TABLE seals (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  tbl TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  op TEXT NOT NULL,
+  data TEXT,
+  at TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX seals_row ON seals(tbl, row_id, seq);
+-- Colonnes scellées de chaque table (une mise à jour qui en ajoute fait resceller la table).
+CREATE TABLE seal_tables (tbl TEXT PRIMARY KEY, cols TEXT NOT NULL);
+-- Anomalies relevées juste avant un rescellement, gardées pour le gérant.
+CREATE TABLE seal_findings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  problem TEXT NOT NULL,
+  tbl TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  ref TEXT,
+  seal_at TEXT
+);
+`,
+  },
+  {
+    version: 72,
+    name: 'erreurs du logiciel',
+    sql: `
+-- Plantages du logiciel sur ce PC (message, endroit du programme, version ; jamais de données saisies),
+-- envoyés au serveur central. Propre à ce PC, jamais synchronisée.
+CREATE TABLE app_errors (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  message TEXT NOT NULL,
+  stack TEXT,
+  where_at TEXT,
+  version TEXT,
+  count INTEGER NOT NULL,
+  first_at TEXT NOT NULL,
+  last_at TEXT NOT NULL,
+  sent_at TEXT
+);
+`,
+  },
 ];

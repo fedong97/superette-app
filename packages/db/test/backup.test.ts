@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -118,5 +118,29 @@ describe('sauvegardes', () => {
     // Les réglages de sauvegarde du PC survivent à la restauration.
     expect(restored.backups.status().copy_dir).toBe(join(root, 'usb'));
     restored.db.close();
+  });
+
+  it('0.116.0 : copie de secours nommée, faite même sans clé USB, gardée 30 jours (et toujours les 3 dernières)', async () => {
+    const { root, s, ctx, setNow } = setup();
+    const usb = join(root, 'cle-absente.txt');
+    writeFileSync(usb, 'pas un dossier');
+    s.backups.configure(ctx.userId, { dir: usb });
+    const first = await s.backups.safetyCopy(ctx.userId, 'reset');
+    expect(first).toMatchObject({ ok: true, kind: 'safety', reason: 'reset' });
+    expect(first!.file.startsWith(join(root, 'sauvegardes'))).toBe(true);
+    expect(first!.name).toMatch(/-safety-reset\.db$/);
+    for (const [i, reason] of (['template', 'takeover', 'repair'] as const).entries()) {
+      setNow(`2026-10-1${i + 1}T20:00:00`);
+      await s.backups.safetyCopy(ctx.userId, reason);
+    }
+    const dir = join(root, 'sauvegardes');
+    const old = new Date('2026-08-01T10:00:00');
+    utimesSync(first!.file, old, old);
+    setNow('2026-10-20T20:00:00');
+    s.backups.pruneSafety(dir);
+    const left = readdirSync(dir).filter((f) => f.includes('-safety'));
+    expect(left).toHaveLength(3);
+    expect(left.some((f) => f.endsWith('-safety-reset.db'))).toBe(false);
+    expect(s.backups.safetyFile()).toMatch(/-safety-restore\.db$/);
   });
 });

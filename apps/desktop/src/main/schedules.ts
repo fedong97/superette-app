@@ -4,7 +4,8 @@ const CHECK_MS = 5 * 60_000;
 
 /**
  * Travaux programmés du magasin, vérifiés toutes les 5 minutes sur chaque PC :
- * prix arrivés à leur date, commandes répétées des clients pros à préparer.
+ * prix arrivés à leur date, commandes répétées des clients pros à préparer,
+ * contrôle d'intégrité du journal scellé (une fois par jour).
  * Les deux sont sans doublon : un autre PC qui les fait aussi ne change rien.
  */
 export function createScheduler(s: Services) {
@@ -17,6 +18,8 @@ export function createScheduler(s: Services) {
     for (const [name, job] of [
       ['prix programmés', () => s.priceSchedules.applyDue(ctx)],
       ['commandes répétées', () => s.recurringOrders.generate(ctx)],
+      // Journal scellé : contrôle d'intégrité une fois par jour.
+      ['contrôle d’intégrité', () => s.seals.checkDaily()],
     ] as const) {
       try {
         job();

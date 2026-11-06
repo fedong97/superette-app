@@ -37,7 +37,7 @@ function start(root: string, clock: () => Date) {
 }
 
 describe('nouveautés tirées de Sage dans l’application', () => {
-  it('crée la boutique depuis un modèle, en fait un modèle et le réapplique ailleurs', () => {
+  it('crée la boutique depuis un modèle, en fait un modèle et le réapplique ailleurs', async () => {
     const root = mkdtempSync(join(tmpdir(), 'fedonix-api-modele-'));
     const clock = () => new Date('2026-10-17T08:00:00');
     const a = start(join(root, 'a'), clock);
@@ -56,7 +56,7 @@ describe('nouveautés tirées de Sage dans l’application', () => {
     b.answers.file = saved.file;
     b.api['setup.bootstrap']!({ storeCode: 'YDE1', storeName: 'Quincaillerie Mvog', adminName: 'Steve', adminLogin: 'steve', adminPin: '1234' });
     expect(b.s.catalogue.listDepartments()).toHaveLength(0);
-    expect(b.api['template.apply']!(saved.file)).toMatchObject({ departments: 5 });
+    expect(await b.api['template.apply']!(saved.file)).toMatchObject({ departments: 5 });
     expect(b.s.catalogue.listDepartments().map((d) => d.name)).toContain('Matériaux');
   });
 

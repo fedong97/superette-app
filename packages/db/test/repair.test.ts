@@ -26,7 +26,7 @@ describe('outil de réparation', () => {
     expect(before.checks.find((c) => c.key === 'stock')).toMatchObject({ status: 'problem', detail: expect.stringMatching(/1 article/) });
 
     const done = await s.repair.repair(admin.id);
-    expect(done).toMatchObject({ ok: true, damaged: false, backup: expect.stringMatching(/safety\.db$/) });
+    expect(done).toMatchObject({ ok: true, damaged: false, backup: expect.stringMatching(/safety-repair\.db$/) });
     expect(done.checks.find((c) => c.key === 'stock')).toMatchObject({ status: 'fixed' });
     expect(s.db.prepare('SELECT qty FROM stock WHERE article_id = ?').pluck().get(savon.id)).toBe(50_000);
     expect(s.repair.check().ok).toBe(true);

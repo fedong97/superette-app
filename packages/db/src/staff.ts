@@ -448,7 +448,12 @@ export class StaffService extends Base {
          FROM treasury_entries WHERE staff_id = ? AND status = 'active'`,
       )
       .get(staffId) as { paid: number; lent: number; repaid: number };
-    return { due: sal.gross - sal.legal - sal.deducted - ent.paid, advances: ent.lent - ent.repaid - sal.deducted };
+    // Manquants de caisse mis à sa charge : comme une avance, retenue sur sa paie.
+    const gaps = this.db
+      .prepare("SELECT COALESCE(SUM(-difference), 0) FROM cash_sessions WHERE gap_staff_id = ? AND status = 'closed' AND difference < 0")
+      .pluck()
+      .get(staffId) as number;
+    return { due: sal.gross - sal.legal - sal.deducted - ent.paid, advances: ent.lent + gaps - ent.repaid - sal.deducted };
   }
 
   /** Extrait de compte : salaires constatés et payés, avances versées, remboursées ou retenues. */
@@ -466,6 +471,9 @@ export class StaffService extends Base {
                 CASE kind WHEN 'staff_salary' THEN -amount ELSE 0 END,
                 CASE kind WHEN 'staff_advance' THEN amount WHEN 'staff_repayment' THEN -amount ELSE 0 END
          FROM treasury_entries WHERE staff_id = @id AND status = 'active'
+         UNION ALL
+         SELECT closed_at, 'Z' || z_number, 'Manquant de caisse à sa charge, clôture n° ' || z_number, 0, -difference
+         FROM cash_sessions WHERE gap_staff_id = @id AND status = 'closed' AND difference < 0
          ORDER BY 1, 2`,
       )
       .all({ id: staffId }) as { at: string; number: string; label: string; due: number; advance: number }[];

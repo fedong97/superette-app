@@ -532,6 +532,7 @@ function Day({
       {se.gap_reason && (
         <p className="muted">
           Motif de l'écart : {se.gap_reason}
+          {se.gap_staff_name && ` · à la charge de ${se.gap_staff_name} (retenu sur sa paie)`}
           {se.gap_approved_by_name && ` · justifié par ${se.gap_approved_by_name}${se.gap_justified_at ? ` le ${dateTime(se.gap_justified_at)}` : ''}`}
           {canJustify && (
             <button className="link" onClick={() => setJustifying(true)}>
@@ -703,13 +704,16 @@ function SalesList({ sales, onChanged }: { sales: Journey['sales']; onChanged?: 
 function JustifyGapDialog({ session, difference, onClose, onDone }: { session: Journey['z']['session']; difference: number; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [reason, setReason] = useState(session.gap_reason ?? '');
+  const [charge, setCharge] = useState(Boolean(session.gap_staff_id));
+  // Manquant : il peut être mis à la charge du caissier (avance retenue sur sa paie) s'il a une fiche du personnel.
+  const { data: cashier } = useLoad(() => (difference < 0 ? call('treasury.gapCashier', session.id) : Promise.resolve(null)), [session.id, difference]);
   return (
     <Modal title="Justifier l'écart de caisse" onClose={onClose}>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
           try {
-            await call('treasury.justifyGap', session.id, reason);
+            await call('treasury.justifyGap', session.id, reason, { chargeCashier: difference < 0 && charge });
             toast.ok('Écart justifié');
             onDone();
           } catch (err) {
@@ -737,6 +741,19 @@ function JustifyGapDialog({ session, difference, onClose, onDone }: { session: J
         <Field label="Motif de l'écart">
           <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Erreur de monnaie, billet manquant, vente non saisie…" />
         </Field>
+        {difference < 0 && (
+          <div className="gap-charge">
+            <p className="muted small">Qui paie ce manquant ?</p>
+            <label className="check">
+              <input type="radio" name="gap-charge" checked={!charge} onChange={() => setCharge(false)} /> Le magasin : perte enregistrée en charge (compte des manquants de caisse)
+            </label>
+            <label className="check">
+              <input type="radio" name="gap-charge" checked={charge} disabled={!cashier} onChange={() => setCharge(true)} /> Le caissier{cashier ? ` (${cashier.name})` : ''} : avance retenue sur sa
+              prochaine paie
+            </label>
+            {cashier === null && <p className="muted small">Pour le mettre à la charge du caissier, créez sa fiche dans Personnel et reliez-la à son utilisateur.</p>}
+          </div>
+        )}
         <div className="actions">
           <button type="button" onClick={onClose}>
             Annuler

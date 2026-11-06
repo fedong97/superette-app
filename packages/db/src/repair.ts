@@ -116,7 +116,7 @@ export class RepairService extends Base {
     let backup: string | null = null;
     if (!this.db.memory) {
       try {
-        backup = (await this.backups.backup(userId, { kind: 'safety' })).file;
+        backup = (await this.backups.safetyCopy(userId, 'repair'))?.file ?? null;
       } catch (e) {
         throw new AppError(`Réparation annulée : la sauvegarde d'avant réparation a échoué (${e instanceof Error ? e.message : String(e)})`, 'REPAIR_FAILED');
       }

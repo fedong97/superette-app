@@ -118,6 +118,16 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.116.0',
+    items: [
+      "Journal scellé : chaque vente, clôture, écriture ou modification de prix est scellée au moment où ONIX l'enregistre. Administration › Intégrité des données vérifie chaque jour que rien n'a été changé en dehors du logiciel, et montre ce qui l'a été.",
+      "Manquant de caisse : en le justifiant, choisissez s'il est à la charge du magasin ou du caissier. À la charge du caissier, il s'ajoute à ses avances et figure sur son relevé.",
+      "Erreurs du logiciel : un plantage est noté sur le PC et envoyé au serveur central, sans aucune donnée saisie. Vous le voyez dans Administration › État des PC.",
+      "Facture fournisseur en PDF : dans une facture directe, « Lire la facture du fournisseur (PDF)… » reprend le fournisseur, le numéro, la date et les lignes, et retrouve les articles. Vous vérifiez avant d'enregistrer. Les PDF scannés (des images) ne sont pas lus.",
+      "Copie de secours : avant une remise à zéro, une réparation, un modèle ou une reprise de données, ONIX copie la base, même sans dossier de sauvegarde choisi. Ces copies sont gardées 30 jours.",
+    ],
+  },
+  {
     version: '0.115.0',
     items: [
       "Plus de « Z » à l'écran ni sur les tickets : on parle de « clôture n° 5 » pour la 5e fermeture d'une caisse, de « bilan de clôture » pour le rapport imprimé le soir, et de « Clôtures de caisse » pour leur liste. Le numéro se suit toujours sans trou.",

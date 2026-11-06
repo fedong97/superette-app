@@ -80,7 +80,7 @@
 
   var ONGLETS = [
     ['accueil', 'Accueil'], ['postes', 'Postes'], ['activite', 'Activité'],
-    ['ventes', 'Ventes'], ['boutique', 'Boutique en ligne'], ['majs', 'Mises à jour'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
+    ['ventes', 'Ventes'], ['boutique', 'Boutique en ligne'], ['majs', 'Mises à jour'], ['erreurs', 'Erreurs des PC'], ['sauvegardes', 'Sauvegardes'], ['reglages', 'Réglages']
   ];
 
   function esc(v) {
@@ -209,7 +209,7 @@
   }
 
   function afficher(silencieux) {
-    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, boutique: vueBoutique, majs: vueMajs, sauvegardes: vueSauvegardes, reglages: vueReglages };
+    var vues = { accueil: vueAccueil, postes: vuePostes, activite: vueActivite, ventes: vueVentes, boutique: vueBoutique, majs: vueMajs, erreurs: vueErreurs, sauvegardes: vueSauvegardes, reglages: vueReglages };
     var o = onglet;
     if (!silencieux) page.innerHTML = '<p class="muted">Chargement…</p>';
     vues[o]().then(function (html) {
@@ -444,6 +444,22 @@
           }).join('') + '</tbody></table><p class="muted">Un PC « en attente » prend la mise à jour quand il est fermé puis rouvert. Sa version s\'affiche à sa prochaine synchronisation.</p></div>';
       }
       return h;
+    });
+  }
+
+  // ——— Erreurs des PC (0.116.0) ———
+
+  function vueErreurs() {
+    return api('errors').then(function (list) {
+      var noms = { main: 'Programme', screen: 'Écran', action: 'Action' };
+      var h = '<h2>Erreurs des PC</h2><p class="muted">Les plantages du logiciel sur chaque PC, envoyés tout seuls : le message, l\'endroit dans le programme et la version. ' +
+        'Jamais de données saisies (ni clients, ni montants, ni codes). Les 90 derniers jours.</p>';
+      if (!list.length) return h + '<div class="bloc"><p>Aucune erreur reçue. Tout va bien.</p></div>';
+      return h + '<div class="bloc"><table><thead><tr><th>Dernière fois</th><th>PC</th><th>Version</th><th>Où</th><th>Message</th><th>Fois</th></tr></thead><tbody>' +
+        list.map(function (e) {
+          return '<tr><td>' + esc(depuis(e.lastAt)) + '</td><td>' + esc(e.device) + '</td><td>' + esc(e.version || '—') + '</td><td>' + esc((noms[e.source] || e.source) + (e.where ? ' · ' + e.where : '')) + '</td>' +
+            '<td>' + esc(e.message) + (e.stack ? '<details><summary class="muted">Détail</summary><pre style="white-space:pre-wrap;font-size:11px">' + esc(e.stack) + '</pre></details>' : '') + '</td><td>' + esc(e.count) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
     });
   }
 

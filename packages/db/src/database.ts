@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { MIGRATIONS } from './schema';
+import { installSeals } from './seals';
 
 export type Db = Database.Database;
 
@@ -11,6 +12,8 @@ export function openDatabase(file: string): Db {
   // Minuscules sans accents, pour chercher « creme » et trouver « Crème ».
   db.function('fold', { deterministic: true }, (v: unknown) => (v == null ? null : fold(String(v))));
   migrate(db);
+  // Journal scellé : fonction d'empreinte et déclencheurs de cette connexion (voir seals.ts).
+  installSeals(db);
   return db;
 }
 

@@ -23,7 +23,7 @@ const POS_KEYS: [string, string][] = [
   ['F2', 'Valider et imprimer le ticket de caisse (fiche vide : réimprimer le dernier ticket)'],
   ['F7', 'Valider et imprimer la facture listing (fiche vide : réimprimer la dernière facture en listing)'],
   ['Entrée sur saisie vide ou F4', 'Enregistrer la fiche sans imprimer'],
-  ['Ctrl+E', 'Encaisser : Mobile Money, carte, chèque, paiements mixtes'],
+  ['Ctrl+E', 'Autre paiement : Mobile Money, carte, chèque, paiements mixtes'],
   ['F3 / F10', 'Mettre en attente / rappeler un ticket en attente'],
   ['F5', 'Ouvrir le tiroir'],
   ['F6', 'Remise sur la ligne choisie'],
@@ -74,7 +74,7 @@ const POS: PageHelp = {
     {
       title: 'Payer par Mobile Money, carte ou chèque',
       steps: [
-        '« Encaisser » (Ctrl+E) ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
+        '« Autre paiement » (Ctrl+E) ouvre l’encaissement : choisissez le moyen, le montant, puis la référence reçue par SMS.',
         'Paiement mobile réglé sur ce PC : avec MTN MoMo ou Orange Money, tapez le téléphone du client et « Demander le paiement » ; il confirme sur son téléphone et le paiement s’ajoute avec sa référence.',
         'Un paiement peut être mixte : une partie en espèces, le reste en MTN par exemple.',
         'Chaque paiement va dans la caisse de son type : MTN, Orange et carte à celle de vos caisses électroniques qui reçoit ce moyen, virement et chèque à votre caisse banque.',

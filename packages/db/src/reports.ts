@@ -25,6 +25,8 @@ export interface ActivityItem {
   register: string | null;
   party: string | null;
   label: string | null;
+  /** Nombre d'articles du ticket (ventes et retours seulement). */
+  items?: number;
 }
 
 /** Indicateurs de base de la phase 1 ; les tableaux de bord complets arrivent en phase 4. */
@@ -110,7 +112,7 @@ export class ReportService extends Base {
    * clients et fournisseurs, entrées et sorties de caisse, dépenses et réceptions.
    */
   activity(storeId: string, limit = 12): ActivityItem[] {
-    return this.db
+    const list = this.db
       .prepare(
         `SELECT * FROM (
            SELECT CASE WHEN s.status = 'cancelled' THEN 'cancelled' ELSE s.kind END AS type, s.id, s.number, s.total_ttc AS amount, s.created_at AS at,
@@ -142,6 +144,10 @@ export class ReportService extends Base {
          ) ORDER BY at DESC LIMIT @limit`,
       )
       .all({ storeId, limit }) as ActivityItem[];
+    const rows = list;
+    // Nombre d'articles de chaque ticket (quantités des lignes, un article au poids compte pour un).
+    const items = this.db.prepare("SELECT COALESCE(SUM(CASE WHEN a.unit = 'piece' THEN l.qty / 1000.0 ELSE 1 END), 0) FROM sale_lines l JOIN articles a ON a.id = l.article_id WHERE l.sale_id = ?").pluck();
+    return rows.map((r) => (r.type === 'sale' || r.type === 'return' || r.type === 'cancelled' ? { ...r, items: Math.round(Math.abs(items.get(r.id) as number)) } : r));
   }
 
   /** Export des ventes du jour pour la comptabilité existante (en attendant la phase 3). */

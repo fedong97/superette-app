@@ -8,6 +8,7 @@ import { type Customer, CUSTOMER_PAY_METHODS, CustomerFields, CustomerPaymentDia
 import { OffsetDialog, Offsets } from './Offsets';
 import { Consignment } from './Consignment';
 import { tx } from '../tax';
+import { FilterPills, SummaryTiles } from './summary';
 import { InvoicePreview } from './docPreview';
 import { SummaryInvoices } from './SummaryInvoices';
 import { BalanceDialog, EMPTY_OPENING, OpeningField, saveOpening } from './balanceAdjust';
@@ -62,15 +63,45 @@ function CustomerList({ user }: { user: User }) {
   const [search, setSearch] = useState('');
   useFind('customers', setSearch);
   const [inactive, setInactive] = useState(false);
-  const [debtors, setDebtors] = useState(false);
+  const [view, setView] = useState<'all' | 'debtors' | 'late' | 'over'>('all');
   const [zone, setZone] = useState('');
   const zones = useLoad(() => call('customers.zones'), []);
-  const list = useLoad(() => call('customers.list', { search: search || undefined, includeInactive: inactive, withBalance: debtors, zone: zone || null }), [search, inactive, debtors, zone]);
+  const loaded = useLoad(() => call('customers.list', { search: search || undefined, includeInactive: inactive, zone: zone || null }), [search, inactive, zone]);
+  const all = loaded.data ?? [];
+  const over = (c: (typeof all)[number]) => c.credit_limit > 0 && c.balance > c.credit_limit;
+  const debtors = all.filter((c) => c.balance > 0);
+  const late = all.filter((c) => c.overdue > 0);
+  const overList = all.filter(over);
+  const month = today().slice(0, 8) + '01';
+  const paid = useLoad(() => call('customers.payments', { limit: 5000 }), []);
+  const paidMonth = (paid.data ?? []).filter((p) => p.paid_at.slice(0, 10) >= month);
+  const list = { ...loaded, data: loaded.data && (view === 'debtors' ? debtors : view === 'late' ? late : view === 'over' ? overList : all) };
+  const canRemind = has(user, 'customer_statement') || has(user, 'receivables');
+  const [reminding, setReminding] = useState<string[] | null>(null);
+  const pick = (v: typeof view) => setView((cur) => (cur === v ? 'all' : v));
+  const plural = (n: number, w: string) => `${n} ${w}${n > 1 ? 's' : ''}`;
   const [open, setOpen] = useState<Customer | 'new' | null>(null);
   const loyaltyOn = useStoreSettings().loyaltyEnabled;
   const points = useLoad(() => (loyaltyOn ? call('loyalty.balances') : Promise.resolve({} as Record<string, number>)), [loyaltyOn, list.data]);
   return (
     <>
+      {all.length > 0 && (
+        <SummaryTiles
+          tiles={[
+            { label: 'Total dû par les clients', value: fcfa(debtors.reduce((t, c) => t + c.balance, 0)), note: plural(debtors.length, 'client'), onClick: () => pick('debtors'), active: view === 'debtors' },
+            {
+              label: 'Crédits en retard',
+              value: fcfa(late.reduce((t, c) => t + c.overdue, 0)),
+              note: late.length ? plural(late.length, 'client') : 'aucun retard',
+              tone: late.length ? 'down' : 'flat',
+              onClick: () => pick('late'),
+              active: view === 'late',
+            },
+            { label: 'Plafond dépassé', value: plural(overList.length, 'client'), note: overList.length ? 'à surveiller' : 'aucun', tone: overList.length ? 'down' : 'flat', onClick: () => pick('over'), active: view === 'over' },
+            { label: 'Encaissé ce mois', value: fcfa(paidMonth.reduce((t, p) => t + p.amount, 0)), note: paidMonth.length ? plural(paidMonth.length, 'règlement') : 'aucun règlement' },
+          ]}
+        />
+      )}
       <div className="filters">
         <input className="search" placeholder="Nom, code ou téléphone" value={search} onChange={(e) => setSearch(e.target.value)} />
         {(zones.data ?? []).length > 0 && (
@@ -83,9 +114,17 @@ function CustomerList({ user }: { user: User }) {
             ))}
           </select>
         )}
-        <label>
-          <input type="checkbox" checked={debtors} onChange={(e) => setDebtors(e.target.checked)} /> Qui doivent seulement
-        </label>
+        <FilterPills
+          label="Clients affichés"
+          value={view}
+          onChange={setView}
+          pills={[
+            { key: 'all', label: 'Tous', count: all.length },
+            { key: 'debtors', label: 'Qui doivent', count: debtors.length },
+            { key: 'late', label: 'En retard', count: late.length },
+            { key: 'over', label: 'Plafond dépassé', count: overList.length },
+          ]}
+        />
         <label>
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Inactifs
         </label>
@@ -111,6 +150,7 @@ function CustomerList({ user }: { user: User }) {
               <th className="r">En retard</th>
               {loyaltyOn && <th className="r">Points</th>}
               <th>Dernier achat</th>
+              {canRemind && <th />}
             </tr>
           </thead>
           <tbody>
@@ -131,11 +171,21 @@ function CustomerList({ user }: { user: User }) {
                 <td className="r neg">{c.overdue ? fcfa(c.overdue) : ''}</td>
                 {loyaltyOn && <td className="r">{points.data?.[c.id] || ''}</td>}
                 <td>{c.last_sale ? dateTime(c.last_sale) : ''}</td>
+                {canRemind && (
+                  <td className="r">
+                    {c.balance > 0 && (
+                      <button type="button" className="link" onClick={(e) => (e.stopPropagation(), setReminding([c.id]))} title="Relancer par WhatsApp">
+                        Relancer ›
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       )}
+      {reminding && <ReminderDialog queue={reminding} onClose={() => (setReminding(null), loaded.reload())} />}
       {open && (
         <CustomerDialog
           user={user}

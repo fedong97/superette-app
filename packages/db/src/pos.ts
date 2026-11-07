@@ -815,6 +815,36 @@ export class PosService extends Base {
    * vendeur peut vendre (dépôt de vente d'abord), qui complètent une ligne que
    * le dépôt choisi ne couvre pas.
    */
+  /**
+   * Stock vendable des tuiles de la caisse (touches rapides, plus vendus) :
+   * même dépôt et mêmes dépôts d'appoint que la recherche, et le seuil d'alerte
+   * de chaque article pour signaler celles qui passent dessous.
+   */
+  tileStock(storeId: string, articleIds: string[], opts: { warehouseId?: string | null; userId?: string | null } = {}): Record<string, { available: Milli; alert_qty: Milli | null }> {
+    if (!articleIds.length) return {};
+    const warehouse = this.saleWarehouse(storeId, opts.warehouseId);
+    const sources = this.saleSources(storeId, opts.userId ?? null, warehouse);
+    const marks = articleIds.map(() => '?').join(',');
+    const stock = new Map<string, Milli>();
+    for (const r of this.db
+      .prepare(`SELECT article_id, warehouse_id, qty FROM stock WHERE warehouse_id IN (${sources.map(() => '?').join(',')}) AND article_id IN (${marks})`)
+      .all(...sources.map((w) => w.id), ...articleIds) as { article_id: string; warehouse_id: string; qty: Milli }[]) {
+      stock.set(`${r.article_id}|${r.warehouse_id}`, r.qty);
+    }
+    const alerts = new Map(
+      (this.db.prepare(`SELECT id, alert_qty FROM articles WHERE id IN (${marks})`).all(...articleIds) as { id: string; alert_qty: Milli | null }[]).map((r) => [r.id, r.alert_qty]),
+    );
+    const out: Record<string, { available: Milli; alert_qty: Milli | null }> = {};
+    for (const id of articleIds) {
+      const available = sources.reduce((t, w, i) => {
+        const q = stock.get(`${id}|${w.id}`) ?? 0;
+        return t + (i === 0 ? q : Math.max(0, q));
+      }, 0);
+      out[id] = { available, alert_qty: alerts.get(id) ?? null };
+    }
+    return out;
+  }
+
   private saleSources(storeId: string, userId: string | null, chosen: { id: string; name: string }): { id: string; name: string }[] {
     const others = userId ? this.admin.saleWarehousesFor(storeId, userId).filter((w) => w.id !== chosen.id) : [];
     return [chosen, ...others];

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { type Result, call } from '../api';
-import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useStoreSettings, useToast, has } from '../ui';
+import { askConfirm, Empty, Field, Modal, Tabs, dateFr, fcfa, parseAmount, parseQty, qty, today, useCan, useLoad, useStoreSettings, useToast, has, openScreen } from '../ui';
 import { BalanceDialog, EMPTY_OPENING, OpeningField, saveOpening } from './balanceAdjust';
 import { RecentAccounts, SupplierSituation, SupplierStatement } from './Controls';
 import { ArticlePicker } from './pickers';
 import { tx } from '../tax';
+import { FilterPills, SummaryTiles } from './summary';
 
 type Supplier = Result<'suppliers.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
@@ -45,14 +46,63 @@ export function Suppliers({ user, initialTab = 'list' }: { user: User; initialTa
 function SupplierList({ user }: { user: User }) {
   const [search, setSearch] = useState('');
   const [inactive, setInactive] = useState(false);
-  const list = useLoad(() => call('suppliers.list', { search: search || undefined, includeInactive: inactive }), [search, inactive]);
+  const loaded = useLoad(() => call('suppliers.list', { search: search || undefined, includeInactive: inactive }), [search, inactive]);
   const [open, setOpen] = useState<Supplier | 'new' | null>(null);
   const canEdit = has(user, 'supplier_edit');
   const canArticles = has(user, 'supplier_articles');
+  // Échéances des factures (pour qui voit l'échéancier) et commandes en cours.
+  const canDue = has(user, 'purchase_due');
+  const canPay = has(user, 'supplier_pay');
+  const canOrder = has(user, 'reorder');
+  const actions = canPay || canOrder;
+  const due = useLoad(() => (canDue ? call('purchases.due') : Promise.resolve(null)), [canDue]);
+  const canOrders = has(user, 'purchases') || has(user, 'purchase_orders');
+  const orders = useLoad(() => (canOrders ? call('purchases.orders', { open: true }) : Promise.resolve([])), [canOrders]);
+  const [filter, setFilter] = useState<'all' | 'owed' | 'late'>('all');
+  const all = loaded.data ?? [];
+  const lateIds = new Set((due.data?.invoices ?? []).filter((i) => i.overdue).map((i) => i.supplier_id));
+  const owed = all.filter((f) => f.balance > 0);
+  const late = all.filter((f) => lateIds.has(f.id));
+  const list = { ...loaded, data: loaded.data && (filter === 'owed' ? owed : filter === 'late' ? late : all) };
+  const pick = (f: typeof filter) => setFilter((cur) => (cur === f ? 'all' : f));
+  const openOrders = orders.data ?? [];
   return (
     <>
+      {all.length > 0 && (
+        <SummaryTiles
+          tiles={[
+            { label: 'Dû aux fournisseurs', value: fcfa(owed.reduce((t, f) => t + f.balance, 0)), note: `${owed.length} fournisseur${owed.length > 1 ? 's' : ''}`, onClick: () => pick('owed'), active: filter === 'owed' },
+            ...(canDue
+              ? [
+                  { label: 'À payer cette semaine', value: fcfa(due.data?.dueThisWeek ?? 0), note: due.data?.dueThisWeek ? 'échéances des 7 jours' : 'aucune échéance' },
+                  {
+                    label: 'Échéances dépassées',
+                    value: fcfa(due.data?.overdue ?? 0),
+                    note: late.length ? `${late.length} fournisseur${late.length > 1 ? 's' : ''}` : 'aucun retard',
+                    tone: (late.length ? 'down' : 'flat') as 'down' | 'flat',
+                    onClick: () => pick('late'),
+                    active: filter === 'late',
+                  },
+                ]
+              : []),
+            ...(canOrders
+              ? [{ label: 'Commandes en cours', value: `${openOrders.length} bon${openOrders.length > 1 ? 's' : ''}`, note: openOrders.length ? fcfa(openOrders.reduce((t, o) => t + o.total_ht, 0)) : 'aucune', onClick: () => openScreen('purchases', 'orders') }]
+              : []),
+          ]}
+        />
+      )}
       <div className="filters">
         <input className="search" placeholder="Rechercher un fournisseur" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <FilterPills
+          label="Fournisseurs affichés"
+          value={filter}
+          onChange={setFilter}
+          pills={[
+            { key: 'all', label: 'Tous', count: all.length },
+            { key: 'owed', label: 'À payer', count: owed.length },
+            ...(canDue ? [{ key: 'late' as const, label: 'En retard', count: late.length }] : []),
+          ]}
+        />
         <label>
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} /> Inactifs
         </label>
@@ -76,6 +126,7 @@ function SupplierList({ user }: { user: User }) {
               <th className="r">Paiement</th>
               <th className="r">Articles</th>
               <th className="r">Solde dû</th>
+              {actions && <th />}
             </tr>
           </thead>
           <tbody>
@@ -89,6 +140,19 @@ function SupplierList({ user }: { user: User }) {
                 <td className="r">{f.payment_terms_days ? `${f.payment_terms_days} j` : 'comptant'}</td>
                 <td className="r">{f.article_count}</td>
                 <td className={`r ${f.balance > 0 ? 'neg' : ''}`}>{fcfa(f.balance)}</td>
+                {actions && (
+                  <td className="r">
+                    {canPay && f.balance > 0 ? (
+                      <button type="button" className="link" onClick={(e) => (e.stopPropagation(), openScreen('purchases', 'due'))} title="Ouvrir l'échéancier pour payer">
+                        Payer ›
+                      </button>
+                    ) : canOrder ? (
+                      <button type="button" className="link" onClick={(e) => (e.stopPropagation(), openScreen('purchases', 'reorder'))} title="Ouvrir la Proposition de commande">
+                        Commander ›
+                      </button>
+                    ) : null}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

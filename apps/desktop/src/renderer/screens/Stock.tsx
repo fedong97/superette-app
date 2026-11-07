@@ -17,13 +17,14 @@ import { DayTasks, Restock } from './Floor';
 import { Recalls } from './Recalls';
 import { StoreTransfers } from './StoreTransfers';
 import { Anomalies } from './Anomalies';
+import { Coverage, FilterPills, SummaryTiles } from './summary';
 
 type Article = Result<'catalogue.get'>;
 type User = NonNullable<Result<'app.state'>['user']>;
 export type StockTab = Tab;
 type Tab = 'state' | 'critical' | 'multi' | 'warehouses' | 'receive' | 'loss' | 'transfer' | 'transferNew' | 'inventory' | 'expiry' | 'moves' | 'adjustments' | 'monitoring' | 'clearance' | 'losses' | 'cycle' | 'restock' | 'tasks' | 'stores' | 'recalls' | 'anomalies';
 
-const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Alerte', normal: 'Normal', surstock: 'Surstock' } as const;
+const LEVEL_LABEL = { rupture: 'Rupture', alerte: 'Sous le seuil', normal: 'Normal', surstock: 'Surstock' } as const;
 
 export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?: Tab }) {
   // Les stocks critiques sont l'état du stock filtré sur les ruptures et alertes.
@@ -106,17 +107,54 @@ export function Stock({ user, initialTab = 'state' }: { user: User; initialTab?:
   );
 }
 
+type StockFilter = 'all' | 'order' | 'noalert' | 'expiry' | 'surstock';
+
+/** Article sans seuil d'alerte : son stock n'est jamais signalé, on le montre pour qu'il ne passe pas inaperçu. */
+const noAlert = (r: StockRowT) => r.alert_qty === null && r.level === 'normal';
+const expiresSoon = (r: StockRowT, limit: string) => Boolean(r.next_expiry && r.next_expiry <= limit);
+/** Ordre d'urgence : ruptures, alertes, sans seuil, puis le reste par nom. */
+const urgency = (r: StockRowT) => (r.level === 'rupture' ? 0 : r.level === 'alerte' ? 1 : noAlert(r) ? 2 : 3);
+
+/** Ventes par jour, arrondies : « 2,5 vendus par jour », « moins d'un par semaine ». */
+function perDay(daily: number, unit: 'piece' | 'kg' | 'litre') {
+  if (unit !== 'piece') return `${qty(daily, unit)} vendus par jour`;
+  if (daily < 143) return 'moins d’un par semaine';
+  if (daily < 1000) {
+    const w = Math.round((daily * 7) / 1000);
+    return `${w} vendu${w > 1 ? 's' : ''} par semaine`;
+  }
+  const n = Math.round(daily / 100) / 10;
+  return `${String(n).replace('.', ',')} vendu${n >= 2 ? 's' : ''} par jour`;
+}
+
 function StockState({ critical = false }: { critical?: boolean }) {
+  const can = useCan();
   const [warehouseId, setWarehouseId] = useState('');
   const [search, setSearch] = useState('');
-  const [level, setLevel] = useState<'' | 'critical' | 'rupture' | 'alerte' | 'surstock'>(critical ? 'critical' : '');
-  const loaded = useLoad(
-    () => call('stock.list', { warehouseId: warehouseId || undefined, search: search || undefined, level: level && level !== 'critical' ? level : undefined }),
-    [warehouseId, search, level],
-  );
-  const rows = { ...loaded, data: level === 'critical' ? loaded.data?.filter((r) => r.level === 'rupture' || r.level === 'alerte') : loaded.data };
+  const [filter, setFilter] = useState<StockFilter>(critical ? 'order' : 'all');
+  const loaded = useLoad(() => call('stock.list', { warehouseId: warehouseId || undefined, search: search || undefined }), [warehouseId, search]);
+  // Quantité à recommander : celle de la Proposition de commande (même calcul), pour qui y a droit.
+  const canReorder = can('reorder');
+  const proposal = useLoad(() => (canReorder ? call('purchases.reorder') : Promise.resolve([])), [canReorder]);
+  const toOrder = new Map((proposal.data ?? []).map((p) => [p.article_id, p]));
+  const all = loaded.data ?? [];
+  const limit = new Date(Date.parse(`${today()}T00:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10);
+  const counts = {
+    order: all.filter((r) => r.level === 'rupture' || r.level === 'alerte').length,
+    noalert: all.filter(noAlert).length,
+    expiry: all.filter((r) => expiresSoon(r, limit)).length,
+    surstock: all.filter((r) => r.level === 'surstock').length,
+  };
+  const shown = all
+    .filter((r) =>
+      filter === 'order' ? r.level === 'rupture' || r.level === 'alerte' : filter === 'noalert' ? noAlert(r) : filter === 'expiry' ? expiresSoon(r, limit) : filter === 'surstock' ? r.level === 'surstock' : true,
+    )
+    .sort((x, y) => urgency(x) - urgency(y) || x.name.localeCompare(y.name));
+  const rows = { ...loaded, data: loaded.data ? shown : undefined };
   const wh = useLoad(() => call('admin.warehouses'));
-  const total = (rows.data ?? []).reduce((s, r) => s + r.value, 0);
+  const total = all.reduce((s, r) => s + r.value, 0);
+  const normal = all.length - counts.order - counts.noalert;
+  const pick = (f: StockFilter) => setFilter((cur) => (cur === f ? 'all' : f));
   // Tous les dépôts : une colonne par dépôt, puis le total ; un clic détaille l'article par dépôt et par lot.
   const perWarehouse = !warehouseId && (wh.data?.length ?? 0) > 1 ? wh.data! : [];
   const [detail, setDetail] = useState<StockRowT | null>(null);
@@ -137,6 +175,27 @@ function StockState({ critical = false }: { critical?: boolean }) {
     });
   return (
     <>
+      <SummaryTiles
+        tiles={[
+          { label: 'Valeur du stock', value: fcfa(total), note: 'au coût moyen', onClick: () => setFilter('all'), active: filter === 'all' },
+          {
+            label: "Sous le seuil d'alerte",
+            value: `${counts.order} article${counts.order > 1 ? 's' : ''}`,
+            note: counts.order ? 'à commander' : 'aucun',
+            tone: counts.order ? 'down' : 'flat',
+            onClick: () => pick('order'),
+            active: filter === 'order',
+          },
+          { label: 'Périment dans les 30 jours', value: `${counts.expiry} article${counts.expiry > 1 ? 's' : ''}`, note: counts.expiry ? 'à écouler en priorité' : 'aucune DLC proche', onClick: () => pick('expiry'), active: filter === 'expiry' },
+          {
+            label: 'Stock normal',
+            value: `${normal} article${normal > 1 ? 's' : ''}`,
+            note: counts.noalert ? `${counts.noalert} article${counts.noalert > 1 ? 's' : ''} sans seuil` : 'tous ont un seuil',
+            onClick: counts.noalert ? () => pick('noalert') : undefined,
+            active: filter === 'noalert',
+          },
+        ]}
+      />
       <div className="filters">
         <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
           <option value="">Tous les dépôts</option>
@@ -146,18 +205,27 @@ function StockState({ critical = false }: { critical?: boolean }) {
             </option>
           ))}
         </select>
-        <select value={level} onChange={(e) => setLevel(e.target.value as typeof level)}>
-          <option value="">Tous les niveaux</option>
-          <option value="critical">Stocks critiques (ruptures et alertes)</option>
-          <option value="rupture">Ruptures</option>
-          <option value="alerte">Sous le seuil d'alerte</option>
-          <option value="surstock">Surstocks</option>
-        </select>
+        <FilterPills
+          label="Niveau de stock"
+          value={filter}
+          onChange={setFilter}
+          pills={[
+            { key: 'all', label: 'Tous', count: all.length },
+            { key: 'order', label: 'À commander', count: counts.order },
+            { key: 'noalert', label: 'Sans seuil', count: counts.noalert },
+            { key: 'expiry', label: 'DLC proche', count: counts.expiry },
+            ...(counts.surstock ? [{ key: 'surstock' as const, label: 'Surstocks', count: counts.surstock }] : []),
+          ]}
+        />
         <input className="search" placeholder="Rechercher" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <span className="muted">Valeur du stock (coût moyen) : {fcfa(total)}</span>
-        <button disabled={!rows.data} onClick={exportXlsx}>
+        <button disabled={!rows.data} onClick={exportXlsx} style={{ marginLeft: 'auto' }}>
           Exporter vers Excel
         </button>
+        {canReorder && (
+          <button className="primary" onClick={() => openScreen('purchases', 'reorder')} title="Ouvre la Proposition de commande, préremplie avec les articles à commander">
+            Préparer la commande
+          </button>
+        )}
       </div>
       <table className="list">
         <thead>
@@ -170,37 +238,66 @@ function StockState({ critical = false }: { critical?: boolean }) {
               </th>
             ))}
             <th className="r">{perWarehouse.length ? 'Total' : 'Quantité'}</th>
+            <th className="r" title="Jours de vente couverts par le stock, d'après les ventes des 28 derniers jours">
+              Couverture
+            </th>
             <th className="r" title="Coût moyen unitaire pondéré (CMUP)">Coût moyen</th>
             <th className="r">Valeur</th>
             <th>Prochaine DLC</th>
             <th>Niveau</th>
+            {canReorder && (
+              <th className="r" title="Quantité proposée par la Proposition de commande">
+                À commander
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
-          {(rows.data ?? []).map((r) => (
-            <tr key={r.article_id} className="clickable" title="Détail par dépôt et par lot" onClick={() => setDetail(r)}>
-              <td>{r.name}</td>
-              <td>{r.department_name ?? '—'}</td>
-              {perWarehouse.map((w) => {
-                const v = r.by_warehouse[w.id] ?? 0;
-                return (
-                  <td key={w.id} className={`r ${v < 0 ? 'neg' : v === 0 ? 'muted' : ''}`}>
-                    {qty(v, r.unit)}
-                  </td>
-                );
-              })}
-              <td className={`r ${r.qty < 0 ? 'neg' : ''} ${perWarehouse.length ? 'b' : ''}`}>
-                {qty(r.qty, r.unit)}
-                {r.in_packs && <small className="muted block">{r.in_packs}</small>}
-              </td>
-              <td className="r">{fcfa(r.avg_cost)}</td>
-              <td className="r">{fcfa(r.value)}</td>
-              <td>{r.next_expiry ? dateFr(r.next_expiry) : '—'}</td>
-              <td>
-                <span className={`tag ${r.level}`}>{LEVEL_LABEL[r.level]}</span>
-              </td>
-            </tr>
-          ))}
+          {(rows.data ?? []).map((r) => {
+            const prop = toOrder.get(r.article_id);
+            return (
+              <tr
+                key={r.article_id}
+                className={`clickable ${r.level === 'rupture' ? 'row-danger' : r.level === 'alerte' ? 'row-warn' : ''}`}
+                title="Détail par dépôt et par lot"
+                onClick={() => setDetail(r)}
+              >
+                <td>
+                  {r.name}
+                  {r.avg_daily_sales > 0 && <small className="sub">{perDay(r.avg_daily_sales, r.unit)}</small>}
+                </td>
+                <td>{r.department_name ?? '—'}</td>
+                {perWarehouse.map((w) => {
+                  const v = r.by_warehouse[w.id] ?? 0;
+                  return (
+                    <td key={w.id} className={`r ${v < 0 ? 'neg' : v === 0 ? 'muted' : ''}`}>
+                      {qty(v, r.unit)}
+                    </td>
+                  );
+                })}
+                <td className={`r ${r.qty < 0 ? 'neg' : ''} ${perWarehouse.length ? 'b' : ''}`}>
+                  {qty(r.qty, r.unit)}
+                  {r.in_packs && <small className="muted block">{r.in_packs}</small>}
+                </td>
+                <td className="r">
+                  <Coverage stock={r.qty} daily={r.avg_daily_sales} />
+                </td>
+                <td className="r">{fcfa(r.avg_cost)}</td>
+                <td className="r">{fcfa(r.value)}</td>
+                <td>{r.next_expiry ? dateFr(r.next_expiry) : '—'}</td>
+                <td>
+                  {noAlert(r) ? (
+                    <span className="tag info nowrap" title="Aucun seuil d'alerte : ONIX ne pourra pas prévenir avant la rupture. Le seuil se règle dans la fiche article.">
+                      Seuil non défini
+                    </span>
+                  ) : (
+                    <span className={`tag ${r.level}`}>{LEVEL_LABEL[r.level]}</span>
+                  )}
+                </td>
+                {canReorder && <td className="r">{prop ? <span className="reorder-qty">+ {qty(prop.qty, r.unit)}</span> : r.on_order > 0 ? <small className="sub">{qty(r.on_order, r.unit)} en commande</small> : ''}</td>}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {detail && <StockDetail row={detail} warehouses={wh.data ?? []} onClose={() => setDetail(null)} />}

@@ -9,6 +9,7 @@ import { type RecLine, newRecLine, recLineInput } from './Stock';
 import { PurchaseEntry } from './purchaseEntry';
 import { type TermsText, TermsCells, lineNet, lineTerms, noTerms, termsFrom } from './purchaseTerms';
 import { hasVat, tx } from '../tax';
+import { FilterPills, SummaryTiles } from './summary';
 import { DocPreview } from './docPreview';
 import { ReceptionLabels } from './barcodePrint';
 import { SupplierReturns } from './SupplierReturns';
@@ -101,18 +102,55 @@ type OrderView = { mode: 'list' } | { mode: 'edit'; order: Order | null } | { mo
 
 function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: boolean }) {
   const [view, setView] = useState<OrderView>(startNew ? { mode: 'edit', order: null } : { mode: 'list' });
-  const [open, setOpen] = useState(true);
-  const list = useLoad(() => call('purchases.orders', { open }), [open, view.mode]);
+  const [filter, setFilter] = useState<'open' | 'draft' | 'waiting' | 'late' | 'all'>('open');
+  const loaded = useLoad(() => call('purchases.orders', {}), [view.mode]);
+  const all = loaded.data ?? [];
+  const day = today();
+  const isWaiting = (o: (typeof all)[number]) => o.state === 'sent' || o.state === 'partial';
+  const isLate = (o: (typeof all)[number]) => isWaiting(o) && !!o.expected_date && o.expected_date < day;
+  const groups = {
+    open: all.filter((o) => o.state === 'draft' || isWaiting(o)),
+    draft: all.filter((o) => o.state === 'draft'),
+    waiting: all.filter(isWaiting),
+    late: all.filter(isLate),
+    all,
+  };
+  const dueToday = groups.waiting.filter((o) => o.expected_date === day);
+  const next = groups.waiting.filter((o) => o.expected_date && o.expected_date >= day).sort((a, b) => a.expected_date!.localeCompare(b.expected_date!))[0];
+  const sum = (l: typeof all) => fcfa(l.reduce((t, o) => t + o.total_ht, 0));
+  const bons = (n: number) => `${n} bon${n > 1 ? 's' : ''}`;
+  const open = filter === 'open';
+  const list = { ...loaded, data: loaded.data && groups[filter] };
+  const pick = (f: typeof filter) => setFilter((cur) => (cur === f ? 'open' : f));
   if (view.mode === 'edit') return <OrderEditor order={view.order} onDone={(id) => setView(id ? { mode: 'view', id } : { mode: 'list' })} />;
   if (view.mode === 'view')
     return <OrderDetail id={view.id} canEdit={canEdit} onBack={() => setView({ mode: 'list' })} onEdit={(o) => setView({ mode: 'edit', order: o })} onReceive={() => setView({ mode: 'receive', id: view.id })} />;
   if (view.mode === 'receive') return <ReceiveOrder id={view.id} phone={view.phone} onDone={() => setView({ mode: 'view', id: view.id })} />;
   return (
     <>
+      {all.length > 0 && (
+        <SummaryTiles
+          tiles={[
+            { label: 'En brouillon', value: bons(groups.draft.length), note: groups.draft.length ? `${sum(groups.draft)} à envoyer` : 'aucun', onClick: () => pick('draft'), active: filter === 'draft' },
+            { label: 'Envoyés, en attente', value: bons(groups.waiting.length), note: groups.waiting.length ? sum(groups.waiting) : 'aucun', onClick: () => pick('waiting'), active: filter === 'waiting' },
+            { label: "À recevoir aujourd'hui", value: bons(dueToday.length), note: next ? `prochain : ${dateFr(next.expected_date!)}` : 'aucune livraison prévue' },
+            { label: 'En retard', value: bons(groups.late.length), note: groups.late.length ? 'livraison dépassée' : 'aucun', tone: groups.late.length ? 'down' : 'flat', onClick: () => pick('late'), active: filter === 'late' },
+          ]}
+        />
+      )}
       <div className="filters">
-        <label>
-          <input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} /> En cours seulement
-        </label>
+        <FilterPills
+          label="Bons affichés"
+          value={filter}
+          onChange={setFilter}
+          pills={[
+            { key: 'open', label: 'En cours', count: groups.open.length },
+            { key: 'draft', label: 'Brouillons', count: groups.draft.length },
+            { key: 'waiting', label: 'À recevoir', count: groups.waiting.length },
+            { key: 'late', label: 'En retard', count: groups.late.length },
+            { key: 'all', label: 'Tous', count: all.length },
+          ]}
+        />
         {canEdit && (
           <button data-new title="Ctrl+J" className="primary" style={{ marginLeft: 'auto' }} onClick={() => setView({ mode: 'edit', order: null })}>
             Nouveau bon de commande
@@ -132,6 +170,7 @@ function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: bo
               <th>Livraison prévue</th>
               <th className="r">{tx('Total HT')}</th>
               <th>État</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -147,6 +186,18 @@ function Orders({ canEdit, startNew = false }: { canEdit: boolean; startNew?: bo
                 <td className="r">{fcfa(o.total_ht)}</td>
                 <td>
                   <span className={`tag ${STATE_TAG[o.state]}`}>{ORDER_STATES[o.state]}</span>
+                </td>
+                <td className="r">
+                  {o.state === 'draft' && canEdit && (
+                    <button type="button" className="link" onClick={(e) => (e.stopPropagation(), setView({ mode: 'view', id: o.id }))} title="Ouvrir le bon pour l'envoyer au fournisseur">
+                      Envoyer ›
+                    </button>
+                  )}
+                  {isWaiting(o) && (
+                    <button type="button" className="link" onClick={(e) => (e.stopPropagation(), setView({ mode: 'receive', id: o.id }))}>
+                      Réceptionner ›
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

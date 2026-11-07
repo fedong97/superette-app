@@ -754,3 +754,47 @@ tr.empty { display: table-row; padding: 0; max-width: none; margin: 0; }
 .integrity-bad { background: var(--danger-bg); color: var(--danger-ink); border: 1px solid var(--danger); }
 .gap-charge { display: grid; gap: 6px; margin: 8px 0 4px; }
 .read-pdf { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 4px 0 14px; }
+
+/* Résumés en haut des listes, pastilles de filtre, couverture en jours (0.117) */
+.summary-tiles > div.on { border-color: var(--accent-line); box-shadow: inset 0 -3px 0 var(--brand), var(--shadow-sm); }
+.summary-tiles > div:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.filter-pills button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.filter-pills .pill-count { font-size: 12px; font-weight: 600; color: var(--faint); font-variant-numeric: tabular-nums; }
+.filter-pills button.active .pill-count { color: var(--brand); }
+.coverage { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.coverage i { display: inline-block; width: 52px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.coverage u { display: block; height: 100%; background: var(--brand); text-decoration: none; }
+.coverage.mid u { background: var(--gold); }
+.coverage.low u { background: var(--danger); }
+table.list tr.row-warn > td { background: var(--warning-bg); }
+table.list tr.row-danger > td { background: var(--danger-bg); }
+.reorder-qty { color: var(--brand); font-weight: 650; }
+td small.sub { display: block; color: var(--muted); font-size: 12px; }
+.row-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Accueil et tableau de bord : courbe du CA, axe des montants, À traiter (0.117) */
+.rev-spark { display: block; margin: 2px 0 2px; overflow: visible; }
+.rev-spark polyline { fill: none; stroke: var(--brand); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rev-spark circle { fill: var(--brand); }
+.hours-axed { display: flex; align-items: stretch; gap: 6px; }
+.hours-axed > .home-hours, .hours-axed > .hcols { flex: 1; min-width: 0; }
+.amount-axis { display: flex; flex-direction: column; justify-content: space-between; width: 38px; flex: none; text-align: right; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 6px; line-height: 1; transform: translateY(5px); }
+.hours-axed-x { padding-left: 44px; }
+.home-hours > div > .bar-value, .hcols > div > .bar-value { position: absolute; left: 50%; transform: translate(-50%, -4px); font-size: 11.5px; font-weight: 650; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hcols > div { position: relative; }
+.home-todo .todo-what { display: flex; flex-direction: column; min-width: 0; }
+.home-todo .todo-what small { color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-todo .todo-go { color: var(--brand); font-weight: 650; white-space: nowrap; }
+.home-feed .feed-items { font-weight: 600; color: var(--ink); }
+.rail-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 11.5px; font-weight: 700; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
+.rail-count + .rail-chev { margin-left: 4px; }
+
+/* Caisse : stock restant sur les tuiles et unité du prix (0.117) */
+.pos-tile .tile-stock { position: absolute; top: 12px; right: 10px; font-size: 11.5px; color: var(--muted); font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pos-tile .tile-stock.low { color: var(--warning-ink, var(--warn)); background: var(--warning-bg); font-weight: 700; padding: 1px 6px; border-radius: 5px; }
+.pos-tile .tile-stock.out { color: var(--danger-ink, var(--danger)); background: var(--danger-bg); font-weight: 700; padding: 1px 6px; border-radius: 5px; }
+.pos-tile .tile-cur { font-size: 11px; font-weight: 600; color: var(--muted); }
+
+/* Caisses en direct : actions sous chaque carte */
+.live-cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.live-actions { justify-content: flex-start; padding: 0 4px; }

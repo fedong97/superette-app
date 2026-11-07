@@ -118,6 +118,16 @@ GETTING_STARTED.seller = [
 /** Quoi de neuf : les nouveautés des dernières versions, la plus récente en premier. */
 export const WHATS_NEW: { version: string; items: string[] }[] = [
   {
+    version: '0.117.0',
+    items: [
+      "Accueil et tableau de bord : courbe du chiffre d'affaires de la journée, comparaison avec la veille ou le même jour de la semaine passée, panier moyen, et taux de marge comparé à un objectif (Paramètres › Ventes et caisse, 20 % par défaut).",
+      "« À traiter aujourd'hui » remplace les points d'attention sur l'accueil : une ligne par alerte, avec son action (Commander, Relancer, Payer…). Le menu Stock affiche le nombre d'articles à commander.",
+      "État du stock : résumés en haut (valeur, sous le seuil, péremption à 30 jours, stock normal), pastilles de filtre, bouton « Préparer la commande », couverture en jours de vente, quantité à commander ou déjà en commande, et « Seuil non défini » pour les articles sans seuil d'alerte.",
+      "Caisse : le stock restant s'affiche sur chaque tuile (⚠ quand il passe sous le seuil). « Encaisser » s'appelle maintenant « Autre paiement », avec le même raccourci Ctrl+E.",
+      "Clients, bons de commande, fournisseurs et caisses en direct : résumés en haut, pastilles de filtre et une action sur chaque ligne (Relancer, Envoyer, Réceptionner, Payer, Commander, Voir et clôturer).",
+    ],
+  },
+  {
     version: '0.116.0',
     items: [
       "Journal scellé : chaque vente, clôture, écriture ou modification de prix est scellée au moment où ONIX l'enregistre. Administration › Intégrité des données vérifie chaque jour que rien n'a été changé en dehors du logiciel, et montre ce qui l'a été.",
